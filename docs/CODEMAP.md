@@ -13,7 +13,11 @@ They are listed in dependency order.
 | `compose` | `src/lib.rs` | `Composer` (`Greedy`), `GeometryProvider` (`Measure`), break opportunities (ICU4X), `LineFragment` | 23 |
 | `display` | `src/lib.rs` | `DisplayList`, `Item`, `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends | 32 |
-| `layout` | `src/lib.rs` | `Engine` (configuration), `LayoutSnapshot`, flow and relation passes, `to_display_list`, debug overlay | 24, 26, 37, 39 |
+| `layout` | `src/lib.rs` | `Engine` (configuration), `PageSettings`, `Engine::layout` running the passes in order | 24, 26 |
+|  | `src/snapshot.rs` | `LayoutSnapshot`, `BlockLayout`, `LineLayout`, `RelationLayout`, `Diagnostic`, queries | 05, 13, 37 |
+|  | `src/flow.rs` | Pass 1: shaping, composition and stacking blocks in the main column | 24 |
+|  | `src/relations.rs` | Pass 2: resolving relations and placing the blocks they position | 13, 15, 26 |
+|  | `src/display.rs` | `to_display_list` and the debug overlay | 32, 39 |
 | `cli` | `src/lib.rs` | The spike fixture document and `write_outputs` | 40 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end tests and JSON fixtures | 38, 39 |
@@ -27,7 +31,7 @@ Other files:
 
 -   **Add a relation kind or target query:**
     1.  Add the variant to `RelationKind` or `Target` in `doc`.
-    2.  Resolve it in the relation pass of `Engine::layout` in `layout`.
+    2.  Resolve it in `layout/src/relations.rs`.
     3.  Cover it in `cli/tests/spike.rs`.
 -   **Add a shaping adapter:** implement `ShapingAdapter` in `shape`, or in a new crate if it
     pulls in platform code. Set `platform_independent` honestly.
@@ -36,7 +40,7 @@ Other files:
 -   **Add a display item:**
     1.  Add the variant to `Item` in `display`.
     2.  Draw it in all three backends.
-    3.  Emit it from `LayoutSnapshot::to_display_list`.
+    3.  Emit it from `LayoutSnapshot::to_display_list` in `layout/src/display.rs`.
 -   **Add a style property:**
     1.  Add the field to `Style` (with `read` and `write`) and `ComputedStyle` in `doc`.
     2.  Resolve it in `Document::computed_style`, recording its source in `explain`.
