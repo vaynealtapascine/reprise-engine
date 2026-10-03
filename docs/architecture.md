@@ -2,9 +2,8 @@
 
 Decisions for **reprise-engine**, the relational document and layout engine behind
 **Reprise**, the WYSIWYG editor. They come from the architecture decision workbook
-(40 decisions in 10 groups), answered on 2026-10-03.
-
-No implementation language, library or platform is chosen yet (see [Open questions](#open-questions)).
+(40 decisions in 10 groups), answered on 2026-10-03. Decision 41, the implementation language,
+was added afterwards.
 
 ## North star
 
@@ -77,6 +76,7 @@ Decisions about the editor UI itself belong in Reprise.
 | 38 | Determinism | Same inputs, including the adapter, give the same output on every platform |
 | 39 | Provenance and verification | Explanations, reverse dependencies, debug renderer, reproducible fixtures |
 | 40 | Development approach | End-to-end spike, then contract-first parallel modules |
+| 41 | Implementation language | Rust; Bend2 possibly later as a proven model of core rules |
 
 Every decision here is **Decided (pre-spike)**. A decision changes by editing this document in
 a commit that says why. The **Revisit if** lines record what evidence would reopen a decision.
@@ -552,6 +552,38 @@ browser environment.
 **Rationale:** Freezing contracts before any code exists tends to fix the wrong interfaces. A
 spike tests them on real code first, then parallel work can scale without churn.
 
+### 41 Implementation language
+
+**Choice:** Rust, for the engine and the editing kernel.
+
+**Rationale:**
+
+-   **Ecosystem.** Rust already has the hard pieces: shaping (rustybuzz, HarfBuzz bindings),
+    fonts (the fontations crates), Unicode bidi and segmentation (unicode-bidi, ICU4X),
+    collaborative text (Loro, yrs, Automerge), incremental computation (salsa) and WASM
+    sandboxing (wasmtime).
+-   **Targets.** It compiles to WASM, which a browser editor and sandboxed plugins (36) need.
+-   **Fit.** Traits suit the typed extension interfaces (04). Integer types suit fixed-point
+    layout units (19).
+
+**Alternative considered:** Bend2. Its dependent types and built-in proofs are attractive for
+code written by many agents. As of 2026-10, it was rejected as the engine language because:
+
+-   It describes itself as young and unaudited, and its proof checker isn't verified.
+-   It doesn't support Windows, has no WASM target, and has no visible way to call code in other
+    languages.
+-   Its affine values (no shared arrays or closures) clash with the engine's shared, changing
+    structures.
+-   Its automatic parallelism helps little in layout, which is mostly sequential.
+
+**Possible later use:** Bend2 could hold a proven model of the core rules: IDs are never reused
+(07), the text store converges (09, 29), anchors follow their policies (12) and rebinding ends
+in a defined state (15). The Rust code would then be tested against that model. Verus and Kani,
+which prove properties of Rust code directly, are alternatives. Decide after the spike.
+
+**Revisit if:** Bend2 matures, gains WASM output and a way to call other code, and the
+verification benefit outweighs the ecosystem cost.
+
 ---
 
 ## Cross-decision notes
@@ -569,9 +601,8 @@ spike tests them on real code first, then parallel work can scale without churn.
 
 ## Open questions
 
--   **Implementation language and platform.** The workbook leaves this open. Determinism (38),
-    sandboxed WASM (36) and the default platform-independent shaping adapter (22) all affect the
-    choice.
+-   **Platforms Reprise targets** (browser, desktop or both), which decides how the engine is
+    exposed to the UI.
 -   **Numbers to fix during implementation:** tombstone compaction, fixed-point resolution, and
     the iteration limit and cycle classes.
 -   **Where allocation, fragmentation and backtracking live** in block and region flow (24).
