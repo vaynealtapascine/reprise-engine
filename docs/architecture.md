@@ -58,7 +58,7 @@ Decisions about the editor UI itself belong in Reprise.
 | 19 | Numeric policy | Fixed-point layout units |
 | 20 | Coordinates | Typed spaces with transforms; logical and physical axes |
 | 21 | Fonts | Pinned face identities, bundled fonts, explicit fallback chains |
-| 22 | Shaping | Interchangeable adapters behind one contract, with one reference adapter |
+| 22 | Shaping | Interchangeable adapters behind one contract; the adapter is part of engine configuration |
 | 23 | Line composition | Pluggable composers + geometry providers |
 | 24 | Block and region flow | All in scope: ordered flow, frames/columns, pagination, floats/tables/notes |
 | 25 | Solvers | Hybrid: specialised algorithms + explicit constraint-solver domains |
@@ -74,7 +74,7 @@ Decisions about the editor UI itself belong in Reprise.
 | 35 | Clipboard and export | Multiple formats; exports report what they lose |
 | 36 | Plugin execution | Sandboxed WASM/scripts for all loadable extensions |
 | 37 | Failure behaviour | Partial snapshot + diagnostics |
-| 38 | Determinism | Cross-platform guarantee with the reference shaping adapter |
+| 38 | Determinism | Same inputs, including the adapter, give the same output on every platform |
 | 39 | Provenance and verification | Explanations, reverse dependencies, debug renderer, reproducible fixtures |
 | 40 | Development approach | End-to-end spike, then contract-first parallel modules |
 
@@ -358,8 +358,17 @@ The reproducibility envelope is:
 mappings from source text to clusters to glyphs, and the bidi information. It allows text to be
 reshaped when a break changes its boundaries.
 
-One **reference adapter** is the basis for the determinism guarantee (38). Other adapters are
-allowed, but their output is outside that guarantee, and they are reported as such.
+The adapter and its version are part of the engine configuration, and so part of the input
+set that the determinism guarantee covers (21, 38). Each adapter declares whether it is
+**platform-independent**, meaning its output depends only on its declared inputs:
+
+-   **Platform-independent:** for example a pinned HarfBuzz or rustybuzz build, possibly compiled
+    to WASM. It gives the same output on every platform.
+-   **Platform-dependent:** an adapter that wraps the OS or browser shaper, such as CoreText,
+    DirectWrite or a browser text engine. It is deterministic on one platform, but the platform
+    shaper's version is a hidden input, so its output can differ between platforms.
+
+The engine ships a default adapter that is platform-independent.
 
 ### 23 Line composition and geometry
 
@@ -505,12 +514,22 @@ whole job. This covers missing fonts, impossible constraints, plugin errors and 
 
 ### 38 Determinism contract
 
-**Choice:** A cross-platform guarantee. Given the same document, pinned fonts, dictionaries,
-settings and engine version, **using the reference shaping adapter**, composition is identical on
-every platform. Fixed-point units (19) support this guarantee. Layout-time plugins must be pure.
+**Choice:** A cross-platform guarantee. Given the same inputs, composition is identical on
+every platform. The inputs are:
 
-**Revisit if:** the reference adapter can't run on a target platform, such as some browser
-environment.
+-   the document
+-   pinned fonts
+-   dictionaries
+-   engine settings and engine version
+-   engine configuration, including the shaping adapter and its version
+
+The guarantee covers any configuration whose adapters declare themselves platform-independent
+(22). A platform-dependent adapter still gives repeatable output on one platform, and output
+records which kind of adapter produced it. Fixed-point units (19) support this guarantee.
+Layout-time plugins must be pure.
+
+**Revisit if:** no platform-independent adapter can run on a target platform, such as some
+browser environment.
 
 ### 39 Provenance and verification
 
@@ -541,7 +560,8 @@ spike tests them on real code first, then parallel work can scale without churn.
     Per-character identity and tombstones are what make automatic rebinding defensible. A
     compaction policy for tombstones is needed eventually.
 -   **Determinism (19, 21, 22, 36, 38).** The guarantee holds only inside the reproducibility
-    envelope: pinned fonts, the reference adapter, pure plugins and fixed-point units.
+    envelope: pinned fonts, the configured adapters (when they are platform-independent), pure plugins and
+    fixed-point units.
 -   **Layout queries and cycles (13, 26, 27).** Relations that target layout queries are the main
     source of cycles. The spike should include at least one.
 -   **Scope (24).** Choosing every flow feature makes the contract-first step in 40 especially
@@ -550,7 +570,8 @@ spike tests them on real code first, then parallel work can scale without churn.
 ## Open questions
 
 -   **Implementation language and platform.** The workbook leaves this open. Determinism (38),
-    sandboxed WASM (36) and the reference shaping adapter (22) all affect the choice.
+    sandboxed WASM (36) and the default platform-independent shaping adapter (22) all affect the
+    choice.
 -   **Numbers to fix during implementation:** tombstone compaction, fixed-point resolution, and
     the iteration limit and cycle classes.
 -   **Where allocation, fragmentation and backtracking live** in block and region flow (24).
