@@ -7,7 +7,20 @@ It is headless, and its editing kernel can be reused by any UI.
 -   [docs/architecture-decisions-workbook.docx](docs/architecture-decisions-workbook.docx): the
     workbook those decisions came from.
 
-No code yet. The next step is the end-to-end spike described in decision 40.
+-   [PROGRESS.md](PROGRESS.md): what is done, the known gaps and what comes next.
+-   [AGENTS.md](AGENTS.md) and [docs/CODEMAP.md](docs/CODEMAP.md): how to work on it.
+
+It is written in Rust. The end-to-end spike (decision 40) runs with:
+
+```sh
+cargo run -p reprise-cli -- spike out
+```
+
+It writes the layout before and after an edit, as layout JSON, display list JSON, SVG,
+PNG and PDF.
+
+The test fixture font is Source Serif Pro, under the SIL Open Font License; see
+[fixtures/fonts/](fixtures/fonts/).
 
 ## License
 

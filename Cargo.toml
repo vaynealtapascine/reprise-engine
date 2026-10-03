@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/vaynealtapascine/reprise-engine"
+publish = false
+
+[workspace.dependencies]
+reprise-geom = { path = "crates/geom" }
+reprise-text = { path = "crates/text" }
+reprise-doc = { path = "crates/doc" }
+reprise-font = { path = "crates/font" }
+reprise-shape = { path = "crates/shape" }
+reprise-compose = { path = "crates/compose" }
+reprise-layout = { path = "crates/layout" }
+reprise-display = { path = "crates/display" }
+
+loro = "1.16"
+thiserror = "2"
+harfrust = "0.13"
+skrifa = "0.46"
+icu_segmenter = "2.3"
+tiny-skia = "0.12"
+krilla = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+insta = { version = "1.49", features = ["json"] }

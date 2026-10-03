@@ -1,0 +1,16 @@
+[package]
+name = "reprise-compose"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+reprise-geom.workspace = true
+reprise-shape.workspace = true
+icu_segmenter.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+reprise-font.workspace = true

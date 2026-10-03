@@ -1,0 +1,400 @@
+---
+source: crates/cli/tests/spike.rs
+expression: before.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      477
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "page": {
+    "width": 430080,
+    "height": 307200,
+    "margin_top": 36864,
+    "margin_left": 36864,
+    "column_width": 225280,
+    "gutter": 18432,
+    "margin_column_width": 112640,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "face": {
+        "family": "Source Serif Pro",
+        "hash": "199c8adc83479480d9aa5d942afe8f52"
+      },
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "frame": {
+        "origin": {
+          "x": 36864,
+          "y": 36864
+        },
+        "width": 225280,
+        "height": 54068
+      },
+      "lines": [
+        {
+          "text": {
+            "start": 0,
+            "end": 44
+          },
+          "preview": "The house was a little larger on the inside",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 36864
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 47571,
+          "width": 207931,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 44,
+            "end": 87
+          },
+          "preview": "than on the outside. Nobody measured it at",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 50381
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 61088,
+          "width": 215329,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 87,
+            "end": 135
+          },
+          "preview": "first; the difference was a quarter of an inch,",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 63898
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 74605,
+          "width": 222731,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 135,
+            "end": 179
+          },
+          "preview": "and a quarter of an inch is easy to forgive.",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 77415
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 88122,
+          "width": 208965,
+          "break_reason": "end"
+        }
+      ]
+    },
+    {
+      "node": "189@1",
+      "kind": "paragraph",
+      "face": {
+        "family": "Source Serif Pro",
+        "hash": "199c8adc83479480d9aa5d942afe8f52"
+      },
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "frame": {
+        "origin": {
+          "x": 36864,
+          "y": 99124
+        },
+        "width": 225280,
+        "height": 67585
+      },
+      "lines": [
+        {
+          "text": {
+            "start": 0,
+            "end": 41
+          },
+          "preview": "Later a door appeared in a wall where no",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 99124
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 109831,
+          "width": 204582,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 41,
+            "end": 85
+          },
+          "preview": "door had been, opening onto a corridor that",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 112641
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 123348,
+          "width": 220467,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 85,
+            "end": 128
+          },
+          "preview": "went on further than the house could hold.",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 126158
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 136865,
+          "width": 215298,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 128,
+            "end": 167
+          },
+          "preview": "Its walls were smooth and cold and the",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 139675
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 150382,
+          "width": 194266,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 167,
+            "end": 181
+          },
+          "preview": "colour of ash.",
+          "rect": {
+            "origin": {
+              "x": 36864,
+              "y": 153192
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 163899,
+          "width": 68407,
+          "break_reason": "end"
+        }
+      ]
+    },
+    {
+      "node": "374@1",
+      "kind": "annotation",
+      "face": {
+        "family": "Source Serif Pro",
+        "hash": "199c8adc83479480d9aa5d942afe8f52"
+      },
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 8448,
+        "line_height": 10560,
+        "explain": {
+          "family": "default",
+          "line-height": "style note",
+          "size": "style note"
+        }
+      },
+      "frame": {
+        "origin": {
+          "x": 280576,
+          "y": 63898
+        },
+        "width": 112640,
+        "height": 21120
+      },
+      "lines": [
+        {
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "A quarter of an inch,",
+          "rect": {
+            "origin": {
+              "x": 280576,
+              "y": 63898
+            },
+            "width": 112640,
+            "height": 10560
+          },
+          "baseline": 72139,
+          "width": 78016,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 22,
+            "end": 42
+          },
+          "preview": "measured from where?",
+          "rect": {
+            "origin": {
+              "x": 280576,
+              "y": 74458
+            },
+            "width": 112640,
+            "height": 10560
+          },
+          "baseline": 82699,
+          "width": 86961,
+          "break_reason": "end"
+        }
+      ]
+    },
+    {
+      "node": "420@1",
+      "kind": "annotation",
+      "face": {
+        "family": "Source Serif Pro",
+        "hash": "199c8adc83479480d9aa5d942afe8f52"
+      },
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 8448,
+        "line_height": 10560,
+        "explain": {
+          "family": "default",
+          "line-height": "style note",
+          "size": "style note"
+        }
+      },
+      "frame": {
+        "origin": {
+          "x": 280576,
+          "y": 112641
+        },
+        "width": 112640,
+        "height": 21120
+      },
+      "lines": [
+        {
+          "text": {
+            "start": 0,
+            "end": 26
+          },
+          "preview": "The corridor is never the",
+          "rect": {
+            "origin": {
+              "x": 280576,
+              "y": 112641
+            },
+            "width": 112640,
+            "height": 10560
+          },
+          "baseline": 120882,
+          "width": 93426,
+          "break_reason": "opportunity"
+        },
+        {
+          "text": {
+            "start": 26,
+            "end": 44
+          },
+          "preview": "same length twice.",
+          "rect": {
+            "origin": {
+              "x": 280576,
+              "y": 123201
+            },
+            "width": 112640,
+            "height": 10560
+          },
+          "baseline": 131442,
+          "width": 70446,
+          "break_reason": "end"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "rel0@1",
+      "kind": "follow",
+      "source": "374@1",
+      "status": "valid",
+      "target_line": [
+        "6@1",
+        2
+      ]
+    },
+    {
+      "id": "rel1@1",
+      "kind": "follow",
+      "source": "420@1",
+      "status": "valid",
+      "target_line": [
+        "189@1",
+        1
+      ]
+    }
+  ],
+  "diagnostics": []
+}

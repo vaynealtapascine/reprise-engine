@@ -599,8 +599,9 @@ These were chosen on 2026-10-03, before the spike.
         cosmic-text. That keeps fixed-point units (19), geometry providers (23) and break
         explanations (39) under our control.
     -   Fonts: fontations (skrifa, read-fonts).
-    -   Shaping: a pure-Rust shaper as the default platform-independent adapter (22). Choose
-        between rustybuzz and harfrust in the spike.
+    -   Shaping: harfrust, HarfBuzz's own Rust port, as the default platform-independent
+        adapter (22). It was chosen in the spike over rustybuzz because it shares the
+        read-fonts stack with skrifa.
     -   Segmentation and bidi: ICU4X.
 -   **License:** AGPL-3.0-or-later for reprise-engine and Reprise. Collaboration is in scope, so
     the network clause also covers hosted editors and collaboration servers. Every dependency
