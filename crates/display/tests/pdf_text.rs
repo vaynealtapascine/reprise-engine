@@ -5,7 +5,7 @@
 //! (PDF 1.7, 14.9.4). It never reads the source display list during extraction.
 
 use lopdf::{Document, Object, content::Content};
-use reprise_display::{Color, DisplayList, Glyph, GlyphRun, Item, Layer, pdf};
+use reprise_display::{Color, DisplayList, Glyph, GlyphRun, Item, Layer, Path, pdf};
 use reprise_font::{Face, FontStore};
 use reprise_geom::{InlineDirection, Length};
 use reprise_shape::{HarfRust, ShapeRequest, ShapingAdapter};
@@ -302,4 +302,52 @@ fn very_long_text_and_nonpositive_sizes_are_bounded() {
         run.size = size;
         assert_eq!(extract(&bytes(run, &fonts)).0, "");
     }
+}
+
+/// Orchestrator review: workstream 5 puts rotated and mirrored frames into
+/// groups, and glyph positions are now encoded as offsets divided by the font
+/// size. A ligature run inside a mirrored, quarter-turned and clipped group,
+/// and a run at the smallest size with glyphs far from the origin, must still
+/// render and extract exactly their source text.
+#[test]
+fn transformed_groups_and_tiny_sizes_keep_their_text() {
+    use reprise_geom::{Matrix, Point, Rect};
+
+    let (ligature, fonts) = run("office", InlineDirection::Ltr);
+    let (mut tiny, _) = run("far away", InlineDirection::Ltr);
+    tiny.size = Length(1);
+    for glyph in &mut tiny.glyphs {
+        glyph.x = Length(i32::MAX / 4) + glyph.x;
+        glyph.y = Length(i32::MIN / 4);
+    }
+    let transform = Matrix::mirror_x()
+        .then(&Matrix::rotate_quarter(3))
+        .then(&Matrix::translate(
+            Length::from_pt(200),
+            Length::from_pt(100),
+        ));
+    let clip = Path::rect(Rect::new(
+        Point::origin(),
+        Length::from_pt(300),
+        Length::from_pt(200),
+    ));
+    let list = DisplayList {
+        width: Length::from_pt(420),
+        height: Length::from_pt(300),
+        items: vec![Item::Group {
+            transform,
+            clip: Some(clip),
+            items: vec![
+                Item::Group {
+                    transform: Matrix::rotate_quarter(-7),
+                    clip: None,
+                    items: vec![Item::Glyphs(ligature)],
+                },
+                Item::Glyphs(tiny),
+            ],
+        }],
+    };
+    let bytes = pdf::render(&[list], &fonts).expect("transformed text renders");
+    let (text, _) = extract(&bytes);
+    assert_eq!(text, "officefar away");
 }
