@@ -1,13 +1,12 @@
 //! The greedy composer: fills each line with as many words as fit, then moves on.
 
-use std::ops::Range;
-
 use reprise_diag::Note;
 use reprise_geom::Length;
 
+use crate::para::{Para, indented};
+use crate::walk::{Step, Walk, stalled};
 use crate::{
-    Adjustment, Available, Break, BreakKind, BreakReason, ComposeRequest, Composer, Composition,
-    Explanation, Interval, LineFragment, LineQuery, codes,
+    Adjustment, BreakKind, BreakReason, ComposeRequest, Composer, Composition, Interval, codes,
 };
 
 /// How many times in a row a geometry provider may answer `Skip` before
@@ -30,124 +29,154 @@ enum Fill {
     Pass,
 }
 
-struct State<'r, 'a> {
-    request: &'r ComposeRequest<'a>,
-    /// Valid breaks after the start, sorted, ending at the end of the text.
-    breaks: Vec<Break>,
+/// How first-fit composition sets lines, beyond what [`Greedy`] does.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct FirstFit {
+    /// Moves the first interval of a line in by this much when the line
+    /// continues an authored line (a turnover).
+    pub indent: Length,
+    /// Gives an overflowing line that ends at a forced break the reason
+    /// `Forced` rather than `Overflow`, so `Forced` always marks the end of
+    /// an authored line. [`Greedy`] keeps `Overflow`.
+    pub forced_reason_wins: bool,
 }
 
-impl State<'_, '_> {
-    /// The width of `range` without its trailing whitespace, from the
-    /// paragraph's shaping.
-    fn measure(&self, range: Range<usize>) -> Length {
-        let text = self.request.text;
-        let trimmed = text[range.clone()].trim_end().len();
-        self.request
-            .shaped
-            .width(range.start..range.start + trimmed)
-    }
-
-    fn fill(&self, pos: usize, interval: Interval, later: &[Interval]) -> (Fill, Option<Note>) {
-        let width = interval.width();
-        let len = self.request.text.len();
-        let mut last_fit = None;
-        for b in self.breaks.iter().filter(|b| b.at > pos) {
-            let need = self.measure(pos..b.at);
-            if need <= width {
-                let forced = b.kind == BreakKind::Forced;
-                if forced || b.at == len {
-                    let reason = if forced {
-                        BreakReason::Forced
-                    } else {
-                        BreakReason::End
-                    };
-                    let fill = Fill::Fragment {
-                        end: b.at,
-                        reason,
-                        ends_line: forced,
-                    };
-                    return (fill, None);
-                }
-                last_fit = Some(b.at);
-                continue;
-            }
-            if let Some(end) = last_fit {
+fn fill(
+    para: &Para<'_, '_>,
+    pos: usize,
+    interval: Interval,
+    later: &[Interval],
+    style: FirstFit,
+) -> (Fill, Option<Note>) {
+    let width = interval.width();
+    let len = para.len;
+    let mut last_fit = None;
+    for (i, b) in para
+        .breaks
+        .iter()
+        .enumerate()
+        .skip(para.first_break_after(pos))
+    {
+        let need = para.natural_width(pos, i);
+        let forced = b.kind == BreakKind::Forced;
+        if need <= width {
+            if forced || b.at == len {
+                let reason = if forced {
+                    BreakReason::Forced
+                } else {
+                    BreakReason::End
+                };
                 let fill = Fill::Fragment {
-                    end,
-                    reason: BreakReason::Opportunity,
-                    ends_line: false,
+                    end: b.at,
+                    reason,
+                    ends_line: forced,
                 };
                 return (fill, None);
             }
-            if later.iter().any(|l| need <= l.width()) {
-                return (Fill::Pass, None);
-            }
-            let note = Note::warning(
-                codes::OVERFLOW,
-                format!("text at bytes {pos}..{} overflows its line", b.at),
-            )
-            .at(pos..b.at);
+            last_fit = Some(b.at);
+            continue;
+        }
+        if let Some(end) = last_fit {
             let fill = Fill::Fragment {
-                end: b.at,
-                reason: BreakReason::Overflow,
-                ends_line: b.kind == BreakKind::Forced,
+                end,
+                reason: BreakReason::Opportunity,
+                ends_line: false,
             };
-            return (fill, Some(note));
+            return (fill, None);
         }
-        // Only reached for empty text: the one empty line.
+        if later.iter().any(|l| need <= l.width()) {
+            return (Fill::Pass, None);
+        }
+        let note = Note::warning(
+            codes::OVERFLOW,
+            format!("text at bytes {pos}..{} overflows its line", b.at),
+        )
+        .at(pos..b.at);
         let fill = Fill::Fragment {
-            end: pos,
-            reason: BreakReason::End,
-            ends_line: true,
-        };
-        (fill, None)
-    }
-
-    fn fragment(
-        &self,
-        text: Range<usize>,
-        available: Interval,
-        line: u32,
-        block_offset: Length,
-        reason: BreakReason,
-    ) -> LineFragment {
-        let request = self.request;
-        let len = request.text.len();
-        let edge_unsafe = |at: usize| at > 0 && at < len && !request.shaped.is_safe_to_break(at);
-        let reshaped = edge_unsafe(text.start) || edge_unsafe(text.end);
-        let (runs, width) = if reshaped {
-            let runs = request.reshape.reshape(text.clone());
-            let trimmed = request.text[text.clone()].trim_end().len();
-            let content = text.start..text.start + trimmed;
-            let width = runs
-                .iter()
-                .flat_map(|r| &r.glyphs)
-                .filter(|g| content.contains(&(g.cluster as usize)))
-                .map(|g| g.advance)
-                .sum();
-            (runs, width)
-        } else {
-            (
-                request.shaped.slice(text.clone()),
-                self.measure(text.clone()),
-            )
-        };
-        LineFragment {
-            text,
-            runs,
-            width,
-            available,
-            line,
-            block_offset,
-            height: request.line_height,
-            explanation: Explanation {
-                reason,
-                score: None,
-                adjustment: Adjustment::default(),
-                reshaped,
+            end: b.at,
+            reason: if forced && style.forced_reason_wins {
+                BreakReason::Forced
+            } else {
+                BreakReason::Overflow
             },
-        }
+            ends_line: forced,
+        };
+        return (fill, Some(note));
     }
+    // Only reached for empty text: the one empty line.
+    let fill = Fill::Fragment {
+        end: pos,
+        reason: BreakReason::End,
+        ends_line: true,
+    };
+    (fill, None)
+}
+
+/// Composes first-fit from `pos` and `walk` to the end of the text, the end
+/// of the region or a stall, appending to `out`. Lines carry no score.
+pub(crate) fn first_fit(
+    para: &Para<'_, '_>,
+    walk: &mut Walk,
+    mut pos: usize,
+    out: &mut Composition,
+    style: FirstFit,
+) {
+    let request = para.request;
+    let len = para.len;
+    // Empty text still gets one line; otherwise stop when the text runs out.
+    let unfinished =
+        |out: &Composition, pos: usize| pos < len || (len == 0 && out.lines.is_empty());
+    while unfinished(out, pos) {
+        let intervals = match walk.next_line(request, &out.lines) {
+            Step::Room(intervals) => intervals,
+            Step::Moved => continue,
+            Step::End => {
+                out.rest = Some(pos);
+                break;
+            }
+            Step::Stalled => {
+                out.notes.push(stalled(walk, pos, len));
+                out.rest = Some(pos);
+                break;
+            }
+        };
+        for (k, &interval) in intervals.iter().enumerate() {
+            if !unfinished(out, pos) {
+                break;
+            }
+            let interval = if k == 0 && !para.begins_line(pos) {
+                indented(interval, style.indent)
+            } else {
+                interval
+            };
+            let later = intervals.get(k + 1..).unwrap_or_default();
+            let (fill, note) = fill(para, pos, interval, later, style);
+            out.notes.extend(note);
+            let Fill::Fragment {
+                end,
+                reason,
+                ends_line,
+            } = fill
+            else {
+                continue;
+            };
+            out.lines.push(para.fragment(
+                pos..end,
+                interval,
+                walk.line,
+                walk.y,
+                reason,
+                None,
+                Adjustment::default(),
+            ));
+            pos = end;
+            if ends_line {
+                break;
+            }
+        }
+        walk.advance(request.line_height);
+    }
+    out.block_end = walk.y;
 }
 
 impl Composer for Greedy {
@@ -156,97 +185,10 @@ impl Composer for Greedy {
     }
 
     fn compose(&self, request: &ComposeRequest<'_>) -> Composition {
-        let text = request.text;
-        let len = text.len();
-        let start = request.start.min(len);
-        let mut breaks: Vec<Break> = request
-            .breaks
-            .iter()
-            .filter(|b| b.at > start && b.at <= len && text.is_char_boundary(b.at))
-            .copied()
-            .collect();
-        breaks.sort_by_key(|b| b.at);
-        breaks.dedup_by_key(|b| b.at);
-        if len > start && breaks.last().is_none_or(|b| b.at != len) {
-            breaks.push(Break {
-                at: len,
-                kind: BreakKind::Allowed,
-                penalty: 0,
-            });
-        }
-        let state = State { request, breaks };
-
+        let para = Para::new(request);
         let mut out = Composition::default();
-        let mut pos = start;
-        let mut y = request.block_start;
-        let mut line = 0u32;
-        let mut skips = 0u32;
-        // Empty text still gets one line; otherwise stop when the text runs out.
-        let unfinished =
-            |out: &Composition, pos: usize| pos < len || (len == 0 && out.lines.is_empty());
-        while unfinished(&out, pos) {
-            let available = request.geometry.available(&LineQuery {
-                line,
-                block_offset: y,
-                line_height: request.line_height,
-                previous: &out.lines,
-            });
-            let intervals = match available {
-                Available::End => {
-                    out.rest = Some(pos);
-                    break;
-                }
-                Available::Room(intervals) if !intervals.is_empty() => intervals,
-                skip => {
-                    let next = match skip {
-                        Available::Skip { next } => next,
-                        _ => y + request.line_height,
-                    };
-                    skips += 1;
-                    if next <= y || skips > MAX_CONSECUTIVE_SKIPS {
-                        out.notes.push(
-                            Note::error(
-                                codes::GEOMETRY_STALLED,
-                                format!(
-                                    "geometry made no progress at block offset {y:?}; \
-                                     bytes {pos}..{len} not composed"
-                                ),
-                            )
-                            .at(pos..len),
-                        );
-                        out.rest = Some(pos);
-                        break;
-                    }
-                    y = next;
-                    continue;
-                }
-            };
-            skips = 0;
-            for (k, &interval) in intervals.iter().enumerate() {
-                if !unfinished(&out, pos) {
-                    break;
-                }
-                let (fill, note) = state.fill(pos, interval, &intervals[k + 1..]);
-                out.notes.extend(note);
-                let Fill::Fragment {
-                    end,
-                    reason,
-                    ends_line,
-                } = fill
-                else {
-                    continue;
-                };
-                out.lines
-                    .push(state.fragment(pos..end, interval, line, y, reason));
-                pos = end;
-                if ends_line {
-                    break;
-                }
-            }
-            y += request.line_height;
-            line += 1;
-        }
-        out.block_end = y;
+        let mut walk = Walk::new(request.block_start);
+        first_fit(&para, &mut walk, para.start, &mut out, FirstFit::default());
         out
     }
 }
@@ -260,7 +202,10 @@ mod tests {
         HarfRust, Item, ParagraphInput, Reshape, ShapedRun, ShapedText, Shaper, StyleRun, itemize,
     };
 
+    use std::ops::Range;
+
     use super::*;
+    use crate::{Available, Break, LineQuery};
     use crate::{GeometryProvider, Measure, break_opportunities};
 
     const SERIF: &[u8] = include_bytes!("../../../fixtures/fonts/SourceSerifPro-Regular.otf");
