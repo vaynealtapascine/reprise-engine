@@ -14,8 +14,10 @@ use crate::flow::Pending;
 use crate::{Diagnostic, Engine, LayoutSnapshot, RelationLayout, RelationStatus, Subject, codes};
 
 mod follow;
+mod resolve;
 
 use follow::Follow;
+use resolve::Resolver;
 
 pub(crate) fn run(
     engine: &Engine,
@@ -26,6 +28,7 @@ pub(crate) fn run(
     let mut follow = Follow {
         next_free: Length::MIN,
     };
+    let mut resolver = Resolver::new(doc);
     for (id, relation) in doc.relations() {
         let relation = match relation {
             Ok(r) => r,
@@ -60,14 +63,17 @@ pub(crate) fn run(
             snapshot.relations.push(result);
             continue;
         }
-        if schema.is_none() {
+        let Some(schema) = schema else {
             snapshot.diagnostics.push(Diagnostic::new(
                 Severity::Warning,
                 codes::RELATION_UNKNOWN_SCHEMA,
                 Subject::Relation(id),
                 format!("schema {} is not registered; not applied", relation.schema),
             ));
-        } else if relation.schema == builtin::FOLLOW {
+            snapshot.relations.push(result);
+            continue;
+        };
+        if relation.schema == builtin::FOLLOW {
             follow.apply(
                 engine,
                 doc,
@@ -78,12 +84,24 @@ pub(crate) fn run(
                 &mut result,
             );
         } else {
-            snapshot.diagnostics.push(Diagnostic::new(
-                Severity::Info,
-                codes::RELATION_NOT_APPLIED,
-                Subject::Relation(id),
-                format!("layout has no behaviour for {}", relation.schema),
-            ));
+            // Every registered relation has its targets resolved and
+            // reported (15), whether or not layout does anything with them.
+            let resolved = resolver.resolve(snapshot, id, schema, &relation);
+            let usable = !resolved.deleted && resolved.unique("to").is_some();
+            snapshot.diagnostics.extend(resolved.diagnostics);
+            result.targets = resolved.targets;
+            if relation.schema == builtin::REFERENCE {
+                // Resolving is all a reference does (14): it is in effect
+                // when its one target is usable.
+                result.applied = usable;
+            } else {
+                snapshot.diagnostics.push(Diagnostic::new(
+                    Severity::Info,
+                    codes::RELATION_NOT_APPLIED,
+                    Subject::Relation(id),
+                    format!("layout has no behaviour for {}", relation.schema),
+                ));
+            }
         }
         result.status = result
             .targets

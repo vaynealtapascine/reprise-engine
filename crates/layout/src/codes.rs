@@ -35,3 +35,16 @@ pub const RELATION_OWNER_DELETED: Code = Code::new("relation.owner-deleted");
 pub const RELATION_NO_MATCH: Code = Code::new("relation.no-match");
 /// A placed block was moved to avoid overlapping an earlier one.
 pub const RELATION_PUSHED: Code = Code::new("relation.pushed");
+/// A role that takes one target resolved to several equally good candidates,
+/// and layout didn't choose (15).
+pub const RELATION_AMBIGUOUS: Code = Code::new("relation.ambiguous");
+/// A target was deleted, and the schema's policy is to delete the relation (14).
+pub const RELATION_TARGET_DELETED: Code = Code::new("relation.target-deleted");
+/// A snapshot target's version isn't available: not in the document's
+/// history, compacted away, or malformed (13).
+pub const RELATION_SNAPSHOT_UNAVAILABLE: Code = Code::new("relation.snapshot-unavailable");
+/// A relation's target resolved to the relation's own owner.
+pub const RELATION_SELF_REFERENCE: Code = Code::new("relation.self-reference");
+/// Rebinding followed a chain of successors to its limit without finding a
+/// live node (37).
+pub const RELATION_REBIND_LIMIT: Code = Code::new("relation.rebind-limit");
