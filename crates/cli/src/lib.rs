@@ -14,9 +14,18 @@ pub fn write_outputs(
     dir: &Path,
     name: &str,
 ) -> std::io::Result<()> {
-    let pages = snapshot.to_display_lists(DisplayOptions { debug: true });
+    let pages = snapshot.to_display_lists(DisplayOptions {
+        debug: true,
+        ..DisplayOptions::default()
+    });
     let content: Vec<_> = pages.iter().map(|p| p.content_only()).collect();
-    let first = snapshot.to_display_list(0, DisplayOptions { debug: true });
+    let first = snapshot.to_display_list(
+        0,
+        DisplayOptions {
+            debug: true,
+            ..DisplayOptions::default()
+        },
+    );
     let fail = |e: &dyn std::fmt::Display| std::io::Error::other(e.to_string());
     std::fs::create_dir_all(dir)?;
     std::fs::write(dir.join(format!("{name}.layout.json")), snapshot.to_json())?;

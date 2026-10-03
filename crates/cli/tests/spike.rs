@@ -57,12 +57,20 @@ fn annotation_follows_its_line_through_a_reflow() {
 fn layout_is_deterministic() {
     let engine = engine();
     let spike = document().unwrap();
-    let a = engine
-        .layout(&spike.doc)
-        .to_display_list(0, DisplayOptions { debug: true });
-    let b = engine
-        .layout(&document().unwrap().doc)
-        .to_display_list(0, DisplayOptions { debug: true });
+    let a = engine.layout(&spike.doc).to_display_list(
+        0,
+        DisplayOptions {
+            debug: true,
+            ..DisplayOptions::default()
+        },
+    );
+    let b = engine.layout(&document().unwrap().doc).to_display_list(
+        0,
+        DisplayOptions {
+            debug: true,
+            ..DisplayOptions::default()
+        },
+    );
     assert_eq!(a.to_json(), b.to_json());
     insta::assert_snapshot!("display", a.content_only().to_json());
 }

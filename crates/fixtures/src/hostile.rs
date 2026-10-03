@@ -59,6 +59,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         deleted_targets()?,
         concurrent_edits()?,
         extreme_lengths()?,
+        display_text_clusters()?,
     ])
 }
 
@@ -320,4 +321,17 @@ pub fn extreme_lengths() -> Result<Fixture, DocError> {
             "layout.style-clamped",
         ],
     ))
+}
+
+/// A single paragraph attacks selectable PDF text with a ligature, stacked
+/// marks, an explicit right-to-left override and unsupported ZWJ emoji.
+pub fn display_text_clusters() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "office Z\u{335}\u{322}\u{31b}\u{332} a\u{30a}\u{30a} \u{202e}abc office\u{202c} 👩‍👩‍👧‍👦 end.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("display_text_clusters", doc, &[]))
 }

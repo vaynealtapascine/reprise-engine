@@ -19,18 +19,19 @@ interfaces.
 | `compose` | `src/lib.rs` | `Composer` and `GeometryProvider` contracts, `Measure`, break opportunities, `LineFragment`, `Explanation` | 23 |
 |  | `src/greedy.rs` | The greedy composer | 23 |
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
-|  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends | 32 |
+|  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
+|  | `tests/pdf_text.rs` | Generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
 | `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`), `PageSettings`, `Engine::layout` | 24, 26 |
 |  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Diagnostic`, queries | 05, 13, 37 |
 |  | `src/flow.rs` | Pass 1: shaping, composition and stacking blocks in the main frame | 24 |
 |  | `src/relations/mod.rs` | Pass 2: dispatching relations on their schema | 13–15, 26 |
 |  | `src/relations/follow.rs` | `reprise.follow`: placing a block beside the line it follows | 13, 15 |
-|  | `src/display.rs` | `to_display_list(s)` and the debug overlay | 32, 39 |
+|  | `src/display.rs` | `to_display_list(s)` and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing | 37, 39 |
-|  | `tests/hostile.rs`, `tests/snapshots/` | The invariant checks and their JSON snapshots | 38, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing, including `display_text_clusters` (ligature, stacked marks, RLO and ZWJ) | 37, 39 |
+|  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 | `cli` | `src/lib.rs` | `write_outputs`: every output format for a snapshot | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |

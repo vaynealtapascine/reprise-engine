@@ -1,6 +1,10 @@
 //! PDF backend. Glyph runs are real PDF text, positioned glyph by glyph at the
 //! coordinates layout chose, so the PDF never re-shapes or re-advances them.
 //! Each display list becomes one page.
+//!
+//! Text extraction follows item order, and uses logical source order inside
+//! each run, including RTL runs. Viewers must honour PDF ActualText. The list
+//! has no separate reading-order metadata for ordering spatial blocks or runs.
 
 use std::collections::BTreeMap;
 
@@ -147,6 +151,9 @@ impl Pdf<'_> {
     }
 
     fn glyphs(&mut self, surface: &mut Surface<'_>, run: &GlyphRun) -> Result<(), RenderError> {
+        if run.glyphs.is_empty() || run.size <= Length::ZERO {
+            return Ok(());
+        }
         let font = match self.krilla_fonts.get(&run.face) {
             Some(f) => f.clone(),
             None => {
@@ -158,22 +165,65 @@ impl Pdf<'_> {
         };
         surface.set_fill(Some(fill(run.color)));
         surface.set_stroke(None);
-        for g in &run.glyphs {
-            // One glyph per call, so each sits exactly where layout put it and
-            // the advance is never consulted. ToUnicode text from `run.text`
-            // is not passed on yet.
-            let glyph = KrillaGlyph::new(GlyphId::new(g.id), 0.0, 0.0, 0.0, 0.0, 0..0, None);
-            surface.draw_glyphs(
-                Point::from_xy(pt(g.x), pt(g.y)),
-                &[glyph],
-                font.clone(),
-                "",
-                pt(run.size),
-                false,
-            );
-        }
+        // krilla must see all glyphs in a cluster together to emit ActualText
+        // rather than duplicate the source once per glyph. Zero advances and
+        // offsets from the origin keep the layout's absolute glyph positions.
+        let size = pt(run.size);
+        let fallback = needs_run_text(run);
+        let glyphs: Vec<_> = run
+            .glyphs
+            .iter()
+            .map(|g| {
+                let range = if fallback {
+                    0..run.text.len()
+                } else {
+                    g.text.start as usize..g.text.end as usize
+                };
+                KrillaGlyph::new(
+                    GlyphId::new(g.id),
+                    0.0,
+                    pt(g.x) / size,
+                    -pt(g.y) / size,
+                    0.0,
+                    range,
+                    None,
+                )
+            })
+            .collect();
+        surface.draw_glyphs(
+            Point::from_xy(0.0, 0.0),
+            &glyphs,
+            font,
+            &run.text,
+            size,
+            false,
+        );
         Ok(())
     }
+}
+
+/// A valid LTR mapping partitions all source bytes, with repeated ranges
+/// allowed for a cluster. Everything else (RTL, holes, overlaps, empty or
+/// invalid UTF-8 ranges) falls back to one source span for the entire run.
+/// A single glyph can express that span through ToUnicode; multiple glyphs
+/// make krilla emit ActualText. Neither case guesses missing characters.
+fn needs_run_text(run: &GlyphRun) -> bool {
+    let mut end = 0;
+    let mut previous = None;
+    for glyph in &run.glyphs {
+        let range = glyph.text.start as usize..glyph.text.end as usize;
+        if range.is_empty() || run.text.get(range.clone()).is_none() {
+            return true;
+        }
+        if previous.as_ref() != Some(&range) {
+            if range.start != end {
+                return true;
+            }
+            end = range.end;
+            previous = Some(range);
+        }
+    }
+    end != run.text.len()
 }
 
 #[cfg(test)]

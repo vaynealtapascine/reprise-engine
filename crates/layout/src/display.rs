@@ -3,16 +3,51 @@
 //! Each frame becomes a group whose transform is the frame's transform to its
 //! page, so its lines and glyphs are drawn in frame space.
 
+use reprise_compose::BreakReason;
+use reprise_diag::Severity;
 use reprise_display::{Color, DisplayList, Glyph, GlyphRun, Item, Layer, Path, Stroke};
 use reprise_geom::{FrameSpace, Length, Point, Rect};
 
-use crate::{LayoutSnapshot, LineLayout, PositionedRun};
+use crate::{LayoutSnapshot, LineLayout, PositionedRun, RelationStatus, Resolution, Subject};
 
 /// Display list options.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct DisplayOptions {
-    /// Draw frames, line boxes, baselines and relation links (39).
+    /// Master switch. Defaults to false; the enabled overlay is a superset
+    /// of the original frames, block/line boxes, baselines and relation links.
     pub debug: bool,
+    /// Frame, block and line boxes.
+    pub boxes: bool,
+    /// Baseline across each available line interval.
+    pub baselines: bool,
+    /// Available interval (cyan) and used width (blue), one point apart.
+    pub intervals: bool,
+    /// Purple boxes around positioned runs.
+    pub run_boundaries: bool,
+    /// Wrap hook, forced-break arrow, end square or overflow cross.
+    pub break_reasons: bool,
+    /// Magenta outlines on lines whose boundaries required reshaping.
+    pub reshaped_lines: bool,
+    /// Green valid, blue rebound, amber ambiguous, red missing links.
+    pub relations: bool,
+    /// Blue info, amber warning and red error markers over source clusters.
+    pub diagnostics: bool,
+}
+
+impl Default for DisplayOptions {
+    fn default() -> Self {
+        Self {
+            debug: false,
+            boxes: true,
+            baselines: true,
+            intervals: true,
+            run_boundaries: true,
+            break_reasons: true,
+            reshaped_lines: true,
+            relations: true,
+            diagnostics: true,
+        }
+    }
 }
 
 const FRAME: Color = Color(40, 110, 220, 160);
@@ -20,6 +55,27 @@ const BLOCK: Color = Color(40, 110, 220, 100);
 const LINE_BOX: Color = Color(40, 110, 220, 60);
 const BASELINE: Color = Color(220, 60, 60, 110);
 const LINK: Color = Color(30, 160, 90, 200);
+const AVAILABLE: Color = Color(30, 150, 190, 190);
+const USED: Color = Color(20, 90, 160, 230);
+const RUN: Color = Color(150, 70, 190, 160);
+const RESHAPED: Color = Color(210, 50, 160, 220);
+
+fn severity_color(severity: Severity) -> Color {
+    match severity {
+        Severity::Info => Color(30, 130, 200, 220),
+        Severity::Warning => Color(210, 130, 10, 230),
+        Severity::Error => Color(220, 40, 40, 230),
+    }
+}
+
+fn status_color(status: RelationStatus) -> Color {
+    match status {
+        RelationStatus::Valid => LINK,
+        RelationStatus::Rebound => Color(30, 130, 210, 220),
+        RelationStatus::Ambiguous => severity_color(Severity::Warning),
+        RelationStatus::Missing | RelationStatus::OwnerDeleted => severity_color(Severity::Error),
+    }
+}
 
 fn hairline(color: Color) -> Option<Stroke> {
     Some(Stroke {
@@ -69,27 +125,46 @@ impl LayoutSnapshot {
                 continue;
             }
             let mut children = Vec::new();
-            if options.debug {
+            if options.debug && options.boxes {
                 children.push(debug_path(Path::rect(r(frame.rect)), FRAME));
             }
             for block in &self.blocks {
                 let lines: Vec<&LineLayout> =
                     block.lines.iter().filter(|l| l.frame == index).collect();
                 if options.debug
+                    && options.boxes
                     && let Some(bounds) = lines.iter().map(|l| l.rect).reduce(|a, b| a.union(&b))
                 {
                     children.push(debug_path(Path::rect(r(bounds)), BLOCK));
                 }
                 for line in lines {
                     if options.debug {
-                        children.push(debug_path(Path::rect(r(line.rect)), LINE_BOX));
-                        children.push(debug_path(
-                            Path::line(
-                                Point::new(line.rect.origin.x, line.baseline),
-                                Point::new(line.rect.max_x(), line.baseline),
-                            ),
-                            BASELINE,
-                        ));
+                        if options.boxes {
+                            children.push(debug_path(Path::rect(r(line.rect)), LINE_BOX));
+                        }
+                        if options.baselines {
+                            children.push(debug_path(
+                                Path::line(
+                                    Point::new(line.rect.origin.x, line.baseline),
+                                    Point::new(line.rect.max_x(), line.baseline),
+                                ),
+                                BASELINE,
+                            ));
+                        }
+                        line_overlays(&mut children, line, options);
+                        if options.diagnostics {
+                            for diagnostic in &self.diagnostics {
+                                if diagnostic.subject == Subject::Node(block.node) {
+                                    diagnostic_overlay(
+                                        &mut children,
+                                        line,
+                                        &block.text,
+                                        diagnostic.bytes.as_ref(),
+                                        severity_color(diagnostic.severity),
+                                    );
+                                }
+                            }
+                        }
                     }
                     for run in &line.runs {
                         children.push(Item::Glyphs(glyph_run(run, line, &block.text)));
@@ -102,7 +177,7 @@ impl LayoutSnapshot {
                 items: children,
             });
         }
-        if options.debug {
+        if options.debug && options.relations {
             items.extend(self.relation_links(page));
         }
         DisplayList {
@@ -112,40 +187,182 @@ impl LayoutSnapshot {
         }
     }
 
-    /// Lines from each followed line's end to the block it placed, on the page.
+    /// Links for every resolved target, even for unapplied relations. Missing
+    /// targets get a cross at their placed owner. Unplaced owners have no
+    /// geometry in the snapshot and cannot be marked at an invented position.
     fn relation_links(&self, page: usize) -> Vec<Item> {
         let mut out = Vec::new();
-        for rel in self.relations.iter().filter(|r| r.applied) {
+        for rel in &self.relations {
             let Some(owner) = rel.owner.and_then(|o| self.block(o)) else {
                 continue;
             };
-            let target = rel.targets.iter().find_map(|t| match t.resolved {
-                Some(crate::Resolution::Line(line)) => Some(line),
-                _ => None,
-            });
-            let (Some(target), Some(first)) = (target, owner.lines.first()) else {
+            let Some(first) = owner.lines.first() else {
                 continue;
             };
-            let (Some(from_line), Some(to_frame)) = (self.line(target), self.frame(first.frame))
-            else {
+            let Some(to_frame) = self.frame(first.frame) else {
                 continue;
             };
-            let Some(from_frame) = self.frame(from_line.frame) else {
-                continue;
-            };
-            if from_frame.page != page || to_frame.page != page {
+            if to_frame.page != page {
                 continue;
             }
-            let from = from_frame.to_page.apply(Point::new(
-                from_line.rect.origin.x + from_line.width,
-                from_line.baseline,
-            ));
             let to = to_frame
                 .to_page
                 .apply(Point::new(first.rect.origin.x, first.baseline));
-            out.push(debug_path(Path::line(from, to), LINK));
+            if rel.targets.is_empty() {
+                out.push(debug_path(cross(to), status_color(rel.status)));
+            }
+            for target in &rel.targets {
+                let from_line = match &target.resolved {
+                    Some(Resolution::Line(at)) => self.line(*at),
+                    Some(Resolution::Node(node)) => self.block(*node).and_then(|b| b.lines.first()),
+                    Some(Resolution::Range { node, bytes }) => self
+                        .line_containing(*node, bytes.start)
+                        .and_then(|at| self.line(at)),
+                    None => None,
+                };
+                let color = status_color(target.status);
+                if let Some(line) = from_line
+                    && let Some(frame) = self.frame(line.frame)
+                    && frame.page == page
+                {
+                    let from = frame
+                        .to_page
+                        .apply(Point::new(line.rect.origin.x + line.width, line.baseline));
+                    out.push(debug_path(Path::line(from, to), color));
+                } else {
+                    // A same-page link cannot show a cross-page endpoint.
+                    out.push(debug_path(cross(to), color));
+                }
+            }
         }
         out
+    }
+}
+
+fn cross(at: Point<reprise_geom::PageSpace>) -> Path {
+    let d = Length::from_pt(2);
+    Path(vec![
+        reprise_display::Segment::Move(Point::new(at.x - d, at.y - d)),
+        reprise_display::Segment::Line(Point::new(at.x + d, at.y + d)),
+        reprise_display::Segment::Move(Point::new(at.x - d, at.y + d)),
+        reprise_display::Segment::Line(Point::new(at.x + d, at.y - d)),
+    ])
+}
+
+fn line_overlays(out: &mut Vec<Item>, line: &LineLayout, options: DisplayOptions) {
+    let x = line.rect.origin.x;
+    let end = x + line.width;
+    let top = line.rect.origin.y;
+    if options.intervals {
+        out.push(debug_path(
+            Path::line(Point::new(x, top), Point::new(line.rect.max_x(), top)),
+            AVAILABLE,
+        ));
+        let y = top + Length::from_pt(1);
+        out.push(debug_path(
+            Path::line(Point::new(x, y), Point::new(end, y)),
+            USED,
+        ));
+    }
+    if options.run_boundaries {
+        for run in &line.runs {
+            out.push(debug_path(
+                Path::rect(Rect::new(
+                    Point::new(run.x, top),
+                    run.width,
+                    line.rect.height,
+                )),
+                RUN,
+            ));
+        }
+    }
+    if options.reshaped_lines && line.explanation.reshaped {
+        out.push(debug_path(Path::rect(r(line.rect)), RESHAPED));
+    }
+    if options.break_reasons {
+        // Symbols sit just beyond used text: wrap=hook, forced=down arrow,
+        // end=square, overflow=cross; unknown future reasons=diamond.
+        use reprise_display::Segment::{Close, Line, Move};
+        let at = Point::new(end + Length::from_pt(4), line.baseline);
+        let d = Length::from_pt(2);
+        let path = match line.explanation.reason {
+            BreakReason::Opportunity => Path(vec![
+                Move(Point::new(at.x - d, at.y - d)),
+                Line(Point::new(at.x + d, at.y - d)),
+                Line(Point::new(at.x + d, at.y + d)),
+                Line(Point::new(at.x, at.y + d)),
+            ]),
+            BreakReason::Forced => Path(vec![
+                Move(Point::new(at.x, at.y - d)),
+                Line(Point::new(at.x, at.y + d)),
+                Move(Point::new(at.x - d, at.y)),
+                Line(Point::new(at.x, at.y + d)),
+                Line(Point::new(at.x + d, at.y)),
+            ]),
+            BreakReason::End => Path::rect(Rect::new(Point::new(at.x - d, at.y - d), d + d, d + d)),
+            BreakReason::Overflow => cross(at),
+            _ => Path(vec![
+                Move(Point::new(at.x, at.y - d)),
+                Line(Point::new(at.x + d, at.y)),
+                Line(Point::new(at.x, at.y + d)),
+                Line(Point::new(at.x - d, at.y)),
+                Close,
+            ]),
+        };
+        out.push(debug_path(path, USED));
+    }
+}
+
+/// Mark whole affected clusters, since source bytes inside a ligature or
+/// combining cluster have no independent glyph geometry. A point range marks
+/// its containing cluster; malformed/outside ranges are ignored.
+fn diagnostic_overlay(
+    out: &mut Vec<Item>,
+    line: &LineLayout,
+    text: &str,
+    bytes: Option<&std::ops::Range<usize>>,
+    color: Color,
+) {
+    let Some(bytes) = bytes else {
+        if line.text.start == 0 {
+            out.push(debug_path(
+                cross(Point::new(line.rect.origin.x, line.baseline)),
+                color,
+            ));
+        }
+        return;
+    };
+    if bytes.start > bytes.end || text.get(bytes.clone()).is_none() {
+        return;
+    }
+    for run in &line.runs {
+        let display = glyph_run(run, line, text);
+        for (glyph, shaped) in display.glyphs.iter().zip(&run.glyphs) {
+            let start = run.range.start.saturating_add(glyph.text.start as usize);
+            let end = run.range.start.saturating_add(glyph.text.end as usize);
+            let overlaps = if bytes.is_empty() {
+                start <= bytes.start && bytes.start < end
+            } else {
+                start < bytes.end && bytes.start < end
+            };
+            if overlaps {
+                let width = shaped.advance.max(Length::from_pt(1));
+                out.push(debug_path(
+                    Path::rect(Rect::new(
+                        Point::new(glyph.x, line.rect.origin.y),
+                        width,
+                        line.rect.height,
+                    )),
+                    color,
+                ));
+            }
+        }
+    }
+    if bytes.is_empty() && bytes.start == line.text.end && bytes.start == text.len() {
+        out.push(debug_path(
+            cross(Point::new(line.rect.origin.x + line.width, line.baseline)),
+            color,
+        ));
     }
 }
 
@@ -186,5 +403,204 @@ fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
         text: source.to_string(),
         glyphs,
         layer: Layer::Content,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot() -> LayoutSnapshot {
+        let mut fonts = reprise_font::FontStore::default();
+        fonts.add(
+            reprise_font::Face::from_bytes(
+                include_bytes!("../../../fixtures/fonts/SourceSerifPro-Regular.otf").as_slice(),
+            )
+            .unwrap(),
+        );
+        let doc = reprise_doc::Document::new(1).unwrap();
+        doc.append_block(
+            reprise_doc::BlockKind::Paragraph,
+            "",
+            "office Z\u{335}\u{322} abc",
+        )
+        .unwrap();
+        crate::Engine::new(fonts).layout(&doc)
+    }
+
+    fn only() -> DisplayOptions {
+        DisplayOptions {
+            debug: true,
+            boxes: false,
+            baselines: false,
+            intervals: false,
+            run_boundaries: false,
+            break_reasons: false,
+            reshaped_lines: false,
+            relations: false,
+            diagnostics: false,
+        }
+    }
+
+    #[test]
+    fn every_break_reason_has_a_distinct_path_and_reshaping_is_optional() {
+        let mut snapshot = snapshot();
+        let line = &mut snapshot.blocks[0].lines[0];
+        let mut paths = Vec::new();
+        for reason in [
+            BreakReason::Opportunity,
+            BreakReason::Forced,
+            BreakReason::End,
+            BreakReason::Overflow,
+        ] {
+            line.explanation.reason = reason;
+            let mut items = Vec::new();
+            line_overlays(
+                &mut items,
+                line,
+                DisplayOptions {
+                    break_reasons: true,
+                    ..only()
+                },
+            );
+            assert_eq!(items.len(), 1);
+            assert!(!paths.contains(&items[0]));
+            paths.push(items[0].clone());
+        }
+        line.explanation.reshaped = true;
+        let mut items = Vec::new();
+        line_overlays(&mut items, line, only());
+        assert!(items.is_empty());
+        line_overlays(
+            &mut items,
+            line,
+            DisplayOptions {
+                reshaped_lines: true,
+                ..only()
+            },
+        );
+        assert_eq!(items, vec![debug_path(Path::rect(r(line.rect)), RESHAPED)]);
+    }
+
+    #[test]
+    fn intervals_show_available_and_used_extents_and_run_bounds_toggle() {
+        let snapshot = snapshot();
+        let line = &snapshot.blocks[0].lines[0];
+        let mut items = Vec::new();
+        line_overlays(
+            &mut items,
+            line,
+            DisplayOptions {
+                intervals: true,
+                ..only()
+            },
+        );
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0],
+            debug_path(
+                Path::line(
+                    p(line.rect.origin),
+                    Point::new(line.rect.max_x(), line.rect.origin.y)
+                ),
+                AVAILABLE
+            )
+        );
+        let y = line.rect.origin.y + Length::from_pt(1);
+        assert_eq!(
+            items[1],
+            debug_path(
+                Path::line(
+                    Point::new(line.rect.origin.x, y),
+                    Point::new(line.rect.origin.x + line.width, y)
+                ),
+                USED
+            )
+        );
+        items.clear();
+        line_overlays(
+            &mut items,
+            line,
+            DisplayOptions {
+                run_boundaries: true,
+                ..only()
+            },
+        );
+        assert_eq!(items.len(), line.runs.len());
+    }
+
+    #[test]
+    fn diagnostic_ranges_mark_only_affected_clusters() {
+        let snapshot = snapshot();
+        let block = &snapshot.blocks[0];
+        let line = &block.lines[0];
+        let mut items = Vec::new();
+        diagnostic_overlay(&mut items, line, &block.text, Some(&(2..3)), Color::BLACK);
+        assert_eq!(
+            items.len(),
+            1,
+            "a byte inside the ffi ligature marks its whole glyph"
+        );
+        diagnostic_overlay(
+            &mut items,
+            line,
+            &block.text,
+            Some(&(usize::MAX..usize::MAX)),
+            Color::BLACK,
+        );
+        diagnostic_overlay(
+            &mut items,
+            line,
+            &block.text,
+            Some(&std::ops::Range { start: 10, end: 2 }),
+            Color::BLACK,
+        );
+        assert_eq!(items.len(), 1, "malformed ranges are ignored");
+        items.clear();
+        diagnostic_overlay(&mut items, line, &block.text, Some(&(0..0)), Color::BLACK);
+        assert_eq!(items.len(), 1, "point marks the cluster at the caret");
+        items.clear();
+        diagnostic_overlay(
+            &mut items,
+            line,
+            &block.text,
+            Some(&(block.text.len()..block.text.len())),
+            Color::BLACK,
+        );
+        assert_eq!(items.len(), 1, "end caret is a cross");
+    }
+
+    #[test]
+    fn extreme_negative_and_zero_overlay_geometry_saturates() {
+        let mut snapshot = snapshot();
+        let line = &mut snapshot.blocks[0].lines[0];
+        for extent in [Length(i32::MIN), Length::ZERO, Length(i32::MAX)] {
+            line.rect.origin = Point::new(extent, extent);
+            line.rect.width = extent;
+            line.rect.height = extent;
+            line.width = extent;
+            line.baseline = extent;
+            for run in &mut line.runs {
+                run.x = extent;
+                run.width = extent;
+            }
+            let mut items = Vec::new();
+            line_overlays(
+                &mut items,
+                line,
+                DisplayOptions {
+                    debug: true,
+                    ..Default::default()
+                },
+            );
+            diagnostic_overlay(&mut items, line, "", Some(&(0..0)), Color::BLACK);
+            assert!(!items.is_empty());
+        }
+        assert!(
+            snapshot
+                .to_display_list(usize::MAX, only())
+                .items
+                .is_empty()
+        );
     }
 }
