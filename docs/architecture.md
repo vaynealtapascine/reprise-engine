@@ -584,6 +584,30 @@ which prove properties of Rust code directly, are alternatives. Decide after the
 **Revisit if:** Bend2 matures, gains WASM output and a way to call other code, and the
 verification benefit outweighs the ecosystem cost.
 
+#### Implementation choices
+
+These were chosen on 2026-10-03, before the spike.
+
+-   **Platform:** Reprise is a Tauri app with one web UI for desktop and the web. On desktop the
+    engine runs natively in the Tauri backend; on the web it runs as WASM. So the engine needs a
+    native API and a WASM/TypeScript API over the same core.
+-   **Collaborative text store (09, 29):** Loro, wrapped behind the engine's own text-store
+    interface so the rest of the engine doesn't depend on it directly. Loro's movable tree is a
+    candidate for the content tree (06), and its stable cursors for anchors (12).
+-   **Text stack:**
+    -   Our own composer on low-level crates, not a ready-made layout library such as parley or
+        cosmic-text. That keeps fixed-point units (19), geometry providers (23) and break
+        explanations (39) under our control.
+    -   Fonts: fontations (skrifa, read-fonts).
+    -   Shaping: a pure-Rust shaper as the default platform-independent adapter (22). Choose
+        between rustybuzz and harfrust in the spike.
+    -   Segmentation and bidi: ICU4X.
+-   **Spike output:** four headless backends for the display list (32):
+    -   JSON snapshots of the layout and display list, for test fixtures and diffs
+    -   SVG, with debug overlays
+    -   PNG, through a rasterizer, for visual regression tests
+    -   PDF
+
 ---
 
 ## Cross-decision notes
@@ -601,8 +625,6 @@ verification benefit outweighs the ecosystem cost.
 
 ## Open questions
 
--   **Platforms Reprise targets** (browser, desktop or both), which decides how the engine is
-    exposed to the UI.
 -   **Numbers to fix during implementation:** tombstone compaction, fixed-point resolution, and
     the iteration limit and cycle classes.
 -   **Where allocation, fragmentation and backtracking live** in block and region flow (24).
