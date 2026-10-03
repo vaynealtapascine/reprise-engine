@@ -20,10 +20,12 @@ interfaces.
 |  | `src/greedy.rs` | The greedy composer | 23 |
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends | 32 |
-| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`), `PageSettings`, diagnostic codes, `Engine::layout` | 24, 26 |
+| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`), `PageSettings`, `Engine::layout` | 24, 26 |
+|  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Diagnostic`, queries | 05, 13, 37 |
 |  | `src/flow.rs` | Pass 1: shaping, composition and stacking blocks in the main frame | 24 |
-|  | `src/relations.rs` | Pass 2: dispatching relations on their schema and placing the blocks they position | 13–15, 26 |
+|  | `src/relations/mod.rs` | Pass 2: dispatching relations on their schema | 13–15, 26 |
+|  | `src/relations/follow.rs` | `reprise.follow`: placing a block beside the line it follows | 13, 15 |
 |  | `src/display.rs` | `to_display_list(s)` and the debug overlay | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
@@ -43,7 +45,8 @@ Other files:
 -   **Add a relation type:**
     1.  Define its `RelationSchema` in `doc/src/relation.rs`. Add it to `builtin::all()`
         if it is built in.
-    2.  Give it layout behaviour in `layout/src/relations.rs`, dispatching on its `SchemaId`.
+    2.  Give it layout behaviour in its own file under `layout/src/relations/`, and dispatch
+        to it on its `SchemaId` in `relations/mod.rs`.
     3.  Cover it, including its deleted-target cases, in `fixtures`.
 -   **Add a target or layout query:**
     1.  Add the variant to `Target` or `LayoutQuery` in `doc/src/relation.rs`, with its
@@ -62,8 +65,8 @@ Other files:
     1.  Add the field to `Style` and `ComputedStyle` in `doc/src/style.rs`.
     2.  Resolve it in `Document::computed_style`, recording its source in `explain` and
         clamping it if negative values make no sense.
--   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module and
-    to the table in `contracts.md`.
+-   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module
+    (`layout/src/codes.rs` for layout) and to the table in `contracts.md`.
 -   **Add a hostile fixture:**
     1.  Add a function in `fixtures/src/hostile.rs` and add it to `all()`.
     2.  Add a test in `fixtures/tests/hostile.rs`.
