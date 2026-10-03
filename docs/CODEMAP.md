@@ -13,9 +13,12 @@ interfaces.
 | `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge | 05–07, 15, 29 |
 |  | `src/relation.rs` | `Relation`, `Target`, `LayoutQuery`, `RelationSchema`, `SchemaRegistry`, the built-in schemas | 13, 14, 15 |
 |  | `src/style.rs` | `Style`, `LengthExpr`, `ComputedStyle`, defaults | 08, 17, 18 |
-| `font` | `src/lib.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines; `FontStore` | 21 |
-| `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust`, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22 |
-|  | `src/paragraph.rs` | `itemize` (fallback chains), `Shaper` (shaping and reshaping a paragraph) | 21, 22 |
+| `font` | `src/lib.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore` | 21, 22, 38 |
+| `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
+|  | `src/paragraph.rs` | `itemize` (fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
+|  | `src/unicode.rs`, `src/bidi-character-subset.txt` | ICU4X property adapter for UAX #9 (including N0) and UAX #24 script resolution; pinned Unicode conformance subset | 09, 22, 38 |
+|  | `src/line.rs` | Pure L1/L2 line reordering, preserving bidi groups across missing-font gaps | 20, 22, 30 |
+|  | `HANDOFF.md` | Unicode/version/cache bounds and instructions for layout's line-helper integration | 21, 22, 38 |
 | `compose` | `src/lib.rs` | `Composer` and `GeometryProvider` contracts, `Measure`, break opportunities, `LineFragment`, `Explanation` | 23 |
 |  | `src/greedy.rs` | The greedy composer | 23 |
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |

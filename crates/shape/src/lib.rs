@@ -24,9 +24,13 @@ use reprise_font::{Face, FaceId};
 use reprise_geom::{InlineDirection, Length};
 use serde::{Deserialize, Serialize};
 
+mod line;
 mod paragraph;
+mod unicode;
 
-pub use paragraph::{Itemized, ParagraphInput, Shaper, StyleRun, itemize};
+pub use line::reorder_line;
+pub use paragraph::{Itemized, ParagraphInput, Shaper, StyleRun, codes, itemize};
+pub use unicode::UNICODE_VERSION;
 
 /// Who shaped a run, recorded with the output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,60 +260,74 @@ impl ShapingAdapter for HarfRust {
     }
 
     fn shape(&self, request: &ShapeRequest<'_>) -> Vec<ShapedGlyph> {
-        let text = request.text;
-        let (range, context) = (request.range.clone(), &request.context);
-        let (Some(run), Some(pre), Some(post)) = (
-            text.get(range.clone()),
-            text.get(context.start.min(range.start)..range.start),
-            text.get(range.end..context.end.max(range.end)),
-        ) else {
-            return Vec::new(); // Not on character boundaries; nothing to shape.
-        };
-        let font = request.face.font_ref();
-        let data = harfrust::ShaperData::new(&font);
-        let shaper = data.shaper(&font).build();
-        let mut buffer = harfrust::UnicodeBuffer::new();
-        buffer.set_pre_context(pre);
-        buffer.push_str(run);
-        buffer.set_post_context(post);
-        buffer.set_direction(match request.direction {
-            InlineDirection::Ltr => harfrust::Direction::LeftToRight,
-            InlineDirection::Rtl => harfrust::Direction::RightToLeft,
-        });
-        if let Some(script) = request
-            .script
-            .and_then(|s| harfrust::Script::from_iso15924_tag(harfrust::Tag::new(&s.0)))
+        let local;
+        let data = match request
+            .face
+            .adapter_data(|| harfrust::ShaperData::new(&request.face.font_ref()))
         {
-            buffer.set_script(script);
-        }
-        if let Some(language) = request.language.and_then(|l| l.parse().ok()) {
-            buffer.set_language(language);
-        }
-        buffer.guess_segment_properties();
-        let features: Vec<harfrust::Feature> = request
-            .features
-            .iter()
-            .map(|f| harfrust::Feature::new(harfrust::Tag::new(&f.tag), f.value, ..))
-            .collect();
-        // No scale is set, so positions come back in font design units. They are
-        // integers, and scaling them with integer arithmetic keeps layout exact.
-        let out = shaper.shape(buffer, harfrust::ShapeOptions::new().features(&features));
-        let upem = request.face.metrics().units_per_em;
-        let scale = |v: i32| Length::from_font_units(v, request.size, upem);
-        out.glyph_infos()
-            .iter()
-            .zip(out.glyph_positions())
-            .map(|(info, pos)| ShapedGlyph {
-                id: info.glyph_id,
-                cluster: info.cluster + range.start as u32,
-                advance: scale(pos.x_advance),
-                x_offset: scale(pos.x_offset),
-                y_offset: scale(pos.y_offset),
-                unsafe_to_break: info.unsafe_to_break(),
-                unsafe_to_concat: info.unsafe_to_concat(),
-            })
-            .collect()
+            Some(data) => data,
+            None => {
+                local = harfrust::ShaperData::new(&request.face.font_ref());
+                &local
+            }
+        };
+        shape_with_data(request, data)
     }
+}
+
+fn shape_with_data(request: &ShapeRequest<'_>, data: &harfrust::ShaperData) -> Vec<ShapedGlyph> {
+    let text = request.text;
+    let (range, context) = (request.range.clone(), &request.context);
+    let (Some(run), Some(pre), Some(post)) = (
+        text.get(range.clone()),
+        text.get(context.start.min(range.start)..range.start),
+        text.get(range.end..context.end.max(range.end)),
+    ) else {
+        return Vec::new(); // Not on character boundaries; nothing to shape.
+    };
+    let font = request.face.font_ref();
+    let shaper = data.shaper(&font).build();
+    let mut buffer = harfrust::UnicodeBuffer::new();
+    buffer.set_pre_context(pre);
+    buffer.push_str(run);
+    buffer.set_post_context(post);
+    buffer.set_direction(match request.direction {
+        InlineDirection::Ltr => harfrust::Direction::LeftToRight,
+        InlineDirection::Rtl => harfrust::Direction::RightToLeft,
+    });
+    if let Some(script) = request
+        .script
+        .and_then(|s| harfrust::Script::from_iso15924_tag(harfrust::Tag::new(&s.0)))
+    {
+        buffer.set_script(script);
+    }
+    if let Some(language) = request.language.and_then(|l| l.parse().ok()) {
+        buffer.set_language(language);
+    }
+    buffer.guess_segment_properties();
+    let features: Vec<harfrust::Feature> = request
+        .features
+        .iter()
+        .map(|f| harfrust::Feature::new(harfrust::Tag::new(&f.tag), f.value, ..))
+        .collect();
+    // No scale is set, so positions come back in font design units. They are
+    // integers, and scaling them with integer arithmetic keeps layout exact.
+    let out = shaper.shape(buffer, harfrust::ShapeOptions::new().features(&features));
+    let upem = request.face.metrics().units_per_em;
+    let scale = |v: i32| Length::from_font_units(v, request.size, upem);
+    out.glyph_infos()
+        .iter()
+        .zip(out.glyph_positions())
+        .map(|(info, pos)| ShapedGlyph {
+            id: info.glyph_id,
+            cluster: info.cluster.saturating_add(range.start as u32),
+            advance: scale(pos.x_advance),
+            x_offset: scale(pos.x_offset),
+            y_offset: scale(pos.y_offset),
+            unsafe_to_break: info.unsafe_to_break(),
+            unsafe_to_concat: info.unsafe_to_concat(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -370,6 +388,31 @@ mod tests {
     }
 
     #[test]
+    fn rtl_latin_keeps_ligatures_and_visual_clusters() {
+        let face = Face::from_bytes(SERIF).unwrap();
+        let features = [Feature {
+            tag: *b"liga",
+            value: 0,
+        }];
+        let request = ShapeRequest {
+            direction: InlineDirection::Rtl,
+            script: Some(Script(*b"Latn")),
+            ..request("office", &face, 0..6)
+        };
+        let with = HarfRust.shape(&request);
+        let without = HarfRust.shape(&ShapeRequest {
+            features: &features,
+            ..request
+        });
+        assert!(with.len() < without.len());
+        assert!(
+            with.windows(2)
+                .all(|pair| pair[0].cluster >= pair[1].cluster)
+        );
+        assert!(with.iter().all(|g| g.id != 0));
+    }
+
+    #[test]
     fn misaligned_requests_shape_nothing_instead_of_panicking() {
         let face = Face::from_bytes(SERIF).unwrap();
         let text = "é";
@@ -401,5 +444,95 @@ mod tests {
             lock.replace("\r\n", "\n").contains(&entry),
             "update HARFRUST_VERSION"
         );
+    }
+
+    #[test]
+    fn cached_and_uncached_shaping_are_identical_on_a_varied_corpus() {
+        let face = Face::from_bytes(SERIF).unwrap();
+        let features = [
+            Feature {
+                tag: *b"liga",
+                value: 0,
+            },
+            Feature {
+                tag: *b"kern",
+                value: 0,
+            },
+        ];
+        for text in [
+            "",
+            "office affinity AV To",
+            "é e\u{301} Z\u{335}\u{322}",
+            "Ελληνικά Кириллица",
+            "עברית العربية 123 (abc)",
+            "\u{202e}office\u{202c}",
+            "👩\u{200d}👩\u{200d}👧",
+            "one\ttwo\nthree",
+            "a\u{0}b",
+        ] {
+            for direction in [InlineDirection::Ltr, InlineDirection::Rtl] {
+                for size in [
+                    Length::MIN,
+                    Length::MAX,
+                    Length::ZERO,
+                    Length::from_pt(-12),
+                    Length::from_pt(12),
+                ] {
+                    for settings in [&[][..], &features[..]] {
+                        for script in [None, Some(Script(*b"Latn")), Some(Script(*b"Zyyy"))] {
+                            let request = ShapeRequest {
+                                direction,
+                                size,
+                                features: settings,
+                                script,
+                                language: Some("en"),
+                                ..request(text, &face, 0..text.len())
+                            };
+                            let fresh = harfrust::ShaperData::new(&face.font_ref());
+                            let expected = shape_with_data(&request, &fresh);
+                            assert_eq!(HarfRust.shape(&request), expected);
+                            assert_eq!(HarfRust.shape(&request), expected);
+                        }
+                    }
+                }
+            }
+        }
+        let text = "AV office after";
+        let request = ShapeRequest {
+            context: 0..text.len(),
+            ..request(text, &face, 3..9)
+        };
+        assert_eq!(
+            HarfRust.shape(&request),
+            shape_with_data(&request, &harfrust::ShaperData::new(&face.font_ref()))
+        );
+    }
+
+    #[test]
+    fn a_different_adapter_owning_the_slot_cannot_change_output() {
+        let face = Face::from_bytes(SERIF).unwrap();
+        assert_eq!(face.adapter_data(|| 42_u32), Some(&42));
+        let request = request("office", &face, 0..6);
+        assert_eq!(
+            HarfRust.shape(&request),
+            shape_with_data(&request, &harfrust::ShaperData::new(&face.font_ref()))
+        );
+    }
+
+    #[test]
+    fn concurrent_cache_initialization_cannot_change_output() {
+        let face = Face::from_bytes(SERIF).unwrap();
+        let expected = shape_with_data(
+            &request("office", &face, 0..6),
+            &harfrust::ShaperData::new(&face.font_ref()),
+        );
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| HarfRust.shape(&request("office", &face, 0..6))))
+                .collect();
+            for handle in handles {
+                assert_eq!(handle.join().unwrap(), expected);
+            }
+        });
     }
 }

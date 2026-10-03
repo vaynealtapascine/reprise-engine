@@ -4,9 +4,10 @@
 //! document can say exactly which face it was laid out with and report any
 //! substitution.
 
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -51,6 +52,7 @@ pub struct Face {
     id: FaceId,
     data: Arc<[u8]>,
     metrics: FaceMetrics,
+    adapter_data: OnceLock<Box<dyn Any + Send + Sync>>,
 }
 
 impl Face {
@@ -80,6 +82,7 @@ impl Face {
             id: FaceId { family, hash },
             data,
             metrics,
+            adapter_data: OnceLock::new(),
         })
     }
 
@@ -93,6 +96,17 @@ impl Face {
 
     pub fn metrics(&self) -> FaceMetrics {
         self.metrics
+    }
+
+    /// One immutable adapter-data object per live face, released with the face.
+    /// The first type to initialize the slot owns it; other types get `None`
+    /// and must build their data locally. No font bytes are copied here.
+    /// This keeps the font crate independent of the shaping implementation,
+    /// bounds retained objects to one per face, and works without worker threads.
+    pub fn adapter_data<T: Any + Send + Sync>(&self, init: impl FnOnce() -> T) -> Option<&T> {
+        self.adapter_data
+            .get_or_init(|| Box::new(init()))
+            .downcast_ref()
     }
 
     pub fn font_ref(&self) -> FontRef<'_> {
@@ -185,5 +199,16 @@ mod tests {
         let face = Face::from_bytes(SERIF).unwrap();
         let glyph = face.font_ref().charmap().map('a').unwrap().to_u32();
         assert!(!face.outline(glyph).is_empty());
+    }
+
+    #[test]
+    fn adapter_slot_initializes_once_and_rejects_other_types() {
+        let face = Face::from_bytes(SERIF).unwrap();
+        let first = face.adapter_data(|| vec![1_u8, 2, 3]).unwrap();
+        let again = face
+            .adapter_data(|| panic!("must not initialize twice") as Vec<u8>)
+            .unwrap();
+        assert!(std::ptr::eq(first, again));
+        assert!(face.adapter_data(|| 42_u32).is_none());
     }
 }

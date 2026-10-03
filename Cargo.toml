@@ -26,6 +26,8 @@ thiserror = "2"
 harfrust = "0.13"
 skrifa = "0.46"
 icu_segmenter = "2.3"
+icu_properties = { version = "=2.3.0", features = ["unicode_bidi"] }
+unicode-bidi = { version = "=0.3.18", default-features = false, features = ["std"] }
 tiny-skia = "0.12"
 krilla = "0.8"
 serde = { version = "1", features = ["derive"] }

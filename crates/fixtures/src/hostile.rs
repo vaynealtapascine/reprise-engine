@@ -59,6 +59,9 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         deleted_targets()?,
         concurrent_edits()?,
         extreme_lengths()?,
+        bidi_stray_controls()?,
+        bidi_override_ligature()?,
+        scripts_common_inherited()?,
     ])
 }
 
@@ -320,4 +323,46 @@ pub fn extreme_lengths() -> Result<Fixture, DocError> {
             "layout.style-clamped",
         ],
     ))
+}
+
+/// Stray PDF/PDI, an unterminated isolate, and embedding depth beyond UAX #9's 125.
+pub fn bidi_stray_controls() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "\u{202c}\u{2069}Stray controls, then \u{2067}an unterminated isolate with 123.",
+    )?;
+    let text = format!(
+        "Before {}nested office{} after.",
+        "\u{202b}".repeat(140),
+        "\u{202c}".repeat(140)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    doc.commit();
+    Ok(Fixture::new("bidi_stray_controls", doc, &[]))
+}
+
+/// Real odd-level Latin glyphs, including a ligature under an RLO override.
+pub fn bidi_override_ligature() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    paragraph_with_note(
+        &doc,
+        "Before \u{202e}office 123\u{202c}, then normal English after it.",
+        "office",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("bidi_override_ligature", doc, &[]))
+}
+
+/// Common punctuation between scripts, nested pairs and inherited accents.
+pub fn scripts_common_inherited() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "(Latin e\u{301}, [Ελληνικά α\u{301}] after), Кириллица и\u{301}; Latin again.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("scripts_common_inherited", doc, &[]))
 }

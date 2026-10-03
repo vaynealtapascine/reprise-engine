@@ -6,7 +6,7 @@ use reprise_diag::Note;
 use reprise_font::FontStore;
 use reprise_geom::{InlineDirection, Length};
 
-use crate::{Feature, Item, Reshape, ShapeRequest, ShapedRun, ShapedText, ShapingAdapter};
+use crate::{Feature, Item, Reshape, ShapeRequest, ShapedRun, ShapedText, ShapingAdapter, unicode};
 
 /// Diagnostic codes reported while shaping.
 pub mod codes {
@@ -19,6 +19,11 @@ pub mod codes {
     /// A style run was out of bounds, reversed, overlapping or not on
     /// character boundaries, and was ignored.
     pub const BAD_STYLE_RUN: Code = Code::new("shape.bad-style-run");
+    /// Script bracket matching exceeded its bounded stack; contextual script
+    /// resolution continues but pairing stops for the rest of the paragraph.
+    pub const SCRIPT_DEPTH: Code = Code::new("shape.script-depth");
+    /// Invalid input to line reordering was rejected without changing output.
+    pub const BAD_LINE: Code = Code::new("shape.bad-line");
 }
 
 /// The styling of part of a paragraph, as itemisation needs it.
@@ -48,6 +53,10 @@ pub struct Itemized {
     pub items: Vec<Item>,
     /// The paragraph's base bidi level: 0 for left to right, 1 for right to left.
     pub base_level: u8,
+    /// Resolved UAX #9 levels before L1, one per UTF-8 byte, including text
+    /// without a styled/available face. Retain this for line reordering and
+    /// caret/navigation mappings; all bytes of a scalar have the same level.
+    pub levels: Vec<u8>,
     /// Substitutions and anything that couldn't be itemised.
     pub notes: Vec<Note>,
 }
@@ -59,18 +68,38 @@ pub struct Itemized {
 /// [`codes::FONT_MISSING`] note says so. Each use of a fallback family is
 /// reported with [`codes::FONT_FALLBACK`] (21).
 ///
-/// Not yet implemented: the bidi algorithm and script itemisation. Every item
-/// takes the paragraph's base level, and its script is left to the adapter.
+/// Bidi resolves UAX #9 through I2 with ICU4X properties. Line owners apply
+/// L1/L2 with [`crate::reorder_line`] after composition. Scripts follow UAX #24
+/// contextual runs; all-Common/Inherited text uses ISO 15924 `Zyyy`.
 pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
     let text = input.text;
-    let base_level = match input.direction {
-        Some(InlineDirection::Rtl) => 1,
-        _ => 0,
-    };
+    let bidi = unicode::bidi(
+        text,
+        input.direction.map(|direction| match direction {
+            InlineDirection::Ltr => unicode_bidi::Level::ltr(),
+            InlineDirection::Rtl => unicode_bidi::Level::rtl(),
+        }),
+    );
+    let base_level = bidi.paragraph_level.number();
     let mut out = Itemized {
         base_level,
+        levels: bidi.levels.iter().map(|level| level.number()).collect(),
         ..Itemized::default()
     };
+    let scripts = unicode::scripts(text, &mut out.notes);
+    let resolved: Vec<_> = text
+        .char_indices()
+        .zip(scripts)
+        .map(|((byte, c), script)| {
+            (
+                byte..byte.saturating_add(c.len_utf8()),
+                bidi.levels
+                    .get(byte)
+                    .map_or(base_level, |level| level.number()),
+                script,
+            )
+        })
+        .collect();
     let mut end_of_previous = 0;
     for run in input.styles {
         let r = run.range.clone();
@@ -124,15 +153,31 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
                 .at(r.clone()),
             );
         }
-        out.items.push(Item {
-            range: r,
-            face: face.id().clone(),
-            size: run.size,
-            level: base_level,
-            script: None,
-            language: run.language.clone(),
-            features: run.features.clone(),
-        });
+        let first = resolved.partition_point(|(range, _, _)| range.start < r.start);
+        for (range, level, script) in resolved
+            .iter()
+            .skip(first)
+            .take_while(|(range, _, _)| range.start < r.end)
+        {
+            if let Some(last) = out.items.last_mut().filter(|last| {
+                last.range.start >= r.start
+                    && last.range.end == range.start
+                    && last.level == *level
+                    && last.script == Some(*script)
+            }) {
+                last.range.end = range.end;
+                continue;
+            }
+            out.items.push(Item {
+                range: range.clone(),
+                face: face.id().clone(),
+                size: run.size,
+                level: *level,
+                script: Some(*script),
+                language: run.language.clone(),
+                features: run.features.clone(),
+            });
+        }
     }
     out
 }
@@ -325,5 +370,177 @@ mod tests {
         };
         assert_eq!(ids(&line), ids(&alone.runs));
         assert_eq!(shaper.shape().width(4..7), line[0].width());
+    }
+
+    #[test]
+    fn items_expose_resolved_bidi_levels_and_scripts() {
+        let fonts = fonts();
+        let text = "a \u{202e}office\u{202c} α\u{301};Б";
+        let styles = [run(0..text.len(), &["Source Serif Pro"])];
+        let out = itemize(
+            &ParagraphInput {
+                text,
+                styles: &styles,
+                direction: None,
+            },
+            &fonts,
+        );
+        assert_eq!(out.base_level, 0);
+        let office = text.find("office").unwrap();
+        assert!(out.items.iter().any(|i| i.range.contains(&office)
+            && i.level == 1
+            && i.script == Some(crate::Script(*b"Latn"))));
+        let greek = text.find('α').unwrap();
+        let item = out.items.iter().find(|i| i.range.contains(&greek)).unwrap();
+        assert_eq!(item.script, Some(crate::Script(*b"Grek")));
+        assert!(item.range.end >= greek + "α\u{301};".len());
+        assert!(out.items.iter().all(|i| i.script.is_some()));
+        for pair in out.items.windows(2) {
+            assert_eq!(pair[0].range.end, pair[1].range.start);
+        }
+        assert_eq!(out.items.last().unwrap().range.end, text.len());
+    }
+
+    #[test]
+    fn automatic_base_direction_ignores_isolated_strong_text() {
+        let fonts = fonts();
+        for (text, direction, expected_base, expected_latin) in [
+            ("abc", Some(InlineDirection::Rtl), 1, 2),
+            ("abc", Some(InlineDirection::Ltr), 0, 0),
+            ("אabc", None, 1, 2),
+            ("\u{2067}א\u{2069}abc", None, 0, 0),
+            ("123", None, 0, 0),
+            ("", None, 0, 0),
+        ] {
+            let styles = [run(0..text.len(), &["Source Serif Pro"])];
+            let out = itemize(
+                &ParagraphInput {
+                    text,
+                    styles: &styles,
+                    direction,
+                },
+                &fonts,
+            );
+            assert_eq!(out.base_level, expected_base);
+            if let Some(byte) = text.find('a') {
+                assert_eq!(
+                    out.items
+                        .iter()
+                        .find(|i| i.range.contains(&byte))
+                        .unwrap()
+                        .level,
+                    expected_latin
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn font_size_and_style_boundaries_remain_item_boundaries() {
+        let fonts = fonts();
+        let styles = [
+            run(0..2, &["Source Serif Pro"]),
+            StyleRun {
+                size: Length::MAX,
+                ..run(2..4, &["Source Serif Pro"])
+            },
+            run(4..6, &["Source Serif Pro"]),
+        ];
+        let out = itemize(
+            &ParagraphInput {
+                text: "abcdef",
+                styles: &styles,
+                direction: None,
+            },
+            &fonts,
+        );
+        assert_eq!(
+            out.items
+                .iter()
+                .map(|i| i.range.clone())
+                .collect::<Vec<_>>(),
+            [0..2, 2..4, 4..6]
+        );
+        assert_eq!(out.items[1].size, Length::MAX);
+    }
+
+    /// Orchestrator review: every line split of real mixed-direction text,
+    /// reordered with `reorder_line`, keeps each glyph exactly once, stays
+    /// inside the line, never overlaps, and keeps odd-level runs right to left.
+    #[test]
+    fn reordering_every_line_split_conserves_glyphs() {
+        let fonts = fonts();
+        for text in [
+            "a \u{202e}office  ab\u{202c} c ",
+            "\u{2067}x (y) 12\u{2069}  z\u{2066}",
+            "\u{202b}\u{202b}a b\u{202c} c\u{202c}\t\u{2029}d",
+            " e\u{301}  \u{202e}fi\u{202c} ",
+        ] {
+            for direction in [None, Some(InlineDirection::Rtl)] {
+                let styles = [run(0..text.len(), &["Source Serif Pro"])];
+                let itemized = itemize(
+                    &ParagraphInput {
+                        text,
+                        styles: &styles,
+                        direction,
+                    },
+                    &fonts,
+                );
+                let shaped = Shaper {
+                    text,
+                    items: &itemized.items,
+                    fonts: &fonts,
+                    adapter: &HarfRust,
+                }
+                .shape();
+                let bounds: Vec<usize> = text
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .chain([text.len()])
+                    .collect();
+                for &start in &bounds {
+                    for &end in bounds.iter().filter(|&&e| e >= start) {
+                        let line = start..end;
+                        let runs = shaped.slice(line.clone());
+                        let out = crate::reorder_line(
+                            text,
+                            &runs,
+                            &itemized.levels,
+                            line.clone(),
+                            itemized.base_level,
+                        )
+                        .unwrap_or_else(|n| panic!("{text:?} {line:?}: {}", n.message));
+                        let mut want: Vec<u32> = runs
+                            .iter()
+                            .flat_map(|r| &r.glyphs)
+                            .map(|g| g.cluster)
+                            .collect();
+                        let mut got: Vec<u32> = out
+                            .iter()
+                            .flat_map(|r| &r.glyphs)
+                            .map(|g| g.cluster)
+                            .collect();
+                        want.sort_unstable();
+                        got.sort_unstable();
+                        assert_eq!(got, want, "{text:?} {line:?}");
+                        let mut ranges: Vec<_> = out.iter().map(|r| r.range.clone()).collect();
+                        ranges.sort_by_key(|r| r.start);
+                        for pair in ranges.windows(2) {
+                            assert!(pair[0].end <= pair[1].start, "{text:?} {line:?}");
+                        }
+                        for r in &out {
+                            assert!(line.start <= r.range.start && r.range.end <= line.end);
+                            let clusters: Vec<u32> = r.glyphs.iter().map(|g| g.cluster).collect();
+                            let ordered = if r.level % 2 == 1 {
+                                clusters.windows(2).all(|w| w[0] >= w[1])
+                            } else {
+                                clusters.windows(2).all(|w| w[0] <= w[1])
+                            };
+                            assert!(ordered, "{text:?} {line:?} level {}", r.level);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
