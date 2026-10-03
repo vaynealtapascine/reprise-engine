@@ -602,6 +602,10 @@ These were chosen on 2026-10-03, before the spike.
     -   Shaping: a pure-Rust shaper as the default platform-independent adapter (22). Choose
         between rustybuzz and harfrust in the spike.
     -   Segmentation and bidi: ICU4X.
+-   **License:** AGPL-3.0-or-later for reprise-engine and Reprise. Collaboration is in scope, so
+    the network clause also covers hosted editors and collaboration servers. Every dependency
+    must be compatible with GPLv3: permissive licenses and Apache-2.0 are fine, GPLv2-only is
+    not. Crates declare `license = "AGPL-3.0-or-later"`.
 -   **Spike output:** four headless backends for the display list (32):
     -   JSON snapshots of the layout and display list, for test fixtures and diffs
     -   SVG, with debug overlays
