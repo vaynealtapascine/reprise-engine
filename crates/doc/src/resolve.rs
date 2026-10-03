@@ -278,9 +278,9 @@ impl Document {
     /// The relations whose schema deletes them and that have a deleted
     /// target now: what an editing command may really delete, in ID order.
     ///
-    /// This is a read. Whether to delete is the command's decision, and the
-    /// usual one is to leave them: undoing the target's deletion then brings
-    /// the relation back by itself. Relations with unknown schemas, and ones
+    /// This is a read. Whether to delete them is the command's decision: a
+    /// relation that is left in place is still reported as no longer in
+    /// effect, and costs nothing. Relations with unknown schemas, and ones
     /// that can't be read, are never listed.
     pub fn dead_relations(&self, schemas: &SchemaRegistry) -> Vec<RelationId> {
         let mut history = HistoryCache::default();

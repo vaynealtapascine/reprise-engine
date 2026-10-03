@@ -219,12 +219,21 @@ impl Document {
     pub fn at(&self, version: &Revision) -> Result<DocumentAt, VersionError> {
         self.commit();
         let frontiers = self.frontiers_of(version)?;
-        // The version is in the history, so a failure can only be that the
-        // history before it is gone.
-        let doc = self
-            .doc
-            .fork_at(&frontiers)
-            .map_err(|_| VersionError::Compacted)?;
+        let doc = if self.doc.is_shallow() {
+            // Loro can't open a past version of a compacted document
+            // (`fork_at` is not implemented for them), so only the present
+            // is available. Anything older is, truthfully, compacted away.
+            if *version != self.revision() {
+                return Err(VersionError::Compacted);
+            }
+            self.doc.fork()
+        } else {
+            // The version is in the history, so a failure can only be that
+            // the history before it is gone.
+            self.doc
+                .fork_at(&frontiers)
+                .map_err(|_| VersionError::Compacted)?
+        };
         Ok(DocumentAt {
             doc: Document { doc },
             version: version.clone(),
@@ -240,8 +249,14 @@ impl Document {
     /// A copy of this document that has dropped all history before `since`
     /// (07): the compaction tombstones will need eventually. The copy has the
     /// same content, IDs, tombstones and relations, and merges with replicas
-    /// that are not older than `since`. Versions before `since` become
-    /// [`VersionError::Compacted`] in it. `since` itself stays readable.
+    /// that are not older than `since`. Every version
+    /// older than the copy's present becomes [`VersionError::Compacted`] in it.
+    /// That is stricter than the history it keeps: Loro can't yet open past
+    /// versions of a compacted document, only its present one. A snapshot
+    /// target in a compacted document therefore resolves only if it names
+    /// the document's current revision, and otherwise reports
+    /// `relation.snapshot-unavailable`. `since` marks how much history the
+    /// copy keeps for merging with replicas.
     ///
     /// `peer` is the copy's peer ID. Retire the original; keeping both
     /// editing under one peer ID corrupts the history.

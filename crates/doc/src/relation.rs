@@ -544,8 +544,11 @@ pub enum Ownership {
 /// makes it correct under collaboration (29). A target deleted by another
 /// peer and then merged is, to the resolver, exactly a target deleted
 /// locally, because both are the same CRDT state. Nothing is rewritten, so
-/// there is no operation for two peers to apply twice or in different orders,
-/// and undoing the deletion brings the relation back with no repair step.
+/// there is no operation for two peers to apply twice or in different orders.
+/// Whether a restored node counts as the same target is a question of IDs:
+/// Loro's undo restores a deleted block as a *new* node, so the kernel must
+/// record it with [`Document::supersede`](crate::Document::supersede), after
+/// which `Rebind` relations follow it.
 ///
 /// "Deleted" means the target is gone: a node that is tombstoned, a range
 /// whose block or text is gone, or a structural or layout query whose anchor
@@ -572,14 +575,15 @@ pub enum OnTargetDeleted {
     ///     with no successor has no evidence to rebind on and is `Missing`:
     ///     a neighbouring block is not the same thing.
     Rebind,
-    /// Keep the relation, reported as missing, until the target comes back
-    /// (for example through undo). For schemas that opt out of rebinding.
+    /// Keep the relation, reported as missing, and never rebind it, even when
+    /// a successor is recorded. It resolves again if the very same ID is
+    /// live again. For schemas that opt out of rebinding.
     KeepMissing,
     /// The relation stops existing as soon as any one of its targets is
-    /// deleted. It stays in the document, as a tombstone-to-be, so that undo
-    /// can bring the target back and the relation with it; resolution
-    /// reports it as no longer in effect. [`Document::dead_relations`]
-    /// lists the relations an editing command may now really delete.
+    /// deleted. It stays in the document until something deletes it, but
+    /// resolution reports it as no longer in effect.
+    /// [`Document::dead_relations`] lists the relations an editing command
+    /// may now really delete.
     ///
     /// [`Document::dead_relations`]: crate::Document::dead_relations
     Delete,

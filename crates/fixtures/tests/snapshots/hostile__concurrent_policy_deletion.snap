@@ -1,0 +1,299 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      175
+    ],
+    [
+      2,
+      2
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "page": {
+    "width": 430080,
+    "height": 307200,
+    "margin_top": 36864,
+    "margin_left": 36864,
+    "column_width": 225280,
+    "gutter": 18432,
+    "margin_column_width": 112640,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 29
+          },
+          "preview": "The owner of three relations.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 146019,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 29
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 146019
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "141@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 24
+          },
+          "preview": "Edited: The replacement.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 21709
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 32416,
+          "width": 126722,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 24
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 126722
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "161@1",
+      "schema": "reprise.reference",
+      "owner": "6@1",
+      "status": "rebound",
+      "applied": true,
+      "targets": [
+        {
+          "role": "to",
+          "status": "rebound",
+          "resolved": {
+            "node": "141@1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "163@1",
+      "schema": "fixtures.keep",
+      "owner": "6@1",
+      "status": "missing",
+      "applied": false,
+      "targets": [
+        {
+          "role": "to",
+          "status": "missing",
+          "resolved": null
+        }
+      ]
+    },
+    {
+      "id": "165@1",
+      "schema": "fixtures.delete",
+      "owner": "6@1",
+      "status": "missing",
+      "applied": false,
+      "targets": [
+        {
+          "role": "to",
+          "status": "missing",
+          "resolved": null
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "info",
+      "code": "relation.rebound",
+      "subject": {
+        "kind": "relation",
+        "id": "161@1"
+      },
+      "message": "39@1 was deleted; rebound to its successor",
+      "bytes": null
+    },
+    {
+      "severity": "error",
+      "code": "relation.missing-target",
+      "subject": {
+        "kind": "relation",
+        "id": "163@1"
+      },
+      "message": "node 71@1 is gone",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.not-applied",
+      "subject": {
+        "kind": "relation",
+        "id": "163@1"
+      },
+      "message": "layout has no behaviour for fixtures.keep",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.target-deleted",
+      "subject": {
+        "kind": "relation",
+        "id": "165@1"
+      },
+      "message": "node 104@1 was deleted; fixtures.delete deletes the relation with it",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.not-applied",
+      "subject": {
+        "kind": "relation",
+        "id": "165@1"
+      },
+      "message": "layout has no behaviour for fixtures.delete",
+      "bytes": null
+    }
+  ]
+}

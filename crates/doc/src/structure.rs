@@ -6,7 +6,7 @@
 //! read from the tree, so nested blocks (stanzas holding lines, notes holding
 //! notes) work with the same queries once something creates them.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use loro::{TreeID, TreeParentId};
 
@@ -18,6 +18,10 @@ use crate::{BlockKind, DocError, Document, NodeId, get_str};
 /// that two peers recording different successors at the same time keep both
 /// (a single map entry would keep only one of them).
 const SUCCESSOR_PREFIX: &str = "succ/";
+
+/// The same link, recorded on the successor instead, for when the old node
+/// can no longer be written to. The key is the prefix and the old node's ID.
+const PREDECESSOR_PREFIX: &str = "pred/";
 
 /// How many generations of successors rebinding follows before giving up.
 /// A chain this long is a mistake or an attack; giving up is reported with
@@ -196,44 +200,68 @@ impl Document {
     /// Records that `new` takes the place of `old`: the evidence relations
     /// need to rebind from `old` to `new` once `old` is deleted (15).
     ///
-    /// Call it **before** deleting `old`: a deleted block can't be written
-    /// to. Call it once for each successor when a block is split (the halves
-    /// are equally good successors, so relations on it become `Ambiguous`),
-    /// and once on each block when blocks are merged. The link is one
-    /// metadata key on `old`, so it is merged like any other edit and two
-    /// peers' successors are both kept.
+    /// `new` must be alive; `old` may be alive or already deleted. Call it:
+    ///
+    /// -   when a block is **replaced, split or merged**: once for each
+    ///     successor. Halves of a split block are equally good successors, so
+    ///     relations on it become `Ambiguous`.
+    /// -   when an **undo brings a deleted block back**. Loro restores it as a
+    ///     new node with a new ID, so the editing kernel must record the new
+    ///     node as the old one's successor, or relations to the old ID stay
+    ///     orphaned.
+    ///
+    /// The link is one metadata key, on `old` while it is alive and on `new`
+    /// once `old` is deleted (a deleted block can't be written to), so it
+    /// merges like any other edit and two peers' successors are both kept.
     pub fn supersede(&self, old: NodeId, new: NodeId) -> Result<(), DocError> {
         if old == new {
             return Err(DocError::Malformed(old, "a node can't succeed itself"));
         }
         let tree = self.tree("content");
-        for id in [old, new] {
-            if !self.live(&tree, id.0) {
-                return Err(DocError::NoNode(id));
-            }
+        if !self.live(&tree, new.0) {
+            return Err(DocError::NoNode(new));
         }
-        tree.get_meta(old.0)?
-            .insert(&format!("{SUCCESSOR_PREFIX}{new}"), true)?;
+        if self.live(&tree, old.0) {
+            tree.get_meta(old.0)?
+                .insert(&format!("{SUCCESSOR_PREFIX}{new}"), true)?;
+        } else if tree.contains(old.0) {
+            tree.get_meta(new.0)?
+                .insert(&format!("{PREDECESSOR_PREFIX}{old}"), true)?;
+        } else {
+            return Err(DocError::NoNode(old));
+        }
         Ok(())
     }
 
-    /// The successors recorded for a node, live or not, in ID order. Works
-    /// for deleted nodes: their metadata outlives them.
-    pub fn successors(&self, id: NodeId) -> Vec<NodeId> {
+    /// Every recorded succession link: node to its successors, whichever
+    /// side recorded it. Reads every node's metadata, including deleted
+    /// nodes', which outlive them.
+    fn successor_index(&self) -> BTreeMap<NodeId, BTreeSet<NodeId>> {
         let tree = self.tree("content");
-        if !tree.contains(id.0) {
-            return Vec::new();
+        let mut index: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+        for id in tree.nodes() {
+            let Ok(meta) = tree.get_meta(id) else {
+                continue;
+            };
+            for key in meta.keys() {
+                if let Some(new) = key.strip_prefix(SUCCESSOR_PREFIX).and_then(NodeId::parse) {
+                    index.entry(NodeId(id)).or_default().insert(new);
+                } else if let Some(old) =
+                    key.strip_prefix(PREDECESSOR_PREFIX).and_then(NodeId::parse)
+                {
+                    index.entry(old).or_default().insert(NodeId(id));
+                }
+            }
         }
-        let Ok(meta) = tree.get_meta(id.0) else {
-            return Vec::new();
-        };
-        let mut found: Vec<NodeId> = meta
-            .keys()
-            .filter_map(|k| k.strip_prefix(SUCCESSOR_PREFIX).and_then(NodeId::parse))
-            .collect();
-        found.sort();
-        found.dedup();
-        found
+        index
+    }
+
+    /// The successors recorded for a node, live or not, in ID order.
+    pub fn successors(&self, id: NodeId) -> Vec<NodeId> {
+        self.successor_index()
+            .remove(&id)
+            .map(|s| s.into_iter().collect())
+            .unwrap_or_default()
     }
 
     /// What replaces a deleted node (15). Searches generation by generation:
@@ -241,14 +269,15 @@ impl Document {
     /// own successors. Terminates: every node is visited once, and the
     /// search stops after [`MAX_SUCCESSION_DEPTH`] generations.
     pub fn succession(&self, from: NodeId) -> Succession {
+        let index = self.successor_index();
         let mut seen: BTreeSet<NodeId> = BTreeSet::from([from]);
         let mut generation = vec![from];
         for _ in 0..MAX_SUCCESSION_DEPTH {
             let mut next = Vec::new();
             for node in &generation {
-                for s in self.successors(*node) {
-                    if seen.insert(s) {
-                        next.push(s);
+                for s in index.get(node).into_iter().flatten() {
+                    if seen.insert(*s) {
+                        next.push(*s);
                     }
                 }
             }
