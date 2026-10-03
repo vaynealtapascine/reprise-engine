@@ -165,5 +165,11 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 9);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 12);
 }
+
+hostile_tests!(
+    bidi_stray_controls,
+    bidi_override_ligature,
+    scripts_common_inherited
+);
