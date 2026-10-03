@@ -1554,6 +1554,7 @@ name = "reprise-doc"
 version = "0.0.0"
 dependencies = [
  "loro",
+ "reprise-diag",
  "reprise-geom",
  "reprise-text",
  "serde",
