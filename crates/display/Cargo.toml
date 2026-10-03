@@ -17,3 +17,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 skrifa.workspace = true
+lopdf.workspace = true
+reprise-shape.workspace = true
+reprise-fixtures.workspace = true

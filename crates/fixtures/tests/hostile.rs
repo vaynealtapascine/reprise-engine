@@ -131,7 +131,10 @@ fn check_queries(name: &str, snapshot: &LayoutSnapshot) {
 
 fn check_backends(name: &str, fixture: &Fixture, snapshot: &LayoutSnapshot) {
     let fonts = &fixture.engine.fonts;
-    let pages = snapshot.to_display_lists(DisplayOptions { debug: true });
+    let pages = snapshot.to_display_lists(DisplayOptions {
+        debug: true,
+        ..DisplayOptions::default()
+    });
     assert_eq!(pages.len(), snapshot.pages.len());
     for page in &pages {
         reprise_display::svg::render(page, fonts).unwrap_or_else(|e| panic!("{name}: svg: {e}"));
@@ -165,7 +168,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 12);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 13);
 }
 
 hostile_tests!(
@@ -173,3 +176,256 @@ hostile_tests!(
     bidi_override_ligature,
     scripts_common_inherited
 );
+
+#[test]
+fn display_text_clusters() {
+    check(hostile::display_text_clusters().expect("the fixture builds"));
+}
+
+#[test]
+fn debug_families_preserve_content_for_every_fixture() {
+    for fixture in hostile::all().unwrap() {
+        let snapshot = fixture.engine.layout(&fixture.doc);
+        let content: Vec<_> = snapshot
+            .to_display_lists(DisplayOptions::default())
+            .iter()
+            .map(|page| page.content_only())
+            .collect();
+        insta::assert_snapshot!(
+            format!("content_{}", fixture.name),
+            serde_json::to_string_pretty(&content).unwrap()
+        );
+        let all = DisplayOptions {
+            debug: true,
+            ..Default::default()
+        };
+        let none = DisplayOptions {
+            debug: true,
+            boxes: false,
+            baselines: false,
+            intervals: false,
+            run_boundaries: false,
+            break_reasons: false,
+            reshaped_lines: false,
+            relations: false,
+            diagnostics: false,
+        };
+        for options in [
+            all,
+            none,
+            DisplayOptions {
+                boxes: false,
+                ..all
+            },
+            DisplayOptions {
+                baselines: false,
+                ..all
+            },
+            DisplayOptions {
+                intervals: false,
+                ..all
+            },
+            DisplayOptions {
+                run_boundaries: false,
+                ..all
+            },
+            DisplayOptions {
+                break_reasons: false,
+                ..all
+            },
+            DisplayOptions {
+                reshaped_lines: false,
+                ..all
+            },
+            DisplayOptions {
+                relations: false,
+                ..all
+            },
+            DisplayOptions {
+                diagnostics: false,
+                ..all
+            },
+        ] {
+            let stripped: Vec<_> = snapshot
+                .to_display_lists(options)
+                .iter()
+                .map(|p| p.content_only())
+                .collect();
+            assert_eq!(
+                stripped, content,
+                "{}: overlay affects content",
+                fixture.name
+            );
+        }
+    }
+}
+
+/// Snapshot the added overlay geometry alone, with all statuses, severities,
+/// break reasons and a reshaped line represented regardless of what the
+/// current composer/relation pass happens to produce.
+#[test]
+fn debug_explainability() {
+    use reprise_display::{DisplayList, Item, Layer};
+    use reprise_layout::{Diagnostic, RelationStatus, Subject};
+    let fixture = hostile::combining_marks().unwrap();
+    let mut snapshot = fixture.engine.layout(&fixture.doc);
+    let reasons = ["opportunity", "forced", "end", "overflow"];
+    for (index, line) in snapshot
+        .blocks
+        .iter_mut()
+        .flat_map(|block| &mut block.lines)
+        .enumerate()
+    {
+        line.explanation.reason =
+            serde_json::from_value(serde_json::json!(reasons[index % reasons.len()])).unwrap();
+        line.explanation.reshaped = index == 0;
+    }
+    for (index, severity) in [Severity::Info, Severity::Warning, Severity::Error]
+        .into_iter()
+        .enumerate()
+    {
+        let mut diagnostic = Diagnostic::new(
+            severity,
+            reprise_diag::Code::new("test.display"),
+            Subject::Node(snapshot.blocks[0].node),
+            "test marker",
+        );
+        diagnostic.bytes = Some([7..16, 16..24, 0..0][index].clone());
+        snapshot.diagnostics.push(diagnostic);
+    }
+    let relation = snapshot.relations[0].clone();
+    for status in [
+        RelationStatus::Rebound,
+        RelationStatus::Ambiguous,
+        RelationStatus::Missing,
+    ] {
+        let mut relation = relation.clone();
+        relation.status = status;
+        relation.applied = false;
+        for target in &mut relation.targets {
+            target.status = status;
+            if status == RelationStatus::Missing {
+                target.resolved = None;
+            }
+        }
+        snapshot.relations.push(relation);
+    }
+    let lists = snapshot.to_display_lists(DisplayOptions {
+        debug: true,
+        ..Default::default()
+    });
+    fn debug(item: &Item) -> Option<Item> {
+        match item {
+            Item::Path {
+                layer: Layer::Debug,
+                ..
+            } => Some(item.clone()),
+            Item::Group {
+                transform,
+                clip,
+                items,
+            } => Some(Item::Group {
+                transform: *transform,
+                clip: clip.clone(),
+                items: items.iter().filter_map(debug).collect(),
+            }),
+            _ => None,
+        }
+    }
+    let overlays: Vec<_> = lists
+        .iter()
+        .map(|list| DisplayList {
+            width: list.width,
+            height: list.height,
+            items: list.items.iter().filter_map(debug).collect(),
+        })
+        .collect();
+    fn path_count(item: &Item) -> usize {
+        match item {
+            Item::Path {
+                layer: Layer::Debug,
+                ..
+            } => 1,
+            Item::Group { items, .. } => items.iter().map(path_count).sum(),
+            _ => 0,
+        }
+    }
+    let none = DisplayOptions {
+        debug: true,
+        boxes: false,
+        baselines: false,
+        intervals: false,
+        run_boundaries: false,
+        break_reasons: false,
+        reshaped_lines: false,
+        relations: false,
+        diagnostics: false,
+    };
+    let families = [
+        DisplayOptions {
+            boxes: true,
+            ..none
+        },
+        DisplayOptions {
+            baselines: true,
+            ..none
+        },
+        DisplayOptions {
+            intervals: true,
+            ..none
+        },
+        DisplayOptions {
+            run_boundaries: true,
+            ..none
+        },
+        DisplayOptions {
+            break_reasons: true,
+            ..none
+        },
+        DisplayOptions {
+            reshaped_lines: true,
+            ..none
+        },
+        DisplayOptions {
+            relations: true,
+            ..none
+        },
+        DisplayOptions {
+            diagnostics: true,
+            ..none
+        },
+    ];
+    let counts: Vec<usize> = families
+        .iter()
+        .map(|options| {
+            snapshot
+                .to_display_lists(*options)
+                .iter()
+                .flat_map(|page| &page.items)
+                .map(path_count)
+                .sum()
+        })
+        .collect();
+    assert!(
+        counts.iter().all(|&count| count > 0),
+        "every selected family draws geometry"
+    );
+    assert_eq!(
+        counts.iter().sum::<usize>(),
+        lists
+            .iter()
+            .flat_map(|page| &page.items)
+            .map(path_count)
+            .sum::<usize>(),
+        "families are independent and disabling them removes their geometry"
+    );
+    insta::assert_snapshot!(
+        "debug_explainability",
+        serde_json::to_string_pretty(&overlays).unwrap()
+    );
+    for list in &lists {
+        reprise_display::svg::render(list, &fixture.engine.fonts).unwrap();
+        reprise_display::png::render(list, &fixture.engine.fonts, 1.0).unwrap();
+    }
+    reprise_display::pdf::render(&lists, &fixture.engine.fonts).unwrap();
+}

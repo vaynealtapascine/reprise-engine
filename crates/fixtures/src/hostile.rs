@@ -62,6 +62,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         bidi_stray_controls()?,
         bidi_override_ligature()?,
         scripts_common_inherited()?,
+        display_text_clusters()?,
     ])
 }
 
@@ -365,4 +366,17 @@ pub fn scripts_common_inherited() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("scripts_common_inherited", doc, &[]))
+}
+
+/// A single paragraph attacks selectable PDF text with a ligature, stacked
+/// marks, an explicit right-to-left override and unsupported ZWJ emoji.
+pub fn display_text_clusters() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "office Z\u{335}\u{322}\u{31b}\u{332} a\u{30a}\u{30a} \u{202e}abc office\u{202c} 👩‍👩‍👧‍👦 end.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("display_text_clusters", doc, &[]))
 }

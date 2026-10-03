@@ -48,8 +48,7 @@ Codes in use:
 
 | Library | Codes |
 | --- | --- |
-| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
-| shape | `shape.script-depth`, `shape.bad-line` |
+| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | compose | `compose.overflow`, `compose.geometry-stalled` |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed` |
@@ -137,8 +136,13 @@ Codes in use:
 -   **`AdapterInfo`:** the adapter's `name` and `version`, plus `platform_independent`.
     That flag decides whether the cross-platform guarantee covers the adapter (22, 38).
 -   **Bidi:** `visual_order(levels)` implements UAX #9 rule L2.
--   **Open:** the bidi algorithm and script itemisation. Every item currently takes the
-    paragraph's base level, and its script is left to the adapter.
+-   **Bidi and scripts:** `itemize` resolves UAX #9 levels (paragraph rules P2/P3 when no
+    direction is given) and UAX #24 scripts from ICU4X data, whose Unicode version
+    (`UNICODE_VERSION`) is part of the reproducibility envelope. Items split wherever the
+    face, size, level or script changes. `Itemized.levels` holds the resolved level of
+    every byte.
+-   **Lines:** `reorder_line` applies rules L1 and L2 to one composed line and returns its
+    runs in visual order.
 
 ## Composition: `reprise-compose`
 
@@ -220,8 +224,11 @@ Codes in use:
     | `pdf::render(&[list], &fonts)` | all |
 
     All three draw every item. Adding an item kind means drawing it in all three.
--   **Open:** the PDF backend doesn't pass the source text on yet (ToUnicode and
-    ActualText). Image items come with document assets (34).
+-   **Source text in PDF:** the PDF backend maps glyphs to their source text with ToUnicode,
+    and uses ActualText where one glyph can't carry it: shared clusters, right-to-left runs
+    and malformed ranges. Text extracts in logical order within each run.
+-   **Open:** image items come with document assets (34). A reading order across runs
+    (33) needs the reading-order workstream.
 
 ## Fixtures: `reprise-fixtures`
 

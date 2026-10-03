@@ -1,0 +1,168 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      51
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "page": {
+    "width": 430080,
+    "height": 307200,
+    "margin_top": 36864,
+    "margin_left": 36864,
+    "column_width": 225280,
+    "gutter": 18432,
+    "margin_column_width": 112640,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 70
+          },
+          "preview": "office Z̵̢̛̲ å̊ ‮abc office‬ 👩‍👩‍👧‍👦 end.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 173909,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 26
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 69230
+            },
+            {
+              "range": {
+                "start": 26,
+                "end": 39
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 1,
+              "x": 69230,
+              "width": 48256
+            },
+            {
+              "range": {
+                "start": 39,
+                "end": 70
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 117486,
+              "width": 56423
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": []
+}
