@@ -2,6 +2,44 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-03: phase 2 started (decision 40, step 3)
+
+**In flight: wave 1.** Each workstream has its own worktree under `D:/!!Self/dev/reprise-wt/`
+and its own `ws/*` branch. The shared rules every agent follows are in
+`reprise-wt/BRIEF-COMMON.md`.
+
+| Branch | Workstream | Decisions | Model |
+| --- | --- | --- | --- |
+| `ws/shape` | 1: UAX #9 bidi and UAX #24 scripts in `itemize`, line reordering helper (L1/L2), shaping-data cache | 21, 22 | GPT-6.1-Sol |
+| `ws/compose` | 2: Knuth–Plass composer, authored-break (verse) composer, polygon and runaround geometry, composer conformance suite | 11, 23 | Opus 5.5 |
+| `ws/flow` | 3a: authored page templates (`doc/src/page.rs`) replacing `PageSettings`, a responsive medium, frame threading, pagination and fragmentation | 24, 25 | Sonnet 5.5 |
+| `ws/relations` | 4a: `Structural` and `Snapshot` targets, more layout queries, `Ambiguous`, `OnTargetDeleted`, copy planning | 13–16 | Sonnet 5.5 |
+| `ws/styles` | 4b: typed bounded expressions, registered pure functions, resolution contexts, explicit value stages | 08, 17, 18 | Sonnet 5.5 |
+| `ws/display` | 8: PDF ToUnicode and ActualText, a richer debug overlay | 32, 39 | GPT-6.1-Sol |
+
+**Split to avoid contention:** workstream 3 became 3a (core flow, now) and 3b (floats,
+tables, notes and solver domains, after 3a and the geometry providers of 2). Workstream 4
+became 4a (relations) and 4b (styles), which use different files. Layout's `codes` and the
+`follow` behaviour moved into their own files first (`eabf5d0`).
+
+**Integration the orchestrator does after merging** (each workstream was told not to touch
+the other's files):
+
+-   Wire workstream 1's L1/L2 line reordering into `layout/src/flow.rs`.
+-   Switch `relations/follow.rs` to workstream 4a's shared target resolver.
+-   Pass frame and page resolution contexts from flow into workstream 4b's styles.
+-   Apply `Adjustment` (justified Knuth–Plass) to glyph positions in layout.
+
+**Wave 2, queued:**
+
+-   5: rotated and mirrored frames, writing modes, and reading-order overrides (after 3a and 8).
+-   3b: floats, tables, notes and solver domains (after 2 and 3a).
+-   7: the editing kernel (after 1 and 3a).
+-   9: persistence and clipboard (after 4a).
+
+**Later:** workstream 6 (incremental evaluation and scheduling), once 1–5 stabilise, then 10
+(plugins) and 11 (bindings).
+
 ## 2026-10-03: contracts frozen (decision 40, step 2)
 
 **Done.** The interfaces that parallel workstreams build against are frozen and documented
