@@ -463,4 +463,84 @@ mod tests {
         );
         assert_eq!(out.items[1].size, Length::MAX);
     }
+
+    /// Orchestrator review: every line split of real mixed-direction text,
+    /// reordered with `reorder_line`, keeps each glyph exactly once, stays
+    /// inside the line, never overlaps, and keeps odd-level runs right to left.
+    #[test]
+    fn reordering_every_line_split_conserves_glyphs() {
+        let fonts = fonts();
+        for text in [
+            "a \u{202e}office  ab\u{202c} c ",
+            "\u{2067}x (y) 12\u{2069}  z\u{2066}",
+            "\u{202b}\u{202b}a b\u{202c} c\u{202c}\t\u{2029}d",
+            " e\u{301}  \u{202e}fi\u{202c} ",
+        ] {
+            for direction in [None, Some(InlineDirection::Rtl)] {
+                let styles = [run(0..text.len(), &["Source Serif Pro"])];
+                let itemized = itemize(
+                    &ParagraphInput {
+                        text,
+                        styles: &styles,
+                        direction,
+                    },
+                    &fonts,
+                );
+                let shaped = Shaper {
+                    text,
+                    items: &itemized.items,
+                    fonts: &fonts,
+                    adapter: &HarfRust,
+                }
+                .shape();
+                let bounds: Vec<usize> = text
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .chain([text.len()])
+                    .collect();
+                for &start in &bounds {
+                    for &end in bounds.iter().filter(|&&e| e >= start) {
+                        let line = start..end;
+                        let runs = shaped.slice(line.clone());
+                        let out = crate::reorder_line(
+                            text,
+                            &runs,
+                            &itemized.levels,
+                            line.clone(),
+                            itemized.base_level,
+                        )
+                        .unwrap_or_else(|n| panic!("{text:?} {line:?}: {}", n.message));
+                        let mut want: Vec<u32> = runs
+                            .iter()
+                            .flat_map(|r| &r.glyphs)
+                            .map(|g| g.cluster)
+                            .collect();
+                        let mut got: Vec<u32> = out
+                            .iter()
+                            .flat_map(|r| &r.glyphs)
+                            .map(|g| g.cluster)
+                            .collect();
+                        want.sort_unstable();
+                        got.sort_unstable();
+                        assert_eq!(got, want, "{text:?} {line:?}");
+                        let mut ranges: Vec<_> = out.iter().map(|r| r.range.clone()).collect();
+                        ranges.sort_by_key(|r| r.start);
+                        for pair in ranges.windows(2) {
+                            assert!(pair[0].end <= pair[1].start, "{text:?} {line:?}");
+                        }
+                        for r in &out {
+                            assert!(line.start <= r.range.start && r.range.end <= line.end);
+                            let clusters: Vec<u32> = r.glyphs.iter().map(|g| g.cluster).collect();
+                            let ordered = if r.level % 2 == 1 {
+                                clusters.windows(2).all(|w| w[0] >= w[1])
+                            } else {
+                                clusters.windows(2).all(|w| w[0] <= w[1])
+                            };
+                            assert!(ordered, "{text:?} {line:?} level {}", r.level);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
