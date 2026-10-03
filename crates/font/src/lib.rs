@@ -65,6 +65,9 @@ impl Face {
         let unreadable = |e: skrifa::raw::ReadError| FontError::Unreadable(e.to_string());
         let head = font.head().map_err(unreadable)?;
         let hhea = font.hhea().map_err(unreadable)?;
+        if head.units_per_em() == 0 {
+            return Err(FontError::Unreadable("units per em is zero".into()));
+        }
         let metrics = FaceMetrics {
             units_per_em: head.units_per_em(),
             ascent: hhea.ascender().to_i16() as i32,

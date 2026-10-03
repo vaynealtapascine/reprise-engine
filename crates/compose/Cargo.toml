@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 reprise-geom.workspace = true
 reprise-shape.workspace = true
+reprise-diag.workspace = true
 icu_segmenter.workspace = true
 serde.workspace = true
 

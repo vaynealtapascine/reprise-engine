@@ -1,77 +1,209 @@
-//! The derived layout result and its queries.
+//! The derived layout result and its queries (05, 13, 16, 30).
+//!
+//! A snapshot has pages, frames on those pages, and blocks whose lines sit in
+//! frames. Line geometry is in its frame's logical [`FrameSpace`]; each frame
+//! has a transform to its page, which carries any writing mode, rotation or
+//! mirroring (20). Use [`LayoutSnapshot::line_to_page`] or
+//! [`LayoutSnapshot::line_bounds`] for page coordinates.
 
 use std::ops::Range;
 
-use reprise_compose::BreakReason;
-use reprise_doc::{BlockKind, ComputedStyle, NodeId, RelationId, RelationKind, Revision};
+use reprise_compose::Explanation;
+use reprise_diag::{Code, Note, Severity};
+use reprise_doc::{BlockKind, ComputedStyle, NodeId, RangeId, RelationId, Revision, SchemaId};
 use reprise_font::FaceId;
-use reprise_geom::{Length, PageSpace, Rect};
+use reprise_geom::{FrameSpace, Length, LineSpace, Matrix, PageSpace, Rect, Transform};
 use reprise_shape::{AdapterInfo, ShapedGlyph};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::PageSettings;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LineLayout {
-    pub text: Range<usize>,
-    /// The line's text, for reading snapshots.
-    pub preview: String,
-    /// The line box.
-    pub rect: Rect<PageSpace>,
-    pub baseline: Length,
-    pub width: Length,
-    pub break_reason: BreakReason,
-    #[serde(skip)]
-    pub(crate) glyphs: Vec<ShapedGlyph>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlockLayout {
-    pub node: NodeId,
-    pub kind: BlockKind,
-    pub face: FaceId,
-    pub style: ComputedStyle,
-    pub frame: Rect<PageSpace>,
-    pub lines: Vec<LineLayout>,
-}
-
-/// How a relation resolved (15).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RelationStatus {
-    Valid,
-    /// The target range lost an end and was rebound to the nearest position.
-    Rebound,
-    Missing,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RelationLayout {
-    pub id: RelationId,
-    pub kind: RelationKind,
-    pub source: NodeId,
-    pub status: RelationStatus,
-    /// The block and line index the query matched.
-    pub target_line: Option<(NodeId, usize)>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Diagnostic {
-    pub node: Option<NodeId>,
-    pub message: String,
-}
-
 /// Everything layout derived from one document revision. Can be thrown away
 /// and recomputed at any time (05).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LayoutSnapshot {
     pub revision: Revision,
     pub adapter: AdapterInfo,
     pub composer: String,
     pub page: PageSettings,
+    pub pages: Vec<PageLayout>,
+    pub frames: Vec<FrameLayout>,
+    /// Blocks in the order layout placed them: flowed blocks in flow order,
+    /// then blocks placed by relations in relation order.
     pub blocks: Vec<BlockLayout>,
     pub relations: Vec<RelationLayout>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct PageLayout {
+    pub width: Length,
+    pub height: Length,
+}
+
+/// A region that lines sit in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FrameLayout {
+    /// What the frame is for, such as `main` or `margin`.
+    pub name: String,
+    /// Index into [`LayoutSnapshot::pages`].
+    pub page: usize,
+    pub to_page: Transform<FrameSpace, PageSpace>,
+    /// The frame's extent; its origin is the frame's start corner.
+    pub rect: Rect<FrameSpace>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BlockLayout {
+    pub node: NodeId,
+    pub kind: BlockKind,
+    pub style: ComputedStyle,
+    /// The text the block was laid out from. Line, run and glyph positions
+    /// are byte offsets into it. Left out of JSON snapshots.
+    #[serde(skip)]
+    pub text: String,
+    /// In logical order. A block's lines may sit in several frames.
+    pub lines: Vec<LineLayout>,
+}
+
+/// One line fragment: a line's text in one interval of one frame.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LineLayout {
+    /// Index into [`LayoutSnapshot::frames`].
+    pub frame: usize,
+    /// Source bytes of the block's text, including trailing whitespace.
+    pub text: Range<usize>,
+    /// The line's text, for reading snapshots.
+    pub preview: String,
+    /// The line box, in frame space.
+    pub rect: Rect<FrameSpace>,
+    /// The baseline's offset on the frame's block axis.
+    pub baseline: Length,
+    /// The width of the content, without trailing whitespace.
+    pub width: Length,
+    pub explanation: Explanation,
+    /// In visual order, left to right along the inline axis.
+    pub runs: Vec<PositionedRun>,
+}
+
+/// A run of glyphs placed on a line.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PositionedRun {
+    pub range: Range<usize>,
+    pub face: FaceId,
+    pub size: Length,
+    pub level: u8,
+    /// Where the run starts on the frame's inline axis.
+    pub x: Length,
+    pub width: Length,
+    /// In visual order. Each glyph's pen position is `x` plus the advances
+    /// of the glyphs before it. Left out of JSON snapshots, which the display
+    /// list snapshot covers.
+    #[serde(skip)]
+    pub glyphs: Vec<ShapedGlyph>,
+}
+
+/// A line within a snapshot: a block and the index of one of its lines.
+/// Only meaningful for the snapshot it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct LineRef {
+    pub node: NodeId,
+    pub line: usize,
+}
+
+/// How a relation's target resolved (15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RelationStatus {
+    Valid,
+    /// The target lost part of itself and was rebound to the nearest
+    /// surviving position.
+    Rebound,
+    /// Several candidates matched and none was preferred.
+    Ambiguous,
+    Missing,
+    /// The relation is owned and its owner was deleted, so it is no longer in
+    /// effect (07, 14). It stays in the document until tombstones are compacted.
+    OwnerDeleted,
+}
+
+/// What a target resolved to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Resolution {
+    Node(NodeId),
+    Range { node: NodeId, bytes: Range<usize> },
+    Line(LineRef),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TargetLayout {
+    pub role: String,
+    pub status: RelationStatus,
+    pub resolved: Option<Resolution>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RelationLayout {
+    pub id: RelationId,
+    pub schema: SchemaId,
+    pub owner: Option<NodeId>,
+    /// The worst status of any target.
+    pub status: RelationStatus,
+    /// True when layout acted on the relation. A relation can be valid and
+    /// still not applied, for example when its schema is unknown.
+    pub applied: bool,
+    pub targets: Vec<TargetLayout>,
+}
+
+/// What a diagnostic is about.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(tag = "kind", content = "id", rename_all = "kebab-case")]
+pub enum Subject {
+    Document,
+    Node(NodeId),
+    Relation(RelationId),
+    Range(RangeId),
+}
+
+/// A problem layout worked around (37), or a note about a decision it made
+/// (39). Match on `code`, never on `message`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Diagnostic {
+    pub severity: Severity,
+    pub code: Code,
+    pub subject: Subject,
+    pub message: String,
+    /// Bytes of the subject's text, when the subject is a node.
+    pub bytes: Option<Range<usize>>,
+}
+
+impl Diagnostic {
+    pub fn new(
+        severity: Severity,
+        code: Code,
+        subject: Subject,
+        message: impl Into<String>,
+    ) -> Diagnostic {
+        Diagnostic {
+            severity,
+            code,
+            subject,
+            message: message.into(),
+            bytes: None,
+        }
+    }
+
+    /// Attaches a subject to a note from a lower library.
+    pub fn from_note(note: Note, subject: Subject) -> Diagnostic {
+        Diagnostic {
+            severity: note.severity,
+            code: note.code,
+            subject,
+            message: note.message,
+            bytes: note.bytes,
+        }
+    }
 }
 
 impl LayoutSnapshot {
@@ -79,21 +211,95 @@ impl LayoutSnapshot {
         self.blocks.iter().find(|b| b.node == node)
     }
 
-    /// The `LineContaining` query: the line holding byte `at` of `node`.
-    /// A position at a line's end belongs to that line, not the next.
-    pub fn line_containing(&self, node: NodeId, at: usize) -> Option<usize> {
+    pub fn line(&self, at: LineRef) -> Option<&LineLayout> {
+        self.block(at.node)?.lines.get(at.line)
+    }
+
+    pub fn frame(&self, index: usize) -> Option<&FrameLayout> {
+        self.frames.get(index)
+    }
+
+    pub fn relation(&self, id: RelationId) -> Option<&RelationLayout> {
+        self.relations.iter().find(|r| r.id == id)
+    }
+
+    /// The `LineContaining` query (13): the line holding byte `at` of `node`.
+    /// A position at a line break belongs to the line after it, except at the
+    /// end of the block, which belongs to the last line.
+    pub fn line_containing(&self, node: NodeId, at: usize) -> Option<LineRef> {
         let block = self.block(node)?;
+        let last = block.lines.len().checked_sub(1)?;
+        let line = block
+            .lines
+            .iter()
+            .position(|l| l.text.start <= at && at < l.text.end)
+            .or_else(|| (at == block.lines[last].text.end).then_some(last))?;
+        Some(LineRef { node, line })
+    }
+
+    /// The line before `at` in its block, or `None` on the first line.
+    pub fn previous_line(&self, at: LineRef) -> Option<LineRef> {
+        let line = at.line.checked_sub(1)?;
+        self.line(LineRef { line, ..at })
+            .map(|_| LineRef { line, ..at })
+    }
+
+    /// The line after `at` in its block, or `None` on the last line.
+    pub fn next_line(&self, at: LineRef) -> Option<LineRef> {
+        let next = LineRef {
+            line: at.line + 1,
+            ..at
+        };
+        self.line(next).map(|_| next)
+    }
+
+    /// Every line of `node` holding part of `bytes`, in order (16). An empty
+    /// range finds the line containing it.
+    pub fn lines_in(&self, node: NodeId, bytes: Range<usize>) -> Vec<LineRef> {
+        if bytes.is_empty() {
+            return self
+                .line_containing(node, bytes.start)
+                .into_iter()
+                .collect();
+        }
+        let Some(block) = self.block(node) else {
+            return Vec::new();
+        };
         block
             .lines
             .iter()
-            .position(|l| at < l.text.end || (at == l.text.end && l.text.end == block_end(block)))
+            .enumerate()
+            .filter(|(_, l)| l.text.start < bytes.end && bytes.start < l.text.end)
+            .map(|(line, _)| LineRef { node, line })
+            .collect()
+    }
+
+    /// The transform from a line's own space (origin at its start edge on its
+    /// baseline) to its page.
+    pub fn line_to_page(&self, at: LineRef) -> Option<Transform<LineSpace, PageSpace>> {
+        let line = self.line(at)?;
+        let frame = self.frame(line.frame)?;
+        let to_frame: Transform<LineSpace, FrameSpace> =
+            Transform::new(Matrix::translate(line.rect.origin.x, line.baseline));
+        Some(to_frame.then(&frame.to_page))
+    }
+
+    /// The page and page-space bounds of a line's box.
+    pub fn line_bounds(&self, at: LineRef) -> Option<(usize, Rect<PageSpace>)> {
+        let line = self.line(at)?;
+        let frame = self.frame(line.frame)?;
+        Some((frame.page, frame.to_page.bounds(&line.rect)))
+    }
+
+    /// Diagnostics with a given code, in order.
+    pub fn diagnostics_with(&self, code: &str) -> impl Iterator<Item = &Diagnostic> {
+        let code = code.to_owned();
+        self.diagnostics
+            .iter()
+            .filter(move |d| d.code == code.as_str())
     }
 
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).expect("snapshots serialize")
     }
-}
-
-fn block_end(block: &BlockLayout) -> usize {
-    block.lines.last().map_or(0, |l| l.text.end)
 }

@@ -1,0 +1,432 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      246
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "page": {
+    "width": 430080,
+    "height": 307200,
+    "margin_top": 36864,
+    "margin_left": 36864,
+    "column_width": 225280,
+    "gutter": 18432,
+    "margin_column_width": 112640,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 33
+          },
+          "preview": "The first paragraph has a  in it.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 153264,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 33
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 153264
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "81@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 35
+          },
+          "preview": "The second paragraph loses a lette.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 21709
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 32416,
+          "width": 175804,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 35
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 175804
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "121@1",
+      "kind": "annotation",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 8448,
+        "line_height": 10560,
+        "explain": {
+          "family": "default",
+          "line-height": "style note",
+          "size": "style note"
+        }
+      },
+      "lines": [
+        {
+          "frame": 1,
+          "text": {
+            "start": 0,
+            "end": 8
+          },
+          "preview": "Rebound.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 21709
+            },
+            "width": 112640,
+            "height": 10560
+          },
+          "baseline": 29950,
+          "width": 36434,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 8
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 8448,
+              "level": 0,
+              "x": 0,
+              "width": 36434
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "79@1",
+      "schema": "reprise.follow",
+      "owner": "56@1",
+      "status": "missing",
+      "applied": false,
+      "targets": [
+        {
+          "role": "line",
+          "status": "missing",
+          "resolved": null
+        }
+      ]
+    },
+    {
+      "id": "138@1",
+      "schema": "reprise.follow",
+      "owner": "121@1",
+      "status": "rebound",
+      "applied": true,
+      "targets": [
+        {
+          "role": "line",
+          "status": "rebound",
+          "resolved": {
+            "line": {
+              "node": "81@1",
+              "line": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "185@1",
+      "schema": "reprise.follow",
+      "owner": "161@1",
+      "status": "missing",
+      "applied": false,
+      "targets": [
+        {
+          "role": "line",
+          "status": "missing",
+          "resolved": null
+        }
+      ]
+    },
+    {
+      "id": "209@1",
+      "schema": "reprise.follow",
+      "owner": "187@1",
+      "status": "owner-deleted",
+      "applied": false,
+      "targets": []
+    },
+    {
+      "id": "211@1",
+      "schema": "elsewhere.unknown",
+      "owner": null,
+      "status": "valid",
+      "applied": false,
+      "targets": []
+    },
+    {
+      "id": "218@1",
+      "schema": "reprise.follow",
+      "owner": "81@1",
+      "status": "valid",
+      "applied": false,
+      "targets": [
+        {
+          "role": "line",
+          "status": "valid",
+          "resolved": {
+            "line": {
+              "node": "81@1",
+              "line": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "relation.missing-target",
+      "subject": {
+        "kind": "relation",
+        "id": "79@1"
+      },
+      "message": "target range 74@1 is gone; owner not placed",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.rebound",
+      "subject": {
+        "kind": "relation",
+        "id": "138@1"
+      },
+      "message": "target range 133@1 lost part of its text; rebound",
+      "bytes": null
+    },
+    {
+      "severity": "error",
+      "code": "relation.missing-target",
+      "subject": {
+        "kind": "relation",
+        "id": "185@1"
+      },
+      "message": "target range 180@1 is gone; owner not placed",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.owner-deleted",
+      "subject": {
+        "kind": "relation",
+        "id": "209@1"
+      },
+      "message": "owner 187@1 was deleted; the relation went with it",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "relation.unknown-schema",
+      "subject": {
+        "kind": "relation",
+        "id": "211@1"
+      },
+      "message": "schema elsewhere.unknown is not registered; not applied",
+      "bytes": null
+    },
+    {
+      "severity": "error",
+      "code": "relation.owner-not-placeable",
+      "subject": {
+        "kind": "relation",
+        "id": "218@1"
+      },
+      "message": "owner is not a block a relation can place, or is already placed",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.unplaced",
+      "subject": {
+        "kind": "node",
+        "id": "56@1"
+      },
+      "message": "no relation places this block; not drawn",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.unplaced",
+      "subject": {
+        "kind": "node",
+        "id": "161@1"
+      },
+      "message": "no relation places this block; not drawn",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.unplaced",
+      "subject": {
+        "kind": "node",
+        "id": "220@1"
+      },
+      "message": "no relation places this block; not drawn",
+      "bytes": null
+    }
+  ]
+}

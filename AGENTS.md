@@ -4,6 +4,8 @@ Notes for anyone (human or AI) working on reprise-engine.
 
 -   [docs/architecture.md](docs/architecture.md) records the decisions. Change a decision
     by editing it there, in a commit that says why.
+-   [docs/contracts.md](docs/contracts.md) describes the frozen interfaces that parallel work
+    builds against, and how they may change. Don't change one inside a feature branch.
 -   [docs/CODEMAP.md](docs/CODEMAP.md) maps each crate and feature to its files. Update it
     in the same commit when you add, move or remove files.
 -   [PROGRESS.md](PROGRESS.md) is the hand-off log: what is done, what is in flight and
@@ -15,7 +17,7 @@ Notes for anyone (human or AI) working on reprise-engine.
 cargo test --workspace                     # all tests, including snapshot fixtures
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
-cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display
+cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures
 cargo run -p reprise-cli -- spike out      # writes before/after in every output format
 ```
 
@@ -32,7 +34,13 @@ the WASM check.
     and say in the commit why the output changed. A snapshot that differs only on one
     platform is a determinism bug, not a fixture to update.
 -   **Fixtures pin their inputs:** the bundled font in `fixtures/fonts/` and peer ID 1. Don't
-    use system fonts or random peer IDs in tests.
+    use system fonts or random peer IDs in tests. Use `reprise-fixtures` for engines and
+    documents.
+-   **The hostile fixtures must keep passing.** `crates/fixtures/tests/hostile.rs` checks
+    every invariant that no workstream may break. Add cases freely; removing one is a
+    contract change.
+-   **Diagnostics are matched by code, never by message.** Codes are public; add new ones to
+    the table in `docs/contracts.md`.
 -   **Authored vs derived (05):** `reprise-doc` holds only what is saved and undoable. Never
     store layout results in the Loro document.
 -   **Byte offsets everywhere.** Loro counts Unicode scalars; only `reprise-text` converts.

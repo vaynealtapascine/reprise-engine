@@ -1,5 +1,5 @@
 [package]
-name = "reprise-text"
+name = "reprise-diag"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,7 +7,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-loro.workspace = true
-icu_segmenter.workspace = true
-thiserror.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

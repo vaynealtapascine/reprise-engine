@@ -11,14 +11,10 @@ name = "reprise"
 path = "src/main.rs"
 
 [dependencies]
-reprise-geom.workspace = true
-reprise-text.workspace = true
-reprise-doc.workspace = true
-reprise-font.workspace = true
-reprise-shape.workspace = true
 reprise-layout.workspace = true
 reprise-display.workspace = true
-serde_json.workspace = true
+reprise-fixtures.workspace = true
 
 [dev-dependencies]
+reprise-doc.workspace = true
 insta.workspace = true

@@ -1511,12 +1511,8 @@ dependencies = [
  "insta",
  "reprise-display",
  "reprise-doc",
- "reprise-font",
- "reprise-geom",
+ "reprise-fixtures",
  "reprise-layout",
- "reprise-shape",
- "reprise-text",
- "serde_json",
 ]
 
 [[package]]
@@ -1524,10 +1520,19 @@ name = "reprise-compose"
 version = "0.0.0"
 dependencies = [
  "icu_segmenter",
+ "reprise-diag",
  "reprise-font",
  "reprise-geom",
  "reprise-shape",
  "serde",
+]
+
+[[package]]
+name = "reprise-diag"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1557,6 +1562,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reprise-fixtures"
+version = "0.0.0"
+dependencies = [
+ "insta",
+ "reprise-diag",
+ "reprise-display",
+ "reprise-doc",
+ "reprise-font",
+ "reprise-geom",
+ "reprise-layout",
+ "serde_json",
+]
+
+[[package]]
 name = "reprise-font"
 version = "0.0.0"
 dependencies = [
@@ -1571,6 +1590,7 @@ name = "reprise-geom"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1578,6 +1598,7 @@ name = "reprise-layout"
 version = "0.0.0"
 dependencies = [
  "reprise-compose",
+ "reprise-diag",
  "reprise-display",
  "reprise-doc",
  "reprise-font",
@@ -1593,6 +1614,7 @@ name = "reprise-shape"
 version = "0.0.0"
 dependencies = [
  "harfrust",
+ "reprise-diag",
  "reprise-font",
  "reprise-geom",
  "serde",
@@ -1602,6 +1624,7 @@ dependencies = [
 name = "reprise-text"
 version = "0.0.0"
 dependencies = [
+ "icu_segmenter",
  "loro",
  "serde",
  "thiserror 2.0.21",

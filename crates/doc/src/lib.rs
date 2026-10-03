@@ -3,11 +3,14 @@
 //! Everything here is saved, undoable and collaborative, so it all lives in one
 //! Loro document:
 //!
-//! - `content`: a tree of blocks. Node IDs are Loro tree IDs: opaque, never
-//!   reused, and deleted nodes are kept as tombstones (07).
-//! - `ranges`: named ranges, each a pair of anchors with a policy (10, 12).
-//! - `relations`: typed relations between blocks and targets (13, 14).
+//! - `content`: a tree of blocks (06).
+//! - `ranges`: persistent ranges, each a pair of anchors with a policy (10, 12).
+//! - `relations`: relations between nodes and targets (13, 14), stored as JSON.
 //! - `styles`: named styles with inheritance (08).
+//!
+//! Blocks, ranges and relations are all nodes of Loro trees, so their IDs are
+//! Loro operation IDs: opaque, never reused even after undo, and a deleted
+//! item stays behind as a tombstone (07).
 //!
 //! Layout and display are derived from this and never stored here (05).
 
@@ -17,45 +20,68 @@ use std::ops::Range;
 
 use loro::{Container, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID, ValueOrContainer};
 use reprise_geom::Length;
-use reprise_text::{Anchor, RangePolicy, Resolved, Text};
+use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+pub mod relation;
+mod style;
+
+pub use relation::{
+    LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
+    Target, TargetClass,
+};
 pub use reprise_text as text;
+pub use style::{ComputedStyle, LengthExpr, Style, default_style};
 
-/// A block's identity in the content tree.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeId(TreeID);
+macro_rules! tree_ids {
+    ($($(#[$m:meta])* $name:ident),*) => {$(
+        $(#[$m])*
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $name(TreeID);
 
-impl fmt::Debug for NodeId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+        impl $name {
+            /// Parses the form produced by `Display`, such as `12@1`.
+            pub fn parse(s: &str) -> Option<$name> {
+                TreeID::try_from(s).ok().map($name)
+            }
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.collect_str(self)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let s = String::deserialize(d)?;
+                $name::parse(&s)
+                    .ok_or_else(|| serde::de::Error::custom(concat!("bad ", stringify!($name))))
+            }
+        }
+    )*};
 }
 
-impl fmt::Display for NodeId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl NodeId {
-    pub fn parse(s: &str) -> Option<NodeId> {
-        TreeID::try_from(s).ok().map(NodeId)
-    }
-}
-
-impl Serialize for NodeId {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.collect_str(self)
-    }
-}
-
-impl<'de> Deserialize<'de> for NodeId {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        NodeId::parse(&s).ok_or_else(|| serde::de::Error::custom("bad node id"))
-    }
-}
+tree_ids!(
+    /// A block's identity in the content tree.
+    NodeId,
+    /// A persistent range's identity.
+    RangeId,
+    /// A relation's identity.
+    RelationId
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -83,135 +109,16 @@ impl BlockKind {
     }
 }
 
-/// A length as authored: a literal or relative to the font size (17).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum LengthExpr {
-    Pt(Length),
-    /// Thousandths of an em.
-    Em(i32),
-}
-
-impl LengthExpr {
-    fn resolve(self, em: Length) -> Length {
-        match self {
-            LengthExpr::Pt(l) => l,
-            LengthExpr::Em(permille) => em.mul_ratio(permille, 1000),
-        }
-    }
-
-    fn to_loro(self) -> LoroValue {
-        match self {
-            LengthExpr::Pt(l) => format!("pt:{}", l.0).into(),
-            LengthExpr::Em(p) => format!("em:{p}").into(),
-        }
-    }
-
-    fn from_loro(v: &str) -> Option<LengthExpr> {
-        let (unit, n) = v.split_once(':')?;
-        let n: i32 = n.parse().ok()?;
-        match unit {
-            "pt" => Some(LengthExpr::Pt(Length(n))),
-            "em" => Some(LengthExpr::Em(n)),
-            _ => None,
-        }
-    }
-}
-
-/// Style properties as authored, in a named style or as direct overrides.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Style {
-    pub parent: Option<String>,
-    pub family: Option<String>,
-    pub size: Option<LengthExpr>,
-    pub line_height: Option<LengthExpr>,
-}
-
-impl Style {
-    fn write(&self, map: &LoroMap) -> loro::LoroResult<()> {
-        if let Some(p) = &self.parent {
-            map.insert("parent", p.as_str())?;
-        }
-        if let Some(f) = &self.family {
-            map.insert("family", f.as_str())?;
-        }
-        if let Some(s) = self.size {
-            map.insert("size", s.to_loro())?;
-        }
-        if let Some(l) = self.line_height {
-            map.insert("line-height", l.to_loro())?;
-        }
-        Ok(())
-    }
-
-    fn read(map: &LoroMap) -> Style {
-        Style {
-            parent: get_str(map, "parent"),
-            family: get_str(map, "family"),
-            size: get_str(map, "size").and_then(|v| LengthExpr::from_loro(&v)),
-            line_height: get_str(map, "line-height").and_then(|v| LengthExpr::from_loro(&v)),
-        }
-    }
-}
-
-/// Used values after inheritance and overrides (08), with where each came from (39).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ComputedStyle {
-    pub family: String,
-    pub size: Length,
-    pub line_height: Length,
-    pub explain: BTreeMap<String, String>,
-}
-
-/// Engine defaults, the bottom of every style chain.
-pub fn default_style() -> Style {
-    Style {
-        parent: None,
-        family: Some("Source Serif Pro".into()),
-        size: Some(LengthExpr::Pt(Length::from_pt(10))),
-        line_height: Some(LengthExpr::Em(1200)),
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
-pub struct RangeId(pub String);
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
-pub struct RelationId(pub String);
-
-/// What a range resolves to now.
+/// What a range resolves to now (15).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum RangeState {
     /// Both ends are on live characters.
     Valid { node: NodeId, bytes: Range<usize> },
-    /// An end's character was deleted; the range kept its nearest position (15).
+    /// An end's character was deleted; the range kept its nearest position.
     Rebound { node: NodeId, bytes: Range<usize> },
-    /// The range's content is gone.
+    /// The range's content is gone, or so is its block.
     Missing { node: Option<NodeId> },
-}
-
-/// What a relation points at (13). The spike implements one layout query.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "query", rename_all = "kebab-case")]
-pub enum Target {
-    /// The visual line that contains the start of a range.
-    LineContaining { range: RangeId },
-}
-
-/// Relation types (14). These become registered schemas; the spike has one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RelationKind {
-    /// The source block sits beside its target line and moves with it.
-    Follow,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Relation {
-    pub kind: RelationKind,
-    pub source: NodeId,
-    pub target: Target,
 }
 
 #[derive(Clone, Debug)]
@@ -232,12 +139,25 @@ pub enum DocError {
     #[error("could not export the document: {0}")]
     Export(String),
     #[error(transparent)]
-    Text(#[from] reprise_text::TextError),
+    Schema(#[from] SchemaError),
     #[error(transparent)]
-    Loro(#[from] loro::LoroError),
+    Text(#[from] reprise_text::TextError),
+    #[error("the document store refused the change: {0}")]
+    Store(String),
 }
 
-/// The document revision a result was computed from (28).
+impl From<loro::LoroError> for DocError {
+    fn from(e: loro::LoroError) -> Self {
+        DocError::Store(e.to_string())
+    }
+}
+
+/// The document revision a result was computed from (28): the frontier of
+/// the operation history, sorted.
+///
+/// Equal revisions mean equal documents. The derived ordering is only there
+/// to keep revisions sortable; it is not causal order. Deciding whether one
+/// revision is newer than another needs the document's history.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Revision(pub Vec<(u64, i32)>);
 
@@ -252,10 +172,6 @@ impl Document {
         doc.set_peer_id(peer)?;
         doc.get_tree("content").enable_fractional_index(0);
         Ok(Document { doc })
-    }
-
-    pub fn loro(&self) -> &LoroDoc {
-        &self.doc
     }
 
     /// A second replica of this document for another peer.
@@ -293,26 +209,25 @@ impl Document {
         Revision(ids)
     }
 
-    fn tree(&self) -> LoroTree {
-        self.doc.get_tree("content")
+    fn tree(&self, name: &str) -> LoroTree {
+        self.doc.get_tree(name)
     }
 
-    fn map(&self, name: &str) -> LoroMap {
-        self.doc.get_map(name)
-    }
-
-    fn new_id(&self, map: &LoroMap, prefix: &str) -> String {
-        format!("{prefix}{}@{}", map.len(), self.doc.peer_id())
+    fn live(&self, tree: &LoroTree, id: TreeID) -> bool {
+        tree.contains(id) && !tree.is_node_deleted(&id).unwrap_or(true)
     }
 
     pub fn define_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
-        let map = self.map("styles").insert_container(name, LoroMap::new())?;
+        let map = self
+            .doc
+            .get_map("styles")
+            .insert_container(name, LoroMap::new())?;
         style.write(&map)?;
         Ok(())
     }
 
     pub fn style(&self, name: &str) -> Option<Style> {
-        match self.map("styles").get(name)? {
+        match self.doc.get_map("styles").get(name)? {
             ValueOrContainer::Container(Container::Map(m)) => Some(Style::read(&m)),
             _ => None,
         }
@@ -325,7 +240,7 @@ impl Document {
         style: &str,
         text: &str,
     ) -> Result<NodeId, DocError> {
-        let tree = self.tree();
+        let tree = self.tree("content");
         let id = tree.create(None)?;
         let meta = tree.get_meta(id)?;
         meta.insert("kind", kind.as_str())?;
@@ -337,12 +252,16 @@ impl Document {
 
     /// Top-level blocks in document order.
     pub fn blocks(&self) -> Vec<NodeId> {
-        self.tree().roots().into_iter().map(NodeId).collect()
+        self.tree("content")
+            .roots()
+            .into_iter()
+            .map(NodeId)
+            .collect()
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
-        let tree = self.tree();
-        if !tree.contains(id.0) || tree.is_node_deleted(&id.0).unwrap_or(true) {
+        let tree = self.tree("content");
+        if !self.live(&tree, id.0) {
             return Err(DocError::NoNode(id));
         }
         let meta = tree.get_meta(id.0)?;
@@ -350,7 +269,7 @@ impl Document {
             .and_then(|k| BlockKind::parse(&k))
             .ok_or(DocError::Malformed(id, "kind"))?;
         let text = match meta.get("text") {
-            Some(ValueOrContainer::Container(Container::Text(t))) => Text::new(t),
+            Some(ValueOrContainer::Container(Container::Text(t))) => Text::from_loro(t),
             _ => return Err(DocError::Malformed(id, "text")),
         };
         let overrides = match meta.get("overrides") {
@@ -367,14 +286,16 @@ impl Document {
     }
 
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
-        let meta = self.tree().get_meta(id.0)?;
+        let meta = self.tree("content").get_meta(id.0)?;
         let map = meta.insert_container("overrides", LoroMap::new())?;
         style.write(&map)?;
         Ok(())
     }
 
+    /// Deletes a block, leaving a tombstone. What happens to relations that
+    /// involve it is up to their schemas; that is not applied yet.
     pub fn delete_block(&self, id: NodeId) -> Result<(), DocError> {
-        Ok(self.tree().delete(id.0)?)
+        Ok(self.tree("content").delete(id.0)?)
     }
 
     /// Resolves a block's style: defaults, then its named style chain, then
@@ -423,83 +344,131 @@ impl Document {
         // Line height resolves against the final font size, so an inherited
         // 1.2em follows a size change further down the chain.
         let line_height = line_height.map_or(size, |l| l.resolve(size));
+        // Used values (08) can't be negative. Hostile or mistaken values are
+        // clamped here, once, so nothing downstream lays out upwards.
+        let mut clamped = Vec::new();
+        let mut used = |name: &str, value: Length| {
+            if value < Length::ZERO {
+                clamped.push(name.to_string());
+                Length::ZERO
+            } else {
+                value
+            }
+        };
+        let (size, line_height) = (used("size", size), used("line-height", line_height));
         Ok(ComputedStyle {
             family,
             size,
             line_height,
             explain,
+            clamped,
         })
     }
 
-    /// Creates a named range over part of a block's text.
+    /// Creates a persistent range over part of a block's text.
     pub fn add_range(
         &self,
         node: NodeId,
         bytes: Range<usize>,
         policy: RangePolicy,
     ) -> Result<RangeId, DocError> {
+        if bytes.start > bytes.end {
+            return Err(reprise_text::TextError::BadRange(bytes).into());
+        }
         let text = self.block(node)?.text;
         let start = text.anchor(bytes.start, policy.start)?;
         let end = text.anchor(bytes.end, policy.end)?;
-        let ranges = self.map("ranges");
-        let id = self.new_id(&ranges, "r");
-        let map = ranges.insert_container(&id, LoroMap::new())?;
-        map.insert("node", node.to_string())?;
-        map.insert("start", start.encode())?;
-        map.insert("end", end.encode())?;
+        let tree = self.tree("ranges");
+        let id = tree.create(None)?;
+        let meta = tree.get_meta(id)?;
+        meta.insert("node", node.to_string())?;
+        meta.insert("start", start.encode())?;
+        meta.insert("end", end.encode())?;
+        let empty = match policy.empty {
+            Empty::Missing => "missing",
+            Empty::Keep => "keep",
+        };
+        meta.insert("empty", empty)?;
         Ok(RangeId(id))
     }
 
-    pub fn resolve_range(&self, id: &RangeId) -> RangeState {
-        let Some(ValueOrContainer::Container(Container::Map(map))) = self.map("ranges").get(&id.0)
-        else {
+    /// Where a range is now. A range whose ends have crossed (possible after
+    /// concurrent edits) is treated as empty at its start.
+    pub fn resolve_range(&self, id: RangeId) -> RangeState {
+        let tree = self.tree("ranges");
+        if !self.live(&tree, id.0) {
+            return RangeState::Missing { node: None };
+        }
+        let Ok(meta) = tree.get_meta(id.0) else {
             return RangeState::Missing { node: None };
         };
-        let node = get_str(&map, "node").and_then(|s| NodeId::parse(&s));
-        let anchor = |key| match map.get(key) {
+        let node = get_str(&meta, "node").and_then(|s| NodeId::parse(&s));
+        let anchor = |key| match meta.get(key) {
             Some(ValueOrContainer::Value(LoroValue::Binary(b))) => Anchor::decode(&b),
             _ => None,
         };
+        let keep_empty = get_str(&meta, "empty").as_deref() == Some("keep");
         let (Some(node), Some(start), Some(end)) = (node, anchor("start"), anchor("end")) else {
             return RangeState::Missing { node };
         };
-        if self.block(node).is_err() {
+        let Ok(block) = self.block(node) else {
+            return RangeState::Missing { node: Some(node) };
+        };
+        let (Ok(s), Ok(e)) = (block.text.resolve(&start), block.text.resolve(&end)) else {
+            return RangeState::Missing { node: Some(node) };
+        };
+        let bytes = s.offset()..e.offset().max(s.offset());
+        if bytes.is_empty() && !keep_empty {
             return RangeState::Missing { node: Some(node) };
         }
-        let resolve = |a: &Anchor| reprise_text::resolve(&self.doc, a).ok();
-        match (resolve(&start), resolve(&end)) {
-            (Some(s), Some(e)) if s.offset() < e.offset() => {
-                let bytes = s.offset()..e.offset();
-                if matches!((s, e), (Resolved::Live(_), Resolved::Live(_))) {
-                    RangeState::Valid { node, bytes }
-                } else {
-                    RangeState::Rebound { node, bytes }
-                }
-            }
-            _ => RangeState::Missing { node: Some(node) },
+        if matches!((s, e), (Resolved::Live(_), Resolved::Live(_))) {
+            RangeState::Valid { node, bytes }
+        } else {
+            RangeState::Rebound { node, bytes }
         }
     }
 
-    pub fn add_relation(&self, relation: &Relation) -> Result<RelationId, DocError> {
-        let relations = self.map("relations");
-        let id = self.new_id(&relations, "rel");
+    /// Adds a relation after checking it against its schema.
+    pub fn add_relation(
+        &self,
+        schemas: &SchemaRegistry,
+        relation: &Relation,
+    ) -> Result<RelationId, DocError> {
+        schemas.validate(relation)?;
+        let tree = self.tree("relations");
+        let id = tree.create(None)?;
         let json = serde_json::to_string(relation).expect("relations serialize");
-        relations.insert(&id, json)?;
+        tree.get_meta(id)?.insert("json", json)?;
         Ok(RelationId(id))
     }
 
-    /// Relations in ID order. Unreadable entries are skipped, not fatal.
-    pub fn relations(&self) -> Vec<(RelationId, Relation)> {
-        let map = self.map("relations");
-        let mut out: Vec<_> = map
-            .keys()
-            .filter_map(|k| {
-                let json = get_str(&map, &k)?;
-                Some((RelationId(k.to_string()), serde_json::from_str(&json).ok()?))
-            })
+    /// Deletes a relation, leaving a tombstone.
+    pub fn delete_relation(&self, id: RelationId) -> Result<(), DocError> {
+        Ok(self.tree("relations").delete(id.0)?)
+    }
+
+    /// Live relations in ID order. Each is `Err` with its stored text when it
+    /// can't be read, for example because a newer engine wrote it; it is kept
+    /// in the document either way (34).
+    pub fn relations(&self) -> Vec<(RelationId, Result<Relation, String>)> {
+        let tree = self.tree("relations");
+        let mut ids: Vec<TreeID> = tree
+            .nodes()
+            .into_iter()
+            .filter(|&id| self.live(&tree, id))
             .collect();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out
+        ids.sort();
+        ids.into_iter()
+            .map(|id| {
+                let json = tree
+                    .get_meta(id)
+                    .ok()
+                    .and_then(|m| get_str(&m, "json"))
+                    .unwrap_or_default();
+                let parsed = serde_json::from_str(&json).map_err(|_| json);
+                (RelationId(id), parsed)
+            })
+            .collect()
     }
 }
 
@@ -513,6 +482,14 @@ fn get_str(map: &LoroMap, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relation::builtin::FOLLOW;
+
+    fn follow(owner: NodeId, range: RangeId) -> Relation {
+        Relation::new(FOLLOW).owned_by(owner).target(
+            "line",
+            Target::Layout(LayoutQuery::LineContaining { range }),
+        )
+    }
 
     #[test]
     fn styles_inherit_and_override() {
@@ -564,7 +541,7 @@ mod tests {
         let text = doc.block(p).unwrap().text;
         text.insert(0, "zero ").unwrap();
         assert_eq!(
-            doc.resolve_range(&r),
+            doc.resolve_range(r),
             RangeState::Valid {
                 node: p,
                 bytes: 9..12
@@ -572,14 +549,43 @@ mod tests {
         );
         text.delete(11..12).unwrap(); // the last character of "two"
         assert_eq!(
-            doc.resolve_range(&r),
+            doc.resolve_range(r),
             RangeState::Rebound {
                 node: p,
                 bytes: 9..11
             }
         );
         text.delete(9..11).unwrap();
-        assert_eq!(doc.resolve_range(&r), RangeState::Missing { node: Some(p) });
+        assert_eq!(doc.resolve_range(r), RangeState::Missing { node: Some(p) });
+    }
+
+    #[test]
+    fn point_ranges_survive_being_emptied() {
+        let doc = Document::new(1).unwrap();
+        let p = doc
+            .append_block(BlockKind::Paragraph, "body", "see note")
+            .unwrap();
+        let marker = doc.add_range(p, 3..3, RangePolicy::POINT).unwrap();
+        assert_eq!(
+            doc.resolve_range(marker),
+            RangeState::Valid {
+                node: p,
+                bytes: 3..3
+            }
+        );
+        let fixed = doc.add_range(p, 0..3, RangePolicy::FIXED).unwrap();
+        doc.block(p).unwrap().text.delete(0..3).unwrap();
+        assert_eq!(
+            doc.resolve_range(fixed),
+            RangeState::Missing { node: Some(p) }
+        );
+        assert_eq!(
+            doc.resolve_range(marker),
+            RangeState::Rebound {
+                node: p,
+                bytes: 0..0
+            }
+        );
     }
 
     #[test]
@@ -591,12 +597,13 @@ mod tests {
         let b = doc.append_block(BlockKind::Paragraph, "body", "b").unwrap();
         assert_ne!(a, b);
         assert!(doc.block(a).is_err());
-        assert_eq!(doc.resolve_range(&r), RangeState::Missing { node: Some(a) });
+        assert_eq!(doc.resolve_range(r), RangeState::Missing { node: Some(a) });
     }
 
     #[test]
-    fn relations_round_trip() {
+    fn relations_round_trip_and_ids_are_never_reused() {
         let doc = Document::new(1).unwrap();
+        let schemas = SchemaRegistry::builtin();
         let p = doc
             .append_block(BlockKind::Paragraph, "body", "text")
             .unwrap();
@@ -604,12 +611,70 @@ mod tests {
             .append_block(BlockKind::Annotation, "note", "note")
             .unwrap();
         let r = doc.add_range(p, 0..4, RangePolicy::FIXED).unwrap();
-        let rel = Relation {
-            kind: RelationKind::Follow,
-            source: n,
-            target: Target::LineContaining { range: r },
+        let rel = follow(n, r).param("offset", Param::Length(LengthExpr::Em(500)));
+        let id = doc.add_relation(&schemas, &rel).unwrap();
+        assert_eq!(doc.relations(), vec![(id, Ok(rel.clone()))]);
+
+        doc.delete_relation(id).unwrap();
+        assert!(doc.relations().is_empty());
+        let again = doc.add_relation(&schemas, &rel).unwrap();
+        assert_ne!(
+            again, id,
+            "a deleted relation's ID is never handed out again"
+        );
+        assert_eq!(RelationId::parse(&again.to_string()), Some(again));
+    }
+
+    #[test]
+    fn relations_are_checked_against_their_schema() {
+        let doc = Document::new(1).unwrap();
+        let schemas = SchemaRegistry::builtin();
+        let p = doc
+            .append_block(BlockKind::Paragraph, "body", "text")
+            .unwrap();
+        let r = doc.add_range(p, 0..4, RangePolicy::FIXED).unwrap();
+        let line = Target::Layout(LayoutQuery::LineContaining { range: r });
+        let err = |rel: Relation| match doc.add_relation(&schemas, &rel) {
+            Err(DocError::Schema(e)) => e,
+            other => panic!("expected a schema error, got {other:?}"),
         };
-        let id = doc.add_relation(&rel).unwrap();
-        assert_eq!(doc.relations(), vec![(id, rel)]);
+
+        let unowned = Relation::new(FOLLOW).target("line", line.clone());
+        assert!(matches!(err(unowned), SchemaError::MissingOwner { .. }));
+        let two = follow(p, r).target("line", line.clone());
+        assert!(matches!(
+            err(two),
+            SchemaError::Cardinality { count: 2, .. }
+        ));
+        let wrong_class = Relation::new(FOLLOW)
+            .owned_by(p)
+            .target("line", Target::Range(r));
+        assert!(matches!(err(wrong_class), SchemaError::TargetClass { .. }));
+        let stray_role = follow(p, r).target("other", line);
+        assert!(matches!(err(stray_role), SchemaError::UnknownRole { .. }));
+        let bad_param = follow(p, r).param("offset", Param::Bool(true));
+        assert!(matches!(err(bad_param), SchemaError::ParamKind { .. }));
+        let unknown = Relation::new(SchemaId::new("someone.else")).owned_by(p);
+        assert!(matches!(err(unknown), SchemaError::Unknown(_)));
+        assert!(doc.relations().is_empty(), "nothing invalid was stored");
+    }
+
+    #[test]
+    fn unreadable_relations_are_kept_and_reported() {
+        let doc = Document::new(1).unwrap();
+        let tree = doc.tree("relations");
+        let id = tree.create(None).unwrap();
+        tree.get_meta(id)
+            .unwrap()
+            .insert("json", r#"{"schema":"future.kind","shape":"unknown"}"#)
+            .unwrap();
+        let relations = doc.relations();
+        assert_eq!(relations.len(), 1);
+        assert!(
+            relations[0]
+                .1
+                .as_ref()
+                .is_err_and(|raw| raw.contains("future.kind"))
+        );
     }
 }

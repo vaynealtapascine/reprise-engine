@@ -9,5 +9,6 @@ publish.workspace = true
 [dependencies]
 reprise-geom.workspace = true
 reprise-font.workspace = true
+reprise-diag.workspace = true
 harfrust.workspace = true
 serde.workspace = true

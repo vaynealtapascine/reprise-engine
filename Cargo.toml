@@ -10,6 +10,7 @@ repository = "https://github.com/vaynealtapascine/reprise-engine"
 publish = false
 
 [workspace.dependencies]
+reprise-diag = { path = "crates/diag" }
 reprise-geom = { path = "crates/geom" }
 reprise-text = { path = "crates/text" }
 reprise-doc = { path = "crates/doc" }
@@ -18,6 +19,7 @@ reprise-shape = { path = "crates/shape" }
 reprise-compose = { path = "crates/compose" }
 reprise-layout = { path = "crates/layout" }
 reprise-display = { path = "crates/display" }
+reprise-fixtures = { path = "crates/fixtures" }
 
 loro = "1.16"
 thiserror = "2"

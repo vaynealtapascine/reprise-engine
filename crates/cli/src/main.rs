@@ -26,8 +26,8 @@ fn main() -> ExitCode {
 }
 
 fn run_spike(out: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let engine = reprise_cli::engine();
-    let spike = reprise_cli::spike_document()?;
+    let engine = reprise_fixtures::engine();
+    let spike = reprise_fixtures::spike::document()?;
 
     let before = engine.layout(&spike.doc);
     reprise_cli::write_outputs(&engine, &before, out, "before")?;
@@ -36,10 +36,13 @@ fn run_spike(out: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     reprise_cli::write_outputs(&engine, &after, out, "after")?;
 
     for (name, snapshot) in [("before", &before), ("after", &after)] {
-        let note = snapshot.block(spike.hallway_note).map(|b| b.frame.origin.y);
+        let note = snapshot
+            .line_containing(spike.hallway_note, 0)
+            .and_then(|l| snapshot.line_bounds(l))
+            .map(|(_, r)| r.origin.y);
         println!("{name}: hallway note at y = {note:?}");
         for d in &snapshot.diagnostics {
-            println!("  diagnostic: {}", d.message);
+            println!("  {:?} {}: {}", d.severity, d.code, d.message);
         }
     }
     println!("wrote {}", out.display());

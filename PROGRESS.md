@@ -2,6 +2,55 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-03: contracts frozen (decision 40, step 2)
+
+**Done.** The interfaces that parallel workstreams build against are frozen and documented
+in [docs/contracts.md](docs/contracts.md):
+
+-   `reprise-diag`: diagnostics with stable codes.
+-   `reprise-text`: navigation positions in `segment`, plus a `POINT` range policy.
+-   `reprise-doc::relation`: a `SchemaRegistry` of registered `RelationSchema`s, replacing
+    the old enums.
+-   `reprise-doc::style`: clamping of negative used lengths.
+-   `reprise-shape`: itemisation with fallback chains, shaping, reshaping and visual order.
+-   `reprise-compose`: geometry providers that can return several intervals, skip or end.
+    Composers now carry explanations.
+-   `reprise-display`: groups with transforms and clips, paths, and source text on glyph runs.
+-   `reprise-layout`: a snapshot with pages and frames, frame-relative lines, and a query API.
+-   `geom`: saturating fixed-point arithmetic, `Fixed` and `Matrix`.
+-   `reprise-fixtures`: the spike document and nine hostile fixtures, with an invariant suite
+    run on every platform.
+
+The layout crate is split into `flow`, `relations`, `snapshot` and `display` modules.
+
+**Picked up from an earlier session.** That session wrote most of the code but stopped
+before the hostile suite passed. Finishing it found and fixed:
+
+-   **Upward layout:** negative sizes and line heights were laid out upwards, which put the
+    following paragraph about 2 million points above the page with no diagnostic. Used
+    lengths are now clamped and reported with `layout.style-clamped`. The suite also checks
+    that no line sits above its frame.
+-   **Deleted owners:** a relation whose owner note was deleted was reported as an `Error`
+    (`owner-not-placeable`). Owned relations now go with their owner: status `OwnerDeleted`,
+    with an `Info` diagnostic `relation.owner-deleted`. `owner-not-placeable` is still
+    covered, by a relation that tries to place a paragraph.
+-   **Lint:** clippy errors, which the earlier session hadn't run.
+
+**The spike snapshots changed only in structure.** Every line break and position is the
+same. Lines are now relative to their frame, which sits at the 36pt top margin.
+
+**Still open inside the contracts** (each is an extension point, not a contract change):
+
+-   No bidi algorithm or script itemisation yet.
+-   Only the `Greedy` composer.
+-   Only `LineContaining` as a layout query.
+-   Nothing produces `Ambiguous` yet.
+-   No `Structural` or `Snapshot` targets.
+-   The PDF backend doesn't pass source text on (ToUnicode).
+-   No expressions beyond `pt` and `em`.
+
+**Next.** Phase 2: parallel workstreams. The orchestrator prompt lists them.
+
 ## 2026-10-03: end-to-end spike (decision 40, step 1)
 
 **Done.** The spike from decision 40 works end to end:
