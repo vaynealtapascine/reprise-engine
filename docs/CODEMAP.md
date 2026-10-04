@@ -11,7 +11,7 @@ interfaces.
 | `text` | `src/lib.rs` | `Text` (byte offsets over Loro), `Anchor`, `Affinity`, `RangePolicy`, `Resolved` | 09, 10, 12 |
 |  | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
 | `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas | 05–07, 15, 29 |
-|  | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13, 14, 15, 27, 35 |
+|  | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`, `reprise.reading-order`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13, 14, 15, 27, 35 |
 |  | `src/structure.rs` | Tree navigation, structural queries (`evaluate`), succession links (`supersede`, `succession`) | 06, 13, 15 |
 |  | `src/history.rs` | `DocumentAt` (a past version), `HistoryCache`, snapshot resolution, `compact_history` | 07, 13 |
 |  | `src/resolve.rs` | `resolve_target` / `resolve_relation`: any non-layout target, with `OnTargetDeleted` applied from tombstones; `dead_relations` | 13, 14, 15 |
@@ -41,7 +41,7 @@ interfaces.
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, ordered run addresses and extraction spans, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
 |  | `tests/pdf_text.rs` | Ordered PDF extraction through rotated, mirrored, vertical and spiral layouts; generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
-| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `medium` and `FlowSettings`), `Engine::layout` | 24, 26, 38 |
+| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `medium` and `FlowSettings`), `Engine::layout`, geometry and reading module wiring | 20, 24, 26, 33, 38 |
 |  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Resolution`, `Diagnostic`, queries | 05, 13, 37 |
 |  | `src/geometry.rs`, `src/GEOMETRY.md` | Exact authored frame transforms, logical writing axes, bounded spiral expansion, inverse and path diagnostics | 19, 20, 37, 38 |
@@ -53,11 +53,11 @@ interfaces.
 |  | `src/relations/follow.rs` | `reprise.follow`: placing a block in the margin frame of its target line's page | 13, 15, 24 |
 |  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; shared by `follow` and other relation behaviours | 13, 14, 15 |
 |  | `src/query.rs` | Layout queries added by relations (`first_line`, `frame_of`, `answer`, ...) | 13, 16 |
-|  | `src/display.rs` | `to_display_list(s)` and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
+|  | `src/display.rs` | `to_display_list(s)`, ordered PDF run addresses and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
 |  | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases | 17, 18, 37, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases; transformed RTL, writing modes, spirals, reading cycles and degenerate/extreme transforms | 17, 18, 20, 33, 37, 39 |
 |  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |

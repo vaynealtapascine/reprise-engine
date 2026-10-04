@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 38);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 44);
 }
 
 hostile_tests!(
@@ -944,3 +944,12 @@ fn positioned_runs_tile_their_lines() {
     }
 }
 hostile_tests!(persistence_tombstones);
+
+hostile_tests!(
+    transformed_rtl,
+    vertical_rl,
+    spiral_text,
+    reading_cycle,
+    degenerate_transform,
+    rational_rotation_extreme
+);

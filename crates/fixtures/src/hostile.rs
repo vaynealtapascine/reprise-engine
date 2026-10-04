@@ -92,6 +92,12 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         style_fragment_basis()?,
         justified_bidi()?,
         persistence_tombstones()?,
+        transformed_rtl()?,
+        vertical_rl()?,
+        spiral_text()?,
+        reading_cycle()?,
+        degenerate_transform()?,
+        rational_rotation_extreme()?,
     ])
 }
 
@@ -1287,4 +1293,154 @@ pub fn persistence_tombstones() -> Result<Fixture, DocError> {
     doc.store_raw_page_template("future-unused", "{future:opaque}")?;
     doc.commit();
     Ok(Fixture::new("persistence_tombstones", doc, &[]))
+}
+
+pub fn transformed_rtl() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "reflected",
+        Dim::pt(220),
+        Dim::pt(55),
+        Dim::pt(210),
+        Dim::pt(100),
+    );
+    f.transform.rotation = reprise_doc::Rotation::Quarter(1);
+    f.transform.mirror_x = true;
+    f.transform.origin_x = Dim::pt(105);
+    f.transform.origin_y = Dim::pt(50);
+    doc.set_page_template(
+        &PageTemplate::new("reflected", Dim::pt(420), Dim::pt(360)).with_frame(f),
+    )?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "אבג The hall turns backwards. דהו A mirror keeps the words in order.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("transformed_rtl", doc, &[]))
+}
+
+pub fn vertical_rl() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "vertical",
+        Dim::pt(30),
+        Dim::pt(25),
+        Dim::pt(100),
+        Dim::pt(240),
+    );
+    f.writing_mode = reprise_doc::WritingMode::VerticalRl;
+    doc.set_page_template(
+        &PageTemplate::new("vertical", Dim::pt(180), Dim::pt(300)).with_frame(f),
+    )?;
+    doc.append_block(BlockKind::Paragraph, "body", "The columns descend, one after another, from the right edge of the page. The house is taller inside than outside. The next column is a step to the left.")?;
+    doc.commit();
+    Ok(Fixture::new("vertical_rl", doc, &[]))
+}
+
+pub fn spiral_text() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.define_style(
+        "spiral",
+        &Style {
+            size: Some(LengthExpr::Pt(Length::from_pt(5))),
+            line_height: Some(LengthExpr::Pt(Length::from_pt(6))),
+            ..Default::default()
+        },
+    )?;
+    let mut f = flow_frame(
+        "spiral",
+        Dim::pt(190),
+        Dim::pt(190),
+        Dim::pt(20),
+        Dim::pt(7),
+    );
+    f.path = Some(reprise_doc::Spiral {
+        radius: Dim::pt(56),
+        growth: Dim::pt(32),
+        start_millidegrees: 0,
+        sweep_millidegrees: 1_080_000,
+        segments: 96,
+    });
+    doc.set_page_template(&PageTemplate::new("spiral", Dim::pt(380), Dim::pt(380)).with_frame(f))?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "spiral",
+        &"the hall is a lie a door is a hall ".repeat(32),
+    )?;
+    doc.commit();
+    Ok(Fixture::new("spiral_text", doc, &[]))
+}
+
+pub fn reading_cycle() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let a = doc.append_block(BlockKind::Paragraph, "body", "First room.")?;
+    let b = doc.append_block(BlockKind::Paragraph, "body", "Second room.")?;
+    let c = doc.append_block(BlockKind::Paragraph, "body", "Third room.")?;
+    for (before, after) in [(a, b), (b, c), (c, a), (b, a)] {
+        doc.add_relation(
+            &SchemaRegistry::builtin(),
+            &reprise_doc::reading::before(before, after),
+        )?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "reading_cycle",
+        doc,
+        &["layout.reading-cycle", "layout.reading-conflict"],
+    ))
+}
+
+pub fn degenerate_transform() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "singular",
+        Dim::pt(30),
+        Dim::pt(30),
+        Dim::pt(180),
+        Dim::pt(150),
+    );
+    f.transform.rotation = reprise_doc::Rotation::Matrix {
+        xx: reprise_geom::Fixed::ZERO,
+        yx: reprise_geom::Fixed::ZERO,
+        xy: reprise_geom::Fixed::ZERO,
+        yy: reprise_geom::Fixed::ONE,
+    };
+    doc.set_page_template(
+        &PageTemplate::new("singular", Dim::pt(250), Dim::pt(210)).with_frame(f),
+    )?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Zero scale cannot erase this room. Identity is the reported fallback.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "degenerate_transform",
+        doc,
+        &["layout.transform-unusable"],
+    ))
+}
+
+pub fn rational_rotation_extreme() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "awkward",
+        Dim::pt(220),
+        Dim::pt(180),
+        Dim::pt(160),
+        Dim::pt(90),
+    );
+    f.transform.rotation = reprise_doc::Rotation::Direction {
+        dx: i32::MIN,
+        dy: i32::MAX - 123_456_789,
+    };
+    doc.set_page_template(&PageTemplate::new("awkward", Dim::pt(360), Dim::pt(360)).with_frame(f))?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "An exact irrational direction, authored with integers near their limits.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("rational_rotation_extreme", doc, &[]))
 }
