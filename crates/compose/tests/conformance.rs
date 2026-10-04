@@ -813,3 +813,53 @@ fn authored_lines_are_recoverable_from_fragments_for_every_turnover() {
         }
     }
 }
+
+/// Orchestrator review: incremental evaluation (workstream 6) can hand a
+/// composer shaping from an older revision of the text. Clusters may then lie
+/// past the end, inside characters, or describe different words. Every
+/// composer must still terminate without panicking and cover the text it was
+/// given contiguously from `start`.
+#[test]
+fn every_composer_survives_stale_shaping() {
+    let pairs = [
+        ("the quick brown fox jumps over the lazy dog", "the quick"),
+        ("office affinity", "é\u{301}ü — ✓"),
+        ("ab", "a much longer paragraph than the one that was shaped"),
+        ("", "text with no shaping at all"),
+        ("Zalgo Z\u{335}\u{322} text", "\n\u{2028}é"),
+    ];
+    for (old, new) in pairs {
+        let stale = Shaped::new(old);
+        let shaper = stale.shaper();
+        let shaped = shaper.shape();
+        let breaks = break_opportunities(new);
+        for (gname, geometry) in geometries() {
+            for composer in composers() {
+                let c = composer.compose(&ComposeRequest {
+                    text: new,
+                    shaped: &shaped,
+                    reshape: &shaper,
+                    breaks: &breaks,
+                    line_height: pt(12),
+                    geometry: geometry.as_ref(),
+                    start: 0,
+                    block_start: Length::ZERO,
+                });
+                let name = format!("{} / {old:?} -> {new:?} / {gname}", composer.name());
+                // A region that ends at once places nothing and says so.
+                assert!(
+                    !c.lines.is_empty() || c.rest == Some(0),
+                    "{name}: lines, or all of it left for the next region"
+                );
+                let mut at = 0;
+                for line in &c.lines {
+                    assert_eq!(line.text.start, at, "{name}: contiguous");
+                    assert!(line.text.end >= line.text.start, "{name}: ordered");
+                    assert!(new.is_char_boundary(line.text.end), "{name}: boundary");
+                    at = line.text.end;
+                }
+                assert_eq!(c.rest.unwrap_or(new.len()), at, "{name}: covers to rest");
+            }
+        }
+    }
+}
