@@ -60,6 +60,7 @@ interfaces.
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
+| `edit` | `tests/audit.rs` | Takeover blocker regressions: concurrent real-peer/trash identity collision, first-delete transaction undo and preservation of earlier undo history | 07, 29 |
 | `cli` | `src/lib.rs` | `write_outputs`: layout JSON, and display list JSON, SVG and PNG for every page, plus a PDF | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
