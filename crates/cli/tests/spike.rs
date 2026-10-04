@@ -132,10 +132,10 @@ fn every_backend_renders() {
     let snapshot = engine.layout(&document().unwrap().doc);
     let dir = std::env::temp_dir().join(format!("reprise-spike-{}", std::process::id()));
     reprise_cli::write_outputs(&engine, &snapshot, &dir, "spike").unwrap();
-    let svg = std::fs::read_to_string(dir.join("spike.svg")).unwrap();
+    let svg = std::fs::read_to_string(dir.join("spike.page-1.svg")).unwrap();
     assert!(svg.starts_with("<svg") && svg.contains("<use"));
     assert!(
-        std::fs::read(dir.join("spike.png"))
+        std::fs::read(dir.join("spike.page-1.png"))
             .unwrap()
             .starts_with(b"\x89PNG")
     );

@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      27
+      70
     ]
   ],
   "adapter": {
@@ -82,7 +82,7 @@ expression: snapshot.to_json()
   ],
   "blocks": [
     {
-      "node": "6@1",
+      "node": "8@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -99,9 +99,9 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 0
+            "end": 41
           },
-          "preview": "",
+          "preview": "Text with no frame of its own to flow in.",
           "rect": {
             "origin": {
               "x": 0,
@@ -111,51 +111,7 @@ expression: snapshot.to_json()
             "height": 13517
           },
           "baseline": 10707,
-          "width": 0,
-          "explanation": {
-            "reason": "end",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": []
-        }
-      ]
-    },
-    {
-      "node": "10@1",
-      "kind": "paragraph",
-      "style": {
-        "family": "Source Serif Pro",
-        "size": 11264,
-        "line_height": 13517,
-        "explain": {
-          "family": "default",
-          "line-height": "default",
-          "size": "style body"
-        }
-      },
-      "lines": [
-        {
-          "frame": 0,
-          "text": {
-            "start": 0,
-            "end": 3
-          },
-          "preview": "",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 21709
-            },
-            "width": 225280,
-            "height": 13517
-          },
-          "baseline": 32416,
-          "width": 0,
+          "width": 199359,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -169,7 +125,7 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 3
+                "end": 41
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -178,14 +134,14 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 7875
+              "width": 199359
             }
           ]
         }
       ]
     },
     {
-      "node": "17@1",
+      "node": "53@1",
       "kind": "annotation",
       "style": {
         "family": "Source Serif Pro",
@@ -202,9 +158,9 @@ expression: snapshot.to_json()
           "frame": 1,
           "text": {
             "start": 0,
-            "end": 0
+            "end": 7
           },
-          "preview": "",
+          "preview": "A note.",
           "rect": {
             "origin": {
               "x": 0,
@@ -214,7 +170,7 @@ expression: snapshot.to_json()
             "height": 10560
           },
           "baseline": 8241,
-          "width": 0,
+          "width": 26592,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -224,16 +180,31 @@ expression: snapshot.to_json()
             },
             "reshaped": false
           },
-          "runs": []
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 7
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 8448,
+              "level": 0,
+              "x": 0,
+              "width": 26592
+            }
+          ]
         }
       ]
     }
   ],
   "relations": [
     {
-      "id": "26@1",
+      "id": "69@1",
       "schema": "reprise.follow",
-      "owner": "17@1",
+      "owner": "53@1",
       "status": "valid",
       "applied": true,
       "targets": [
@@ -242,7 +213,7 @@ expression: snapshot.to_json()
           "status": "valid",
           "resolved": {
             "line": {
-              "node": "6@1",
+              "node": "8@1",
               "line": 0
             }
           }
@@ -250,5 +221,15 @@ expression: snapshot.to_json()
       ]
     }
   ],
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "layout.template-unusable",
+      "subject": {
+        "kind": "document"
+      },
+      "message": "page template `sidebar-only` can't be used: it has no frame with room for the main flow; the built-in one is used",
+      "bytes": null
+    }
+  ]
 }

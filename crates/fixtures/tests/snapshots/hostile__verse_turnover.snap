@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      208
+      210
     ]
   ],
   "adapter": {
@@ -15,16 +15,18 @@ expression: snapshot.to_json()
     "platform_independent": true
   },
   "composer": "authored-break",
-  "page": {
+  "medium": {
     "width": 430080,
-    "height": 307200,
-    "margin_top": 36864,
-    "margin_left": 36864,
-    "column_width": 112640,
-    "gutter": 18432,
-    "margin_column_width": 112640,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
     "paragraph_spacing": 8192,
     "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "narrow-verse",
+    "source": "document"
   },
   "pages": [
     {
@@ -35,6 +37,9 @@ expression: snapshot.to_json()
   "frames": [
     {
       "name": "main",
+      "role": {
+        "flow": "main"
+      },
       "page": 0,
       "to_page": {
         "xx": 65536,
@@ -55,6 +60,7 @@ expression: snapshot.to_json()
     },
     {
       "name": "margin",
+      "role": "margin",
       "page": 0,
       "to_page": {
         "xx": 65536,

@@ -14,6 +14,7 @@ use reprise_layout::Engine;
 
 pub mod hostile;
 pub mod spike;
+pub mod templates;
 
 /// The bundled test font: Source Serif Pro (OFL). It covers Latin only, so
 /// Hebrew, Arabic and emoji fall back to `.notdef` until more fonts are bundled.

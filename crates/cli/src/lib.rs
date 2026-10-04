@@ -5,9 +5,12 @@ use std::path::Path;
 
 use reprise_layout::{DisplayOptions, Engine, LayoutSnapshot};
 
-/// Writes every output format for one snapshot as `<dir>/<name>.*`: layout
-/// and display list JSON, plus SVG and PNG of the first page with the debug
-/// overlay, and a PDF of every page without it.
+/// Writes every output format for one snapshot into `dir`:
+///
+/// -   `<name>.layout.json`: the layout snapshot
+/// -   `<name>.page-<n>.display.json`, `.svg` and `.png` for every page, from 1,
+///     with the debug overlay
+/// -   `<name>.pdf`: every page, without the overlay
 pub fn write_outputs(
     engine: &Engine,
     snapshot: &LayoutSnapshot,
@@ -19,25 +22,24 @@ pub fn write_outputs(
         ..DisplayOptions::default()
     });
     let content: Vec<_> = pages.iter().map(|p| p.content_only()).collect();
-    let first = snapshot.to_display_list(
-        0,
-        DisplayOptions {
-            debug: true,
-            ..DisplayOptions::default()
-        },
-    );
     let fail = |e: &dyn std::fmt::Display| std::io::Error::other(e.to_string());
     std::fs::create_dir_all(dir)?;
     std::fs::write(dir.join(format!("{name}.layout.json")), snapshot.to_json())?;
-    std::fs::write(dir.join(format!("{name}.display.json")), first.to_json())?;
-    std::fs::write(
-        dir.join(format!("{name}.svg")),
-        reprise_display::svg::render(&first, &engine.fonts).map_err(|e| fail(&e))?,
-    )?;
-    std::fs::write(
-        dir.join(format!("{name}.png")),
-        reprise_display::png::render(&first, &engine.fonts, 3.0).map_err(|e| fail(&e))?,
-    )?;
+    for (index, page) in pages.iter().enumerate() {
+        let n = index + 1;
+        std::fs::write(
+            dir.join(format!("{name}.page-{n}.display.json")),
+            page.to_json(),
+        )?;
+        std::fs::write(
+            dir.join(format!("{name}.page-{n}.svg")),
+            reprise_display::svg::render(page, &engine.fonts).map_err(|e| fail(&e))?,
+        )?;
+        std::fs::write(
+            dir.join(format!("{name}.page-{n}.png")),
+            reprise_display::png::render(page, &engine.fonts, 3.0).map_err(|e| fail(&e))?,
+        )?;
+    }
     std::fs::write(
         dir.join(format!("{name}.pdf")),
         reprise_display::pdf::render(&content, &engine.fonts).map_err(|e| fail(&e))?,

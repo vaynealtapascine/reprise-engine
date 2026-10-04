@@ -26,6 +26,7 @@ pub mod context;
 pub mod expr;
 pub mod function;
 mod history;
+mod page;
 pub mod relation;
 #[cfg(test)]
 mod relation_tests;
@@ -38,6 +39,10 @@ pub use expr::{ComputedLength, Dependency, Expr};
 pub use function::FunctionRegistry;
 pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
+};
+pub use page::{
+    Basis, Dim, FrameRole, FrameTemplate, MAIN_FLOW, Medium, PageTemplate, StoredTemplate,
+    TemplateChoice,
 };
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,

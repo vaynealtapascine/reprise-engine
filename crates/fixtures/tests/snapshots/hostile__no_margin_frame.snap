@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      51
+      66
     ]
   ],
   "adapter": {
@@ -25,18 +25,18 @@ expression: snapshot.to_json()
     "annotation_spacing": 4096
   },
   "template": {
-    "name": "default",
-    "source": "builtin"
+    "name": "text-only",
+    "source": "document"
   },
   "pages": [
     {
-      "width": 430080,
-      "height": 307200
+      "width": 307200,
+      "height": 204800
     }
   ],
   "frames": [
     {
-      "name": "main",
+      "name": "column",
       "role": {
         "flow": "main"
       },
@@ -46,43 +46,22 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 36864,
-        "ty": 36864
+        "tx": 20480,
+        "ty": 20480
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 225280,
-        "height": 233472
-      }
-    },
-    {
-      "name": "margin",
-      "role": "margin",
-      "page": 0,
-      "to_page": {
-        "xx": 65536,
-        "yx": 0,
-        "xy": 0,
-        "yy": 65536,
-        "tx": 280576,
-        "ty": 36864
-      },
-      "rect": {
-        "origin": {
-          "x": 0,
-          "y": 0
-        },
-        "width": 112640,
-        "height": 233472
+        "width": 204800,
+        "height": 163840
       }
     }
   ],
   "blocks": [
     {
-      "node": "6@1",
+      "node": "8@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -99,19 +78,19 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 70
+            "end": 37
           },
-          "preview": "office Z̵̢̛̲ å̊ ‮abc office‬ 👩‍👩‍👧‍👦 end.",
+          "preview": "A paragraph whose note has no margin.",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 225280,
+            "width": 204800,
             "height": 13517
           },
           "baseline": 10707,
-          "width": 173909,
+          "width": 199491,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -125,7 +104,7 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 26
+                "end": 37
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -134,41 +113,54 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 69230
-            },
-            {
-              "range": {
-                "start": 26,
-                "end": 39
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 1,
-              "x": 69230,
-              "width": 48256
-            },
-            {
-              "range": {
-                "start": 39,
-                "end": 70
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 117486,
-              "width": 56423
+              "width": 199491
             }
           ]
         }
       ]
     }
   ],
-  "relations": [],
-  "diagnostics": []
+  "relations": [
+    {
+      "id": "65@1",
+      "schema": "reprise.follow",
+      "owner": "49@1",
+      "status": "valid",
+      "applied": false,
+      "targets": [
+        {
+          "role": "line",
+          "status": "valid",
+          "resolved": {
+            "line": {
+              "node": "8@1",
+              "line": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "relation.no-frame",
+      "subject": {
+        "kind": "relation",
+        "id": "65@1"
+      },
+      "message": "the target line's page has no margin frame; owner not placed",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.unplaced",
+      "subject": {
+        "kind": "node",
+        "id": "49@1"
+      },
+      "message": "no relation places this block; not drawn",
+      "bytes": null
+    }
+  ]
 }

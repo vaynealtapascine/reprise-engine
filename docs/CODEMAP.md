@@ -22,6 +22,7 @@ interfaces.
 |  | `src/function.rs` | `FunctionRegistry`, `PureFunction`, `Signature` and the built-in functions | 17, 36 |
 |  | `src/context.rs` | `ResolutionContext`, `Level`, `Basis`, definite, indefinite and unresolved bases | 18 |
 |  | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
+|  | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), their Loro storage and the built-in template | 05, 24, 34 |
 | `font` | `src/lib.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore` | 21, 22, 38 |
 | `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
 |  | `src/paragraph.rs` | `itemize` (fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
@@ -40,22 +41,26 @@ interfaces.
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
 |  | `tests/pdf_text.rs` | Generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
-| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`), `PageSettings`, `Engine::layout` | 24, 26 |
+| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `medium` and `FlowSettings`), `Engine::layout` | 24, 26, 38 |
 |  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Resolution`, `Diagnostic`, queries | 05, 13, 37 |
-|  | `src/flow.rs` | Pass 1: shaping, composition and stacking blocks in the main frame | 24 |
+|  | `src/template.rs` | Resolving the document's page template against the medium; falling back to the built-in one | 24, 34, 37, 38 |
+|  | `src/region.rs` | `Bounded`: any geometry provider, ended at a frame's depth | 23, 24 |
+|  | `src/flow.rs` | Pass 1: shaping, composing and threading paragraphs through the main flow's frames, page after page | 24 |
 |  | `src/relations/mod.rs` | Pass 2: dispatching relations on their schema | 13–15, 26 |
-|  | `src/relations/follow.rs` | `reprise.follow`: placing a block beside the line it follows | 13, 15 |
+|  | `src/relations/follow.rs` | `reprise.follow`: placing a block in the margin frame of its target line's page | 13, 15, 24 |
 |  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; how `follow` switches over is documented at the top | 13, 14, 15 |
 |  | `src/query.rs` | Layout queries added by relations (`first_line`, `frame_of`, `answer`, ...) | 13, 16 |
 |  | `src/display.rs` | `to_display_list(s)` and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
+|  | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
 |  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases | 17, 18, 37, 39 |
 |  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
-| `cli` | `src/lib.rs` | `write_outputs`: every output format for a snapshot | 32 |
+|  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
+| `cli` | `src/lib.rs` | `write_outputs`: layout JSON, and display list JSON, SVG and PNG for every page, plus a PDF | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
 
@@ -91,6 +96,10 @@ Other files:
         clamping it if negative values make no sense.
 -   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module
     (`layout/src/codes.rs` for layout) and to the table in `contracts.md`.
+-   **Add a page template feature (a frame role, a frame property):**
+    1.  Add it to `FrameTemplate` or `FrameRole` in `doc/src/page.rs`. Unknown fields make a
+        stored template unreadable on purpose, so an older engine reports it.
+    2.  Resolve it in `layout/src/template.rs` and give it behaviour in `flow.rs`.
 -   **Add a hostile fixture:**
     1.  Add a function in `fixtures/src/hostile.rs` and add it to `all()`.
     2.  Add a test in `fixtures/tests/hostile.rs`.

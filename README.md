@@ -16,8 +16,8 @@ It is written in Rust. The end-to-end spike (decision 40) runs with:
 cargo run -p reprise-cli -- spike out
 ```
 
-It writes the layout before and after an edit, as layout JSON, display list JSON, SVG,
-PNG and PDF.
+It writes the layout before and after an edit: layout JSON, then display list JSON, SVG
+and PNG for each page, and one PDF.
 
 The test fixture font is Source Serif Pro, under the SIL Open Font License; see
 [fixtures/fonts/](fixtures/fonts/).

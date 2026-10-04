@@ -11,14 +11,15 @@ use std::ops::Range;
 use reprise_compose::Explanation;
 use reprise_diag::{Code, Note, Severity};
 use reprise_doc::{
-    BlockKind, ComputedStyle, NodeId, RangeId, RelationId, Revision, SchemaId, SnapshotContent,
+    BlockKind, ComputedStyle, FrameRole, Medium, NodeId, RangeId, RelationId, Revision, SchemaId,
+    SnapshotContent,
 };
 use reprise_font::FaceId;
 use reprise_geom::{FrameSpace, Length, LineSpace, Matrix, PageSpace, Rect, Transform};
 use reprise_shape::{AdapterInfo, ShapedGlyph};
 use serde::Serialize;
 
-use crate::PageSettings;
+use crate::FlowSettings;
 
 /// Everything layout derived from one document revision. Can be thrown away
 /// and recomputed at any time (05).
@@ -27,7 +28,12 @@ pub struct LayoutSnapshot {
     pub revision: Revision,
     pub adapter: AdapterInfo,
     pub composer: String,
-    pub page: PageSettings,
+    /// What the document was laid out for: the viewport or the paper (38).
+    pub medium: Medium,
+    /// The engine settings that shaped the flow (38).
+    pub settings: FlowSettings,
+    /// The page template every page was made from.
+    pub template: TemplateUsed,
     pub pages: Vec<PageLayout>,
     pub frames: Vec<FrameLayout>,
     /// Blocks in the order layout placed them: flowed blocks in flow order,
@@ -35,6 +41,23 @@ pub struct LayoutSnapshot {
     pub blocks: Vec<BlockLayout>,
     pub relations: Vec<RelationLayout>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Which page template layout used, and where it came from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TemplateUsed {
+    pub name: String,
+    pub source: TemplateSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TemplateSource {
+    /// Stored in the document.
+    Document,
+    /// The engine's built-in template: the document has none, or its
+    /// template couldn't be used (a diagnostic says which).
+    Builtin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -46,8 +69,10 @@ pub struct PageLayout {
 /// A region that lines sit in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FrameLayout {
-    /// What the frame is for, such as `main` or `margin`.
+    /// The template's name for the frame, such as `main` or `margin`.
     pub name: String,
+    /// What the frame is for: which flow threads through it, or margin.
+    pub role: FrameRole,
     /// Index into [`LayoutSnapshot::pages`].
     pub page: usize,
     pub to_page: Transform<FrameSpace, PageSpace>,
@@ -238,6 +263,18 @@ impl LayoutSnapshot {
 
     pub fn frame(&self, index: usize) -> Option<&FrameLayout> {
         self.frames.get(index)
+    }
+
+    /// The indices of the frames on `page`, in the template's order.
+    pub fn frames_on(&self, page: usize) -> impl Iterator<Item = usize> + '_ {
+        (0..self.frames.len()).filter(move |&i| self.frames[i].page == page)
+    }
+
+    /// The first margin frame on `page`: where relations place blocks beside
+    /// the text.
+    pub fn margin_frame_on(&self, page: usize) -> Option<usize> {
+        self.frames_on(page)
+            .find(|&i| self.frames[i].role == FrameRole::Margin)
     }
 
     pub fn relation(&self, id: RelationId) -> Option<&RelationLayout> {
