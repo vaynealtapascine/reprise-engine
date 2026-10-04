@@ -568,3 +568,175 @@ fn two_peers_resolve_relations_identically_after_a_merge() {
     assert_eq!(x.to_json(), y.to_json());
     assert_eq!(of_schema(&x, &REFERENCE)[0].status, RelationStatus::Missing);
 }
+
+#[test]
+fn follow_accepts_previous_first_and_singleton_lines_queries() {
+    use reprise_doc::relation::builtin::FOLLOW;
+    for query in 0..3 {
+        let doc = Document::new(PEER).unwrap();
+        reprise_fixtures::spike::define_styles(&doc).unwrap();
+        let p = doc
+            .append_block(BlockKind::Paragraph, "body", OPENING)
+            .unwrap();
+        let note = doc
+            .append_block(BlockKind::Annotation, "note", "A note.")
+            .unwrap();
+        let e = engine();
+        let before = e.layout(&doc);
+        let last = before.block(p).unwrap().lines.last().unwrap().text.clone();
+        let range = doc
+            .add_range(p, last.start + 1..last.end, RangePolicy::FIXED)
+            .unwrap();
+        let q = match query {
+            0 => LayoutQuery::PreviousLine { range },
+            1 => LayoutQuery::FirstLine { node: p },
+            _ => LayoutQuery::LinesIn { range },
+        };
+        let id = doc
+            .add_relation(
+                &e.schemas,
+                &Relation::new(FOLLOW)
+                    .owned_by(note)
+                    .target("line", Target::Layout(q)),
+            )
+            .unwrap();
+        doc.commit();
+        let snapshot = e.layout(&doc);
+        let result = snapshot.relation(id).unwrap();
+        assert!(result.applied, "{result:?}");
+        assert_eq!(result.status, RelationStatus::Valid);
+        let n = snapshot.block(p).unwrap().lines.len();
+        let want = LineRef {
+            node: p,
+            line: match query {
+                0 => n - 2,
+                1 => 0,
+                _ => n - 1,
+            },
+        };
+        let resolved = &result.targets[0].resolved;
+        assert!(
+            resolved == &Some(Resolution::Line(want))
+                || resolved == &Some(Resolution::Lines(vec![want]))
+        );
+        assert_eq!(
+            snapshot.block(note).unwrap().lines[0].rect.origin.y,
+            snapshot.line(want).unwrap().rect.origin.y
+        );
+    }
+}
+
+#[test]
+fn follow_lines_across_frames_is_ambiguous_without_choosing_a_line() {
+    let fixture = hostile::follow_lines_across_frames().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let r = &snapshot.relations[0];
+    assert_eq!(r.status, RelationStatus::Ambiguous);
+    assert!(!r.applied);
+    let Some(Resolution::Lines(lines)) = &r.targets[0].resolved else {
+        panic!("all candidates recorded")
+    };
+    assert!(lines.len() > 6);
+    assert!(
+        lines
+            .windows(2)
+            .any(|p| snapshot.line(p[0]).unwrap().frame != snapshot.line(p[1]).unwrap().frame)
+    );
+    assert_eq!(
+        severity(&snapshot, "relation.ambiguous"),
+        vec![Severity::Warning]
+    );
+}
+
+#[test]
+fn follow_applies_each_deleted_target_policy() {
+    use reprise_doc::relation::builtin::{FOLLOW, follow};
+    for policy in [
+        OnTargetDeleted::Rebind,
+        OnTargetDeleted::KeepMissing,
+        OnTargetDeleted::Delete,
+    ] {
+        let doc = Document::new(PEER).unwrap();
+        reprise_fixtures::spike::define_styles(&doc).unwrap();
+        let p = doc
+            .append_block(BlockKind::Paragraph, "body", "Old line.")
+            .unwrap();
+        let successor = doc
+            .append_block(BlockKind::Paragraph, "body", "New line.")
+            .unwrap();
+        let note = doc
+            .append_block(BlockKind::Annotation, "note", "A note.")
+            .unwrap();
+        let mut e = engine();
+        let mut schema = follow();
+        schema.on_target_deleted = policy;
+        // Use a fresh registry so the built-in ID has the policy under test.
+        e.schemas = SchemaRegistry::default();
+        e.schemas.register(schema).unwrap();
+        let id = doc
+            .add_relation(
+                &e.schemas,
+                &Relation::new(FOLLOW)
+                    .owned_by(note)
+                    .target("line", Target::Layout(LayoutQuery::FirstLine { node: p })),
+            )
+            .unwrap();
+        doc.supersede(p, successor).unwrap();
+        doc.delete_block(p).unwrap();
+        doc.commit();
+        let snapshot = e.layout(&doc);
+        let r = snapshot.relation(id).unwrap();
+        match policy {
+            OnTargetDeleted::Rebind => {
+                assert_eq!(r.status, RelationStatus::Rebound);
+                assert!(r.applied);
+                assert_eq!(
+                    r.targets[0].resolved,
+                    Some(Resolution::Line(LineRef {
+                        node: successor,
+                        line: 0
+                    }))
+                );
+                assert_eq!(
+                    severity(&snapshot, "relation.rebound"),
+                    vec![Severity::Info]
+                );
+            }
+            OnTargetDeleted::KeepMissing => {
+                assert_eq!(r.status, RelationStatus::Missing);
+                assert!(!r.applied);
+                assert_eq!(
+                    severity(&snapshot, "relation.missing-target"),
+                    vec![Severity::Error]
+                );
+            }
+            OnTargetDeleted::Delete => {
+                assert_eq!(r.status, RelationStatus::Deleted);
+                assert!(!r.applied);
+                assert_eq!(
+                    severity(&snapshot, "relation.target-deleted"),
+                    vec![Severity::Info]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_follow_diagnostics_keep_their_codes_and_severities() {
+    let fixture = hostile::deleted_targets().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    assert_eq!(
+        severity(&snapshot, "relation.missing-target"),
+        vec![Severity::Error; 2]
+    );
+    assert_eq!(
+        severity(&snapshot, "relation.rebound"),
+        vec![Severity::Info]
+    );
+    assert_eq!(
+        severity(&snapshot, "relation.owner-not-placeable"),
+        vec![Severity::Error]
+    );
+    assert!(severity(&snapshot, "relation.self-reference").is_empty());
+}

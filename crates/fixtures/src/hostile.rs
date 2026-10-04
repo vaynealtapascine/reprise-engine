@@ -88,6 +88,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         concurrent_templates()?,
         no_margin_frame()?,
         bidi_line_override()?,
+        follow_lines_across_frames()?,
     ])
 }
 
@@ -1121,4 +1122,25 @@ pub fn bidi_line_override() -> Result<Fixture, DocError> {
     doc.append_block(BlockKind::Paragraph, "body", "אבג 123 אבג    \nאבג 456    ")?;
     doc.commit();
     Ok(Fixture::new("bidi_line_override", doc, &[]))
+}
+
+/// A follow target covers lines on both sides of a frame break. A required
+/// single-line role must report all candidates as ambiguous and place none.
+pub fn follow_lines_across_frames() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let text = long_text(1);
+    let p = doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    let note = doc.append_block(BlockKind::Annotation, "note", "Which column?")?;
+    let range = doc.add_range(p, 0..text.len(), RangePolicy::FIXED)?;
+    let relation = Relation::new(reprise_doc::relation::builtin::FOLLOW)
+        .owned_by(note)
+        .target("line", Target::Layout(LayoutQuery::LinesIn { range }));
+    doc.add_relation(&SchemaRegistry::builtin(), &relation)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "follow_lines_across_frames",
+        doc,
+        &["relation.ambiguous", "layout.unplaced"],
+    ))
 }

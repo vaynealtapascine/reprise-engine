@@ -73,7 +73,8 @@ pub(crate) fn run(
         if relation.schema == builtin::FOLLOW {
             follow.apply(
                 engine,
-                doc,
+                &mut resolver,
+                schema,
                 snapshot,
                 &mut pending,
                 id,

@@ -284,7 +284,7 @@ expression: snapshot.to_json()
         "kind": "relation",
         "id": "117@1"
       },
-      "message": "target range 107@1 lost part of its text; rebound",
+      "message": "target range lost part of its text; rebound",
       "bytes": null
     },
     {

@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 34);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 35);
 }
 
 hostile_tests!(
@@ -682,3 +682,5 @@ fn line_bidi_resets_trailing_spaces_and_preserves_advances() {
         }
     }
 }
+
+hostile_tests!(follow_lines_across_frames);
