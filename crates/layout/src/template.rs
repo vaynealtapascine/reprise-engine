@@ -14,7 +14,7 @@ use reprise_geom::{FrameSpace, Length, PageSpace, Point, Rect, Transform};
 use crate::{Diagnostic, Engine, Subject, TemplateSource, codes};
 
 /// A template frame on this medium. Position and size are in page space.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedFrame {
     pub name: String,
     pub role: FrameRole,
@@ -52,7 +52,7 @@ impl ResolvedFrame {
 }
 
 /// A page template on this medium: every page is made from it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedTemplate {
     pub name: String,
     pub source: TemplateSource,

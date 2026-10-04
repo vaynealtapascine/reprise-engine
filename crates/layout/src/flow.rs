@@ -35,6 +35,7 @@ use crate::{
 };
 
 /// A block composed but not yet placed.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Pending {
     pub block: BlockLayout,
     /// How far the block extends down the block axis.
@@ -50,83 +51,130 @@ pub(crate) fn run(
     snapshot: &mut LayoutSnapshot,
     plan: &Plan,
 ) -> Vec<Pending> {
-    let thread = template.main_thread();
-    let max_depth = thread
-        .iter()
-        .map(|&t| template.frames[t].depth)
-        .max()
-        .unwrap_or_default();
-    let thread_is_empty = thread.is_empty();
-    let mut flow = Flow {
-        engine,
-        template,
-        snapshot,
-        plan,
-        thread,
-        max_depth,
-        page_base: Vec::new(),
-        fills: Vec::new(),
-        page: 0,
-        pos: 0,
-        // No frame to flow through: unreachable, but nothing may panic.
-        limit_hit: thread_is_empty,
-        pending: Vec::new(),
-        region_owners: crate::regions::owners(engine, doc),
-    };
-    // Even an empty document gets a page.
-    flow.new_page();
-
+    let mut cursor = Cursor::new(engine, doc, template, snapshot, plan);
     for node in doc.blocks() {
-        match doc.table_role(node) {
-            Ok(Some(reprise_doc::TableRole::Table(columns))) => {
-                flow.table(doc, node, &columns);
-                continue;
-            }
-            Ok(Some(_)) | Err(_) => {
-                flow.snapshot.diagnostics.push(Diagnostic::new(
-                    Severity::Error,
-                    codes::TABLE_INVALID,
-                    Subject::Node(node),
-                    "unreadable or misplaced table container",
-                ));
-                continue;
-            }
-            Ok(None) => {}
-        }
-        let kind = match doc.block(node) {
-            Ok(b) => b.kind,
-            Err(e) => {
-                flow.snapshot.diagnostics.push(Diagnostic::new(
-                    Severity::Error,
-                    codes::MALFORMED_BLOCK,
-                    Subject::Node(node),
-                    e.to_string(),
-                ));
-                continue;
-            }
+        cursor = cursor.step(engine, doc, template, snapshot, plan, node, None);
+    }
+    cursor.finish(engine, template, snapshot, plan)
+}
+
+/// Owned continuation state; no borrowed snapshot survives a yield.
+#[derive(Clone, Default)]
+pub(crate) struct Cursor {
+    thread: Vec<usize>,
+    max_depth: Length,
+    page_base: Vec<usize>,
+    fills: Vec<Fill>,
+    page: usize,
+    pos: usize,
+    limit_hit: bool,
+    pending: Vec<Pending>,
+    region_owners: std::collections::BTreeSet<NodeId>,
+    previous: Option<NodeId>,
+}
+impl Cursor {
+    pub(crate) fn new(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+    ) -> Self {
+        let thread = template.main_thread();
+        let max_depth = thread
+            .iter()
+            .map(|&t| template.frames[t].depth)
+            .max()
+            .unwrap_or_default();
+        let thread_is_empty = thread.is_empty();
+        let mut flow = Flow {
+            engine,
+            evaluation: None,
+            previous: None,
+            template,
+            snapshot,
+            plan,
+            thread,
+            max_depth,
+            page_base: Vec::new(),
+            fills: Vec::new(),
+            page: 0,
+            pos: 0,
+            // No frame to flow through: unreachable, but nothing may panic.
+            limit_hit: thread_is_empty,
+            pending: Vec::new(),
+            region_owners: crate::regions::owners(engine, doc),
         };
-        match kind {
-            BlockKind::Paragraph => flow.paragraph(doc, node),
-            BlockKind::Annotation => {
-                if !flow.region_owners.contains(&node)
-                    && let Some(annotation) = flow.annotation(doc, node)
-                {
-                    flow.pending.push(annotation);
-                }
+        // Even an empty document gets a page.
+        flow.new_page();
+
+        flow.cursor()
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn step(
+        self,
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        node: NodeId,
+        evaluation: Option<&crate::incremental::Evaluation>,
+    ) -> Self {
+        let mut flow = self.restore(engine, template, snapshot, plan, evaluation);
+        flow.node(doc, node);
+        flow.previous = Some(node);
+        flow.cursor()
+    }
+    pub(crate) fn finish(
+        self,
+        engine: &Engine,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+    ) -> Vec<Pending> {
+        let mut flow = self.restore(engine, template, snapshot, plan, None);
+        while flow.snapshot.pages.len() < plan.pages {
+            if !flow.new_page() {
+                break;
             }
         }
+        flow.pending
     }
-    while flow.snapshot.pages.len() < plan.pages {
-        if !flow.new_page() {
-            break;
+    pub(crate) fn page(&self) -> usize {
+        self.page
+    }
+    fn restore<'a>(
+        self,
+        engine: &'a Engine,
+        template: &'a ResolvedTemplate,
+        snapshot: &'a mut LayoutSnapshot,
+        plan: &'a Plan,
+        evaluation: Option<&'a crate::incremental::Evaluation>,
+    ) -> Flow<'a> {
+        Flow {
+            engine,
+            template,
+            snapshot,
+            plan,
+            evaluation,
+            thread: self.thread,
+            max_depth: self.max_depth,
+            page_base: self.page_base,
+            fills: self.fills,
+            page: self.page,
+            pos: self.pos,
+            limit_hit: self.limit_hit,
+            pending: self.pending,
+            region_owners: self.region_owners,
+            previous: self.previous,
         }
     }
-    flow.pending
 }
 
 /// How much of a frame the flow has used.
-#[derive(Clone, Copy)]
-struct Fill {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Fill {
     /// Where the next block starts, spacing included.
     used: Length,
     /// Nothing is in the frame yet.
@@ -136,7 +184,9 @@ struct Fill {
 pub(crate) struct Flow<'a> {
     pub(crate) pending: Vec<Pending>,
     pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
+    pub(crate) previous: Option<NodeId>,
     pub(crate) engine: &'a Engine,
+    pub(crate) evaluation: Option<&'a crate::incremental::Evaluation>,
     pub(crate) template: &'a ResolvedTemplate,
     pub(crate) snapshot: &'a mut LayoutSnapshot,
     plan: &'a Plan,
@@ -155,6 +205,62 @@ pub(crate) struct Flow<'a> {
 }
 
 impl Flow<'_> {
+    fn node(&mut self, doc: &Document, node: NodeId) {
+        let flow = self;
+        match doc.table_role(node) {
+            Ok(Some(reprise_doc::TableRole::Table(columns))) => {
+                flow.table(doc, node, &columns);
+                return;
+            }
+            Ok(Some(_)) | Err(_) => {
+                flow.snapshot.diagnostics.push(Diagnostic::new(
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    Subject::Node(node),
+                    "unreadable or misplaced table container",
+                ));
+                return;
+            }
+            Ok(None) => {}
+        }
+        let kind = match doc.block(node) {
+            Ok(b) => b.kind,
+            Err(e) => {
+                flow.snapshot.diagnostics.push(Diagnostic::new(
+                    Severity::Error,
+                    codes::MALFORMED_BLOCK,
+                    Subject::Node(node),
+                    e.to_string(),
+                ));
+                return;
+            }
+        };
+        match kind {
+            BlockKind::Paragraph => flow.paragraph(doc, node),
+            BlockKind::Annotation => {
+                if !flow.region_owners.contains(&node)
+                    && let Some(annotation) = flow.annotation(doc, node)
+                {
+                    flow.pending.push(annotation);
+                }
+            }
+        }
+    }
+    fn cursor(self) -> Cursor {
+        Cursor {
+            thread: self.thread,
+            max_depth: self.max_depth,
+            page_base: self.page_base,
+            fills: self.fills,
+            page: self.page,
+            pos: self.pos,
+            limit_hit: self.limit_hit,
+            pending: self.pending,
+            region_owners: self.region_owners,
+            previous: self.previous,
+        }
+    }
+
     /// Makes the next page from the template, unless the limit is reached.
     fn new_page(&mut self) -> bool {
         let limit = self.engine.flow.max_pages.max(1) as usize;
@@ -216,11 +322,33 @@ impl Flow<'_> {
     }
 
     fn paragraph(&mut self, doc: &Document, node: NodeId) {
+        let Some(evaluation) = self.evaluation else {
+            self.paragraph_inner(doc, node);
+            return;
+        };
+        let key = crate::incremental::FlowKey::new(self, doc, node);
+        if let Some(delta) = evaluation.flow_hit(node, &key, self.engine) {
+            self.apply_delta(delta);
+            return;
+        }
+        let before = self.mark();
+        self.paragraph_inner(doc, node);
+        let delta = self.delta(before);
+        evaluation.flow_miss(node, key, &delta);
+    }
+    fn paragraph_inner(&mut self, doc: &Document, node: NodeId) {
         let engine = self.engine;
         let subject = Subject::Node(node);
         let mut preparation_notes = Vec::new();
         let mut ctx = self.paragraph_context();
-        let Some(mut prepared) = prepare(engine, doc, node, &ctx, &mut preparation_notes) else {
+        let Some(mut prepared) = prepare_cached(
+            engine,
+            doc,
+            node,
+            &ctx,
+            &mut preparation_notes,
+            self.evaluation,
+        ) else {
             self.snapshot.diagnostics.extend(preparation_notes);
             return;
         };
@@ -279,6 +407,7 @@ impl Flow<'_> {
                 y,
                 &subject,
                 &mut composition_notes,
+                self.evaluation,
             );
             if composed.lines.is_empty() {
                 self.snapshot.diagnostics.extend(composition_notes);
@@ -297,8 +426,14 @@ impl Flow<'_> {
                     // candidate starting frame, discarding provisional notes.
                     ctx = self.paragraph_context();
                     preparation_notes.clear();
-                    let Some(next) = prepare(engine, doc, node, &ctx, &mut preparation_notes)
-                    else {
+                    let Some(next) = prepare_cached(
+                        engine,
+                        doc,
+                        node,
+                        &ctx,
+                        &mut preparation_notes,
+                        self.evaluation,
+                    ) else {
                         self.snapshot.diagnostics.extend(preparation_notes);
                         return;
                     };
@@ -408,6 +543,26 @@ impl Flow<'_> {
     /// main frame's when the template has no margin frame (then no relation
     /// can place it, and that is reported when one tries).
     pub(crate) fn annotation(&mut self, doc: &Document, node: NodeId) -> Option<Pending> {
+        let Some(evaluation) = self.evaluation else {
+            return self.annotation_inner(doc, node);
+        };
+        let key = crate::incremental::AnnotationKey::new(doc, node, self.template);
+        if let Some((pending, notes)) = evaluation.annotation_hit(node, &key, self.engine) {
+            self.snapshot.diagnostics.extend(notes);
+            return pending;
+        }
+        let from = self.snapshot.diagnostics.len();
+        let pending = self.annotation_inner(doc, node);
+        let notes = self
+            .snapshot
+            .diagnostics
+            .get(from..)
+            .unwrap_or_default()
+            .to_vec();
+        evaluation.annotation_miss(node, key, pending.clone(), notes);
+        pending
+    }
+    fn annotation_inner(&mut self, doc: &Document, node: NodeId) -> Option<Pending> {
         let engine = self.engine;
         let subject = Subject::Node(node);
         let frame = self
@@ -425,7 +580,14 @@ impl Flow<'_> {
             .margin_width()
             .unwrap_or_else(|| frame.map_or(Length::ZERO, |f| f.width));
         let ctx = resolution_context(engine, self.template, frame, width);
-        let prepared = prepare(engine, doc, node, &ctx, &mut self.snapshot.diagnostics)?;
+        let prepared = prepare_cached(
+            engine,
+            doc,
+            node,
+            &ctx,
+            &mut self.snapshot.diagnostics,
+            self.evaluation,
+        )?;
         let composed = prepared.compose(
             engine,
             &Measure(width),
@@ -434,6 +596,7 @@ impl Flow<'_> {
             Length::ZERO,
             &subject,
             &mut self.snapshot.diagnostics,
+            self.evaluation,
         );
         if let Some(rest) = composed.rest {
             unplaced(
@@ -480,7 +643,127 @@ pub(crate) fn unplaced(diagnostics: &mut Vec<Diagnostic>, subject: &Subject, byt
     diagnostics.push(d);
 }
 
+pub(crate) fn prepare_cached(
+    engine: &Engine,
+    doc: &Document,
+    node: NodeId,
+    ctx: &ResolutionContext,
+    diagnostics: &mut Vec<Diagnostic>,
+    evaluation: Option<&crate::incremental::Evaluation>,
+) -> Option<Prepared> {
+    match evaluation {
+        Some(e) => e.prepare(engine, doc, node, ctx, diagnostics),
+        None => prepare(engine, doc, node, ctx, diagnostics),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PositionKey {
+    page: usize,
+    pos: usize,
+    limit_hit: bool,
+    pages: usize,
+    frames: usize,
+    fills: Vec<Fill>,
+}
+#[derive(Clone)]
+pub(crate) struct Delta {
+    pages: Vec<PageLayout>,
+    frames: Vec<FrameLayout>,
+    pub(crate) blocks: Vec<BlockLayout>,
+    diagnostics: Vec<Diagnostic>,
+    fills: Vec<Fill>,
+    page_base: Vec<usize>,
+    page: usize,
+    pos: usize,
+    limit_hit: bool,
+    tail: usize,
+}
+struct Mark {
+    pages: usize,
+    frames: usize,
+    blocks: usize,
+    diagnostics: usize,
+    tail: usize,
+}
+impl Flow<'_> {
+    pub(crate) fn position_key(&self) -> PositionKey {
+        let tail = self.page_base.last().copied().unwrap_or(0);
+        PositionKey {
+            page: self.page,
+            pos: self.pos,
+            limit_hit: self.limit_hit,
+            pages: self.snapshot.pages.len(),
+            frames: self.snapshot.frames.len(),
+            fills: self.fills.get(tail..).unwrap_or_default().to_vec(),
+        }
+    }
+    pub(crate) fn plan(&self) -> &Plan {
+        self.plan
+    }
+    fn mark(&self) -> Mark {
+        Mark {
+            pages: self.snapshot.pages.len(),
+            frames: self.snapshot.frames.len(),
+            blocks: self.snapshot.blocks.len(),
+            diagnostics: self.snapshot.diagnostics.len(),
+            tail: self.page_base.last().copied().unwrap_or(0),
+        }
+    }
+    fn delta(&self, before: Mark) -> Delta {
+        Delta {
+            pages: self
+                .snapshot
+                .pages
+                .get(before.pages..)
+                .unwrap_or_default()
+                .to_vec(),
+            frames: self
+                .snapshot
+                .frames
+                .get(before.frames..)
+                .unwrap_or_default()
+                .to_vec(),
+            blocks: self
+                .snapshot
+                .blocks
+                .get(before.blocks..)
+                .unwrap_or_default()
+                .to_vec(),
+            diagnostics: self
+                .snapshot
+                .diagnostics
+                .get(before.diagnostics..)
+                .unwrap_or_default()
+                .to_vec(),
+            fills: self.fills.get(before.tail..).unwrap_or_default().to_vec(),
+            page_base: self
+                .page_base
+                .get(before.pages..)
+                .unwrap_or_default()
+                .to_vec(),
+            page: self.page,
+            pos: self.pos,
+            limit_hit: self.limit_hit,
+            tail: before.tail,
+        }
+    }
+    fn apply_delta(&mut self, delta: Delta) {
+        self.snapshot.pages.extend(delta.pages);
+        self.snapshot.frames.extend(delta.frames);
+        self.snapshot.blocks.extend(delta.blocks);
+        self.snapshot.diagnostics.extend(delta.diagnostics);
+        self.fills.truncate(delta.tail);
+        self.fills.extend(delta.fills);
+        self.page_base.extend(delta.page_base);
+        self.page = delta.page;
+        self.pos = delta.pos;
+        self.limit_hit = delta.limit_hit;
+    }
+}
+
 /// A block shaped and ready to compose into one or more regions.
+#[derive(Clone)]
 pub(crate) struct Prepared {
     node: NodeId,
     kind: BlockKind,
@@ -512,6 +795,17 @@ pub(crate) fn prepare(
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Prepared> {
+    prepare_with(engine, doc, node, ctx, diagnostics, None)
+}
+
+pub(crate) fn prepare_with(
+    engine: &Engine,
+    doc: &Document,
+    node: NodeId,
+    ctx: &ResolutionContext,
+    diagnostics: &mut Vec<Diagnostic>,
+    evaluation: Option<&crate::incremental::Evaluation>,
+) -> Option<Prepared> {
     let subject = Subject::Node(node);
     let block = match doc.block(node) {
         Ok(block) => block,
@@ -525,6 +819,9 @@ pub(crate) fn prepare(
             return None;
         }
     };
+    if let Some(e) = evaluation {
+        e.style_resolution();
+    }
     let style = match doc.computed_style_with(node, ctx, &engine.functions) {
         Ok(s) => s,
         Err(e) => {
@@ -560,14 +857,32 @@ pub(crate) fn prepare(
         language: None,
         features: Vec::new(),
     }];
-    let itemized = itemize(
-        &ParagraphInput {
-            text: &text,
-            styles: &styles,
-            direction: None,
-        },
-        &engine.fonts,
-    );
+    let fallback = engine
+        .fonts
+        .by_family(&style.family)
+        .map(|f| (f.id().clone(), style.size));
+    let input = ParagraphInput {
+        text: &text,
+        styles: &styles,
+        direction: None,
+    };
+    let shape_key =
+        evaluation.map(|_| crate::incremental::ShapingKey::new(&input, fallback.clone()));
+    let shape_notes = diagnostics.len();
+    if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
+        && let Some((value, notes)) = e.shaping_hit(node, key)
+    {
+        diagnostics.extend(notes);
+        return value.map(|mut prepared| {
+            prepared.kind = block.kind;
+            prepared.style = style;
+            prepared
+        });
+    }
+    if let Some(e) = evaluation {
+        e.itemization();
+    }
+    let itemized = itemize(&input, &engine.fonts);
     diagnostics.extend(
         itemized
             .notes
@@ -575,7 +890,18 @@ pub(crate) fn prepare(
             .map(|n| Diagnostic::from_note(n, subject.clone())),
     );
     if itemized.items.is_empty() && !text.is_empty() {
+        if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
+            e.shaping_miss(
+                node,
+                shape_key,
+                None,
+                diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
+            );
+        }
         return None; // Nothing could be shaped; itemisation said why.
+    }
+    if let Some(e) = evaluation {
+        e.shape();
     }
     let shaped = Shaper {
         text: &text,
@@ -584,11 +910,7 @@ pub(crate) fn prepare(
         adapter: engine.shaper.as_ref(),
     }
     .shape();
-    let fallback = engine
-        .fonts
-        .by_family(&style.family)
-        .map(|f| (f.id().clone(), style.size));
-    Some(Prepared {
+    let prepared = Prepared {
         node,
         kind: block.kind,
         breaks: break_opportunities(&text),
@@ -599,7 +921,16 @@ pub(crate) fn prepare(
         base_level: itemized.base_level,
         shaped,
         fallback,
-    })
+    };
+    if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
+        e.shaping_miss(
+            node,
+            shape_key,
+            Some(prepared.clone()),
+            diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
+        );
+    }
+    Some(prepared)
 }
 
 impl Prepared {
@@ -619,7 +950,11 @@ impl Prepared {
         block_start: Length,
         subject: &Subject,
         diagnostics: &mut Vec<Diagnostic>,
+        evaluation: Option<&crate::incremental::Evaluation>,
     ) -> Composed {
+        if let Some(e) = evaluation {
+            e.composer_call();
+        }
         let shaper = Shaper {
             text: &self.text,
             items: &self.items,
