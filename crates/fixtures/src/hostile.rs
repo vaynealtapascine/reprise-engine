@@ -87,6 +87,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         column_storm()?,
         concurrent_templates()?,
         no_margin_frame()?,
+        bidi_line_override()?,
     ])
 }
 
@@ -1109,4 +1110,15 @@ pub fn no_margin_frame() -> Result<Fixture, DocError> {
         doc,
         &["relation.no-frame", "layout.unplaced"],
     ))
+}
+
+/// RLO continues across soft and forced line breaks, with hanging spaces.
+pub fn bidi_line_override() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    doc.append_block(BlockKind::Paragraph, "body",
+        "Latin \u{202e}office 123 office 456 office 789    \nmore reversed office 321    \u{202c} normal end.   ")?;
+    doc.append_block(BlockKind::Paragraph, "body", "אבג 123 אבג    \nאבג 456    ")?;
+    doc.commit();
+    Ok(Fixture::new("bidi_line_override", doc, &[]))
 }

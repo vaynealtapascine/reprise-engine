@@ -139,7 +139,7 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 30,
-                "end": 54
+                "end": 53
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -148,7 +148,21 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 2,
               "x": 100456,
-              "width": 122444
+              "width": 119819
+            },
+            {
+              "range": {
+                "start": 53,
+                "end": 54
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 220275,
+              "width": 2625
             }
           ]
         },

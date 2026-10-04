@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 33);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 34);
 }
 
 hostile_tests!(
@@ -650,4 +650,35 @@ fn style_bases_that_are_missing_or_indefinite_are_reported() {
         );
     }
     every_block_is_laid_out(&fixture);
+}
+
+hostile_tests!(bidi_line_override);
+
+#[test]
+fn line_bidi_resets_trailing_spaces_and_preserves_advances() {
+    let fixture = hostile::bidi_line_override().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    for (i, block) in snapshot.blocks.iter().enumerate() {
+        assert!(block.lines.len() > 1);
+        for line in &block.lines {
+            let end = line.text.start + block.text[line.text.clone()].trim_end().len();
+            for run in &line.runs {
+                assert_eq!(
+                    run.width,
+                    run.glyphs.iter().fold(Length::ZERO, |w, g| w + g.advance)
+                );
+                for glyph in &run.glyphs {
+                    if glyph.cluster as usize >= end {
+                        assert_eq!(
+                            run.level, i as u8,
+                            "trailing whitespace uses paragraph level"
+                        );
+                    }
+                }
+            }
+            for pair in line.runs.windows(2) {
+                assert_eq!(pair[1].x, pair[0].x + pair[0].width);
+            }
+        }
+    }
 }

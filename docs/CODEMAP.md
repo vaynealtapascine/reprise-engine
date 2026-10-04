@@ -28,7 +28,6 @@ interfaces.
 |  | `src/paragraph.rs` | `itemize` (fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
 |  | `src/unicode.rs`, `src/bidi-character-subset.txt` | ICU4X property adapter for UAX #9 (including N0) and UAX #24 script resolution; pinned Unicode conformance subset | 09, 22, 38 |
 |  | `src/line.rs` | Pure L1/L2 line reordering, preserving bidi groups across missing-font gaps | 20, 22, 30 |
-|  | `HANDOFF.md` | Unicode/version/cache bounds and instructions for layout's line-helper integration | 21, 22, 38 |
 | `compose` | `src/lib.rs` | `Composer` and `GeometryProvider` contracts, `Measure`, break opportunities, `LineFragment`, `Explanation` | 23 |
 |  | `src/greedy.rs` | The greedy composer, and the first-fit algorithm other composers fall back to | 23 |
 |  | `src/optimal.rs` | `Optimal`: Knuth–Plass total fit over variable geometry, ragged or justified; integer demerits, `Limits` | 19, 23, 39 |
@@ -46,7 +45,7 @@ interfaces.
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Resolution`, `Diagnostic`, queries | 05, 13, 37 |
 |  | `src/template.rs` | Resolving the document's page template against the medium; falling back to the built-in one | 24, 34, 37, 38 |
 |  | `src/region.rs` | `Bounded`: any geometry provider, ended at a frame's depth | 23, 24 |
-|  | `src/flow.rs` | Pass 1: shaping, composing and threading paragraphs through the main flow's frames, page after page | 24 |
+|  | `src/flow.rs` | Pass 1: shaping, line L1/L2 reordering, composing and threading paragraphs through the main flow's frames, page after page | 22, 24, 30 |
 |  | `src/relations/mod.rs` | Pass 2: dispatching relations on their schema | 13–15, 26 |
 |  | `src/relations/follow.rs` | `reprise.follow`: placing a block in the margin frame of its target line's page | 13, 15, 24 |
 |  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; how `follow` switches over is documented at the top | 13, 14, 15 |

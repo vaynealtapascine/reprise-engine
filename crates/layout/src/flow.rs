@@ -19,7 +19,9 @@ use reprise_diag::Severity;
 use reprise_doc::{BlockKind, ComputedStyle, Document, NodeId};
 use reprise_font::FaceId;
 use reprise_geom::{FrameSpace, Length, Point, Rect};
-use reprise_shape::{Item, ParagraphInput, ShapedText, Shaper, StyleRun, itemize, visual_order};
+use reprise_shape::{
+    Item, ParagraphInput, ShapedText, Shaper, StyleRun, itemize, reorder_line, visual_order,
+};
 
 use crate::region::Bounded;
 use crate::template::ResolvedTemplate;
@@ -328,6 +330,8 @@ struct Prepared {
     style: ComputedStyle,
     text: String,
     items: Vec<Item>,
+    levels: Vec<u8>,
+    base_level: u8,
     shaped: ShapedText,
     breaks: Vec<Break>,
     /// Empty lines take their vertical metrics from the style's own face.
@@ -415,6 +419,8 @@ fn prepare(
         style,
         text,
         items: itemized.items,
+        levels: itemized.levels,
+        base_level: itemized.base_level,
         shaped,
         fallback,
     })
@@ -461,7 +467,7 @@ impl Prepared {
             lines: composition
                 .lines
                 .into_iter()
-                .map(|l| line_layout(engine, &self.text, frame, l, self.fallback.as_ref()))
+                .map(|l| line_layout(engine, self, frame, l, subject, diagnostics))
                 .collect(),
             rest: composition.rest,
             block_end: composition.block_end,
@@ -481,11 +487,14 @@ impl Prepared {
 
 fn line_layout(
     engine: &Engine,
-    text: &str,
+    prepared: &Prepared,
     frame: usize,
     fragment: LineFragment,
-    fallback: Option<&(FaceId, Length)>,
+    subject: &Subject,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> LineLayout {
+    let text = &prepared.text;
+    let fallback = prepared.fallback.as_ref();
     // Half-leading: the tallest ascent and descent on the line are centred
     // in the line box.
     let metrics = |face: &FaceId, size: Length| {
@@ -509,12 +518,27 @@ fn line_layout(
     let descent = extents.iter().map(|e| e.1).max().unwrap_or_default();
     let half_leading = (fragment.height - ascent - descent).mul_ratio(1, 2);
 
-    let levels: Vec<u8> = fragment.runs.iter().map(|r| r.level).collect();
+    let visual_runs = match reorder_line(
+        text,
+        &fragment.runs,
+        &prepared.levels,
+        fragment.text.clone(),
+        prepared.base_level,
+    ) {
+        Ok(runs) => runs,
+        Err(note) => {
+            diagnostics.push(Diagnostic::from_note(note, subject.clone()));
+            let levels: Vec<u8> = fragment.runs.iter().map(|r| r.level).collect();
+            visual_order(&levels)
+                .into_iter()
+                .filter_map(|i| fragment.runs.get(i).cloned())
+                .collect()
+        }
+    };
     let mut x = fragment.available.start;
-    let runs = visual_order(&levels)
+    let runs = visual_runs
         .into_iter()
-        .map(|i| {
-            let run = &fragment.runs[i];
+        .map(|run| {
             let width = run.width();
             let placed = PositionedRun {
                 range: run.range.clone(),
@@ -558,4 +582,51 @@ pub(crate) fn place(mut block: BlockLayout, frame: usize, by: Length) -> BlockLa
         line.baseline += by;
     }
     block
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reprise_compose::{Adjustment, BreakReason, Explanation, Interval};
+    use reprise_font::FontStore;
+
+    #[test]
+    fn malformed_line_levels_report_and_fall_back_without_panicking() {
+        let engine = Engine::new(FontStore::default());
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "").unwrap();
+        let mut diagnostics = Vec::new();
+        let mut prepared = prepare(&engine, &doc, node, &mut diagnostics).unwrap();
+        prepared.levels = vec![127];
+        let fragment = LineFragment {
+            text: 0..0,
+            runs: Vec::new(),
+            width: Length::ZERO,
+            available: Interval::new(Length::MIN, Length::MAX),
+            line: 0,
+            block_offset: Length::ZERO,
+            height: Length::MAX,
+            explanation: Explanation {
+                reason: BreakReason::End,
+                score: None,
+                adjustment: Adjustment::default(),
+                reshaped: false,
+            },
+        };
+        let line = line_layout(
+            &engine,
+            &prepared,
+            0,
+            fragment,
+            &Subject::Node(node),
+            &mut diagnostics,
+        );
+        assert!(line.runs.is_empty());
+        let note = diagnostics
+            .iter()
+            .find(|d| d.code.as_str() == "shape.bad-line")
+            .unwrap();
+        assert_eq!(note.severity, Severity::Warning);
+        assert_eq!(note.subject, Subject::Node(node));
+    }
 }

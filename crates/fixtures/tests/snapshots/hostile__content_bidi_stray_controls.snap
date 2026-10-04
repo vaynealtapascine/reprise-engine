@@ -266,7 +266,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               0,
               255
             ],
-            "text": "an unterminated isolate ",
+            "text": "an unterminated isolate",
             "glyphs": [
               {
                 "id": 28,
@@ -474,14 +474,32 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 22,
                   "end": 23
                 }
-              },
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
               {
                 "id": 1,
                 "x": 220275,
                 "y": 10707,
                 "text": {
-                  "start": 23,
-                  "end": 24
+                  "start": 0,
+                  "end": 1
                 }
               }
             ],
