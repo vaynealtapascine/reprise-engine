@@ -1051,6 +1051,6 @@ pub mod builtin {
     }
 
     pub fn all() -> Vec<RelationSchema> {
-        vec![follow(), reference()]
+        vec![follow(), reference(), crate::reading::schema()]
     }
 }

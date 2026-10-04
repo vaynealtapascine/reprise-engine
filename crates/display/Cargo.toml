@@ -20,3 +20,5 @@ skrifa.workspace = true
 lopdf.workspace = true
 reprise-shape.workspace = true
 reprise-fixtures.workspace = true
+reprise-doc.workspace = true
+reprise-layout.workspace = true

@@ -919,6 +919,7 @@ mod tests {
         let frame = ResolvedFrame {
             name: "extreme".into(),
             role: reprise_doc::FrameRole::Margin,
+            transform: reprise_geom::Matrix::IDENTITY,
             x: Length::MIN,
             y: Length::MAX,
             width: Length::MAX,

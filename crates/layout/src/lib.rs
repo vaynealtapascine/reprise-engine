@@ -18,7 +18,9 @@
 pub mod codes;
 mod display;
 mod flow;
+pub mod geometry;
 mod query;
+pub mod reading;
 mod region;
 mod relations;
 mod snapshot;
