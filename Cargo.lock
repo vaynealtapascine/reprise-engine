@@ -1822,6 +1822,7 @@ dependencies = [
 name = "reprise-edit"
 version = "0.0.0"
 dependencies = [
+ "icu_properties",
  "reprise-doc",
  "reprise-fixtures",
  "reprise-font",

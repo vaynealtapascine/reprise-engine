@@ -241,6 +241,7 @@ fn a_half_invalid_transaction_is_refused_whole() {
 }
 
 #[test]
+#[allow(clippy::reversed_empty_ranges)] // reversed on purpose
 fn every_kind_of_refusal_is_typed() {
     let mut e = editor(Document::new(1).unwrap());
     let a = para(e.document(), "héllo");
