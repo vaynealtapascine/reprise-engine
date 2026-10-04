@@ -56,7 +56,7 @@ pub struct ImageHeader {
     pub format: ImageFormat,
     pub width: u32,
     pub height: u32,
-    /// Physical size in points, respecting PNG pHYs or JPEG JFIF density.
+    /// Physical size in points, respecting PNG pHYs or JPEG JFIF/EXIF density.
     /// Without absolute density, one pixel is 3/4 point (96 DPI).
     pub physical_width: Length,
     pub physical_height: Length,

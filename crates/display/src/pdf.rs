@@ -126,7 +126,7 @@ fn render_impl(
     doc.finish().map_err(|e| RenderError::Pdf(format!("{e:?}")))
 }
 
-/// A glyph-run address in an original display list, indexing Group children.
+/// A glyph-run or image address in an original display list, indexing Group children.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReadingRun {
     pub page: usize,
@@ -134,7 +134,7 @@ pub struct ReadingRun {
 }
 
 /// Emit text in explicit reading order, with a whole-run ActualText span.
-/// The order must address every glyph item exactly once. Nested transforms
+/// The order must address every glyph and image item exactly once. Nested transforms
 /// and clips are preserved. Non-text leaves paint first in original order.
 /// Pages stay in physical order; cross-page reversals return an error.
 /// This supplies extraction spans, not a PDF/UA semantic structure tree.

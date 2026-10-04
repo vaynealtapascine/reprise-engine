@@ -367,7 +367,7 @@ Codes in use:
     adds `render_with_assets`; PDF also adds `render_ordered_with_assets`. Original
     signatures use an empty store. Missing/unreadable raster data draw a gray box;
     SVG embeds header-readable bytes as data URIs, or draws the same missing box.
-    PNG/PDF pixel decoding is capped at 16 million pixels and 64 MiB source bytes.
+    PNG/PDF pixel decoding is capped at 16,777,216 pixels and 64 MiB source bytes.
     Layout scans at most 1 MiB and 512 header parts, stopping at IDAT/SOS.
     PNG pHYs and JPEG JFIF/primary-IFD EXIF densities set physical size; absence uses 96 DPI.
     Width-only/height-only sizes preserve physical aspect; excess inline size
@@ -682,3 +682,21 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
   PlainText, Html, Native and Pdf implement it. PDF requires current layout/fonts, wraps
   ordered rendering, and explicitly reports editable structure and relation graph loss,
   lack of PDF/UA structure, viewer-dependent text extraction, and layout omissions.
+
+## Image resource additions (34, 35)
+
+- `Package::new_with_resources`, `embed_document_images`,
+  `open_with_resources` and `OpenedFile::save_with_resources` add image resource
+  capture/restoration beside the existing font paths. All live authored image
+  references are captured, including images omitted by a page limit. Missing
+  bundles remain declared; unrelated/unknown assets survive.
+- `AssetAvailability::restore_images` installs only hash-verified bundled images.
+  External resources remain host needs; the library performs no I/O.
+- `NativeFragment::attach_images` finds selected image hashes and uses
+  `attach_asset`; `install_assets` verifies the fragment before modifying the
+  host store. Missing bytes retain their reference and report
+  `clipboard.resource-missing` (Warning).
+- `NativeWithAssets` and `PdfWithAssets` implement the existing `Exporter` trait
+  with a supplied `AssetStore`, leaving frozen `ExportOptions` unchanged.
+  `export.assets` reports actual image preservation; plain text preserves alt
+  text and reports pixel data dropped. Ordered PDF uses image ActualText.

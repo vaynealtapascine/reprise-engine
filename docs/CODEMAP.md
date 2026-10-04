@@ -85,6 +85,8 @@ interfaces.
 | `display` | `src/lib.rs`, `src/svg.rs`, `src/png.rs`, `src/pdf.rs`, `tests/images.rs`, `tests/pdf_text.rs` | Image display items, layers, data URIs, bounded raster blits, PDF image objects and ordered alt-text extraction; gray missing-resource boxes | 20, 32, 33, 37 |
 | `layout` | `src/lib.rs`, `src/snapshot.rs`, `src/floats.rs`, `src/notes.rs`, `src/regions.rs`, `src/incremental.rs`, `src/codes.rs` | Host asset input, positioned image boxes in flow/floats/notes, synchronized geometry, metadata cache invalidation and stable image warnings | 05, 24, 27, 37, 38 |
 | `doc` / `edit` | `doc/src/fragment.rs`, `edit/src/paste.rs` | Opaque image metadata retained through staged native paste and undo/redo | 07, 29, 34, 35 |
+| `format` | `src/image_assets.rs`, `src/package.rs`, `src/lib.rs` | Embed all authored image references, restore verified bytes, save edited packages with images without dropping other resources | 34 |
+| `clipboard` | `src/image_export.rs`, `src/native.rs`, `src/lib.rs`, `tests/images.rs` | Selected image assets through attach/install, asset-aware native and PDF exporters, package/copy/paste/export pipeline tests | 33, 34, 35 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/images.rs`, `tests/snapshots/hostile__*image*.snap` | Ten hostile image fixtures and paired geometry/content goldens, integer sizes, flow limits, region runaround and incremental parity | 19, 20, 24, 37, 38, 39 |
 | `cli` | `src/lib.rs` | Pass host assets to every headless output backend | 32, 34 |
 | inputs | `fixtures/images/` | Reproducible original CC0 PNG/JPEG pixels and oversized header, generator and provenance | 38, 39 |
@@ -166,7 +168,7 @@ undo, concurrent merging and input bounds. Clipboard is included in CI/WASM chec
 | | `src/json.rs` | Iterative manifest bounds and canonical metadata | 34, 37, 38 |
 | | `src/assets.rs` | Font pins (including versioned frontend declarations), bundled/external assets, hash validation, missing-font list, open-and-restore/store API and preservation of unknown declaration fields | 21, 34 |
 | | `src/migration.rs` | Pure checked N -> N+1 migrations, synthetic v0 | 34 |
-| | `src/package.rs` | Package save/open with additive used-layout-font embedding, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
+| | `src/package.rs` | Package save/open with additive used-layout-font and authored-image embedding, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
 | | `src/tests.rs`, `tests/roundtrip.rs`, `tests/fonts.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
 |  | `tests/fonts_damaged.rs` | Truncated and byte-flipped default faces register or refuse, and lay out, draw and subset without panicking | 21, 37 |
 | | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |

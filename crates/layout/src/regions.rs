@@ -180,7 +180,7 @@ pub(crate) fn allocate(
                 Severity::Error,
                 codes::RELATION_OWNER,
                 Subject::Relation(*id),
-                "region owner must be a unique annotation",
+                "region owner must be a unique annotation or image",
             ));
             return false;
         }
