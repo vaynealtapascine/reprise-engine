@@ -121,6 +121,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         plugin_fuel()?,
         plugin_extensions()?,
         clipboard_unicode_seams()?,
+        range_policy_endpoints()?,
     ])
 }
 
@@ -2008,4 +2009,40 @@ pub fn clipboard_unicode_seams() -> Result<Fixture, DocError> {
     doc.add_relation(&schemas, &reference(paragraph, Target::Node(other)))?;
     doc.commit();
     Ok(Fixture::new("clipboard_unicode_seams", doc, &[]))
+}
+
+/// Every authored endpoint policy on Unicode text and the ambiguous empty-text point.
+pub fn range_policy_endpoints() -> Result<Fixture, DocError> {
+    use reprise_doc::text::{Affinity, Empty};
+    let doc = document()?;
+    let node = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "office e\u{301} \u{5d0}\u{5d1}\u{5d2}",
+    )?;
+    let blank = doc.append_block(BlockKind::Paragraph, "body", "")?;
+    let len = doc.block(node)?.text.len();
+    for start in [Affinity::Before, Affinity::After] {
+        for end in [Affinity::Before, Affinity::After] {
+            for empty in [Empty::Keep, Empty::Missing] {
+                doc.add_range(node, 0..len, RangePolicy { start, end, empty })?;
+            }
+            doc.add_range(
+                blank,
+                0..0,
+                RangePolicy {
+                    start,
+                    end,
+                    empty: Empty::Keep,
+                },
+            )?;
+        }
+    }
+    doc.commit();
+    let replica = doc.fork(OTHER_PEER)?;
+    doc.merge(&replica)?;
+    replica.merge(&doc)?;
+    let mut fixture = Fixture::new("range_policy_endpoints", doc, &[]);
+    fixture.replica = Some(replica);
+    Ok(fixture)
 }
