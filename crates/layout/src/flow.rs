@@ -22,8 +22,8 @@ use reprise_doc::{BlockKind, ComputedStyle, Document, NodeId};
 use reprise_font::FaceId;
 use reprise_geom::{FrameSpace, Length, Point, Rect};
 use reprise_shape::{
-    Item, ParagraphInput, ShapedRun, ShapedText, Shaper, StyleRun, itemize, reorder_line,
-    visual_order,
+    Item, ParagraphInput, ShapedRun, ShapedText, Shaper, StyleRun, itemize, itemize_families,
+    reorder_line, visual_order,
 };
 
 use crate::region::Bounded;
@@ -852,22 +852,50 @@ pub(crate) fn prepare_with(
     let text = block.text.to_string();
     let styles = [StyleRun {
         range: 0..text.len(),
-        families: vec![style.family.clone()],
+        families: if style.families.is_empty() {
+            vec![style.family.clone()]
+        } else {
+            style.families.clone()
+        },
         size: style.size,
         language: None,
         features: Vec::new(),
     }];
-    let fallback = engine
-        .fonts
-        .by_family(&style.family)
-        .map(|f| (f.id().clone(), style.size));
+    let fallback = if style.families.is_empty() {
+        engine
+            .fonts
+            .by_family(&style.family)
+            .map(|f| (f.id().clone(), style.size))
+    } else {
+        let generic = style
+            .families
+            .last()
+            .and_then(|family| reprise_font::GenericFamily::parse(family))
+            .unwrap_or(reprise_font::GenericFamily::Serif);
+        Some((engine.fonts.generic(generic).id().clone(), style.size))
+    };
     let input = ParagraphInput {
         text: &text,
         styles: &styles,
         direction: None,
     };
-    let shape_key =
-        evaluation.map(|_| crate::incremental::ShapingKey::new(&input, fallback.clone()));
+    let shape_key = evaluation.map(|_| {
+        // The additive entry point changes fallback semantics even for the same
+        // list of names. Version only the owned cache representation; itemization
+        // and the adapter receive the original authored families unchanged.
+        let mut key_styles = styles.clone();
+        if !style.families.is_empty() {
+            for run in &mut key_styles {
+                run.families.insert(0, "\0reprise-font-chain1".into());
+            }
+        }
+        let key_input = ParagraphInput {
+            text: &text,
+            styles: &key_styles,
+            direction: input.direction,
+        };
+        crate::incremental::ShapingKey::new(&key_input, fallback.clone())
+    });
     let shape_notes = diagnostics.len();
     if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
         && let Some((value, notes)) = e.shaping_hit(node, key)
@@ -882,7 +910,11 @@ pub(crate) fn prepare_with(
     if let Some(e) = evaluation {
         e.itemization();
     }
-    let itemized = itemize(&input, &engine.fonts);
+    let itemized = if style.families.is_empty() {
+        itemize(&input, &engine.fonts)
+    } else {
+        itemize_families(&input, &engine.fonts)
+    };
     diagnostics.extend(
         itemized
             .notes

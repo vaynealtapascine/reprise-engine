@@ -2,8 +2,10 @@
 
 use std::ops::Range;
 
+use icu_properties::{CodePointSetData, props::DefaultIgnorableCodePoint};
+use icu_segmenter::GraphemeClusterSegmenter;
 use reprise_diag::Note;
-use reprise_font::FontStore;
+use reprise_font::{Descriptors, FontStore, GenericFamily};
 use reprise_geom::{InlineDirection, Length};
 
 use crate::{Feature, Item, Reshape, ShapeRequest, ShapedRun, ShapedText, ShapingAdapter, unicode};
@@ -16,6 +18,7 @@ pub mod codes {
     pub const FONT_FALLBACK: Code = Code::new("font.fallback");
     /// No family in the fallback chain was available; the text has no glyphs.
     pub const FONT_MISSING: Code = Code::new("font.missing");
+    pub const FONT_CHAIN_LIMIT: Code = Code::new("font.chain-limit");
     /// A style run was out of bounds, reversed, overlapping or not on
     /// character boundaries, and was ignored.
     pub const BAD_STYLE_RUN: Code = Code::new("shape.bad-style-run");
@@ -72,6 +75,22 @@ pub struct Itemized {
 /// L1/L2 with [`crate::reorder_line`] after composition. Scripts follow UAX #24
 /// contextual runs; all-Common/Inherited text uses ISO 15924 `Zyyy`.
 pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
+    itemize_inner(input, fonts, false)
+}
+
+/// Explicit family chains ending in a generic default. Serif is appended if
+/// absent. At most 64 named families are searched. Fallback keeps each grapheme
+/// together: first face covering every visible scalar, or the terminal class
+/// default with .notdef and a diagnostic. Legacy itemize retains its contract.
+pub fn itemize_families(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
+    itemize_inner(input, fonts, true)
+}
+
+fn itemize_inner(
+    input: &ParagraphInput<'_>,
+    fonts: &FontStore,
+    generic_defaults: bool,
+) -> Itemized {
     let text = input.text;
     let bidi = unicode::bidi(
         text,
@@ -100,6 +119,12 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
             )
         })
         .collect();
+    let boundaries: Vec<_> = if generic_defaults {
+        GraphemeClusterSegmenter::new().segment_str(text).collect()
+    } else {
+        Vec::new()
+    };
+    let ignorable = CodePointSetData::new::<DefaultIgnorableCodePoint>();
     let mut end_of_previous = 0;
     for run in input.styles {
         let r = run.range.clone();
@@ -107,7 +132,10 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
             && r.start >= end_of_previous
             && text.is_char_boundary(r.start)
             && text.is_char_boundary(r.end)
-            && r.end <= text.len();
+            && r.end <= text.len()
+            && (!generic_defaults
+                || (boundaries.binary_search(&r.start).is_ok()
+                    && boundaries.binary_search(&r.end).is_ok()));
         if !valid {
             out.notes.push(
                 Note::warning(
@@ -125,12 +153,60 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
         if r.is_empty() {
             continue;
         }
-        let Some((index, face)) = run
+        let chain_limit = if generic_defaults { 64 } else { usize::MAX };
+        let mut families: Vec<&str> = run
             .families
             .iter()
+            .take(chain_limit)
+            .map(String::as_str)
+            .collect();
+        if generic_defaults && run.families.len() > 64 {
+            out.notes.push(
+                Note::warning(
+                    codes::FONT_CHAIN_LIMIT,
+                    "font chain search limited to 64 families",
+                )
+                .at(r.clone()),
+            );
+        }
+        if generic_defaults
+            && families
+                .last()
+                .and_then(|f| GenericFamily::parse(f))
+                .is_none()
+        {
+            families.push(
+                run.families
+                    .last()
+                    .and_then(|f| GenericFamily::parse(f))
+                    .unwrap_or(GenericFamily::Serif)
+                    .name(),
+            );
+        }
+        let mut nearest = std::collections::BTreeMap::new();
+        let mut reported_matches = std::collections::BTreeSet::new();
+        let candidates: Vec<_> = families
+            .iter()
             .enumerate()
-            .find_map(|(i, f)| fonts.by_family(f).map(|face| (i, face)))
-        else {
+            .filter_map(|(index, family)| {
+                let face = if generic_defaults {
+                    if let Some(generic) = GenericFamily::parse(family) {
+                        Some(fonts.generic(generic))
+                    } else {
+                        fonts
+                            .match_family(family, Descriptors::default())
+                            .map(|matched| {
+                                nearest.insert(index, matched.notes);
+                                matched.face
+                            })
+                    }
+                } else {
+                    fonts.by_family(family)
+                };
+                face.map(|face| (index, face))
+            })
+            .collect();
+        let Some((initial_index, initial_face)) = candidates.first().copied() else {
             out.notes.push(
                 Note::error(
                     codes::FONT_MISSING,
@@ -140,30 +216,94 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
             );
             continue;
         };
-        if index > 0 {
+        if !generic_defaults && initial_index > 0 {
             out.notes.push(
                 Note::warning(
                     codes::FONT_FALLBACK,
                     format!(
                         "{:?} unavailable; used {:?}",
-                        &run.families[..index],
-                        run.families[index]
+                        &run.families[..initial_index],
+                        run.families[initial_index]
                     ),
                 )
                 .at(r.clone()),
             );
         }
+        let mut chosen = (initial_index, initial_face);
+        let mut cluster_end = r.start;
+        let mut cluster_level = base_level;
+        let mut cluster_script = None;
         let first = resolved.partition_point(|(range, _, _)| range.start < r.start);
         for (range, level, script) in resolved
             .iter()
             .skip(first)
             .take_while(|(range, _, _)| range.start < r.end)
         {
+            if generic_defaults && range.start >= cluster_end {
+                // A mark can have its own Script property. Keep the whole
+                // grapheme in the base scalar's script/level, so adapter runs
+                // and caret clusters never split it when those properties differ.
+                cluster_level = *level;
+                cluster_script = Some(*script);
+                let boundary = boundaries.partition_point(|b| *b <= range.start);
+                cluster_end = boundaries
+                    .get(boundary)
+                    .copied()
+                    .unwrap_or(r.end)
+                    .min(r.end);
+                let cluster = text.get(range.start..cluster_end).unwrap_or("");
+                let covers = |face: &reprise_font::Face| {
+                    cluster
+                        .chars()
+                        .all(|c| c.is_control() || ignorable.contains(c) || face.covers(c))
+                };
+                chosen = candidates
+                    .iter()
+                    .copied()
+                    .find(|(_, face)| covers(face))
+                    .unwrap_or_else(|| candidates.last().copied().unwrap_or(chosen));
+                let bytes = range.start..cluster_end;
+                if reported_matches.insert(chosen.0)
+                    && let Some(notes) = nearest.remove(&chosen.0)
+                {
+                    for note in notes {
+                        out.notes.push(note.at(bytes.clone()));
+                    }
+                }
+                if !covers(chosen.1) {
+                    append_font_note(&mut out.notes, Note::warning(codes::FONT_MISSING, "no face covers this grapheme; shaped with the generic default and .notdef").at(bytes.clone()));
+                }
+                if chosen.0 > 0 {
+                    append_font_note(
+                        &mut out.notes,
+                        Note::warning(
+                            codes::FONT_FALLBACK,
+                            format!(
+                                "used {:?} from family chain",
+                                families.get(chosen.0).copied().unwrap_or("serif")
+                            ),
+                        )
+                        .at(bytes),
+                    );
+                }
+            }
+            let face = chosen.1;
+            let level = if generic_defaults {
+                cluster_level
+            } else {
+                *level
+            };
+            let script = if generic_defaults {
+                cluster_script
+            } else {
+                Some(*script)
+            };
             if let Some(last) = out.items.last_mut().filter(|last| {
-                last.range.start >= r.start
+                last.face == *face.id()
+                    && last.range.start >= r.start
                     && last.range.end == range.start
-                    && last.level == *level
-                    && last.script == Some(*script)
+                    && last.level == level
+                    && last.script == script
             }) {
                 last.range.end = range.end;
                 continue;
@@ -172,14 +312,27 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
                 range: range.clone(),
                 face: face.id().clone(),
                 size: run.size,
-                level: *level,
-                script: Some(*script),
+                level,
+                script,
                 language: run.language.clone(),
                 features: run.features.clone(),
             });
         }
     }
     out
+}
+
+fn append_font_note(notes: &mut Vec<Note>, note: Note) {
+    if let Some(previous) = notes
+        .last_mut()
+        .filter(|n| n.code == note.code && n.message == note.message)
+        && let (Some(before), Some(after)) = (&mut previous.bytes, &note.bytes)
+        && before.end == after.start
+    {
+        before.end = after.end;
+        return;
+    }
+    notes.push(note);
 }
 
 /// Shapes a paragraph's items with an adapter, and reshapes lines of it.

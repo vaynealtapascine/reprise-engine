@@ -102,6 +102,24 @@ impl DerivedCache {
     }
 }
 
+// Preserve unrecognized fields while refreshing the known declaration fields.
+// The incoming typed declaration has at most three levels, independent of any
+// unknown stored subtrees; recursion follows only that known schema.
+fn overlay_declaration(stored: &mut serde_json::Value, incoming: serde_json::Value) {
+    if let (Some(target), serde_json::Value::Object(fields)) = (stored.as_object_mut(), &incoming) {
+        for (name, value) in fields {
+            overlay_declaration(
+                target
+                    .entry(name.clone())
+                    .or_insert(serde_json::Value::Null),
+                value.clone(),
+            );
+        }
+    } else {
+        *stored = incoming;
+    }
+}
+
 /// Raw manifests are retained on open so unknown fields and extension bytes
 /// survive without being normalized. Setters replace only their own section.
 #[derive(Clone)]
@@ -134,6 +152,137 @@ impl Package {
             limits: Limits::default(),
             revision: document.revision(),
         })
+    }
+
+    /// A save-ready package embedding precisely faces with at least one glyph
+    /// in the supplied current layout, including glyph zero. Empty runs and
+    /// style-only names are excluded. The old metadata-only constructor remains.
+    pub fn new_with_layout(
+        document: &Document,
+        id: DocumentId,
+        mode: PersistenceMode,
+        layout: &reprise_layout::LayoutSnapshot,
+        fonts: &reprise_font::FontStore,
+    ) -> Result<Self, FormatError> {
+        let mut package = Self::new(document, id, mode)?;
+        package.embed_layout_fonts(layout, fonts)?;
+        Ok(package)
+    }
+
+    /// Add/refresh used font bundles without dropping other assets, font pins,
+    /// unknown metadata or opaque sections. Failure leaves this package intact.
+    pub fn embed_layout_fonts(
+        &mut self,
+        layout: &reprise_layout::LayoutSnapshot,
+        fonts: &reprise_font::FontStore,
+    ) -> Result<(), FormatError> {
+        self.writable()?;
+        if layout.revision != self.revision {
+            return Err(FormatError::Metadata(
+                "layout revision differs from package".into(),
+            ));
+        }
+        let used: std::collections::BTreeSet<_> = layout
+            .blocks
+            .iter()
+            .flat_map(|block| &block.lines)
+            .flat_map(|line| &line.runs)
+            .filter(|run| !run.glyphs.is_empty())
+            .map(|run| run.face.clone())
+            .collect();
+        if used.len() > self.limits.entries {
+            return Err(FormatError::Limit("used fonts"));
+        }
+        let (mut pins, mut assets) = crate::assets::metadata(&self.container, self.limits)?;
+        let mut candidate = self.container.clone();
+        for id in used {
+            let face = fonts
+                .get(&id)
+                .map_err(|error| FormatError::Metadata(error.to_string()))?;
+            let previous = pins.iter().position(|pin| pin.face == id);
+            let mut pin = if let Some(index) = previous {
+                pins.remove(index)
+            } else {
+                FontPin {
+                    face: id,
+                    version: face.version().into(),
+                    asset: String::new(),
+                    extra: BTreeMap::new(),
+                }
+            };
+            if pin.asset.is_empty()
+                || assets
+                    .iter()
+                    .any(|asset| asset.id == pin.asset && asset.kind != crate::AssetKind::Font)
+            {
+                pin.asset = format!(
+                    "font-{}-{}",
+                    crate::assets::content_hash(pin.face.family.as_bytes()),
+                    pin.face.hash
+                );
+                // Bounded collision repair preserves host assets with the same ID.
+                for _ in 0..=self.limits.entries {
+                    if !assets.iter().any(|entry| entry.id == pin.asset) {
+                        break;
+                    }
+                    pin.asset.push('-');
+                }
+                if assets.iter().any(|entry| entry.id == pin.asset) {
+                    return Err(FormatError::Limit("font asset names"));
+                }
+            }
+            let existing = assets.iter().position(|asset| asset.id == pin.asset);
+            let section = existing
+                .and_then(|index| match assets.get(index)?.source {
+                    crate::AssetSource::Bundled { section } => Some(section),
+                    _ => None,
+                })
+                .or_else(|| {
+                    (ids::FIRST_ASSET..=ids::LAST_ASSET)
+                        .find(|id| !candidate.sections.contains_key(id))
+                })
+                .ok_or(FormatError::Limit("font bundle sections"))?;
+            let mut asset = existing
+                .map(|index| assets.remove(index))
+                .unwrap_or_else(|| Asset {
+                    id: pin.asset.clone(),
+                    kind: crate::AssetKind::Font,
+                    hash: String::new(),
+                    source: crate::AssetSource::Bundled { section },
+                    extra: BTreeMap::new(),
+                });
+            asset.kind = crate::AssetKind::Font;
+            asset.hash = crate::assets::content_hash(face.data());
+            asset.source = crate::AssetSource::Bundled { section };
+            pin.version = face.version().into();
+            let declared = serde_json::to_value(face.declaration())
+                .map_err(|error| FormatError::Metadata(error.to_string()))?;
+            overlay_declaration(
+                pin.extra
+                    .entry("font-declaration1".into())
+                    .or_insert(serde_json::Value::Null),
+                declared,
+            );
+            candidate
+                .sections
+                .insert(section, Section::raw(face.data().to_vec()));
+            pins.push(pin);
+            assets.push(asset);
+        }
+        pins.sort_by(|a, b| (&a.face, &a.version, &a.asset).cmp(&(&b.face, &b.version, &b.asset)));
+        assets.sort_by(|a, b| a.id.cmp(&b.id));
+        candidate.sections.insert(
+            ids::FONTS,
+            Section::raw(crate::json::encode(&pins, self.limits)?),
+        );
+        candidate.sections.insert(
+            ids::ASSETS,
+            Section::raw(crate::json::encode(&assets, self.limits)?),
+        );
+        crate::assets::metadata(&candidate, self.limits)?;
+        candidate.encoded_len(self.limits)?;
+        self.container = candidate;
+        Ok(())
     }
 
     pub fn container(&self) -> &Container {
@@ -316,6 +465,20 @@ impl Package {
         container.encode(self.limits)
     }
 
+    /// Open a package and restore every verified embedded face into the supplied
+    /// frontend store. Missing/corrupt pins remain in the returned missing list.
+    pub fn open_with_fonts(
+        bytes: &[u8],
+        peer: u64,
+        limits: Limits,
+        migrations: &MigrationRegistry,
+        fonts: &mut reprise_font::FontStore,
+    ) -> Result<OpenedFile, FormatError> {
+        let mut opened = Self::open(bytes, peer, limits, migrations)?;
+        opened.restore_fonts(fonts);
+        Ok(opened)
+    }
+
     pub fn open(
         bytes: &[u8],
         peer: u64,
@@ -387,6 +550,16 @@ pub struct OpenedFile {
 }
 
 impl OpenedFile {
+    pub fn missing_fonts(&self) -> Vec<&FontPin> {
+        self.assets.missing_fonts()
+    }
+    pub fn restore_fonts(
+        &mut self,
+        store: &mut reprise_font::FontStore,
+    ) -> Vec<reprise_font::FaceId> {
+        self.assets.restore_fonts(store)
+    }
+
     pub fn is_read_only(&self) -> bool {
         self.read_only
     }
@@ -410,6 +583,27 @@ impl OpenedFile {
             Ok(self.document)
         }
     }
+    /// Save edits and refresh fonts used by their current layout atomically.
+    pub fn save_with_layout(
+        &self,
+        mode: PersistenceMode,
+        layout: &reprise_layout::LayoutSnapshot,
+        fonts: &reprise_font::FontStore,
+    ) -> Result<Vec<u8>, FormatError> {
+        if self.read_only {
+            return Err(FormatError::ReadOnly);
+        }
+        let mut package = self.package.clone();
+        package.revision = self.document.revision();
+        package
+            .container
+            .sections
+            .insert(ids::DOCUMENT, Section::raw(self.document.try_export(mode)?));
+        package.container.sections.remove(&ids::CACHE);
+        package.embed_layout_fonts(layout, fonts)?;
+        package.save()
+    }
+
     pub fn save(&self, mode: PersistenceMode) -> Result<Vec<u8>, FormatError> {
         if self.read_only {
             return Err(FormatError::ReadOnly);

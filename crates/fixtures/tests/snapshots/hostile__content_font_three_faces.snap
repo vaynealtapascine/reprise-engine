@@ -1,0 +1,107 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: "serde_json::to_string_pretty(&content).unwrap()"
+---
+[
+  {
+    "width": 430080,
+    "height": 307200,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 65536,
+          "yx": 0,
+          "xy": 0,
+          "yy": 65536,
+          "tx": 36864,
+          "ty": 36864
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "One",
+              "hash": "21808625578fe8d8cd10cb684be546dc"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "a",
+            "glyphs": [
+              {
+                "id": 28,
+                "x": 0,
+                "y": 10707,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Two",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "ſ",
+            "glyphs": [
+              {
+                "id": 362,
+                "x": 4911,
+                "y": 10707,
+                "text": {
+                  "start": 0,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Sans 3",
+              "hash": "08df266400933d3178d081a45f94a088"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "ƀ",
+            "glyphs": [
+              {
+                "id": 354,
+                "x": 8786,
+                "y": 10707,
+                "text": {
+                  "start": 0,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  }
+]

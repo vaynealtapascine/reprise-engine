@@ -113,6 +113,11 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         editing_half_invalid()?,
         editing_empty_document()?,
         editing_empty_block()?,
+        font_chain_missing()?,
+        font_generics()?,
+        font_three_faces()?,
+        font_corrupt_declaration()?,
+        font_collection_index()?,
     ])
 }
 
@@ -1794,4 +1799,103 @@ pub fn editing_empty_block() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("editing_empty_block", doc, &[]))
+}
+
+fn font_document(chains: &[&[&str]], text: &str) -> Result<Document, DocError> {
+    let doc = document()?;
+    for chain in chains {
+        let node = doc.append_block(BlockKind::Paragraph, "body", "")?;
+        doc.block(node)?.text.insert(0, text)?;
+        doc.set_overrides(
+            node,
+            &Style {
+                families: Some(chain.iter().map(|f| f.to_string()).collect()),
+                ..Style::default()
+            },
+        )?;
+    }
+    doc.commit();
+    Ok(doc)
+}
+/// Missing named family, implicit generic terminal, and no font covers U+10FFFF.
+pub fn font_chain_missing() -> Result<Fixture, DocError> {
+    Ok(Fixture::new(
+        "font_chain_missing",
+        font_document(&[&["Absent"], &[]], "Fallback \u{10ffff}")?,
+        &["font.fallback", "font.missing"],
+    ))
+}
+/// Every generic class resolves without frontend registration, including empty text.
+pub fn font_generics() -> Result<Fixture, DocError> {
+    Ok(Fixture::new(
+        "font_generics",
+        font_document(
+            &[&["serif"], &["sans-serif"], &["monospace"], &["script"]],
+            "office café",
+        )?,
+        &[],
+    ))
+}
+/// Per-character fallback covers the string across three pinned faces.
+pub fn font_three_faces() -> Result<Fixture, DocError> {
+    let mut fixture = Fixture::new(
+        "font_three_faces",
+        font_document(
+            &[&["One", "Two", "sans-serif"]],
+            &crate::fonts::three_face_text(),
+        )?,
+        &["font.fallback"],
+    );
+    let script = fixture
+        .engine
+        .fonts
+        .generic(reprise_font::GenericFamily::Script)
+        .clone();
+    fixture
+        .engine
+        .fonts
+        .register(script.data(), crate::fonts::declaration("One", 0))
+        .expect("bundled face");
+    fixture
+        .engine
+        .fonts
+        .register(crate::SERIF, crate::fonts::declaration("Two", 0))
+        .expect("bundled face");
+    Ok(fixture)
+}
+/// The frontend receives an Error for a corrupt declaration; layout can continue.
+pub fn font_corrupt_declaration() -> Result<Fixture, DocError> {
+    let mut fixture = Fixture::new(
+        "font_corrupt_declaration",
+        font_document(&[&["Corrupt", "serif"]], "still readable")?,
+        &["font.fallback"],
+    );
+    let error = fixture
+        .engine
+        .fonts
+        .register(
+            b"not a font".as_slice(),
+            crate::fonts::declaration("Corrupt", 0),
+        )
+        .expect_err("corrupt font refused");
+    assert_eq!(error.note().code.as_str(), "font.unreadable");
+    Ok(fixture)
+}
+/// An out-of-range collection index is refused; missing family falls through.
+pub fn font_collection_index() -> Result<Fixture, DocError> {
+    let mut fixture = Fixture::new(
+        "font_collection_index",
+        font_document(&[&["BadIndex", "monospace"]], "index fallback")?,
+        &["font.fallback"],
+    );
+    let error = fixture
+        .engine
+        .fonts
+        .register(
+            crate::fonts::collection(),
+            crate::fonts::declaration("BadIndex", u32::MAX),
+        )
+        .expect_err("collection index refused");
+    assert_eq!(error.note().code.as_str(), "font.unreadable");
+    Ok(fixture)
 }

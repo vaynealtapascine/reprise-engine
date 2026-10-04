@@ -12,5 +12,6 @@ reprise-font.workspace = true
 reprise-diag.workspace = true
 harfrust.workspace = true
 icu_properties.workspace = true
+icu_segmenter.workspace = true
 unicode-bidi.workspace = true
 serde.workspace = true

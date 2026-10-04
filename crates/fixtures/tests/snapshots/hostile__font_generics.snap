@@ -1,0 +1,335 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      73
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "default",
+    "source": "builtin"
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "serif",
+        "families": [
+          "serif"
+        ],
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "direct",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 12
+          },
+          "preview": "office café",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 51207,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 12
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 51207
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "23@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "sans-serif",
+        "families": [
+          "sans-serif"
+        ],
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "direct",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 12
+          },
+          "preview": "office café",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 21709
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 32263,
+          "width": 47579,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 12
+              },
+              "face": {
+                "family": "Source Sans 3",
+                "hash": "08df266400933d3178d081a45f94a088"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 47579
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "40@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "monospace",
+        "families": [
+          "monospace"
+        ],
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "direct",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 12
+          },
+          "preview": "office café",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 43418
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 54181,
+          "width": 74338,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 12
+              },
+              "face": {
+                "family": "Source Code Pro",
+                "hash": "9f9664e2edf6f045c11e774f9bd0be69"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 74338
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "57@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "script",
+        "families": [
+          "script"
+        ],
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "direct",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 12
+          },
+          "preview": "office café",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 65127
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 75490,
+          "width": 40009,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 12
+              },
+              "face": {
+                "family": "Dancing Script",
+                "hash": "21808625578fe8d8cd10cb684be546dc"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 40009
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": []
+}

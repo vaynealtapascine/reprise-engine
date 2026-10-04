@@ -9,8 +9,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
+mod supply;
+pub use supply::{
+    Descriptors, FontDeclaration, FontMatch, FontStyle, GenericFamily, MAX_FONT_BYTES, codes,
+};
+
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::raw::TableProvider;
@@ -26,7 +30,12 @@ pub struct FaceId {
 
 impl fmt::Debug for FaceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}#{}", self.family, &self.hash[..8])
+        write!(
+            f,
+            "{}#{}",
+            self.family,
+            self.hash.get(..8).unwrap_or(&self.hash)
+        )
     }
 }
 
@@ -53,18 +62,44 @@ pub struct Face {
     data: Arc<[u8]>,
     metrics: FaceMetrics,
     adapter_data: OnceLock<Box<dyn Any + Send + Sync>>,
+    declaration: FontDeclaration,
+    version: String,
 }
 
 impl Face {
     pub fn from_bytes(data: impl Into<Arc<[u8]>>) -> Result<Face, FontError> {
+        Self::declared(data, None)
+    }
+
+    /// Frontend-supplied family/descriptors and collection index. No OS discovery.
+    pub fn declared(
+        data: impl Into<Arc<[u8]>>,
+        declaration: Option<FontDeclaration>,
+    ) -> Result<Face, FontError> {
         let data: Arc<[u8]> = data.into();
-        let font = FontRef::new(&data).map_err(|e| FontError::Unreadable(e.to_string()))?;
+        if data.len() > MAX_FONT_BYTES {
+            return Err(FontError::Unreadable("font byte limit exceeded".into()));
+        }
+        let index = declaration.as_ref().map_or(0, |d| d.face_index);
+        if let Some(d) = &declaration {
+            d.validate()?;
+        }
+        let font =
+            FontRef::from_index(&data, index).map_err(|e| FontError::Unreadable(e.to_string()))?;
         let family = font
             .localized_strings(StringId::FAMILY_NAME)
             .english_or_first()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "unnamed".into());
         let unreadable = |e: skrifa::raw::ReadError| FontError::Unreadable(e.to_string());
+        for record in font.table_directory().table_records() {
+            if font.table_data(record.tag()).is_none() {
+                return Err(FontError::Unreadable("table outside font bytes".into()));
+            }
+        }
+        font.maxp().map_err(unreadable)?;
+        font.hmtx().map_err(unreadable)?;
+        font.cmap().map_err(unreadable)?;
         let head = font.head().map_err(unreadable)?;
         let hhea = font.hhea().map_err(unreadable)?;
         if head.units_per_em() == 0 {
@@ -76,14 +111,39 @@ impl Face {
             descent: -(hhea.descender().to_i16() as i32),
             line_gap: hhea.line_gap().to_i16() as i32,
         };
-        let digest = Sha256::digest(&data);
-        let hash = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
+        let version = font
+            .localized_strings(StringId::VERSION_STRING)
+            .english_or_first()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "unspecified".into());
+        let declaration = declaration.unwrap_or_else(|| FontDeclaration {
+            family,
+            descriptors: Descriptors::default(),
+            face_index: 0,
+        });
+        let family = declaration.family.clone();
+        let hash = supply::face_hash(&data, index);
         Ok(Face {
             id: FaceId { family, hash },
             data,
             metrics,
             adapter_data: OnceLock::new(),
+            declaration,
+            version,
         })
+    }
+
+    pub fn declaration(&self) -> &FontDeclaration {
+        &self.declaration
+    }
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+    pub fn covers(&self, c: char) -> bool {
+        self.font_ref()
+            .charmap()
+            .map(c)
+            .is_some_and(|g| g.to_u32() != 0)
     }
 
     pub fn id(&self) -> &FaceId {
@@ -110,7 +170,8 @@ impl Face {
     }
 
     pub fn font_ref(&self) -> FontRef<'_> {
-        FontRef::new(&self.data).expect("validated in from_bytes")
+        FontRef::from_index(&self.data, self.declaration.face_index)
+            .expect("immutable bytes and index validated at construction")
     }
 
     /// The glyph's outline in font design units, y up. For rendering only.
@@ -159,6 +220,7 @@ impl OutlinePen for Recorder {
 #[derive(Default)]
 pub struct FontStore {
     faces: BTreeMap<FaceId, Arc<Face>>,
+    defaults: BTreeMap<GenericFamily, FaceId>,
 }
 
 impl FontStore {
@@ -171,10 +233,11 @@ impl FontStore {
     pub fn get(&self, id: &FaceId) -> Result<&Arc<Face>, FontError> {
         self.faces
             .get(id)
+            .or_else(|| supply::bundled().iter().find(|face| face.id() == id))
             .ok_or_else(|| FontError::Missing(id.clone()))
     }
 
-    /// The first face of a family. Real fallback chains (21) come later.
+    /// The first registered face of a family, ordered by pinned identity (legacy API).
     pub fn by_family(&self, family: &str) -> Option<&Arc<Face>> {
         self.faces.values().find(|f| f.id.family == family)
     }

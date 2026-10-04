@@ -48,13 +48,13 @@ Codes in use:
 
 | Library | Codes |
 | --- | --- |
-| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
+| font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
-| format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.asset-missing`, `format.migrated`, `format.read-only` |
+| format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 | edit | `edit.limit`, `edit.invalid-command`, `edit.store` |
 
 ## Text store: `reprise-text`
@@ -132,6 +132,13 @@ Codes in use:
 
 ## Styles: `reprise-doc::style`
 
+-   **Additive family chains (21):** `Style.families` replaces `family` in the
+    same layer, stored as `families1:<JSON string array>`. Unreadable versions
+    are retained in `unparsed_families` and reported with `style.unparsed`.
+    A later single `family` clears an inherited explicit chain. Legacy documents
+    keep their exact output form; empty `ComputedStyle.families` denotes legacy.
+
+
 -   **Resolution:** a `Style` has optional `parent`, `family`, `size` and `line_height`.
     Resolution goes engine defaults, then the named style chain (parents first), then
     direct overrides.
@@ -188,6 +195,27 @@ Codes in use:
     an `Expr` is a follow-up.
 
 ## Shaping: `reprise-shape`
+
+-   **Additive explicit-chain entry point:** `itemize_families` appends serif
+    when no terminal generic is authored. Generic defaults are pinned bundled
+    faces; `FontStore::set_generic` supplies configuration overrides. It searches
+    at most 64 named families (`font.chain-limit`, Warning), preserving the
+    authored terminal generic. The first face covering a whole grapheme wins,
+    so per-character fallback never cuts a cluster. Uncovered graphemes remain
+    in the generic default with `.notdef` (`font.missing`, Warning). Each later
+    family selection reports `font.fallback` (Warning). Legacy `itemize` and
+    single-family documents retain the existing availability-only contract.
+    Explicit-chain runs use a grapheme's base scalar script/level even when
+    a combining mark has its own script, preserving adapter cluster boundaries.
+
+-   **Frontend supply:** `FontDeclaration` declares a family alias, weight 1..1000,
+    style and positive stretch in permille, plus a collection index. `FontStore::register`
+    rejects unreadable imports with `font.unreadable` (Error); font bytes are bounded
+    to 32 MiB. `match_family` searches stretch, style, then weight in CSS-inspired
+    order, breaking ties by `FaceId` and reporting nearest matches with `font.nearest`
+    (Warning). Versions and collection descriptors supplement the frozen `FaceId`;
+    package pins retain them. No synthetic outlines, variable-axis instancing,
+    system discovery, license checks or embedding-flag checks are performed.
 
 -   **Three steps:**
     1.  `itemize(ParagraphInput, &FontStore)` splits the paragraph into `Item`s. Each item
