@@ -48,7 +48,7 @@ Codes in use:
 
 | Library | Codes |
 | --- | --- |
-| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
+| font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit` |
@@ -132,6 +132,13 @@ Codes in use:
 
 ## Styles: `reprise-doc::style`
 
+-   **Additive family chains (21):** `Style.families` replaces `family` in the
+    same layer, stored as `families1:<JSON string array>`. Unreadable versions
+    are retained in `unparsed_families` and reported with `style.unparsed`.
+    A later single `family` clears an inherited explicit chain. Legacy documents
+    keep their exact output form; empty `ComputedStyle.families` denotes legacy.
+
+
 -   **Resolution:** a `Style` has optional `parent`, `family`, `size` and `line_height`.
     Resolution goes engine defaults, then the named style chain (parents first), then
     direct overrides.
@@ -188,6 +195,17 @@ Codes in use:
     an `Expr` is a follow-up.
 
 ## Shaping: `reprise-shape`
+
+-   **Additive explicit-chain entry point:** `itemize_families` appends serif
+    when no terminal generic is authored. Generic defaults are pinned bundled
+    faces; `FontStore::set_generic` supplies configuration overrides. It searches
+    at most 64 named families (`font.chain-limit`, Warning), preserving the
+    authored terminal generic. The first face covering a whole grapheme wins,
+    so per-character fallback never cuts a cluster. Uncovered graphemes remain
+    in the generic default with `.notdef` (`font.missing`, Warning). Each later
+    family selection reports `font.fallback` (Warning). Legacy `itemize` and
+    single-family documents retain the existing availability-only contract.
+
 
 -   **Three steps:**
     1.  `itemize(ParagraphInput, &FontStore)` splits the paragraph into `Item`s. Each item
