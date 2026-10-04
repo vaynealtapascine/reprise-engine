@@ -23,9 +23,14 @@ use reprise_geom::Length;
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+mod page;
 pub mod relation;
 mod style;
 
+pub use page::{
+    Basis, Dim, FrameRole, FrameTemplate, MAIN_FLOW, Medium, PageTemplate, StoredTemplate,
+    TemplateChoice,
+};
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
     Target, TargetClass,
