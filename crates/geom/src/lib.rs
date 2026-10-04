@@ -64,6 +64,16 @@ impl Length {
         Length(self.0.saturating_abs())
     }
 
+    /// The length of the vector `(dx, dy)`: the square root of
+    /// `dx² + dy²`, rounded half up and saturated. Exact integer arithmetic.
+    pub fn hypot(dx: Length, dy: Length) -> Length {
+        let n = (dx.0.unsigned_abs() as u128).pow(2) + (dy.0.unsigned_abs() as u128).pow(2);
+        let r = isqrt(n);
+        // (r + 1/2)² = r² + r + 1/4, so n rounds up exactly when n > r² + r.
+        let r = if n - r * r > r { r + 1 } else { r };
+        Length(r.min(i32::MAX as u128) as i32)
+    }
+
     /// For rendering only; never feed the result back into layout.
     pub fn to_pt_f32(self) -> f32 {
         self.0 as f32 / UNITS_PER_PT as f32
@@ -309,6 +319,161 @@ impl Matrix {
             ..m
         })
     }
+}
+
+/// Exact constructors for the frame transforms of decision 20: arbitrary
+/// rotations, mirrors on either axis, and transforms about an origin.
+///
+/// # Arbitrary angles
+///
+/// An angle is authored as a **direction**: the integer vector `(dx, dy)` that
+/// the rotated +x axis points along. [`Matrix::rotate_toward`] normalises it
+/// with integer arithmetic only, rounding each coefficient (the cosine and the
+/// sine) *correctly* to 16.16, so the matrix depends on nothing but the two
+/// integers and is bit-identical on every platform (38). An angle in
+/// thousandths of a degree is turned into a direction by
+/// [`sin_cos_millidegrees`], an integer Taylor series that is its own
+/// specification. Rotations are clockwise, because page space grows
+/// downwards, like [`Matrix::rotate_quarter`].
+impl Matrix {
+    /// Mirrors along the y axis: y becomes -y.
+    pub const fn mirror_y() -> Matrix {
+        Matrix::scale(Fixed::ONE, Fixed::MINUS_ONE)
+    }
+
+    /// The rotation that turns +x towards `(dx, dy)`. `None` for `(0, 0)`,
+    /// which has no direction. Axis directions give exact quarter turns.
+    pub fn rotate_toward(dx: i32, dy: i32) -> Option<Matrix> {
+        let n = (dx.unsigned_abs() as u128).pow(2) + (dy.unsigned_abs() as u128).pow(2);
+        if n == 0 {
+            return None;
+        }
+        let (c, s) = (unit_coefficient(dx, n), unit_coefficient(dy, n));
+        Some(Matrix {
+            xx: c,
+            yx: s,
+            xy: Fixed(-s.0),
+            yy: c,
+            tx: Length::ZERO,
+            ty: Length::ZERO,
+        })
+    }
+
+    /// The rotation by `millidegrees` thousandths of a degree, clockwise.
+    /// Multiples of 90° are exact quarter turns.
+    pub fn rotate_millidegrees(millidegrees: i64) -> Matrix {
+        let (c, s) = sin_cos_millidegrees(millidegrees);
+        // (c, s) is a unit vector in Q30, so it is never (0, 0).
+        Matrix::rotate_toward(c, s).unwrap_or(Matrix::IDENTITY)
+    }
+
+    /// The same map, performed about `(x, y)` instead of the origin: move
+    /// `(x, y)` to the origin, apply `self`, move back.
+    pub fn about(&self, x: Length, y: Length) -> Matrix {
+        Matrix::translate(-x, -y)
+            .then(self)
+            .then(&Matrix::translate(x, y))
+    }
+
+    /// The determinant of the linear part, in units of 2⁻³². Zero exactly
+    /// when [`Matrix::inverse`] is `None`.
+    pub fn determinant(&self) -> i64 {
+        self.xx.0 as i64 * self.yy.0 as i64 - self.xy.0 as i64 * self.yx.0 as i64
+    }
+
+    /// Whether the inverse exists *and* undoes the map: composing the two
+    /// gives the identity's linear part to within 1/256. A matrix so close to
+    /// singular that its inverse saturates is not invertible in practice, and
+    /// layout treats it as degenerate.
+    pub fn has_usable_inverse(&self) -> bool {
+        let Some(inv) = self.inverse() else {
+            return false;
+        };
+        let round_trip = self.then(&inv);
+        let near = |a: Fixed, b: Fixed| (a.0 as i64 - b.0 as i64).abs() <= 256;
+        near(round_trip.xx, Fixed::ONE)
+            && near(round_trip.yy, Fixed::ONE)
+            && near(round_trip.xy, Fixed::ZERO)
+            && near(round_trip.yx, Fixed::ZERO)
+    }
+}
+
+/// `v / √n` in 16.16, rounded half away from zero, computed exactly: the
+/// result is the largest `c ≥ 0` with `(c - ½)² ≤ v² 2³² / n`, that is
+/// `(2c - 1)² n ≤ v² 2³⁴`. Callers guarantee `v² ≤ n`, so `c ≤ 2¹⁶`.
+fn unit_coefficient(v: i32, n: u128) -> Fixed {
+    let a = v.unsigned_abs() as u128;
+    let bound = (a * a) << 34;
+    let fits = |c: u128| c == 0 || (2 * c - 1).pow(2) * n <= bound;
+    let mut c = isqrt(((a * a) << 32) / n).min(1 << 16);
+    while c < (1 << 16) && fits(c + 1) {
+        c += 1;
+    }
+    while !fits(c) {
+        c -= 1;
+    }
+    let c = c as i32;
+    Fixed(if v < 0 { -c } else { c })
+}
+
+/// The largest `r` with `r² ≤ n`.
+pub fn isqrt(n: u128) -> u128 {
+    if n < 2 {
+        return n;
+    }
+    // Newton's method from a power of two at or above the root decreases
+    // monotonically to it.
+    let mut x = 1u128 << (128 - n.leading_zeros()).div_ceil(2);
+    loop {
+        let y = (x + n / x) / 2;
+        if y >= x {
+            return x;
+        }
+        x = y;
+    }
+}
+
+/// π × 2⁶⁰, rounded: the one transcendental constant layout uses.
+const PI_Q60: i128 = 3_622_009_729_038_561_421;
+
+/// The cosine and sine of an angle in thousandths of a degree, in Q30 (so
+/// 1.0 is 2³⁰). Clockwise in a y-down space. Multiples of 90° are exact.
+///
+/// Integer arithmetic only: the angle is reduced to a quadrant exactly, then
+/// a Taylor series is summed in Q60 until its terms vanish. That procedure is
+/// the specification, so the result is the same on every platform (38).
+pub fn sin_cos_millidegrees(millidegrees: i64) -> (i32, i32) {
+    let md = millidegrees.rem_euclid(360_000);
+    let (quadrant, rest) = (md / 90_000, md % 90_000);
+    // rest < 90°, so x < π/2 < 2⁶¹ in Q60.
+    let x = div_round_i128(rest as i128 * PI_Q60, 180_000);
+    let x2 = div_round_i128(x * x, 1 << 60);
+    let series = |first: i128, start: i128| {
+        let (mut sum, mut term, mut k) = (first, first, start);
+        for _ in 0..64 {
+            term = -div_round_i128(div_round_i128(term * x2, 1 << 60), k * (k + 1));
+            if term == 0 {
+                break;
+            }
+            sum += term;
+            k += 2;
+        }
+        sum
+    };
+    let q30 = |v: i128| div_round_i128(v, 1 << 30).clamp(-(1 << 30), 1 << 30) as i32;
+    let (c, s) = (q30(series(1 << 60, 1)), q30(series(x, 2)));
+    match quadrant {
+        0 => (c, s),
+        1 => (-s, c),
+        2 => (-c, -s),
+        _ => (s, -c),
+    }
+}
+
+/// `n / d` for `d > 0`, rounding half away from zero.
+fn div_round_i128(n: i128, d: i128) -> i128 {
+    let magnitude = (n.abs() + d / 2) / d;
+    if n < 0 { -magnitude } else { magnitude }
 }
 
 impl fmt::Debug for Matrix {
@@ -614,5 +779,171 @@ mod tests {
             serde_json::to_string(&t).unwrap(),
             r#"{"xx":65536,"yx":0,"xy":0,"yy":65536,"tx":1,"ty":2}"#
         );
+    }
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+
+    fn pt(n: i32) -> Length {
+        Length::from_pt(n)
+    }
+
+    #[test]
+    fn axis_directions_are_exact_quarter_turns() {
+        assert_eq!(Matrix::rotate_toward(7, 0), Some(Matrix::IDENTITY));
+        assert_eq!(Matrix::rotate_toward(0, 3), Some(Matrix::rotate_quarter(1)));
+        assert_eq!(
+            Matrix::rotate_toward(i32::MIN, 0),
+            Some(Matrix::rotate_quarter(2))
+        );
+        assert_eq!(
+            Matrix::rotate_toward(0, -1),
+            Some(Matrix::rotate_quarter(3))
+        );
+        assert_eq!(Matrix::rotate_toward(0, 0), None, "no direction");
+        for turns in -8..8 {
+            assert_eq!(
+                Matrix::rotate_millidegrees(turns as i64 * 90_000),
+                Matrix::rotate_quarter(turns)
+            );
+        }
+    }
+
+    #[test]
+    fn directions_round_each_coefficient_correctly() {
+        // 3-4-5: cos 0.6 and sin 0.8, rounded to 16.16.
+        let m = Matrix::rotate_toward(3, 4).unwrap();
+        assert_eq!(
+            (m.xx.0, m.yx.0, m.xy.0, m.yy.0),
+            (39322, 52429, -52429, 39322)
+        );
+        // 45°: 0.70710678… × 65536 = 46340.95.
+        let m = Matrix::rotate_toward(1, 1).unwrap();
+        assert_eq!((m.xx.0, m.yx.0), (46341, 46341));
+        // The same direction at any scale gives the same matrix, up to the
+        // integer limits.
+        for k in [2, 1000, 1 << 20] {
+            assert_eq!(
+                Matrix::rotate_toward(3 * k, 4 * k),
+                Matrix::rotate_toward(3, 4)
+            );
+        }
+        assert_eq!(
+            Matrix::rotate_toward(i32::MIN, i32::MIN),
+            Matrix::rotate_toward(-1, -1)
+        );
+        // Compared with a float reference away from rounding ties. Floats
+        // only check the integer result here; they never feed layout.
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..20_000 {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let dx = (seed as u32) as i32;
+            let dy = ((seed >> 32) as u32) as i32;
+            let Some(m) = Matrix::rotate_toward(dx, dy) else {
+                continue;
+            };
+            let len = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
+            for (v, got) in [(dx, m.xx.0), (dy, m.yx.0)] {
+                let exact = v as f64 / len * 65536.0;
+                if (exact.abs().fract() - 0.5).abs() > 1e-6 {
+                    assert_eq!(
+                        got as f64,
+                        exact.abs().round() * exact.signum(),
+                        "{dx},{dy}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn millidegrees_follow_the_unit_circle() {
+        let close = |md: i64, c: f64, s: f64| {
+            let (qc, qs) = sin_cos_millidegrees(md);
+            let unit = (1u64 << 30) as f64;
+            assert!((qc as f64 / unit - c).abs() < 1e-8, "cos {md}");
+            assert!((qs as f64 / unit - s).abs() < 1e-8, "sin {md}");
+        };
+        close(0, 1.0, 0.0);
+        close(30_000, 3f64.sqrt() / 2.0, 0.5);
+        close(45_000, 0.5f64.sqrt(), 0.5f64.sqrt());
+        close(-30_000, 3f64.sqrt() / 2.0, -0.5);
+        close(
+            359_999,
+            (359.999f64).to_radians().cos(),
+            (359.999f64).to_radians().sin(),
+        );
+        close(
+            89_999,
+            (89.999f64).to_radians().cos(),
+            (89.999f64).to_radians().sin(),
+        );
+        // Reduction is exact at the integer limits.
+        assert_eq!(
+            sin_cos_millidegrees(i64::MAX),
+            sin_cos_millidegrees(i64::MAX.rem_euclid(360_000))
+        );
+        assert_eq!(
+            sin_cos_millidegrees(i64::MIN),
+            sin_cos_millidegrees(i64::MIN.rem_euclid(360_000))
+        );
+        let m = Matrix::rotate_millidegrees(30_000);
+        assert_eq!((m.xx.0, m.yx.0), (56756, 32768));
+    }
+
+    #[test]
+    fn rotations_about_a_point_keep_it_fixed() {
+        let r = Matrix::rotate_toward(-7, 13)
+            .unwrap()
+            .about(pt(50), pt(-20));
+        assert_eq!(r.apply(pt(50), pt(-20)), (pt(50), pt(-20)));
+        let flip = Matrix::mirror_y().about(Length::ZERO, pt(10));
+        assert_eq!(flip.apply(pt(3), pt(0)), (pt(3), pt(20)));
+        assert_eq!(flip.then(&flip), Matrix::IDENTITY);
+    }
+
+    #[test]
+    fn arbitrary_rotations_round_trip_within_a_unit() {
+        let m = Matrix::rotate_toward(1_000_003, -999_999)
+            .unwrap()
+            .then(&Matrix::translate(pt(123), pt(-45)));
+        let inv = m.inverse().unwrap();
+        for (x, y) in [(0, 0), (12345, -999), (pt(500).0, pt(700).0)] {
+            let (px, py) = m.apply(Length(x), Length(y));
+            let (bx, by) = inv.apply(px, py);
+            assert!((bx.0 - x).abs() <= 2 && (by.0 - y).abs() <= 2, "{x},{y}");
+        }
+        assert!(m.has_usable_inverse());
+    }
+
+    #[test]
+    fn singular_and_nearly_singular_matrices_have_no_usable_inverse() {
+        assert!(!Matrix::scale(Fixed::ZERO, Fixed::ONE).has_usable_inverse());
+        // A 1/65536 scale inverts to 65536, past the 16.16 range.
+        assert!(!Matrix::scale(Fixed(1), Fixed::ONE).has_usable_inverse());
+        assert!(Matrix::scale(Fixed::from_ratio(1, 4), Fixed::ONE).has_usable_inverse());
+        assert!(Matrix::IDENTITY.has_usable_inverse());
+        assert_eq!(
+            Matrix::scale(Fixed::from_int(2), Fixed::ONE).determinant(),
+            2 << 32
+        );
+    }
+
+    #[test]
+    fn square_roots_are_exact() {
+        for n in [0u128, 1, 2, 3, 4, 15, 16, 17, u64::MAX as u128, u128::MAX] {
+            let r = isqrt(n);
+            assert!(r * r <= n, "{n}");
+            assert!((r + 1).checked_mul(r + 1).is_none_or(|sq| sq > n), "{n}");
+        }
+        assert_eq!(Length::hypot(Length(3), Length(-4)), Length(5));
+        // √2 = 1.414…, √(2·2) = 2; 1.5² = 2.25 so √2.24 rounds down.
+        assert_eq!(Length::hypot(Length(1), Length(1)), Length(1));
+        assert_eq!(Length::hypot(Length::MIN, Length::MIN), Length::MAX);
+        assert_eq!(Length::hypot(Length::ZERO, Length::ZERO), Length::ZERO);
     }
 }

@@ -7,7 +7,7 @@ interfaces.
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
 | `diag` | `src/lib.rs` | `Note`, `Severity`, `Code`: diagnostics shared by every library | 37, 39 |
-| `geom` | `src/lib.rs` | `Length` (1/1024 pt) and `Fixed` (16.16), saturating and rounding rules, `Matrix`, typed spaces, `Point`, `Rect`, `Transform` | 19, 20 |
+| `geom` | `src/lib.rs` | `Length` (1/1024 pt) and `Fixed` (16.16), saturating and rounding rules, `Matrix` with exact integer direction/angle rotations, mirrors and pivot transforms, typed spaces, `Point`, `Rect`, `Transform` | 19, 20 |
 | `text` | `src/lib.rs` | `Text` (byte offsets over Loro), `Anchor`, `Affinity`, `RangePolicy`, `Resolved` | 09, 10, 12 |
 |  | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
 | `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge | 05–07, 15, 29 |
