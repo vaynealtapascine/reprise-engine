@@ -103,3 +103,17 @@ Other files:
     1.  Add a function in `fixtures/src/hostile.rs` and add it to `all()`.
     2.  Add a test in `fixtures/tests/hostile.rs`.
     3.  Record its snapshot with `INSTA_UPDATE=always`, then read it.
+
+## Persistence files
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/persist.rs` | Opaque snapshot export/import, explicit peer/history mode, allocation-free Loro/LZ4 expansion preflight | 07, 09, 29, 34, 37 |
+| `format` | `src/lib.rs`, `src/container.rs` | Versioned checksummed container, document identity, feature masks, hard bounds, typed errors and codes | 34, 37, 38 |
+| | `src/json.rs` | Iterative manifest bounds and canonical metadata | 34, 37, 38 |
+| | `src/assets.rs` | Font pins, bundled/external assets, hash validation and host resolution needs | 21, 34 |
+| | `src/migration.rs` | Pure checked N -> N+1 migrations, synthetic v0 | 34 |
+| | `src/package.rs` | Package save/open, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
+| | `src/tests.rs`, `tests/roundtrip.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
+| | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/` | Added persistence_tombstones: Unicode anchors, tombstones and retained historical references | 07, 09, 29, 34 |

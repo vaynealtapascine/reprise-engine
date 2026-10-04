@@ -91,6 +91,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         follow_lines_across_frames()?,
         style_fragment_basis()?,
         justified_bidi()?,
+        persistence_tombstones()?,
     ])
 }
 
@@ -1260,4 +1261,30 @@ pub fn justified_bidi() -> Result<Fixture, DocError> {
     let mut fixture = Fixture::new("justified_bidi", doc, &[]);
     fixture.engine.composer = Box::new(Optimal::justified());
     Ok(fixture)
+}
+
+/// Save must retain tombstoned characters and IDs, Unicode byte anchors,
+/// unreadable authored forms and a historical reference across reopening.
+pub fn persistence_tombstones() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let p = doc.append_block(BlockKind::Paragraph, "body", "a\u{301} corridor 🏠")?;
+    let range = doc.add_range(p, 4..12, RangePolicy::FIXED)?;
+    doc.commit();
+    let version = doc.revision();
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(REFERENCE).owned_by(p).target(
+            "to",
+            Target::Snapshot(SnapshotRef {
+                version,
+                of: SnapshotOf::Range(range),
+            }),
+        ),
+    )?;
+    let deleted = doc.append_block(BlockKind::Paragraph, "body", "discarded")?;
+    doc.delete_block(deleted)?;
+    doc.block(p)?.text.delete(4..5)?;
+    doc.store_raw_page_template("future-unused", "{future:opaque}")?;
+    doc.commit();
+    Ok(Fixture::new("persistence_tombstones", doc, &[]))
 }

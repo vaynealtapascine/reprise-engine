@@ -27,6 +27,7 @@ pub mod expr;
 pub mod function;
 mod history;
 mod page;
+mod persist;
 pub mod relation;
 #[cfg(test)]
 mod relation_tests;
@@ -43,6 +44,9 @@ pub use history::{
 pub use page::{
     Basis, Dim, FrameRole, FrameTemplate, MAIN_FLOW, Medium, PageTemplate, StoredTemplate,
     TemplateChoice,
+};
+pub use persist::{
+    MAX_PERSIST_BYTES, MAX_PERSIST_EXPANDED_BYTES, MAX_PERSIST_OPS, PersistenceMode,
 };
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,

@@ -17,7 +17,7 @@ Notes for anyone (human or AI) working on reprise-engine.
 cargo test --workspace                     # all tests, including snapshot fixtures
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
-cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures
+cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format
 cargo run -p reprise-cli -- spike out      # writes before/after in every output format
 ```
 
