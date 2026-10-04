@@ -1433,3 +1433,104 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
 
 #[cfg(test)]
 mod tests;
+
+/// Opaque memo storage for hosts that cannot retain a borrowed session.
+/// Keep it bound to the same document and immutable engine configuration.
+#[derive(Default)]
+pub struct LayoutCache {
+    evaluation: Evaluation,
+}
+/// Opaque suspended job. Resume only against its original document/configuration.
+pub struct LayoutContinuation {
+    document: *const Document,
+    revision: Revision,
+    viewport: Viewport,
+    base: LayoutSnapshot,
+    snapshot: LayoutSnapshot,
+    template: ResolvedTemplate,
+    nodes: Vec<NodeId>,
+    next_node: usize,
+    cursor: Option<Cursor>,
+    pending: Vec<flow::Pending>,
+    final_key: Option<PassKey>,
+    final_reasons: BTreeSet<Dependency>,
+    plan: Plan,
+    history: Vec<Plan>,
+    active: bool,
+    iteration: usize,
+    pass: Pass,
+    cancelled: bool,
+    terminal: Rc<Cell<Option<JobError>>>,
+}
+impl<'engine> LayoutSession<'engine> {
+    pub fn from_cache(engine: &'engine Engine, cache: LayoutCache) -> Self {
+        Self {
+            engine,
+            evaluation: cache.evaluation,
+            document: None,
+        }
+    }
+    pub fn into_cache(self) -> LayoutCache {
+        LayoutCache {
+            evaluation: self.evaluation,
+        }
+    }
+    pub fn resume<'job>(
+        &'job mut self,
+        doc: &'job Document,
+        state: LayoutContinuation,
+    ) -> Result<LayoutJob<'job, 'engine>, JobError> {
+        if !std::ptr::eq(state.document, doc) || state.revision != doc.revision() {
+            self.evaluation = Evaluation::default();
+            return Err(JobError::Stale);
+        }
+        self.document = Some(doc);
+        Ok(LayoutJob {
+            session: self,
+            doc,
+            revision: state.revision,
+            viewport: state.viewport,
+            base: state.base,
+            snapshot: state.snapshot,
+            template: state.template,
+            nodes: state.nodes,
+            next_node: state.next_node,
+            cursor: state.cursor,
+            pending: state.pending,
+            final_key: state.final_key,
+            final_reasons: state.final_reasons,
+            plan: state.plan,
+            history: state.history,
+            active: state.active,
+            iteration: state.iteration,
+            pass: state.pass,
+            cancelled: state.cancelled,
+            terminal: state.terminal,
+        })
+    }
+}
+impl LayoutJob<'_, '_> {
+    pub fn suspend(self) -> LayoutContinuation {
+        LayoutContinuation {
+            document: self.doc,
+            revision: self.revision,
+            viewport: self.viewport,
+            base: self.base,
+            snapshot: self.snapshot,
+            template: self.template,
+            nodes: self.nodes,
+            next_node: self.next_node,
+            cursor: self.cursor,
+            pending: self.pending,
+            final_key: self.final_key,
+            final_reasons: self.final_reasons,
+            plan: self.plan,
+            history: self.history,
+            active: self.active,
+            iteration: self.iteration,
+            pass: self.pass,
+            cancelled: self.cancelled,
+            terminal: self.terminal,
+        }
+    }
+}

@@ -454,3 +454,18 @@ version = \"1.16.2\""
         );
     }
 }
+
+impl Document {
+    /// Sorted version vector, opaque to transport implementations.
+    pub fn version_vector(&self) -> Vec<(u64, i32)> {
+        self.commit();
+        let mut vector: Vec<_> = self
+            .doc
+            .oplog_vv()
+            .iter()
+            .map(|(peer, counter)| (*peer, *counter))
+            .collect();
+        vector.sort_unstable();
+        vector
+    }
+}
