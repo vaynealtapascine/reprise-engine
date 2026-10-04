@@ -12,6 +12,7 @@ reprise-compose.workspace = true
 reprise-doc.workspace = true
 reprise-font.workspace = true
 reprise-layout.workspace = true
+reprise-plugin.workspace = true
 
 [dev-dependencies]
 reprise-edit.workspace = true
@@ -19,3 +20,4 @@ reprise-diag.workspace = true
 reprise-display.workspace = true
 insta.workspace = true
 serde_json.workspace = true
+wat.workspace = true

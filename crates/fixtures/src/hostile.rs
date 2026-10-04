@@ -113,6 +113,8 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         editing_half_invalid()?,
         editing_empty_document()?,
         editing_empty_block()?,
+        plugin_fuel()?,
+        plugin_extensions()?,
     ])
 }
 
@@ -1794,4 +1796,82 @@ pub fn editing_empty_block() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("editing_empty_block", doc, &[]))
+}
+
+/// One module loops at every extension point: text must survive all three fallbacks.
+pub fn plugin_fuel() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    paragraph_sized(&doc, "plugin-loop", expr("plugin-size(9pt)")?)?;
+    let node = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Fuel is a deterministic bound. Text survives a failed extension.",
+    )?;
+    let mut fixture = Fixture::new(
+        "plugin_fuel",
+        doc,
+        &["style.function-failed", "plugin.fuel"],
+    );
+    let plugin = crate::plugins::load(crate::plugins::LOOP)?;
+    fixture
+        .engine
+        .install_plugin_functions(&plugin)
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    fixture
+        .engine
+        .install_plugin_geometry(plugin.clone(), 2, Box::new(reprise_compose::Greedy))
+        .map_err(|n| DocError::Store(n.message))?;
+    fixture
+        .engine
+        .install_plugin_relation(
+            crate::plugins::schema(),
+            reprise_layout::plugins::RelationBinding {
+                plugin: Some(plugin),
+                operation: 3,
+            },
+        )
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    fixture.doc.add_relation(
+        &fixture.engine.schemas,
+        &Relation::new(crate::plugins::REPORT)
+            .target("to", Target::Layout(LayoutQuery::FirstLine { node })),
+    )?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+/// The same source-defined plugin doubles style size, tapers room and reports a resolved line.
+pub fn plugin_extensions() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut style = Style::default();
+    style.set(Property::Size, expr("plugin-size(9pt)")?);
+    doc.define_style("plugin", &style)?;
+    let node = doc.append_block(BlockKind::Paragraph, "plugin", "A sandbox shapes this paragraph with three steps of inset. Every byte remains in reading order, and the relation reports its first line.")?;
+    let mut fixture = Fixture::new("plugin_extensions", doc, &[]);
+    let plugin = crate::plugins::load(crate::plugins::DEMO)?;
+    fixture
+        .engine
+        .install_plugin_functions(&plugin)
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    fixture
+        .engine
+        .install_plugin_geometry(plugin.clone(), 2, Box::new(reprise_compose::Greedy))
+        .map_err(|n| DocError::Store(n.message))?;
+    fixture
+        .engine
+        .install_plugin_relation(
+            crate::plugins::schema(),
+            reprise_layout::plugins::RelationBinding {
+                plugin: Some(plugin),
+                operation: 3,
+            },
+        )
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    fixture.doc.add_relation(
+        &fixture.engine.schemas,
+        &Relation::new(crate::plugins::REPORT)
+            .target("to", Target::Layout(LayoutQuery::FirstLine { node })),
+    )?;
+    fixture.doc.commit();
+    Ok(fixture)
 }

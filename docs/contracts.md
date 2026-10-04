@@ -56,6 +56,7 @@ Codes in use:
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 | edit | `edit.limit`, `edit.invalid-command`, `edit.store` |
+| plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
 
 ## Text store: `reprise-text`
 
@@ -534,3 +535,34 @@ here: through a dedicated `feat(contracts)` commit.
   by layout and omitted from JSON when zero. It does not infer paragraph direction
   from source text. The resolved base level controls transitions between visual
   lines and the inline edge of an empty line; run levels control intra-line cells.
+
+## Plugins (additive ABI v1)
+
+`reprise-plugin` adds pinned core-WASM modules and adapters; existing extension
+traits, snapshot fields and diagnostic codes are unchanged. The complete ABI is
+[plugins.md](plugins.md), including exports, exact little-endian memory records,
+UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
+
+- A module is identified by SHA-256 of its bytes plus declared name/version.
+  Manifest signatures/imports, grants, fuel, memory/table/buffer limits, phase and
+  pinned runtime version are explicit reproduction inputs (`Envelope`). The
+  layout adapter exposes a sorted `PluginEnvelope`; hosts include it in cache tags.
+- The only backend is wasmi 2.0.0, with deterministic NaN arithmetic and portable
+  dispatch. SIMD, relaxed SIMD, shared memory, threads and ambient imports are
+  refused. Layout API values are integer Length/Fixed records, never floats.
+- Required exports: memory, reprise_abi_version () -> i32,
+  reprise_alloc (i32) -> i32, reprise_call (i32,i32,i32,i32,i32) -> i32.
+  ABI version is 1; input/output buffers are checked and disjoint. Instances and
+  mutable state are fresh per invocation. All exports share one fuel budget.
+- PureFunction signatures are declared without executing code. Unknown/refused
+  functions remain unknown; runtime failure uses existing style.function-failed
+  with the underlying plugin code in its message and skips the style layer.
+- Geometry narrows existing frame room only. Invalid/missing/exhausted geometry
+  falls back to that exact room with a Warning. Existing composer bounds apply.
+- Plugin schema bindings resolve targets through the existing resolver, then
+  acknowledge or decline. They cannot place blocks. Failure leaves resolved
+  targets reported with applied=false, a plugin Warning and relation.not-applied.
+- ReadText sees only explicit immutable handle texts. Editing-only InsertText
+  stages bounded UTF-8 commands; EditKernel commits one validated atomic kernel
+  transaction after successful execution. Refusal/trap applies no commands.
+  There are no time, randomness or I/O imports, including in Editing phase v1.

@@ -22,6 +22,7 @@ reprise-layout = { path = "crates/layout" }
 reprise-display = { path = "crates/display" }
 reprise-fixtures = { path = "crates/fixtures" }
 reprise-edit = { path = "crates/edit" }
+reprise-plugin = { path = "crates/plugin" }
 
 loro = "1.16"
 thiserror = "2"
@@ -37,3 +38,6 @@ serde_json = "1"
 sha2 = "0.11"
 insta = { version = "1.49", features = ["json"] }
 lopdf = { version = "0.38", default-features = false }
+wasmi = { version = "=2.0.0", default-features = false, features = ["stable", "std", "validate", "deterministic", "portable-dispatch", "prefer-btree-collections"] }
+wasmparser = { version = "=0.228.0", default-features = false, features = ["std"] }
+wat = { version = "=1.261.0", default-features = false }

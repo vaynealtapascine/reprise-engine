@@ -13,6 +13,7 @@ use reprise_font::{Face, FontStore};
 use reprise_layout::Engine;
 
 pub mod hostile;
+pub mod plugins;
 pub mod spike;
 pub mod templates;
 

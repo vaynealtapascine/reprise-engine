@@ -41,7 +41,7 @@ interfaces.
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, ordered run addresses and extraction spans, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
 |  | `tests/pdf_text.rs` | Ordered PDF extraction through rotated, mirrored, vertical and spiral layouts; generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
-| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `medium` and `FlowSettings`), `Engine::layout`, geometry and reading module wiring | 20, 24, 26, 33, 38 |
+| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `plugins`, `medium` and `FlowSettings`), `Engine::layout`, geometry, plugins and reading module wiring | 20, 24, 26, 33, 36, 38 |
 |  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Resolution`, `Diagnostic`, queries | 05, 13, 37 |
 |  | `src/geometry.rs`, `docs/geometry.md` | Exact authored frame transforms, logical writing axes, bounded spiral expansion, inverse and path diagnostics | 19, 20, 37, 38 |
@@ -49,7 +49,8 @@ interfaces.
 |  | `src/template.rs` | Resolving the document's page template against the medium; falling back to the built-in one | 24, 34, 37, 38 |
 |  | `src/region.rs` | `Bounded`: any geometry provider, ended at a frame's depth | 23, 24 |
 |  | `src/flow.rs` | Pass 1: per-starting-frame style resolution and diagnostics, shaping, line L1/L2 reordering and glyph spacing adjustments, composing and threading paragraphs through the main flow's frames, page after page | 08, 17, 18, 22, 23, 24, 30 |
-|  | `src/relations/mod.rs` | Pass 2: dispatching relations on their schema | 13–15, 26 |
+|  | `src/relations/mod.rs` | Pass 2: schema dispatch, including plugin resolve-and-report after the shared resolver | 13–15, 26, 36 |
+|  | `src/plugins.rs` | Plugin registration helpers, complete ordered reproduction envelope, safe relation acknowledgement adapter | 04, 36–38 |
 |  | `src/relations/follow.rs` | `reprise.follow`: placing a block in the margin frame of its target line's page | 13, 15, 24 |
 |  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; shared by `follow` and other relation behaviours | 13, 14, 15 |
 |  | `src/query.rs` | Layout queries added by relations (`first_line`, `frame_of`, `answer`, ...) | 13, 16 |
@@ -57,7 +58,8 @@ interfaces.
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
 |  | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases; transformed RTL, writing modes, spirals, reading cycles and degenerate/extreme transforms; editing lifecycle, transaction refusal and empty/zero-width carets | 17, 18, 20, 33, 37, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, styles; transformed RTL, writing modes, spirals, reading cycles and extreme transforms; editing lifecycle and carets; plugin fuel fallback and source-defined plugin extension integration | 17, 18, 20, 33, 36, 37, 39 |
+|  | `src/plugins.rs`, `tests/plugins.rs` | Pinned WAT-derived binaries; end-to-end styles, geometry, relation resolution, envelope budgets and real editing kernel atomicity/undo | 04, 29, 36–38 |
 |  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, editing undo/refusal/extreme-hit tests, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
@@ -80,6 +82,20 @@ Other files:
 
 -   `fixtures/fonts/`: the bundled test font (Source Serif Pro, OFL) and its license.
 -   `.github/workflows/ci.yml`: CI.
+-   `Cargo.toml`, `Cargo.lock`: shared dependencies, including pinned plugin runtime and WAT test compiler.
+
+## Plugin sandbox
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `plugin` | `Cargo.toml`, `src/lib.rs`, `src/codes.rs` | Content-hash identities, manifests, ordered capabilities, phase grants, explicit limits and reproduction pins; staged editing-kernel interface and stable failures | 04, 19, 36–38 |
+| | `src/runtime.rs` | Private Runtime boundary and wasmi backend, static preflight, typed import allowlist, fuel, memory/table/stack limits, fresh instances, checked buffers and deterministic host-copy fuel | 36–38 |
+| | `src/abi.rs`, `docs/plugins.md` | Language-independent ABI v1: integer values, UTF-8 byte offsets, linear-memory records, imports/exports and statuses | 04, 19, 36 |
+| | `src/function.rs` | Atomic FunctionRegistry registration and typed PureFunction adapter; frozen style failure diagnostic | 17, 36, 37 |
+| | `src/geometry.rs` | Shape provider with containment/order/progress validation and exact frame-room fallback; wrapper over conforming composers | 20, 23, 36, 37 |
+| | `tests/common/mod.rs`, `tests/sandbox.rs`, `tests/capabilities.rs`, `tests/geometry.rs` | Runtime/ABI/capability/state/fuel/NaN/adversarial geometry conformance, staged editing and exact WAT/WASM equality | 36–39 |
+| | `test-plugins/demo.wat`, `test-plugins/loop.wat`, matching `.wasm`, `examples/compile_test_plugins.rs` | Checked-in test sources and deterministic explicit fixture compiler, no build-time toolchain requirement | 36, 38, 39 |
+| `fixtures` | `tests/snapshots/hostile__plugin_*.snap`, `tests/snapshots/hostile__content_plugin_*.snap` | Paired geometry/content goldens for successful extensions and fuel fallbacks | 36–39 |
 
 ## Recipes
 
