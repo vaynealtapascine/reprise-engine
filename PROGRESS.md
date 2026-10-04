@@ -2,6 +2,57 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-04: geometry, regions and base direction merged; kernel in progress
+
+**Done:**
+
+-   **Workstream 5, geometry and reading order.** It went to Sol after Claude rate limits.
+    -   Exact frame rotation (quarter turns, rational directions, angles in thousandths of a
+        degree, raw matrices) and mirroring.
+    -   `vertical-rl`, plus a sideways `vertical-lr`.
+    -   Spiral paths, expanded into threaded chord frames (at most 1,024 strips).
+    -   `reprise.reading-order` overrides, with diagnostics for cycles, conflicts and
+        missing targets; `LayoutSnapshot::reading_order(&doc)`.
+    -   `pdf::render_ordered`.
+    -   The design note is in `docs/geometry.md`. Orchestrator test: extreme authored matrices
+        and spirals stay total.
+-   **Workstream 3b, floats, notes, tables and solver domains** (Sol).
+    -   Floats with runaround, stacking and deferral.
+    -   Footnotes and endnotes that continue across pages, nest, and can take over pages.
+    -   Tables (`doc/src/table.rs`) with rows fragmenting across pages.
+    -   Integer solver domains for column widths.
+    -   Region feedback runs at most 16 passes and freezes on oscillation.
+    -   `docs/regions.md` answers the open question of where allocation, fragmentation and
+        backtracking live. `architecture.md` still lists it as open: the user may want to
+        close it by pointing there.
+    -   Orchestrator test: floats and nested notes in rotated, mirrored and vertical frames,
+        with reading order covering every line.
+-   **Contract change:** `BlockLayout.base_level`, so the editing kernel doesn't re-derive
+    paragraph direction.
+
+**In flight:**
+
+-   **Workstream 7, the editing kernel** (Sol, `D:/!!Self/dev/reprise-wt/edit`).
+    -   Its first trash-root identity scheme was proven unsound (ID collisions with a
+        concurrent real peer, split undo steps, lost undo history). It was replaced by
+        **soft deletion**: a `deleted` flag in the node's metadata, undone in place with the
+        same ID.
+    -   It must merge `main`, cover tables and reading order, and check carets in transformed
+        frames.
+
+**Gaps noted by these workstreams:**
+
+-   **Vertical text:** upright CJK and downward `vertical-lr` need vertical shaping.
+-   **Paths:** straight-strip approximation, with no collision avoidance.
+-   **Reading order:** overrides work on whole blocks. The ordered PDF has no PDF/UA
+    structure tree.
+-   **Floats and notes:** floats don't fragment, and notes use the first notes frame.
+-   **Tables:** no repeated headers, spanning cells, borders or nested tables yet.
+-   **File format:** needs feature declarations for table metadata and the new schemas.
+
+**Next:** workstream 6, incremental evaluation and scheduling (Sol), now that 1–5 have
+landed. Then 9b, the clipboard, after the kernel merges.
+
 ## 2026-10-04: integration and the file format merged; wave 2b started
 
 **Done.**
