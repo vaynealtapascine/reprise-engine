@@ -146,5 +146,13 @@ Other files:
 
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
-| `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Session API beside the full-layout reference | 16, 26-28, 39 |
-| `fixtures` | `tests/incremental.rs` | Seeded edits of every hostile fixture and spike, exact snapshot and diagnostic equivalence | 27, 38, 39 |
+| `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Exact-input preparation/flow/region/final-pass caches, computed dependency and reverse-inspection graph, revision-gated viewport jobs beside the full-layout reference | 16, 26-28, 39 |
+| `fixtures` | `tests/incremental.rs` | Seeded text/style/template/relation/split/join/concurrent edits of every hostile fixture and spike; exact equivalence, counters, budgets, cancellation, revision rejection and 100,000-paragraph viewport test | 27, 38, 39 |
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/incremental/tests.rs` | Cyclic/missing/deep computed graphs, unified inputs, extreme and reversed viewports | 16, 28, 37, 39 |
+| `layout` | `src/flow.rs`, `src/table.rs`, `src/notes.rs`, `src/floats.rs` | Owned resumable flow cursor, optional exact-input memo hooks and actual work counters; reference disables reuse | 26-28 |
+| `layout` | `src/regions.rs`, `src/regions/tests.rs`, `src/relations/mod.rs`, `src/template.rs` | Shared bounded-feedback outcome/freeze helpers, exact comparable templates, explicit relation/reading stages; unchanged reference output | 26, 37, 38 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, paired `incremental_page_seam` snapshots | UTF-8 pagination seam with a following annotation and explicit reading precedence | 27, 38, 39 |
+| - | `docs/incremental.md`, additive section in `docs/contracts.md` | Exact memo keys and reuse argument, scheduling/partial semantics, limits and Salsa evaluation | 16, 26-28, 39, 41 |

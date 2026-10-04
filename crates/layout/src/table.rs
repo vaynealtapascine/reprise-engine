@@ -1,6 +1,6 @@
 //! Tables allocate columns in a declared solver domain, then fragment rows
 //! synchronously across the body thread. Cell text uses the ordinary composer.
-use crate::flow::{Flow, Prepared, prepare, resolution_context, unplaced};
+use crate::flow::{Flow, Prepared, prepare_cached, resolution_context, unplaced};
 use crate::region::Bounded;
 use crate::solver::{MAX_DOMAIN_VARIABLES, SolverDomain, Variable};
 use crate::{Diagnostic, Subject, codes};
@@ -90,12 +90,13 @@ impl Flow<'_> {
                         }
                         continue;
                     }
-                    if let Some(p) = prepare(
+                    if let Some(p) = prepare_cached(
                         self.engine,
                         doc,
                         block,
                         &ctx,
                         &mut self.snapshot.diagnostics,
+                        self.evaluation,
                     ) {
                         let mut start = 0;
                         let mut minimum = Length::ZERO;
@@ -240,6 +241,7 @@ impl Flow<'_> {
                         y,
                         &subject,
                         &mut self.snapshot.diagnostics,
+                        self.evaluation,
                     );
                     if composed.lines.is_empty() {
                         done = false;

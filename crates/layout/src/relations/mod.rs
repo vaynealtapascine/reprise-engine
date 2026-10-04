@@ -22,9 +22,20 @@ pub(crate) fn run(
     engine: &Engine,
     doc: &Document,
     snapshot: &mut LayoutSnapshot,
-    mut pending: Vec<Pending>,
+    pending: Vec<Pending>,
     applied: &std::collections::BTreeSet<reprise_doc::RelationId>,
 ) {
+    let pending = begin(engine, doc, snapshot, pending, applied);
+    finish_reading(doc, snapshot, pending);
+}
+
+pub(crate) fn begin(
+    engine: &Engine,
+    doc: &Document,
+    snapshot: &mut LayoutSnapshot,
+    mut pending: Vec<Pending>,
+    applied: &std::collections::BTreeSet<reprise_doc::RelationId>,
+) -> Vec<Pending> {
     let mut follow = Follow::default();
     let mut resolver = Resolver::new(doc);
     for (id, relation) in doc.relations() {
@@ -114,6 +125,10 @@ pub(crate) fn run(
             .unwrap_or(result.status);
         snapshot.relations.push(result);
     }
+    pending
+}
+
+pub(crate) fn finish_reading(doc: &Document, snapshot: &mut LayoutSnapshot, pending: Vec<Pending>) {
     snapshot
         .diagnostics
         .extend(snapshot.reading_order_report(doc).diagnostics);

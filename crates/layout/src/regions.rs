@@ -30,7 +30,7 @@ pub(crate) struct Plan {
 }
 
 impl Plan {
-    fn equivalent(&self, other: &Self) -> bool {
+    pub(crate) fn equivalent(&self, other: &Self) -> bool {
         self.exclusions == other.exclusions
             && self.reservations == other.reservations
             && self.blocks == other.blocks
@@ -62,10 +62,7 @@ pub(crate) fn run(
     template: &ResolvedTemplate,
     base: LayoutSnapshot,
 ) -> LayoutSnapshot {
-    let active = doc.relations().iter().any(|(_, r)| {
-        r.as_ref()
-            .is_ok_and(|r| is_region(r) && engine.schemas.get(&r.schema).is_some())
-    });
+    let active = active(engine, doc);
     let mut plan = Plan::default();
     let mut history: Vec<Plan> = Vec::new();
     for iteration in 0..MAX_REGION_ITERATIONS {
@@ -75,21 +72,16 @@ pub(crate) fn run(
             crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
             return snapshot;
         }
-        let next = allocate(engine, doc, template, &snapshot);
-        if next.equivalent(&plan) {
-            snapshot.blocks.extend(next.blocks);
-            snapshot.diagnostics.extend(next.diagnostics);
-            crate::relations::run(engine, doc, &mut snapshot, pending, &next.applied);
-            return snapshot;
-        }
-        let oscillates = history.iter().any(|p| next.equivalent(p));
-        if oscillates || iteration + 1 == MAX_REGION_ITERATIONS {
-            // Freeze the INPUT plan: this flow was composed with precisely its
-            // exclusions and reservations. Never publish a mismatched pair.
-            snapshot.blocks.extend(plan.blocks);
-            snapshot.diagnostics.extend(plan.diagnostics);
-            snapshot.diagnostics.push(Diagnostic::new(Severity::Warning, if oscillates { codes::REGION_CYCLE } else { codes::REGION_LIMIT }, Subject::Document, "region feedback did not converge; last complete input allocation frozen, anchors may differ"));
-            crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
+        let next = allocate(engine, doc, template, &snapshot, None);
+        let outcome = feedback(&plan, &next, &history, iteration);
+        if outcome != Feedback::Continue {
+            let applied = if outcome == Feedback::Converged {
+                next.applied.clone()
+            } else {
+                plan.applied.clone()
+            };
+            finish_feedback(&mut snapshot, &plan, next, outcome);
+            crate::relations::run(engine, doc, &mut snapshot, pending, &applied);
             return snapshot;
         }
         history.push(plan);
@@ -98,11 +90,54 @@ pub(crate) fn run(
     base
 }
 
-fn allocate(
+pub(crate) fn active(engine: &Engine, doc: &Document) -> bool {
+    doc.relations().iter().any(|(_, r)| {
+        r.as_ref()
+            .is_ok_and(|r| is_region(r) && engine.schemas.get(&r.schema).is_some())
+    })
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Feedback {
+    Continue,
+    Converged,
+    Oscillated,
+    Exhausted,
+}
+pub(crate) fn feedback(plan: &Plan, next: &Plan, history: &[Plan], iteration: usize) -> Feedback {
+    if next.equivalent(plan) {
+        Feedback::Converged
+    } else if history.iter().any(|p| next.equivalent(p)) {
+        Feedback::Oscillated
+    } else if iteration.saturating_add(1) >= MAX_REGION_ITERATIONS {
+        Feedback::Exhausted
+    } else {
+        Feedback::Continue
+    }
+}
+pub(crate) fn finish_feedback(
+    snapshot: &mut LayoutSnapshot,
+    plan: &Plan,
+    next: Plan,
+    outcome: Feedback,
+) {
+    if outcome == Feedback::Converged {
+        snapshot.blocks.extend(next.blocks);
+        snapshot.diagnostics.extend(next.diagnostics);
+    } else {
+        snapshot.blocks.extend(plan.blocks.clone());
+        snapshot.diagnostics.extend(plan.diagnostics.clone());
+        snapshot.diagnostics.push(Diagnostic::new(Severity::Warning,
+            if outcome == Feedback::Oscillated { codes::REGION_CYCLE } else { codes::REGION_LIMIT },
+            Subject::Document, "region feedback did not converge; last complete input allocation frozen, anchors may differ"));
+    }
+}
+
+pub(crate) fn allocate(
     engine: &Engine,
     doc: &Document,
     template: &ResolvedTemplate,
     flowed: &LayoutSnapshot,
+    evaluation: Option<&crate::incremental::Evaluation>,
 ) -> Plan {
     let mut scratch = flowed.clone();
     let mut out = Plan::default();
@@ -195,6 +230,7 @@ fn allocate(
                     id,
                     &r,
                     anchor,
+                    evaluation,
                 );
             } else {
                 notes.place(
@@ -206,6 +242,7 @@ fn allocate(
                     id,
                     &r,
                     anchor,
+                    evaluation,
                 );
             }
             progressed = true;
@@ -269,6 +306,7 @@ pub(crate) fn ensure_page(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     engine: &Engine,
     doc: &Document,
@@ -277,8 +315,9 @@ pub(crate) fn prepare(
     template_index: usize,
     width: Length,
     diagnostics: &mut Vec<Diagnostic>,
+    evaluation: Option<&crate::incremental::Evaluation>,
 ) -> Option<flow::Prepared> {
     let ctx: ResolutionContext =
         flow::resolution_context(engine, template, template.frames.get(template_index), width);
-    flow::prepare(engine, doc, node, &ctx, diagnostics)
+    flow::prepare_cached(engine, doc, node, &ctx, diagnostics, evaluation)
 }
