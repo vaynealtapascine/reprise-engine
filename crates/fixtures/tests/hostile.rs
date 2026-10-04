@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 35);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 36);
 }
 
 hostile_tests!(
@@ -684,3 +684,83 @@ fn line_bidi_resets_trailing_spaces_and_preserves_advances() {
 }
 
 hostile_tests!(follow_lines_across_frames);
+
+hostile_tests!(style_fragment_basis);
+
+#[test]
+fn style_uses_the_actual_starting_frame_once_per_block() {
+    let fixture = hostile::style_fragment_basis().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let first = &snapshot.blocks[0];
+    assert_eq!(first.style.size, Length::from_pt(10));
+    assert!(
+        first
+            .lines
+            .iter()
+            .any(|l| snapshot.frame(l.frame).unwrap().name == "narrow")
+    );
+    for line in &first.lines {
+        for run in &line.runs {
+            assert_eq!(run.size, Length::from_pt(10));
+        }
+    }
+    for block in &snapshot.blocks {
+        for note in &block.style.notes {
+            assert!(snapshot.diagnostics.iter().any(|d| d.code == note.code
+                && d.severity == note.severity
+                && d.subject == Subject::Node(block.node)));
+        }
+    }
+    assert_eq!(snapshot.blocks[1].style.size, Length::from_pt(10));
+    let bases = hostile::style_bases().unwrap();
+    assert_eq!(
+        bases.engine.layout(&bases.doc).blocks[0].style.size,
+        Length::from_pt(12)
+    );
+}
+
+#[test]
+fn a_block_that_cannot_start_in_the_current_frame_uses_the_next_frame_basis() {
+    use reprise_doc::{Authored, Dim, Expr, PageTemplate, Property, Style};
+    use reprise_fixtures::templates::flow_frame;
+    let doc = Document::new(reprise_fixtures::PEER).unwrap();
+    reprise_fixtures::spike::define_styles(&doc).unwrap();
+    doc.set_page_template(
+        &PageTemplate::new("start-after-full-frame", Dim::pt(400), Dim::pt(100))
+            .with_frame(flow_frame(
+                "wide",
+                Dim::pt(0),
+                Dim::pt(0),
+                Dim::pt(200),
+                Dim::pt(20),
+            ))
+            .with_frame(flow_frame(
+                "narrow",
+                Dim::pt(210),
+                Dim::pt(0),
+                Dim::pt(100),
+                Dim::pt(40),
+            )),
+    )
+    .unwrap();
+    doc.append_block(BlockKind::Paragraph, "body", "Fills the first frame.")
+        .unwrap();
+    let mut style = Style::default();
+    style.set(
+        Property::Size,
+        Authored::Expr(Expr::parse("5% * frame-width").unwrap()),
+    );
+    doc.define_style("frame-sized", &style).unwrap();
+    let p = doc
+        .append_block(BlockKind::Paragraph, "frame-sized", "Starts here.")
+        .unwrap();
+    let snapshot = reprise_fixtures::engine().layout(&doc);
+    let block = snapshot.block(p).unwrap();
+    assert_eq!(snapshot.frame(block.lines[0].frame).unwrap().name, "narrow");
+    assert_eq!(block.style.size, Length::from_pt(5));
+    assert!(
+        snapshot.diagnostics.is_empty(),
+        "{:?}",
+        snapshot.diagnostics
+    );
+}

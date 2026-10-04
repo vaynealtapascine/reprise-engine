@@ -16,6 +16,7 @@ use reprise_compose::{
     Break, ComposeRequest, GeometryProvider, LineFragment, Measure, break_opportunities,
 };
 use reprise_diag::Severity;
+use reprise_doc::context::{Extent, ResolutionContext};
 use reprise_doc::{BlockKind, ComputedStyle, Document, NodeId};
 use reprise_font::FaceId;
 use reprise_geom::{FrameSpace, Length, Point, Rect};
@@ -24,7 +25,7 @@ use reprise_shape::{
 };
 
 use crate::region::Bounded;
-use crate::template::ResolvedTemplate;
+use crate::template::{ResolvedFrame, ResolvedTemplate};
 use crate::{
     BlockLayout, Diagnostic, Engine, FrameLayout, LayoutSnapshot, LineLayout, PageLayout,
     PositionedRun, Subject, codes,
@@ -181,18 +182,21 @@ impl Flow<'_> {
     fn paragraph(&mut self, doc: &Document, node: NodeId) {
         let engine = self.engine;
         let subject = Subject::Node(node);
-        let Some(prepared) = prepare(engine, doc, node, &mut self.snapshot.diagnostics) else {
+        let mut preparation_notes = Vec::new();
+        let mut ctx = self.paragraph_context();
+        let Some(mut prepared) = prepare(engine, doc, node, &ctx, &mut preparation_notes) else {
+            self.snapshot.diagnostics.extend(preparation_notes);
             return;
         };
         let len = prepared.text.len();
         if self.limit_hit {
+            self.snapshot.diagnostics.extend(preparation_notes);
             unplaced(&mut self.snapshot.diagnostics, &subject, 0..len);
             return;
         }
 
         // A line taller than every frame fits nowhere; placing it overflowing
         // is better than leaving the text out or hunting through pages.
-        let oversize = prepared.style.line_height > self.max_depth;
         let mut lines = Vec::new();
         let mut start = 0;
         let mut done = false;
@@ -210,8 +214,9 @@ impl Flow<'_> {
                 inner: &measure,
                 depth: frame.depth,
             };
-            let unbounded = oversize || forced;
+            let unbounded = prepared.style.line_height > self.max_depth || forced;
             let geometry: &dyn GeometryProvider = if unbounded { &measure } else { &bounded };
+            let mut composition_notes = Vec::new();
             let composed = prepared.compose(
                 engine,
                 geometry,
@@ -219,9 +224,10 @@ impl Flow<'_> {
                 start,
                 y,
                 &subject,
-                &mut self.snapshot.diagnostics,
+                &mut composition_notes,
             );
             if composed.lines.is_empty() {
+                self.snapshot.diagnostics.extend(composition_notes);
                 // Nothing fit here. That is ordinary for a frame that is
                 // already partly full. A whole page of empty frames that can't
                 // take a line means the geometry will never allow one: place it
@@ -232,8 +238,22 @@ impl Flow<'_> {
                 } else if !self.advance() {
                     break;
                 }
+                if lines.is_empty() {
+                    // No line has been placed yet: resolve against the new
+                    // candidate starting frame, discarding provisional notes.
+                    ctx = self.paragraph_context();
+                    preparation_notes.clear();
+                    let Some(next) = prepare(engine, doc, node, &ctx, &mut preparation_notes)
+                    else {
+                        self.snapshot.diagnostics.extend(preparation_notes);
+                        return;
+                    };
+                    prepared = next;
+                }
                 continue;
             }
+            self.snapshot.diagnostics.append(&mut preparation_notes);
+            self.snapshot.diagnostics.extend(composition_notes);
             if unbounded && !overflowed {
                 overflowed = true;
                 self.snapshot.diagnostics.push(Diagnostic::new(
@@ -268,12 +288,28 @@ impl Flow<'_> {
             }
         }
 
+        self.snapshot.diagnostics.extend(preparation_notes);
         if !done {
             unplaced(&mut self.snapshot.diagnostics, &subject, start..len);
         }
         if !lines.is_empty() {
             self.snapshot.blocks.push(prepared.into_block(lines));
         }
+    }
+
+    /// Style is frozen once the block places its first line. A continuation
+    /// keeps that starting frame's context even when later widths differ.
+    fn paragraph_context(&self) -> ResolutionContext {
+        let frame = self
+            .thread
+            .get(self.pos)
+            .and_then(|&i| self.template.frames.get(i));
+        resolution_context(
+            self.engine,
+            self.template,
+            frame,
+            frame.map_or(Length::ZERO, |f| f.width),
+        )
     }
 
     /// Composes an annotation for a relation to place. The page it lands on
@@ -283,12 +319,22 @@ impl Flow<'_> {
     fn annotation(&mut self, doc: &Document, node: NodeId) -> Option<Pending> {
         let engine = self.engine;
         let subject = Subject::Node(node);
-        let prepared = prepare(engine, doc, node, &mut self.snapshot.diagnostics)?;
-        let width = self.template.margin_width().unwrap_or_else(|| {
-            self.thread
-                .first()
-                .map_or(Length::ZERO, |&t| self.template.frames[t].width)
-        });
+        let frame = self
+            .template
+            .frames
+            .iter()
+            .find(|f| f.role == reprise_doc::FrameRole::Margin)
+            .or_else(|| {
+                self.thread
+                    .first()
+                    .and_then(|&i| self.template.frames.get(i))
+            });
+        let width = self
+            .template
+            .margin_width()
+            .unwrap_or_else(|| frame.map_or(Length::ZERO, |f| f.width));
+        let ctx = resolution_context(engine, self.template, frame, width);
+        let prepared = prepare(engine, doc, node, &ctx, &mut self.snapshot.diagnostics)?;
         let composed = prepared.compose(
             engine,
             &Measure(width),
@@ -310,6 +356,26 @@ impl Flow<'_> {
             block: prepared.into_block(composed.lines),
         })
     }
+}
+
+/// All pages currently use the same resolved template. Named bases include
+/// every frame on that page; block height stays indefinite until composed.
+fn resolution_context(
+    engine: &Engine,
+    template: &ResolvedTemplate,
+    frame: Option<&ResolvedFrame>,
+    width: Length,
+) -> ResolutionContext {
+    let mut ctx = ResolutionContext::default()
+        .with_medium(Extent::definite(engine.medium.width, engine.medium.height))
+        .with_page(Extent::definite(template.width, template.height));
+    for f in &template.frames {
+        ctx = ctx.with_named_frame(&f.name, Extent::definite(f.width, f.depth));
+    }
+    if let Some(f) = frame {
+        ctx = ctx.with_current_frame(&f.name, Extent::definite(f.width, f.depth));
+    }
+    ctx.with_block(Extent::auto_height(width))
 }
 
 fn unplaced(diagnostics: &mut Vec<Diagnostic>, subject: &Subject, bytes: Range<usize>) {
@@ -352,11 +418,12 @@ fn prepare(
     engine: &Engine,
     doc: &Document,
     node: NodeId,
+    ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Prepared> {
     let subject = Subject::Node(node);
     let block = doc.block(node).ok()?;
-    let style = match doc.computed_style(node) {
+    let style = match doc.computed_style_with(node, ctx, &engine.functions) {
         Ok(s) => s,
         Err(e) => {
             diagnostics.push(Diagnostic::new(
@@ -368,6 +435,13 @@ fn prepare(
             return None;
         }
     };
+    diagnostics.extend(
+        style
+            .notes
+            .iter()
+            .cloned()
+            .map(|note| Diagnostic::from_note(note, subject.clone())),
+    );
     for property in &style.clamped {
         diagnostics.push(Diagnostic::new(
             Severity::Warning,
@@ -591,12 +665,98 @@ mod tests {
     use reprise_font::FontStore;
 
     #[test]
+    fn preparation_uses_the_engines_function_registry() {
+        use reprise_doc::expr::{Dim, Value};
+        use reprise_doc::function::{Builtin, Signature};
+        use reprise_doc::{Authored, Expr, Property, Style};
+        let mut engine = Engine::new(FontStore::default());
+        engine
+            .functions
+            .register(
+                "custom-size",
+                Builtin::new(Signature::new(&[], Dim::Length), |_| {
+                    Ok(Value::Length(Length::from_pt(12)))
+                }),
+            )
+            .unwrap();
+        let doc = Document::new(1).unwrap();
+        let mut style = Style::default();
+        style.set(
+            Property::Size,
+            Authored::Expr(Expr::parse("custom-size()").unwrap()),
+        );
+        doc.define_style("custom", &style).unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "custom", "")
+            .unwrap();
+        let mut notes = Vec::new();
+        let prepared = prepare(
+            &engine,
+            &doc,
+            node,
+            &ResolutionContext::default(),
+            &mut notes,
+        )
+        .unwrap();
+        assert_eq!(prepared.style.size, Length::from_pt(12));
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn context_keeps_extreme_definite_bases_and_indefinite_block_height() {
+        use reprise_doc::context::{Axis, Basis, Level, Resolved};
+        let mut engine = Engine::new(FontStore::default());
+        engine.medium = reprise_doc::Medium::new(Length::MIN, Length::MAX);
+        let frame = ResolvedFrame {
+            name: "extreme".into(),
+            role: reprise_doc::FrameRole::Margin,
+            x: Length::MIN,
+            y: Length::MAX,
+            width: Length::MAX,
+            depth: Length::ZERO,
+        };
+        let template = ResolvedTemplate {
+            name: "extreme".into(),
+            source: crate::TemplateSource::Document,
+            width: Length::MAX,
+            height: Length::ZERO,
+            frames: vec![frame.clone()],
+        };
+        let ctx = resolution_context(&engine, &template, Some(&frame), frame.width);
+        assert_eq!(
+            ctx.basis(&Basis::frame("extreme", Axis::Width)),
+            Resolved::Definite(Length::MAX)
+        );
+        assert_eq!(
+            ctx.basis(&Basis::exact(Level::Frame, Axis::Height)),
+            Resolved::Definite(Length::ZERO)
+        );
+        assert_eq!(
+            ctx.basis(&Basis::exact(Level::Block, Axis::Height)),
+            Resolved::Indefinite
+        );
+        assert_eq!(
+            ctx.basis(&Basis::exact(Level::Medium, Axis::Width)),
+            Resolved::Definite(Length::MIN)
+        );
+        let absent = resolution_context(&engine, &template, None, Length::ZERO);
+        assert_eq!(absent.frame, Extent::UNRESOLVED);
+    }
+
+    #[test]
     fn malformed_line_levels_report_and_fall_back_without_panicking() {
         let engine = Engine::new(FontStore::default());
         let doc = Document::new(1).unwrap();
         let node = doc.append_block(BlockKind::Paragraph, "", "").unwrap();
         let mut diagnostics = Vec::new();
-        let mut prepared = prepare(&engine, &doc, node, &mut diagnostics).unwrap();
+        let mut prepared = prepare(
+            &engine,
+            &doc,
+            node,
+            &ResolutionContext::default(),
+            &mut diagnostics,
+        )
+        .unwrap();
         prepared.levels = vec![127];
         let fragment = LineFragment {
             text: 0..0,

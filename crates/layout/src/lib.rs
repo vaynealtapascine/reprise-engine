@@ -25,7 +25,7 @@ mod snapshot;
 mod template;
 
 use reprise_compose::{Composer, Greedy};
-use reprise_doc::{Document, Medium, SchemaRegistry};
+use reprise_doc::{Document, FunctionRegistry, Medium, SchemaRegistry};
 use reprise_font::FontStore;
 use reprise_geom::Length;
 use reprise_shape::{HarfRust, ShapingAdapter};
@@ -69,13 +69,15 @@ impl Default for FlowSettings {
 }
 
 /// The engine configuration: fonts, the shaping adapter, the composer, the
-/// relation schemas, the medium and the flow settings. All of it is an input
+/// relation schemas, style functions, the medium and the flow settings. All of it is an input
 /// to the determinism guarantee (38).
 pub struct Engine {
     pub fonts: FontStore,
     pub shaper: Box<dyn ShapingAdapter>,
     pub composer: Box<dyn Composer>,
     pub schemas: SchemaRegistry,
+    /// Pure functions available to authored style expressions.
+    pub functions: FunctionRegistry,
     /// What the document is laid out for. Page templates may size themselves
     /// from it. Not authored state: the same document lays out differently on
     /// a different medium.
@@ -90,6 +92,7 @@ impl Engine {
             shaper: Box::new(HarfRust),
             composer: Box::new(Greedy),
             schemas: SchemaRegistry::builtin(),
+            functions: FunctionRegistry::builtin(),
             medium: Medium::new(Length::from_pt(420), Length::from_pt(300)),
             flow: FlowSettings::default(),
         }
