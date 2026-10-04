@@ -205,6 +205,7 @@ fn one_edit_in_a_thousand_paragraphs_only_shapes_and_composes_that_paragraph() {
     assert_eq!(counters.shapes, 1, "{counters:?}");
     assert_eq!(counters.style_resolutions, 1, "{counters:?}");
     assert_eq!(counters.compositions, 1, "{counters:?}");
+    assert_eq!(counters.reflowed_pages.len(), 1, "{counters:?}");
     assert_eq!(counters.reused_compositions, 999, "{counters:?}");
     assert!(counters.composer_calls <= 2, "{counters:?}");
     let graph = session.graph();
@@ -468,4 +469,144 @@ fn region_viewport_is_explicitly_provisional_until_feedback_and_relations_finish
     let final_view = job.partial().unwrap();
     assert!(final_view.coverage().settled && final_view.coverage().complete);
     assert_eq!(final_view.snapshot(), &fixture.engine.layout(&fixture.doc));
+}
+
+#[test]
+fn deleting_and_reinserting_identical_bytes_invalidates_anchor_answers_only() {
+    let fixture = spike::document().unwrap();
+    let engine = reprise_fixtures::engine();
+    let mut session = LayoutSession::new(&engine);
+    let before = session.layout(&fixture.doc).unwrap();
+    let block = fixture.doc.block(fixture.hallway).unwrap();
+    let text = block.text.to_string();
+    let start = text.find("a corridor").unwrap();
+    let bytes = start..start + "a corridor".len();
+    block.text.delete(bytes.clone()).unwrap();
+    block.text.insert(bytes.start, "a corridor").unwrap();
+    assert_eq!(block.text.to_string(), text);
+    check(
+        &mut session,
+        &engine,
+        &fixture.doc,
+        "same bytes with changed anchors",
+    );
+    assert_eq!(session.counters().shapes, 0);
+    assert_eq!(session.counters().composer_calls, 0);
+    assert_eq!(session.counters().relation_passes, 1);
+    let after = session.layout(&fixture.doc).unwrap();
+    assert_ne!(after.relations, before.relations);
+}
+
+#[test]
+fn unused_style_does_not_reexecute_region_allocation() {
+    let fixture = hostile::float_moves_its_anchor().unwrap();
+    let mut session = LayoutSession::new(&fixture.engine);
+    check(&mut session, &fixture.engine, &fixture.doc, "region before");
+    fixture
+        .doc
+        .define_style(
+            "unreferenced",
+            &Style {
+                line_height: Some(LengthExpr::Pt(Length::MIN)),
+                ..Style::default()
+            },
+        )
+        .unwrap();
+    check(
+        &mut session,
+        &fixture.engine,
+        &fixture.doc,
+        "region unused style",
+    );
+    let counters = session.counters();
+    assert_eq!(counters.shapes, 0, "{counters:?}");
+    assert_eq!(counters.composer_calls, 0, "{counters:?}");
+    assert_eq!(counters.region_passes, 0, "{counters:?}");
+    assert_eq!(counters.relation_passes, 0, "{counters:?}");
+    assert!(
+        session
+            .graph()
+            .why_recomputed(&Computation::Regions)
+            .is_empty()
+    );
+}
+
+#[test]
+fn equal_fixture_revisions_do_not_authorize_publication_to_another_document() {
+    let engine = reprise_fixtures::engine();
+    let doc = paragraphs(30);
+    let other = paragraphs(30);
+    assert_eq!(doc.revision(), other.revision());
+    let mut session = LayoutSession::new(&engine);
+    let mut job = session.start(&doc, Viewport::Pages(0..1));
+    job.step(64).unwrap();
+    let view = job.partial().unwrap();
+    assert!(matches!(view.publish(&other), Err(JobError::Stale)));
+    assert!(view.publish(&doc).is_ok());
+    job.cancel();
+    drop(job);
+    check(
+        &mut session,
+        &engine,
+        &other,
+        "switch to equal-revision document",
+    );
+}
+
+#[test]
+fn rectangle_demand_covers_its_page_before_background_completion() {
+    let engine = reprise_fixtures::engine();
+    let doc = paragraphs(200);
+    let mut session = LayoutSession::new(&engine);
+    let mut job = session.start(
+        &doc,
+        Viewport::Rect {
+            page: 2,
+            rect: reprise_geom::Rect::new(
+                reprise_geom::Point::new(Length::from_pt(10), Length::from_pt(20)),
+                Length::from_pt(80),
+                Length::from_pt(60),
+            ),
+        },
+    );
+    let step = job.step(100).unwrap();
+    assert!(step.viewport_ready && !step.complete, "{step:?}");
+    let view = job.partial().unwrap();
+    assert!(view.coverage().pages.contains(&2));
+    assert!(view.coverage().settled && !view.coverage().complete);
+    for _ in 0..300 {
+        if job.step(5).unwrap().complete {
+            break;
+        }
+    }
+    assert_eq!(job.complete().unwrap().unwrap(), engine.layout(&doc));
+}
+
+#[test]
+fn line_height_edits_change_composition_without_reitemizing_or_reshaping() {
+    let engine = reprise_fixtures::engine();
+    let doc = paragraphs(30);
+    let node = doc.blocks()[0];
+    let mut session = LayoutSession::new(&engine);
+    check(&mut session, &engine, &doc, "height before");
+    doc.set_overrides(
+        node,
+        &Style {
+            line_height: Some(LengthExpr::Pt(Length::from_pt(18))),
+            ..Style::default()
+        },
+    )
+    .unwrap();
+    check(&mut session, &engine, &doc, "height edit");
+    let counters = session.counters();
+    assert_eq!(counters.shapes, 0, "{counters:?}");
+    assert_eq!(counters.itemizations, 0, "{counters:?}");
+    assert!(counters.compositions > 0);
+    let graph = session.graph();
+    assert!(graph.why_recomputed(&Computation::Shape(node)).is_empty());
+    assert!(
+        graph
+            .why_recomputed(&Computation::Style(node))
+            .contains(&Dependency::Node(node))
+    );
 }

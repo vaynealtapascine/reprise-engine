@@ -670,7 +670,7 @@ pub(crate) struct PositionKey {
 pub(crate) struct Delta {
     pages: Vec<PageLayout>,
     frames: Vec<FrameLayout>,
-    blocks: Vec<BlockLayout>,
+    pub(crate) blocks: Vec<BlockLayout>,
     diagnostics: Vec<Diagnostic>,
     fills: Vec<Fill>,
     page_base: Vec<usize>,
@@ -857,17 +857,32 @@ pub(crate) fn prepare_with(
         language: None,
         features: Vec::new(),
     }];
+    let fallback = engine
+        .fonts
+        .by_family(&style.family)
+        .map(|f| (f.id().clone(), style.size));
+    let input = ParagraphInput {
+        text: &text,
+        styles: &styles,
+        direction: None,
+    };
+    let shape_key =
+        evaluation.map(|_| crate::incremental::ShapingKey::new(&input, fallback.clone()));
+    let shape_notes = diagnostics.len();
+    if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
+        && let Some((value, notes)) = e.shaping_hit(node, key)
+    {
+        diagnostics.extend(notes);
+        return value.map(|mut prepared| {
+            prepared.kind = block.kind;
+            prepared.style = style;
+            prepared
+        });
+    }
     if let Some(e) = evaluation {
         e.itemization();
     }
-    let itemized = itemize(
-        &ParagraphInput {
-            text: &text,
-            styles: &styles,
-            direction: None,
-        },
-        &engine.fonts,
-    );
+    let itemized = itemize(&input, &engine.fonts);
     diagnostics.extend(
         itemized
             .notes
@@ -875,6 +890,14 @@ pub(crate) fn prepare_with(
             .map(|n| Diagnostic::from_note(n, subject.clone())),
     );
     if itemized.items.is_empty() && !text.is_empty() {
+        if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
+            e.shaping_miss(
+                node,
+                shape_key,
+                None,
+                diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
+            );
+        }
         return None; // Nothing could be shaped; itemisation said why.
     }
     if let Some(e) = evaluation {
@@ -887,11 +910,7 @@ pub(crate) fn prepare_with(
         adapter: engine.shaper.as_ref(),
     }
     .shape();
-    let fallback = engine
-        .fonts
-        .by_family(&style.family)
-        .map(|f| (f.id().clone(), style.size));
-    Some(Prepared {
+    let prepared = Prepared {
         node,
         kind: block.kind,
         breaks: break_opportunities(&text),
@@ -902,7 +921,16 @@ pub(crate) fn prepare_with(
         base_level: itemized.base_level,
         shaped,
         fallback,
-    })
+    };
+    if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
+        e.shaping_miss(
+            node,
+            shape_key,
+            Some(prepared.clone()),
+            diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
+        );
+    }
+    Some(prepared)
 }
 
 impl Prepared {

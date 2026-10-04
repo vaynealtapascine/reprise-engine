@@ -146,8 +146,8 @@ Other files:
 
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
-| `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Exact-input preparation/flow/region/final-pass caches, computed dependency and reverse-inspection graph, revision-gated viewport jobs beside the full-layout reference | 16, 26-28, 39 |
-| `fixtures` | `tests/incremental.rs` | Seeded text/style/template/relation/split/join/concurrent edits of every hostile fixture and spike; exact equivalence, counters, budgets, cancellation, revision rejection and 100,000-paragraph viewport test | 27, 38, 39 |
+| `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Exact-input preparation/shaping/flow/region/final-pass caches, computed dependency and reverse-inspection graph, revision-gated viewport jobs beside the full-layout reference | 16, 26-28, 39 |
+| `fixtures` | `tests/incremental.rs` | Seeded text/style/template/relation/split/join/concurrent edits of every hostile fixture and spike; exact equivalence, counters, budgets, cancellation, revision/identity rejection, identical-byte anchor changes, line-height-only shaping reuse, affected-page counters and 100,000-paragraph viewport test | 27, 38, 39 |
 
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |

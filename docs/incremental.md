@@ -39,6 +39,7 @@ included by immutable session lifetime, rather than a caller-assembled fingerpri
 | Unit | Variable inputs captured by its key | Retained output |
 | --- | --- | --- |
 | Preparation | Block identity/kind, complete UTF-8 text, overrides, bounded named-style chain (including missing/cyclic endpoints), complete starting-frame `ResolutionContext` | Used style, itemisation, bidi, breaks, shaping, empty-line fallback, ordered diagnostics; failures are memoised too |
+| Itemisation/shaping | Complete `ParagraphInput` (owned by exhaustive destructuring), resolved fallback face/size, immutable engine fonts/adapter | Shaping-only portion of preparation; reused when context or line height changes without changing shaping inputs |
 | Paragraph flow | Preparation inputs, resolved template, incoming page/frame cursor and relevant fills, predecessor identity, complete input region plan | Emitted blocks/lines, diagnostics in original order, new pages/frames, outgoing fills and cursor |
 | Annotation | Preparation inputs and resolved template (including its margin-frame context) | Provisional unplaced block/extent and ordered diagnostics |
 | Region allocation | Complete flowed snapshot except revision, resolved template, ordered authored relations, actual document target resolutions, owner existence and preparation inputs, semantic tree order | Complete next plan, including diagnostics and applied relation IDs |
@@ -53,7 +54,7 @@ availability. Consequently deleting/reinserting identical bytes cannot reuse an
 incorrect range or snapshot resolution. A full document revision still tags every
 published result and gates every job step.
 
-Preparation is bounded to 32 memoised contexts per node, flow to 16 transitions per
+Preparation is bounded to 32 memoised contexts and 32 shaping inputs per node, flow to 16 transitions per
 node, annotation to one per node, allocation to 16 complete plans, and the final
 pass to one complete memo. Eviction only affects work, never layout. The session
 retains node maps until dropped, including deleted identities; hosts should drop
@@ -104,7 +105,8 @@ one memoised unit; a relation edit invalidates that pass without reshaping or
 recomposing unrelated body text. Reading order is likewise one staged pass.
 
 `WorkCounters` exposes charged job units, style-resolution calls, itemisation
-calls, whole-paragraph shaping calls, paragraph-transition misses/reuses, actual
+calls, whole-paragraph shaping calls, paragraph-transition misses/reuses, the ordered set of pages touched by those misses
+(including old and new placement), actual
 composer calls (including table/note/float composition), allocation executions,
 and relation/reading executions. They count work, not wall-clock time. Key
 capture/comparison, input enumeration, output cloning and graph assembly are
@@ -186,7 +188,7 @@ No new diagnostic code or frozen contract change is needed.
 `Dependency` unifies expression dependencies and relation dependencies. Shared
 node/range/tree inputs map to common variants, with explicit layout-of-node,
 layout-of-range and history inputs. Expression dependencies retain their typed
-vocabulary. `Computation` names style, shape, paragraph composition, relation,
+vocabulary. `Computation` names style, shape, paragraph and block/frame composition, relation,
 region, reading, page and line units. Graphs include entering-flow predecessor
 edges, range-to-layout edges and relation-owned line/page edges. Dependencies are
 conservative: an earlier paragraph can influence later pages even when its

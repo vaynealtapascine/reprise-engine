@@ -19,6 +19,7 @@ pub enum Computation {
     Style(NodeId),
     Shape(NodeId),
     Compose(NodeId),
+    ComposeInFrame { node: NodeId, frame: usize },
     Relation(RelationId),
     Regions,
     ReadingOrder,
@@ -136,7 +137,10 @@ pub struct WorkCounters {
     pub style_resolutions: usize,
     pub itemizations: usize,
     pub shapes: usize,
+    /// Paragraph transition misses, including diagnosed empty/unplaced results.
     pub compositions: usize,
+    /// Pages touched by paragraph transition misses, including old and new placement.
+    pub reflowed_pages: BTreeSet<usize>,
     pub composer_calls: usize,
     pub reused_compositions: usize,
     pub region_passes: usize,
@@ -219,6 +223,39 @@ impl Inputs {
         }
         out
     }
+}
+/// Owned directly from the complete shaping request. Exhaustive destructuring
+/// forces future request fields to be considered rather than silently omitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShapingKey {
+    text: String,
+    styles: Vec<reprise_shape::StyleRun>,
+    direction: Option<reprise_geom::InlineDirection>,
+    fallback: Option<(reprise_font::FaceId, reprise_geom::Length)>,
+}
+impl ShapingKey {
+    pub(crate) fn new(
+        input: &reprise_shape::ParagraphInput<'_>,
+        fallback: Option<(reprise_font::FaceId, reprise_geom::Length)>,
+    ) -> Self {
+        let reprise_shape::ParagraphInput {
+            text,
+            styles,
+            direction,
+        } = input;
+        Self {
+            text: (*text).to_owned(),
+            styles: styles.to_vec(),
+            direction: *direction,
+            fallback,
+        }
+    }
+}
+#[derive(Clone)]
+struct ShapingEntry {
+    key: ShapingKey,
+    value: Option<Prepared>,
+    diagnostics: Vec<Diagnostic>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PrepareKey {
@@ -391,6 +428,7 @@ struct FinalEntry {
 #[derive(Default)]
 struct Cache {
     prepared: BTreeMap<NodeId, Vec<PreparedEntry>>,
+    shaping: BTreeMap<NodeId, Vec<ShapingEntry>>,
     flow: BTreeMap<NodeId, Vec<FlowEntry>>,
     annotations: BTreeMap<NodeId, AnnotationEntry>,
     regions: Vec<RegionEntry>,
@@ -403,6 +441,38 @@ pub(crate) struct Evaluation {
     cache: RefCell<Cache>,
 }
 impl Evaluation {
+    pub(crate) fn shaping_hit(
+        &self,
+        node: NodeId,
+        key: &ShapingKey,
+    ) -> Option<(Option<Prepared>, Vec<Diagnostic>)> {
+        self.cache
+            .borrow()
+            .shaping
+            .get(&node)?
+            .iter()
+            .find(|e| &e.key == key)
+            .map(|e| (e.value.clone(), e.diagnostics.clone()))
+    }
+    pub(crate) fn shaping_miss(
+        &self,
+        node: NodeId,
+        key: ShapingKey,
+        value: Option<Prepared>,
+        diagnostics: Vec<Diagnostic>,
+    ) {
+        let mut cache = self.cache.borrow_mut();
+        let entries = cache.shaping.entry(node).or_default();
+        if entries.len() >= 32 {
+            entries.remove(0);
+        }
+        entries.push(ShapingEntry {
+            key,
+            value,
+            diagnostics,
+        });
+    }
+
     pub(crate) fn style_resolution(&self) {
         let mut c = self.cache.borrow_mut();
         c.counters.style_resolutions = c.counters.style_resolutions.saturating_add(1);
@@ -474,18 +544,30 @@ impl Evaluation {
         {
             reasons.insert(Dependency::Template);
         }
+        cache
+            .graph
+            .record(Computation::Style(node), reads, reasons.clone());
         cache.graph.record(
             Computation::Shape(node),
             BTreeSet::from([
                 Dependency::Computed(Computation::Style(node)),
                 Dependency::Text(node),
             ]),
-            reasons,
+            BTreeSet::new(),
         );
+        let itemizations_before = cache.counters.itemizations;
         drop(cache);
         let mut notes = Vec::new();
         let value = flow::prepare_with(engine, doc, node, ctx, &mut notes, Some(self));
         let mut cache = self.cache.borrow_mut();
+        if cache.counters.itemizations > itemizations_before {
+            cache
+                .graph
+                .reasons
+                .entry(Computation::Shape(node))
+                .or_default()
+                .extend(reasons);
+        }
         let entries = cache.prepared.entry(node).or_default();
         if entries.len() >= 32 {
             entries.remove(0);
@@ -673,6 +755,24 @@ impl Evaluation {
         } else {
             reasons.insert(Dependency::Node(node));
         }
+        let frame_count = key.template.frames.len().max(1);
+        let mut pages: BTreeSet<_> = delta
+            .blocks
+            .iter()
+            .flat_map(|b| &b.lines)
+            .map(|l| l.frame / frame_count)
+            .collect();
+        if let Some(old) = cache.flow.get(&node).and_then(|v| v.last()) {
+            let old_count = old.key.template.frames.len().max(1);
+            pages.extend(
+                old.delta
+                    .blocks
+                    .iter()
+                    .flat_map(|b| &b.lines)
+                    .map(|l| l.frame / old_count),
+            );
+        }
+        cache.counters.reflowed_pages.extend(pages);
         cache.counters.compositions = cache.counters.compositions.saturating_add(1);
         cache.graph.record(
             Computation::Compose(node),
@@ -1257,13 +1357,27 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                 });
             reading_reads.insert(Dependency::Computed(Computation::Compose(block.node)));
             for (index, line) in block.lines.iter().enumerate() {
+                let frame_unit = Computation::ComposeInFrame {
+                    node: block.node,
+                    frame: line.frame,
+                };
+                cache
+                    .graph
+                    .reads
+                    .entry(frame_unit.clone())
+                    .or_insert_with(|| {
+                        BTreeSet::from([
+                            Dependency::Computed(Computation::Compose(block.node)),
+                            Dependency::Template,
+                        ])
+                    });
                 let unit = Computation::Line(crate::LineRef {
                     node: block.node,
                     line: index,
                 });
                 cache.graph.record(
                     unit,
-                    BTreeSet::from([Dependency::Computed(Computation::Compose(block.node))]),
+                    BTreeSet::from([Dependency::Computed(frame_unit)]),
                     BTreeSet::new(),
                 );
                 if let Some(frame) = self.snapshot.frame(line.frame) {
