@@ -169,11 +169,14 @@ hostile_tests!(
     snapshot_compacted,
     concurrent_policy_deletion,
     self_reference,
+    optimal_paragraph,
+    verse_turnover,
+    optimal_extreme_lengths,
 );
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 18);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 21);
 }
 
 hostile_tests!(

@@ -1,0 +1,783 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      187
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "optimal-justified",
+  "page": {
+    "width": 430080,
+    "height": 307200,
+    "margin_top": 36864,
+    "margin_left": 36864,
+    "column_width": 225280,
+    "gutter": 18432,
+    "margin_column_width": 112640,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "9@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 2147483647,
+        "line_height": 0,
+        "explain": {
+          "family": "default",
+          "line-height": "style huge",
+          "size": "style huge"
+        },
+        "clamped": [
+          "line-height"
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 5
+          },
+          "preview": "Text",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 2147483647,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 5
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 5,
+            "end": 8
+          },
+          "preview": "at",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 1791001361,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 5,
+                "end": 8
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 8,
+            "end": 12
+          },
+          "preview": "the",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 2147483647,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 8,
+                "end": 12
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 12,
+            "end": 17
+          },
+          "preview": "edge",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 2147483647,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 12,
+                "end": 17
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 17,
+            "end": 20
+          },
+          "preview": "of",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 1939177733,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 17,
+                "end": 20
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 20,
+            "end": 24
+          },
+          "preview": "the",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 2147483647,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 20,
+                "end": 24
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 24,
+            "end": 30
+          },
+          "preview": "range.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 1073741823,
+          "width": 2147483647,
+          "explanation": {
+            "reason": "overflow",
+            "score": 100200100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 24,
+                "end": 30
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 2147483647,
+              "level": 0,
+              "x": 0,
+              "width": 2147483647
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "46@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 0,
+        "line_height": 0,
+        "explain": {
+          "family": "default",
+          "line-height": "style zero",
+          "size": "style zero"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 30
+          },
+          "preview": "Text at the edge of the range.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 8192
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 8192,
+          "width": 0,
+          "explanation": {
+            "reason": "end",
+            "score": 100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 30
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 0,
+              "level": 0,
+              "x": 0,
+              "width": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "83@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 0,
+        "line_height": 0,
+        "explain": {
+          "family": "default",
+          "line-height": "style negative",
+          "size": "style negative"
+        },
+        "clamped": [
+          "size",
+          "line-height"
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 30
+          },
+          "preview": "Text at the edge of the range.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 16384
+            },
+            "width": 225280,
+            "height": 0
+          },
+          "baseline": 16384,
+          "width": 0,
+          "explanation": {
+            "reason": "end",
+            "score": 100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 30
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 0,
+              "level": 0,
+              "x": 0,
+              "width": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "120@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 2147483647,
+        "explain": {
+          "family": "default",
+          "line-height": "style tall",
+          "size": "style tall"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 30
+          },
+          "preview": "Text at the edge of the range.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 24576
+            },
+            "width": 225280,
+            "height": 2147483647
+          },
+          "baseline": 1073770348,
+          "width": 144162,
+          "explanation": {
+            "reason": "end",
+            "score": 100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 30
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 144162
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "154@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 30
+          },
+          "preview": "A normal paragraph after them.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 2147483647
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 2147483647,
+          "width": 159908,
+          "explanation": {
+            "reason": "end",
+            "score": 100,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 30
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 159908
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "layout.style-clamped",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "line-height resolved to a negative length; clamped to zero",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 0..5 overflows its line",
+      "bytes": {
+        "start": 0,
+        "end": 5
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 5..8 overflows its line",
+      "bytes": {
+        "start": 5,
+        "end": 8
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 8..12 overflows its line",
+      "bytes": {
+        "start": 8,
+        "end": 12
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 12..17 overflows its line",
+      "bytes": {
+        "start": 12,
+        "end": 17
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 17..20 overflows its line",
+      "bytes": {
+        "start": 17,
+        "end": 20
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 20..24 overflows its line",
+      "bytes": {
+        "start": 20,
+        "end": 24
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "compose.overflow",
+      "subject": {
+        "kind": "node",
+        "id": "9@1"
+      },
+      "message": "text at bytes 24..30 overflows its line",
+      "bytes": {
+        "start": 24,
+        "end": 30
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.style-clamped",
+      "subject": {
+        "kind": "node",
+        "id": "83@1"
+      },
+      "message": "size resolved to a negative length; clamped to zero",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.style-clamped",
+      "subject": {
+        "kind": "node",
+        "id": "83@1"
+      },
+      "message": "line-height resolved to a negative length; clamped to zero",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.frame-overflow",
+      "subject": {
+        "kind": "node",
+        "id": "120@1"
+      },
+      "message": "runs past the bottom of the main frame",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.frame-overflow",
+      "subject": {
+        "kind": "node",
+        "id": "154@1"
+      },
+      "message": "runs past the bottom of the main frame",
+      "bytes": null
+    }
+  ]
+}

@@ -49,7 +49,8 @@ Codes in use:
 | Library | Codes |
 | --- | --- |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
-| compose | `compose.overflow`, `compose.geometry-stalled` |
+| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
+| compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit` |
 
@@ -195,8 +196,18 @@ Codes in use:
     an `Adjustment` (word and letter spacing), and whether it was reshaped (39).
 -   **Breaks:** `break_opportunities` gives UAX #14 breaks (`Allowed` or `Forced`, each with
     a penalty). The end of the text is always the last one.
--   **Open:** only `Greedy` exists. The optimal and authored-break composers, and
-    non-rectangular providers, come with the composition workstream.
+-   **Composers:** `Greedy`; `Optimal` (Knuth–Plass, ragged by default or justified, each
+    line's demerits in its score); and `AuthoredBreak` (verse: lines end at forced breaks,
+    and long lines turn over with a hanging indent). An optimising composer that can't stay
+    optimal (geometry that depends on earlier lines, or its search limits) sets the rest
+    first-fit with `score: None` and reports `compose.fallback` (`Info`).
+-   **Geometry:** `Measure`, `Polygon` (exact band intersection, several intervals for
+    concave shapes) and `Runaround` (a provider minus exclusions, with a margin and a
+    minimum width).
+-   **Conformance:** `compose/tests/conformance.rs` runs every composer against adversarial
+    geometry, breaks, shaping and texts. A new composer must be added to it.
+-   **Open:** layout doesn't yet apply `Adjustment` to glyph positions, so justified lines
+    render ragged.
 
 ## Layout snapshot: `reprise-layout::snapshot`
 

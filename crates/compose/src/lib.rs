@@ -14,9 +14,20 @@ use reprise_geom::Length;
 use reprise_shape::{Reshape, ShapedRun, ShapedText};
 use serde::{Deserialize, Serialize};
 
+mod authored;
 mod greedy;
+mod optimal;
+mod para;
+mod polygon;
+#[cfg(test)]
+mod testing;
+mod walk;
 
-pub use greedy::Greedy;
+pub use authored::{AuthoredBreak, Turnover};
+pub use greedy::{Greedy, MAX_CONSECUTIVE_SKIPS};
+pub use optimal::{Limits, Mode, Optimal};
+pub use para::is_word_space;
+pub use polygon::{Polygon, Runaround};
 
 /// Diagnostic codes reported by composers.
 pub mod codes {
@@ -27,6 +38,12 @@ pub mod codes {
     /// The geometry provider made no progress down the block axis, so
     /// composition stopped. The rest of the text is reported as unplaced.
     pub const GEOMETRY_STALLED: Code = Code::new("compose.geometry-stalled");
+    /// An optimising composer set some or all lines first-fit instead: its
+    /// search hit a limit, or geometry answered differently once earlier
+    /// lines were known. Every composer guarantee still holds, and the lines
+    /// it set first-fit have no score. Info: the output is still what the
+    /// author asked for; only the engine's choice among valid breaks changed.
+    pub const FALLBACK: Code = Code::new("compose.fallback");
 }
 
 /// A span of the inline axis a line may use.
