@@ -17,11 +17,16 @@
 
 pub mod codes;
 mod display;
+mod floats;
 mod flow;
+mod notes;
 mod query;
 mod region;
+mod regions;
 mod relations;
 mod snapshot;
+pub mod solver;
+mod table;
 mod template;
 
 use reprise_compose::{Composer, Greedy};
@@ -120,8 +125,6 @@ impl Engine {
             name: template.name.clone(),
             source: template.source,
         };
-        let pending = flow::run(self, doc, &template, &mut snapshot);
-        relations::run(self, doc, &mut snapshot, pending);
-        snapshot
+        regions::run(self, doc, &template, snapshot)
     }
 }

@@ -118,10 +118,16 @@ Other files:
 | | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/` | Added persistence_tombstones: Unicode anchors, tombstones and retained historical references | 07, 09, 29, 34 |
 
-## Authored region declarations
+## Region subsystems
 
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
-| `doc` | `src/region_schema.rs`, registration in `lib.rs` and `relation.rs` | Owned float/note schemas and parameter vocabularies | 05, 13, 24 |
-| `doc` | `src/table.rs` | Versioned table/row/cell topology and column declarations | 05, 06, 24 |
-| `doc` | `src/page.rs` | Added Notes frame role; transform fields untouched | 24 |
+| `doc` | `src/region_schema.rs`, registration in `lib.rs` and `relation.rs` | Owned float/note relation schemas and parameter vocabularies | 05, 13, 24 |
+| `doc` | `src/table.rs` | Versioned authored table/row/cell topology and column declarations on the movable tree | 05, 06, 24 |
+| `layout` | `src/solver.rs` | Explicit integer solver domains, bounded water filling and diagnosed fallbacks | 19, 25, 37 |
+| `layout` | `src/regions.rs`, entry in `lib.rs` | Bounded staged feedback, complete input-plan freeze on oscillation, dependency rounds | 24, 26, 37 |
+| `layout` | `src/floats.rs` | Side/edge float allocation, stacking, deferral, runaround exclusions | 24 |
+| `layout` | `src/notes.rs` | Anchor-preserving note allocation, continuation, nesting, endnotes and full-page reservations | 11, 24, 26 |
+| `layout` | `src/table.rs`, hooks in `flow.rs` | Content measurements, declared column allocation and synchronous row fragmentation | 24, 25 |
+| `layout` | `src/relations/mod.rs` | Final region relation reporting and references to note lines | 13, 26 |
+| - | `docs/regions.md` | Allocation, fragmentation, cycle and fallback design | 24–26 |
