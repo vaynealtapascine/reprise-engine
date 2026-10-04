@@ -320,6 +320,22 @@ Codes in use:
     -   Every glyph belongs to its own run.
     -   Every query agrees with itself.
 
+## Authored and positioned images (05, 24, 33, 34)
+
+- `BlockKind::Image` is an additive, pre-approved block kind. The block's
+  collaborative text is its alt text; empty alt text denotes a decorative image.
+- `doc::image::ImageData` names a lowercase SHA-256 asset hash and optional
+  `LengthExpr` width and height. Its version-1 JSON lives in the existing block
+  envelope under `image1`. Unreadable records remain stored verbatim.
+- `FragmentBlock.image: Option<String>` carries that raw record on copy/paste,
+  defaults to absent on old fragments, and is omitted from JSON when absent.
+- `BlockLayout.image: Option<ImageLayout>` is the additive snapshot extension
+  approved in the images brief. It is omitted when absent, preserving all existing
+  text goldens. `ImageLayout` records asset, alt, frame, logical rectangle and
+  placeholder status. An image has one line-like entry for queries/reading order.
+- Images may own float and note relations. Host resources are derived engine
+  inputs; pixels and intrinsic size are never written into authored state.
+
 ## Display list: `reprise-display`
 
 -   **One `DisplayList` per page.** Items are:

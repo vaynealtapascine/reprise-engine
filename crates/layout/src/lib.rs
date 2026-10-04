@@ -43,8 +43,8 @@ use serde::{Deserialize, Serialize};
 
 pub use display::DisplayOptions;
 pub use snapshot::{
-    BlockLayout, Diagnostic, FrameLayout, LayoutSnapshot, LineLayout, LineRef, PageLayout,
-    PositionedRun, RelationLayout, RelationStatus, Resolution, Subject, TargetLayout,
+    BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
+    PageLayout, PositionedRun, RelationLayout, RelationStatus, Resolution, Subject, TargetLayout,
     TemplateSource, TemplateUsed,
 };
 

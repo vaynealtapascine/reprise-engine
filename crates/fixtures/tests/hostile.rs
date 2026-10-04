@@ -140,7 +140,7 @@ fn check_flow(name: &str, snapshot: &LayoutSnapshot) {
                     FrameRole::Margin,
                     "{name}: {node} is placed by a relation, in a margin frame"
                 ),
-                BlockKind::Paragraph => {
+                BlockKind::Paragraph | BlockKind::Image => {
                     assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into()));
                     assert!(
                         line.frame >= previous,
@@ -978,7 +978,9 @@ fn check_region(fixture: Fixture) {
                 fixture.name
             );
             match block.kind {
-                BlockKind::Paragraph => assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into())),
+                BlockKind::Paragraph | BlockKind::Image => {
+                    assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into()))
+                }
                 BlockKind::Annotation => {
                     assert!(matches!(frame.role, FrameRole::Notes | FrameRole::Flow(_)))
                 }

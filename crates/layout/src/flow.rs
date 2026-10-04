@@ -236,7 +236,7 @@ impl Flow<'_> {
             }
         };
         match kind {
-            BlockKind::Paragraph => flow.paragraph(doc, node),
+            BlockKind::Paragraph | BlockKind::Image => flow.paragraph(doc, node),
             BlockKind::Annotation => {
                 if !flow.region_owners.contains(&node)
                     && let Some(annotation) = flow.annotation(doc, node)
@@ -1028,6 +1028,7 @@ impl Prepared {
             text: self.text,
             lines,
             base_level: self.base_level,
+            image: None,
         }
     }
 }
