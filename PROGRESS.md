@@ -2,6 +2,57 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-05: font supply, plugins, and clipboard and exporters merged
+
+All three ran on Sol. They were cut off by Sol's usage limit and resumed after it reset.
+
+-   **Font supply (21).**
+    -   Frontends declare fonts (bytes, family, descriptors, collection index), and faces are
+        matched the way CSS does it.
+    -   Explicit family chains end in a generic class, and characters fall back per grapheme.
+    -   Bundled OFL defaults: Source Serif, Source Sans 3, Source Code Pro and Dancing Script,
+        about 586 KiB.
+    -   Packages embed the faces a layout used, and restore them on open, with a list of
+        missing fonts.
+    -   **Orchestrator:** fixed PDF embedding the wrong face from a collection. Added a test
+        that damages every default face and checks layout, SVG, PNG and PDF survive.
+-   **Plugins (10).**
+    -   `reprise-plugin` runs plugins on wasmi 2.0 with fuel, limits, capability grants, no
+        SIMD or threads, canonical NaNs and a fresh instance per call.
+    -   Its versioned core-WASM ABI is in `docs/plugins.md`.
+    -   Plugins can supply style functions, wrap a composer with geometry, back relation
+        schemas, and stage edits through the kernel.
+    -   **Orchestrator:** recursion never uses the host stack. Hosts need about 384 KiB of
+        stack in debug builds and 256 KiB in release; `docs/plugins.md` says to keep 512 KiB.
+-   **Clipboard and exporters (9b).**
+    -   `reprise-clipboard` copies native fragments through `plan_copy` and pastes them as
+        one transaction with fresh IDs.
+    -   Plain text follows reading order. HTML goes in and out, bounded.
+    -   Plain, HTML, native and PDF exporters return a `LossReport`.
+    -   **Orchestrator:** twenty pastes undo and redo exactly. Fixed in the merge: fonts are
+        now identified by declaration, so fragments carry each `FontDeclaration` and key
+        fonts by face.
+
+**Pending contract proposal (clipboard), approved:** persist each range's authored
+`RangePolicy` beside its anchors. Endpoint affinity isn't always recoverable from cursors.
+It is scheduled next.
+
+**Gaps:**
+
+-   **Fonts:** authored weight, style and stretch; variable axes; emoji and broad-script
+    defaults.
+-   **Plugins:** relation placement and sandboxed composers; hosts must put
+    `Engine.plugins.envelope()` in cache tags.
+-   **Clipboard:** a host range spanning several pasted blocks goes missing (undo restores
+    it); no nested tables in HTML; DOCX and EPUB exporters.
+
+**Next:**
+
+-   Images.
+-   The `RangePolicy` persistence contract.
+-   A CODEMAP tidy: workstreams appended their own tables.
+-   11: bindings.
+
 ## 2026-10-04: workstream 7, the editing kernel, merged; plugin and font choices recorded
 
 **Done.** Workstream 7 started on Sonnet and was finished by Sol.
