@@ -13,8 +13,17 @@ fn pt(l: Length) -> f32 {
     l.to_pt_f32()
 }
 
+fn xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 struct Svg<'a> {
     fonts: &'a FontStore,
+    assets: &'a crate::AssetStore,
     defs: String,
     body: String,
     defined: BTreeSet<String>,
@@ -22,8 +31,17 @@ struct Svg<'a> {
 }
 
 pub fn render(list: &DisplayList, fonts: &FontStore) -> Result<String, FontError> {
+    render_with_assets(list, fonts, &crate::AssetStore::default())
+}
+
+pub fn render_with_assets(
+    list: &DisplayList,
+    fonts: &FontStore,
+    assets: &crate::AssetStore,
+) -> Result<String, FontError> {
     let mut svg = Svg {
         fonts,
+        assets,
         defs: String::new(),
         body: String::new(),
         defined: BTreeSet::new(),
@@ -42,6 +60,44 @@ impl Svg<'_> {
         for item in items {
             match item {
                 Item::Glyphs(run) => self.glyphs(run)?,
+                Item::Image {
+                    asset, rect, alt, ..
+                } => {
+                    use base64::Engine;
+                    if let Some(bytes) = self
+                        .assets
+                        .get(asset)
+                        .filter(|b| crate::assets::image_header(b).is_ok())
+                    {
+                        let mime = if bytes.starts_with(b"\x89PNG") {
+                            "image/png"
+                        } else {
+                            "image/jpeg"
+                        };
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        let _ = write!(
+                            self.body,
+                            r#"<image x="{}" y="{}" width="{}" height="{}" preserveAspectRatio="none" href="data:{mime};base64,{encoded}" role="img" aria-label="{}"><title>{}</title></image>"#,
+                            pt(rect.origin.x),
+                            pt(rect.origin.y),
+                            pt(rect.width),
+                            pt(rect.height),
+                            xml(alt),
+                            xml(alt)
+                        );
+                    } else {
+                        let _ = write!(
+                            self.body,
+                            r##"<rect x="{}" y="{}" width="{}" height="{}" fill="#ddd" role="img" aria-label="{}"><title>{}</title></rect>"##,
+                            pt(rect.origin.x),
+                            pt(rect.origin.y),
+                            pt(rect.width),
+                            pt(rect.height),
+                            xml(alt),
+                            xml(alt)
+                        );
+                    }
+                }
                 Item::Path {
                     path, fill, stroke, ..
                 } => {

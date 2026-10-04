@@ -80,12 +80,21 @@ fn krilla_matrix(m: &Matrix) -> krilla::geom::Transform {
 
 /// Renders one page per display list. Each page's size in points matches its list.
 pub fn render(pages: &[DisplayList], fonts: &FontStore) -> Result<Vec<u8>, RenderError> {
-    render_impl(pages, fonts, false)
+    render_with_assets(pages, fonts, &crate::AssetStore::default())
+}
+
+pub fn render_with_assets(
+    pages: &[DisplayList],
+    fonts: &FontStore,
+    assets: &crate::AssetStore,
+) -> Result<Vec<u8>, RenderError> {
+    render_impl(pages, fonts, assets, false)
 }
 
 fn render_impl(
     pages: &[DisplayList],
     fonts: &FontStore,
+    assets: &crate::AssetStore,
     ordered: bool,
 ) -> Result<Vec<u8>, RenderError> {
     let mut doc = Document::new();
@@ -106,6 +115,7 @@ fn render_impl(
         }
         let mut pdf = Pdf {
             fonts,
+            assets,
             krilla_fonts: &mut krilla_fonts,
             ordered,
         };
@@ -131,6 +141,15 @@ pub struct ReadingRun {
 pub fn render_ordered(
     pages: &[DisplayList],
     fonts: &FontStore,
+    order: &[ReadingRun],
+) -> Result<Vec<u8>, RenderError> {
+    render_ordered_with_assets(pages, fonts, &crate::AssetStore::default(), order)
+}
+
+pub fn render_ordered_with_assets(
+    pages: &[DisplayList],
+    fonts: &FontStore,
+    assets: &crate::AssetStore,
     order: &[ReadingRun],
 ) -> Result<Vec<u8>, RenderError> {
     let error = |s: &str| RenderError::Pdf(s.into());
@@ -174,7 +193,7 @@ pub fn render_ordered(
                         items: vec![wrapped],
                     };
                 }
-                if matches!(item, Item::Glyphs(_)) {
+                if matches!(item, Item::Glyphs(_) | Item::Image { .. }) {
                     text.insert(ReadingRun { page, path }, wrapped);
                 } else {
                     if let Some(page) = output.get_mut(page) {
@@ -201,11 +220,12 @@ pub fn render_ordered(
     if !text.is_empty() {
         return Err(error("ordered PDF order omits glyph runs"));
     }
-    render_impl(&output, fonts, true)
+    render_impl(&output, fonts, assets, true)
 }
 
 struct Pdf<'a> {
     fonts: &'a FontStore,
+    assets: &'a crate::AssetStore,
     ordered: bool,
     krilla_fonts: &'a mut BTreeMap<FaceId, Font>,
 }
@@ -215,6 +235,44 @@ impl Pdf<'_> {
         for item in items {
             match item {
                 Item::Glyphs(run) => self.glyphs(surface, run)?,
+                Item::Image {
+                    asset, rect, alt, ..
+                } => {
+                    surface.start_tagged(ContentTag::Span(SpanTag {
+                        actual_text: Some(alt),
+                        ..SpanTag::empty()
+                    }));
+                    if rect.width <= Length::ZERO || rect.height <= Length::ZERO {
+                        // Keep semantic text for an authored zero-size image.
+                        let marker = reprise_geom::Rect::new(rect.origin, Length(1), Length(1));
+                        if let Some(path) = krilla_path(&Path::rect(marker)) {
+                            surface.set_fill(Some(fill(Color(0, 0, 0, 0))));
+                            surface.set_stroke(None);
+                            surface.draw_path(&path);
+                        }
+                        surface.end_tagged();
+                        continue;
+                    }
+                    if let Some((w, h, rgba)) =
+                        self.assets.get(asset).and_then(crate::image_pixels::decode)
+                    {
+                        if let Some(size) =
+                            krilla::geom::Size::from_wh(pt(rect.width), pt(rect.height))
+                        {
+                            surface.push_transform(&krilla::geom::Transform::from_translate(
+                                pt(rect.origin.x),
+                                pt(rect.origin.y),
+                            ));
+                            surface.draw_image(krilla::image::Image::from_rgba8(rgba, w, h), size);
+                            surface.pop();
+                        }
+                    } else if let Some(path) = krilla_path(&Path::rect(*rect)) {
+                        surface.set_fill(Some(fill(Color(221, 221, 221, 255))));
+                        surface.set_stroke(None);
+                        surface.draw_path(&path);
+                    }
+                    surface.end_tagged();
+                }
                 Item::Path {
                     path,
                     fill: fill_color,

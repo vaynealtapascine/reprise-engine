@@ -170,7 +170,10 @@ pub(crate) fn allocate(
             return false;
         }
         if !owners.insert(owner)
-            || doc.kind_of(owner) != Some(BlockKind::Annotation)
+            || !matches!(
+                doc.kind_of(owner),
+                Some(BlockKind::Annotation | BlockKind::Image)
+            )
             || flowed.block(owner).is_some()
         {
             out.diagnostics.push(Diagnostic::new(

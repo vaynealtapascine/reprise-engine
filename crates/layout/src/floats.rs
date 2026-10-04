@@ -151,6 +151,7 @@ impl Floats {
                             run.x += x;
                         }
                     }
+                    block.sync_image();
                     // Clip padded endpoints before subtracting: saturating a
                     // doubled extreme margin must not shrink the blocked box.
                     let left = (x - margin).max(Length::ZERO);

@@ -236,7 +236,24 @@ impl Flow<'_> {
             }
         };
         match kind {
-            BlockKind::Paragraph | BlockKind::Image => flow.paragraph(doc, node),
+            BlockKind::Paragraph => flow.paragraph(doc, node),
+            BlockKind::Image => {
+                if !flow.region_owners.contains(&node) {
+                    let follows = doc.relations().iter().any(|(_, r)| {
+                        r.as_ref().is_ok_and(|r| {
+                            r.owner == Some(node)
+                                && r.schema == reprise_doc::relation::builtin::FOLLOW
+                        })
+                    });
+                    if follows {
+                        if let Some(image) = flow.annotation(doc, node) {
+                            flow.pending.push(image);
+                        }
+                    } else {
+                        flow.paragraph(doc, node);
+                    }
+                }
+            }
             BlockKind::Annotation => {
                 if !flow.region_owners.contains(&node)
                     && let Some(annotation) = flow.annotation(doc, node)
@@ -372,7 +389,13 @@ impl Flow<'_> {
             let fill = self.fills[index];
             let template = self.template;
             let frame = &template.frames[self.thread[self.pos]];
-            let y = if fill.empty { Length::ZERO } else { fill.used };
+            let y = if prepared.image.is_some() {
+                self.table_top()
+            } else if fill.empty {
+                Length::ZERO
+            } else {
+                fill.used
+            };
             let measure = Measure(frame.width);
             let runaround = Runaround {
                 base: measure,
@@ -389,6 +412,29 @@ impl Flow<'_> {
                 min_width: Length(1),
             };
             let depth = self.depth(index, frame.depth);
+            if prepared.image.is_some()
+                && y > Length::ZERO
+                && (y > depth || depth - y < prepared.line_height())
+            {
+                if !self.advance() {
+                    break;
+                }
+                ctx = self.paragraph_context();
+                preparation_notes.clear();
+                let Some(next) = prepare_cached(
+                    engine,
+                    doc,
+                    node,
+                    &ctx,
+                    &mut preparation_notes,
+                    self.evaluation,
+                ) else {
+                    self.snapshot.diagnostics.extend(preparation_notes);
+                    return;
+                };
+                prepared = next;
+                continue;
+            }
             let inner: &dyn GeometryProvider = if runaround.exclusions.is_empty() {
                 &runaround.base
             } else {
@@ -396,7 +442,7 @@ impl Flow<'_> {
             };
             let bounded = Bounded { inner, depth };
             let unbounded =
-                (prepared.style.line_height > self.max_depth || forced) && depth > Length::ZERO;
+                (prepared.line_height() > self.max_depth || forced) && depth > Length::ZERO;
             let geometry: &dyn GeometryProvider = if unbounded { inner } else { &bounded };
             let mut composition_notes = Vec::new();
             let composed = prepared.compose(
@@ -776,6 +822,7 @@ pub(crate) struct Prepared {
     pub(crate) breaks: Vec<Break>,
     /// Empty lines take their vertical metrics from the style's own face.
     fallback: Option<(FaceId, Length)>,
+    image: Option<crate::ImageLayout>,
 }
 
 /// What composing a block into one region produced.
@@ -850,6 +897,26 @@ pub(crate) fn prepare_with(
         ));
     }
     let text = block.text.to_string();
+    if block.kind == BlockKind::Image {
+        let width = match ctx.block.width {
+            reprise_doc::context::Resolved::Definite(w) => w,
+            _ => Length::MAX,
+        };
+        let image = crate::image::prepare(engine, doc, node, style.size, width, diagnostics);
+        return Some(Prepared {
+            node,
+            kind: block.kind,
+            style,
+            text,
+            items: Vec::new(),
+            levels: Vec::new(),
+            base_level: 0,
+            shaped: ShapedText { runs: Vec::new() },
+            breaks: Vec::new(),
+            fallback: None,
+            image: Some(image),
+        });
+    }
     let styles = [StyleRun {
         range: 0..text.len(),
         families: if style.families.is_empty() {
@@ -953,6 +1020,7 @@ pub(crate) fn prepare_with(
         base_level: itemized.base_level,
         shaped,
         fallback,
+        image: None,
     };
     if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
         e.shaping_miss(
@@ -966,6 +1034,30 @@ pub(crate) fn prepare_with(
 }
 
 impl Prepared {
+    pub(crate) fn image_width(&self) -> Option<Length> {
+        self.image.as_ref().map(|i| i.rect.width)
+    }
+
+    pub(crate) fn fit_image_width(&mut self, width: Length, diagnostics: &mut Vec<Diagnostic>) {
+        if let Some(image) = &mut self.image
+            && image.rect.width > width.max(Length::ZERO)
+        {
+            let limit = width.max(Length::ZERO);
+            image.rect.height = image.rect.height.mul_ratio(limit.0, image.rect.width.0);
+            image.rect.width = limit;
+            diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                codes::IMAGE_SIZE,
+                Subject::Node(self.node),
+                "image scaled proportionally to its table cell's inline extent",
+            ));
+        }
+    }
+    pub(crate) fn line_height(&self) -> Length {
+        self.image
+            .as_ref()
+            .map_or(self.style.line_height, |i| i.rect.height)
+    }
     pub(crate) fn node(&self) -> NodeId {
         self.node
     }
@@ -984,6 +1076,53 @@ impl Prepared {
         diagnostics: &mut Vec<Diagnostic>,
         evaluation: Option<&crate::incremental::Evaluation>,
     ) -> Composed {
+        if let Some(image) = &self.image {
+            use reprise_compose::{Available, BreakReason, Explanation, LineQuery};
+            let height = image.rect.height;
+            let room = geometry.available(&LineQuery {
+                line: 0,
+                block_offset: block_start,
+                line_height: height,
+                previous: &[],
+            });
+            let interval = match room {
+                Available::Room(intervals) => intervals
+                    .into_iter()
+                    .find(|r| r.width() >= image.rect.width),
+                _ => None,
+            };
+            let Some(interval) = interval else {
+                return Composed {
+                    lines: Vec::new(),
+                    rest: Some(start),
+                    block_end: block_start,
+                };
+            };
+            let rect = Rect::new(
+                Point::new(interval.start, block_start),
+                image.rect.width,
+                height,
+            );
+            return Composed {
+                lines: vec![LineLayout {
+                    frame,
+                    text: 0..self.text.len(),
+                    preview: self.text.clone(),
+                    rect,
+                    baseline: block_start,
+                    width: image.rect.width,
+                    runs: Vec::new(),
+                    explanation: Explanation {
+                        reason: BreakReason::End,
+                        score: None,
+                        adjustment: Adjustment::default(),
+                        reshaped: false,
+                    },
+                }],
+                rest: None,
+                block_end: block_start + height,
+            };
+        }
         if let Some(e) = evaluation {
             e.composer_call();
         }
@@ -1021,6 +1160,11 @@ impl Prepared {
     }
 
     pub(crate) fn into_block(self, lines: Vec<LineLayout>) -> BlockLayout {
+        let mut image = self.image;
+        if let (Some(image), Some(line)) = (&mut image, lines.first()) {
+            image.frame = line.frame;
+            image.rect = line.rect;
+        }
         BlockLayout {
             node: self.node,
             kind: self.kind,
@@ -1028,7 +1172,7 @@ impl Prepared {
             text: self.text,
             lines,
             base_level: self.base_level,
-            image: None,
+            image,
         }
     }
 }
@@ -1211,6 +1355,7 @@ pub(crate) fn place(mut block: BlockLayout, frame: usize, by: Length) -> BlockLa
         line.rect.origin.y += by;
         line.baseline += by;
     }
+    block.sync_image();
     block
 }
 

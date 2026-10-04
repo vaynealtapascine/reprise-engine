@@ -45,6 +45,15 @@ impl ImageData {
 }
 
 impl Document {
+    pub fn set_image(&self, node: NodeId, image: &ImageData) -> Result<(), DocError> {
+        let raw = serde_json::to_string(&Record {
+            version: 1,
+            image: image.clone(),
+        })
+        .map_err(|e| DocError::Store(e.to_string()))?;
+        ImageData::parse(&raw).map_err(|_| DocError::Store("invalid image record".into()))?;
+        self.set_image_record(node, &raw)
+    }
     pub fn append_image(
         &self,
         style: &str,

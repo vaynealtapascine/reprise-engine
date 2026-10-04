@@ -24,7 +24,7 @@ interfaces.
 |  | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
 |  | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), v2 authored transforms, writing modes and spiral paths, v1-compatible Loro storage and the built-in template | 05, 20, 24, 34 |
 |  | `src/reading.rs` | Independent `reprise.reading-order` block-precedence schema and authoring helper | 01, 14, 33 |
-| `doc` | `src/image.rs` | Versioned image records, opaque preservation and clipboard staging; alt text in the existing text container | 05, 33, 34 |
+| `doc` | `src/image.rs` | Versioned image records, authored updates, opaque preservation and clipboard staging; alt text in the existing text container | 05, 33, 34 |
 | `font` | `src/lib.rs`, `src/supply.rs`, `src/supply/tests.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore`, frontend declarations, CSS-inspired matching and pinned generic defaults | 21, 22, 38 |
 | `shape` | `src/lib.rs`, `src/fallback_tests.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
 |  | `src/paragraph.rs` | `itemize` / `itemize_families` (legacy and grapheme-preserving generic fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
@@ -39,7 +39,7 @@ interfaces.
 |  | `src/walk.rs` | Walking a geometry provider: skips, `End`, stalls | 23 |
 |  | `src/testing.rs` | Unit-test shaping with the bundled font | 39 |
 |  | `tests/conformance.rs` | Every composer against adversarial geometry and texts, checking every `Composer` guarantee | 23, 37, 39 |
-| `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
+| `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, images, paths, groups), `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, ordered run addresses and extraction spans, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
 |  | `tests/pdf_text.rs` | Ordered PDF extraction through rotated, mirrored, vertical and spiral layouts; generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
 | `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `plugins`, `medium` and `FlowSettings`), `Engine::layout`, geometry, plugins and reading module wiring | 20, 24, 26, 33, 36, 38 |
@@ -49,13 +49,15 @@ interfaces.
 |  | `src/reading.rs` | Snapshot reading-order queries with explicit document input, stable partial-order completion and iterative cycle repair | 01, 33, 37 |
 |  | `src/template.rs` | Resolving the document's page template against the medium; falling back to the built-in one | 24, 34, 37, 38 |
 |  | `src/region.rs` | `Bounded`: any geometry provider, ended at a frame's depth | 23, 24 |
-|  | `src/flow.rs` | Pass 1: per-starting-frame style resolution and diagnostics, shaping, line L1/L2 reordering and glyph spacing adjustments, composing and threading paragraphs through the main flow's frames, page after page | 08, 17, 18, 22, 23, 24, 30 |
+|  | `src/flow.rs` | Pass 1: per-starting-frame style resolution and diagnostics, shaping, line L1/L2 reordering and glyph spacing adjustments, composing and threading paragraphs and indivisible images through the main flow's frames, page after page | 08, 17, 18, 22, 23, 24, 30 |
 |  | `src/relations/mod.rs` | Pass 2: schema dispatch, including plugin resolve-and-report after the shared resolver | 13–15, 26, 36 |
 |  | `src/plugins.rs` | Plugin registration helpers, complete ordered reproduction envelope, safe relation acknowledgement adapter | 04, 36–38 |
 |  | `src/relations/follow.rs` | `reprise.follow`: placing a block in the margin frame of its target line's page | 13, 15, 24 |
 |  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; shared by `follow` and other relation behaviours | 13, 14, 15 |
 |  | `src/query.rs` | Layout queries added by relations (`first_line`, `frame_of`, `answer`, ...) | 13, 16 |
-|  | `src/display.rs` | `to_display_list(s)`, ordered PDF run addresses and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
+|  | `src/display.rs` | `to_display_list(s)`, image display items, ordered PDF glyph/image addresses and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
+| `display` | `src/assets.rs`, `src/assets_tests.rs`, `src/image_pixels.rs` | Host image store, bounded integer PNG/JPEG/JFIF/EXIF headers; backend-only bounded pixel decode | 19, 32, 34, 37, 38 |
+| `layout` | `src/image.rs` | Intrinsic/authored size, aspect-preserving frame fit and diagnostic placeholders | 19, 24, 37, 38 |
 | `fixtures` | `src/lib.rs`, `src/fonts.rs` | Pinned fonts, engine and peers for tests, three-face fallback text and relocated OTC fixture | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
 |  | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
@@ -80,8 +82,16 @@ interfaces.
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
 
+| `display` | `src/lib.rs`, `src/svg.rs`, `src/png.rs`, `src/pdf.rs`, `tests/images.rs`, `tests/pdf_text.rs` | Image display items, layers, data URIs, bounded raster blits, PDF image objects and ordered alt-text extraction; gray missing-resource boxes | 20, 32, 33, 37 |
+| `layout` | `src/lib.rs`, `src/snapshot.rs`, `src/floats.rs`, `src/notes.rs`, `src/regions.rs`, `src/incremental.rs`, `src/codes.rs` | Host asset input, positioned image boxes in flow/floats/notes, synchronized geometry, metadata cache invalidation and stable image warnings | 05, 24, 27, 37, 38 |
+| `doc` / `edit` | `doc/src/fragment.rs`, `edit/src/paste.rs` | Opaque image metadata retained through staged native paste and undo/redo | 07, 29, 34, 35 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/images.rs`, `tests/snapshots/hostile__*image*.snap` | Ten hostile image fixtures and paired geometry/content goldens, integer sizes, flow limits, region runaround and incremental parity | 19, 20, 24, 37, 38, 39 |
+| `cli` | `src/lib.rs` | Pass host assets to every headless output backend | 32, 34 |
+| inputs | `fixtures/images/` | Reproducible original CC0 PNG/JPEG pixels and oversized header, generator and provenance | 38, 39 |
+
 Other files:
 
+-   `fixtures/images/`: original CC0 PNG/JPEG inputs, oversized metadata-only input and reproducible generator.
 -   `fixtures/fonts/`: four bundled generic defaults (Source Serif Pro, Source Sans 3, Source Code Pro, Dancing Script), their OFL licenses and pinned provenance in README.md.
 -   `.github/workflows/ci.yml`: CI.
 -   `Cargo.toml`, `Cargo.lock`: shared dependencies, including pinned plugin runtime and WAT test compiler.

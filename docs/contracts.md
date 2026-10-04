@@ -51,7 +51,7 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
-| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit` |
+| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
@@ -340,6 +340,7 @@ Codes in use:
 
 -   **One `DisplayList` per page.** Items are:
     -   `Glyphs(GlyphRun)`
+    -   `Image`, with SHA-256 asset hash, destination rectangle, alt text and layer
     -   `Path`, with an optional fill and stroke
     -   `Group`, with a `Matrix` transform, an optional clip and children
 
@@ -362,7 +363,20 @@ Codes in use:
 -   **Source text in PDF:** the PDF backend maps glyphs to their source text with ToUnicode,
     and uses ActualText where one glyph can't carry it: shared clusters, right-to-left runs
     and malformed ranges. Text extracts in logical order within each run.
--   **Open:** image items come with document assets (34). Full PDF/UA structure tagging and cross-page reading overrides remain follow-ups; ordered extraction is available through the new `pdf::render_ordered` function.
+-   **Images:** `AssetStore` verifies SHA-256 bytes supplied by the host. Each backend
+    adds `render_with_assets`; PDF also adds `render_ordered_with_assets`. Original
+    signatures use an empty store. Missing/unreadable raster data draw a gray box;
+    SVG embeds header-readable bytes as data URIs, or draws the same missing box.
+    PNG/PDF pixel decoding is capped at 16 million pixels and 64 MiB source bytes.
+    Layout scans at most 1 MiB and 512 header parts, stopping at IDAT/SOS.
+    PNG pHYs and JPEG JFIF/primary-IFD EXIF densities set physical size; absence uses 96 DPI.
+    Width-only/height-only sizes preserve physical aspect; excess inline size
+    scales both dimensions. A tall image advances before overflowing an empty
+    frame with `layout.frame-overflow`; page limits still bound placement.
+    Image ActualText follows ordered PDF run addresses, including placeholders.
+    The computed text style is retained; image box height does not overwrite
+    authored/computed line-height.
+-   **Open:** Full PDF/UA structure tagging and cross-page reading overrides remain follow-ups; ordered extraction is available through the new `pdf::render_ordered` function.
 
 ## Fixtures: `reprise-fixtures`
 

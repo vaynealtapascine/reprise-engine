@@ -14,8 +14,8 @@
 //! # Resources
 //!
 //! Glyph runs name their face by [`FaceId`]; the faces belong to the
-//! `FontStore` the backend is given, not to the list. Image resources will be
-//! owned the same way when image items are added.
+//! `FontStore` the backend is given, not to the list. Images name SHA-256 hashes
+//! in the host-owned [`AssetStore`].
 //!
 //! # Source text
 //!
@@ -29,7 +29,16 @@ use reprise_font::{FaceId, FontError};
 use reprise_geom::{Length, Matrix, PageSpace, Point, Rect};
 use serde::{Deserialize, Serialize};
 
+pub mod assets;
+mod image_pixels;
 pub mod pdf;
+pub use assets::AssetStore;
+
+/// Rendering/export preflight, with the same decoding limits as PNG and PDF.
+/// Layout must use `assets::image_header` instead of this pixel operation.
+pub fn image_renderable(bytes: &[u8]) -> bool {
+    image_pixels::decode(bytes).is_some()
+}
 pub mod png;
 pub mod svg;
 
@@ -143,6 +152,13 @@ pub struct Stroke {
 #[non_exhaustive]
 pub enum Item {
     Glyphs(GlyphRun),
+    /// Host-owned bitmap; destination is in the enclosing group's space.
+    Image {
+        asset: String,
+        rect: Rect<PageSpace>,
+        alt: String,
+        layer: Layer,
+    },
     Path {
         path: Path,
         fill: Option<Color>,
@@ -164,6 +180,7 @@ impl Item {
         match self {
             Item::Glyphs(run) => (run.layer == layer).then(|| self.clone()),
             Item::Path { layer: l, .. } => (*l == layer).then(|| self.clone()),
+            Item::Image { layer: l, .. } => (*l == layer).then(|| self.clone()),
             Item::Group {
                 transform,
                 clip,

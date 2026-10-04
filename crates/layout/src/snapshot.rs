@@ -112,6 +112,15 @@ pub struct ImageLayout {
     pub placeholder: bool,
 }
 
+impl BlockLayout {
+    pub(crate) fn sync_image(&mut self) {
+        if let (Some(image), Some(line)) = (&mut self.image, self.lines.first()) {
+            image.frame = line.frame;
+            image.rect = line.rect;
+        }
+    }
+}
+
 fn is_zero(level: &u8) -> bool {
     *level == 0
 }

@@ -111,6 +111,10 @@ impl Flow<'_> {
                             }
                         }
                         maximum = maximum.max(p.shaped.width(forced_start..p.text.len()));
+                        if let Some(width) = p.image_width() {
+                            minimum = width;
+                            maximum = width;
+                        }
                         if let Some(m) = min.get_mut(col) {
                             *m = (*m).max(minimum);
                         }
@@ -169,7 +173,17 @@ impl Flow<'_> {
                 .into_iter()
                 .map(|n| Diagnostic::from_note(n, subject.clone())),
         );
-        for cells in rows {
+        for mut cells in rows {
+            for cell in &mut cells {
+                let width = solution
+                    .widths
+                    .get(cell.column)
+                    .copied()
+                    .unwrap_or_default();
+                for block in &mut cell.blocks {
+                    block.fit_image_width(width, &mut self.snapshot.diagnostics);
+                }
+            }
             self.table_row(cells, &solution.widths);
         }
     }
@@ -230,7 +244,7 @@ impl Flow<'_> {
                         .map(|f| f.depth)
                         .max()
                         .unwrap_or_default();
-                    let overflow = p.style.line_height > full_depth && depth > Length::ZERO;
+                    let overflow = p.line_height() > full_depth && depth > Length::ZERO;
                     let geometry: &dyn reprise_compose::GeometryProvider =
                         if overflow { &measure } else { &bounded };
                     let mut composed = p.compose(

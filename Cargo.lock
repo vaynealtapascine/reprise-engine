@@ -1833,8 +1833,10 @@ dependencies = [
 name = "reprise-display"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "krilla",
  "lopdf",
+ "png",
  "reprise-doc",
  "reprise-fixtures",
  "reprise-font",
@@ -1843,9 +1845,11 @@ dependencies = [
  "reprise-shape",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "skrifa 0.46.2",
  "thiserror 2.0.21",
  "tiny-skia",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1909,6 +1913,7 @@ name = "reprise-format"
 version = "0.0.0"
 dependencies = [
  "reprise-diag",
+ "reprise-display",
  "reprise-doc",
  "reprise-fixtures",
  "reprise-font",

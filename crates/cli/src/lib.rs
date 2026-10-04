@@ -33,16 +33,19 @@ pub fn write_outputs(
         )?;
         std::fs::write(
             dir.join(format!("{name}.page-{n}.svg")),
-            reprise_display::svg::render(page, &engine.fonts).map_err(|e| fail(&e))?,
+            reprise_display::svg::render_with_assets(page, &engine.fonts, &engine.assets)
+                .map_err(|e| fail(&e))?,
         )?;
         std::fs::write(
             dir.join(format!("{name}.page-{n}.png")),
-            reprise_display::png::render(page, &engine.fonts, 3.0).map_err(|e| fail(&e))?,
+            reprise_display::png::render_with_assets(page, &engine.fonts, &engine.assets, 3.0)
+                .map_err(|e| fail(&e))?,
         )?;
     }
     std::fs::write(
         dir.join(format!("{name}.pdf")),
-        reprise_display::pdf::render(&content, &engine.fonts).map_err(|e| fail(&e))?,
+        reprise_display::pdf::render_with_assets(&content, &engine.fonts, &engine.assets)
+            .map_err(|e| fail(&e))?,
     )?;
     Ok(())
 }

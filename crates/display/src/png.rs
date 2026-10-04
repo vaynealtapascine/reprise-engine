@@ -64,12 +64,22 @@ fn skia_matrix(m: &Matrix) -> Transform {
 struct Raster<'a> {
     pixmap: Pixmap,
     fonts: &'a FontStore,
+    assets: &'a crate::AssetStore,
 }
 
 /// Renders the page at `pixels_per_pt` on a white background.
 pub fn render(
     list: &DisplayList,
     fonts: &FontStore,
+    pixels_per_pt: f32,
+) -> Result<Vec<u8>, RenderError> {
+    render_with_assets(list, fonts, &crate::AssetStore::default(), pixels_per_pt)
+}
+
+pub fn render_with_assets(
+    list: &DisplayList,
+    fonts: &FontStore,
+    assets: &crate::AssetStore,
     pixels_per_pt: f32,
 ) -> Result<Vec<u8>, RenderError> {
     let w = (pt(list.width) * pixels_per_pt).ceil();
@@ -80,7 +90,11 @@ pub fn render(
     }
     let mut pixmap = Pixmap::new(w as u32, h as u32).ok_or_else(bad)?;
     pixmap.fill(tiny_skia::Color::WHITE);
-    let mut raster = Raster { pixmap, fonts };
+    let mut raster = Raster {
+        pixmap,
+        fonts,
+        assets,
+    };
     let page = Transform::from_scale(pixels_per_pt, pixels_per_pt);
     raster.items(&list.items, page, None)?;
     raster
@@ -99,6 +113,45 @@ impl Raster<'_> {
         for item in items {
             match item {
                 Item::Glyphs(run) => self.glyphs(run, at, mask)?,
+                Item::Image { asset, rect, .. } => {
+                    if rect.width <= Length::ZERO || rect.height <= Length::ZERO {
+                        continue;
+                    }
+                    if let Some((w, h, mut rgba)) =
+                        self.assets.get(asset).and_then(crate::image_pixels::decode)
+                    {
+                        for pixel in rgba.as_chunks_mut::<4>().0 {
+                            let [r, g, b, a] = pixel;
+                            let alpha = u16::from(*a);
+                            *r = ((u16::from(*r) * alpha + 127) / 255) as u8;
+                            *g = ((u16::from(*g) * alpha + 127) / 255) as u8;
+                            *b = ((u16::from(*b) * alpha + 127) / 255) as u8;
+                        }
+                        if let Some(size) = tiny_skia::IntSize::from_wh(w, h)
+                            && let Some(image) = Pixmap::from_vec(rgba, size)
+                        {
+                            let transform = at
+                                .pre_translate(pt(rect.origin.x), pt(rect.origin.y))
+                                .pre_scale(pt(rect.width) / w as f32, pt(rect.height) / h as f32);
+                            self.pixmap.draw_pixmap(
+                                0,
+                                0,
+                                image.as_ref(),
+                                &tiny_skia::PixmapPaint::default(),
+                                transform,
+                                mask,
+                            );
+                        }
+                    } else if let Some(path) = skia_path(&Path::rect(*rect)) {
+                        self.pixmap.fill_path(
+                            &path,
+                            &paint(Color(221, 221, 221, 255)),
+                            FillRule::Winding,
+                            at,
+                            mask,
+                        );
+                    }
+                }
                 Item::Path {
                     path, fill, stroke, ..
                 } => {

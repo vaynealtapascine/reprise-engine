@@ -149,13 +149,12 @@ impl Notes {
                 }
             }
             let measure = Measure(area.width);
-            let overflow = prepared.style.line_height > area.depth
-                && page > first_page
-                && used == Length::ZERO;
+            let overflow =
+                prepared.line_height() > area.depth && page > first_page && used == Length::ZERO;
             let bounded = Bounded {
                 inner: &measure,
                 depth: if overflow {
-                    prepared.style.line_height
+                    prepared.line_height()
                 } else {
                     capacity
                 },
@@ -237,6 +236,7 @@ impl Notes {
                         line.baseline += by;
                     }
                 }
+                block.sync_image();
             }
             let page = index / frames.max(1);
             // Project the occupied notes box to each body's logical space.

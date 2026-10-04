@@ -21,6 +21,7 @@ mod display;
 mod floats;
 mod flow;
 pub mod geometry;
+mod image;
 pub mod incremental;
 mod notes;
 pub mod plugins;
@@ -83,6 +84,8 @@ impl Default for FlowSettings {
 /// to the determinism guarantee (38).
 pub struct Engine {
     pub fonts: FontStore,
+    /// Verified content-addressed image bytes supplied by the frontend.
+    pub assets: reprise_display::AssetStore,
     pub shaper: Box<dyn ShapingAdapter>,
     pub composer: Box<dyn Composer>,
     pub schemas: SchemaRegistry,
@@ -101,6 +104,7 @@ impl Engine {
     pub fn new(fonts: FontStore) -> Engine {
         Engine {
             fonts,
+            assets: reprise_display::AssetStore::default(),
             shaper: Box::new(HarfRust),
             composer: Box::new(Greedy),
             schemas: SchemaRegistry::builtin(),
