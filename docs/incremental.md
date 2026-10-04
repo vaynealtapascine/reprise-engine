@@ -220,3 +220,59 @@ An explicit coordinator is therefore still necessary. The existing small number
 of staged operations makes exact-value memos and visible work-budget continuation
 more direct than adding a query runtime. The chosen implementation's WASM support
 is verified by the project's required target check. There are no new dependencies.
+
+## Verified hand-off (2026-10-04)
+
+On `ws/incremental`, `cargo fmt --all`, strict workspace/all-target Clippy,
+`cargo test --workspace`, and the required layout/display/fixtures WASM check all
+pass. The final workspace run has **431 passing tests, zero failures and one
+existing ignored manual geometry-export test**. Fourteen incremental integration
+tests and three incremental unit tests are included. The 55 hostile fixtures and
+the spike each receive 32 seeded edits; completed budgeted jobs also match every
+hostile fixture's full reference snapshot. The 1,000-paragraph edit test records
+one paragraph transition miss, one touched page and 999 reused transitions.
+
+Only two snapshots are added: `hostile__incremental_page_seam.snap` records three
+pages/nine frames/two body blocks plus an annotation, valid follow/reading
+relations and the requested reading-partial Info diagnostic; its paired
+`hostile__content_incremental_page_seam.snap` records 37 glyph items across those
+pages. No existing snapshot changes. No dependencies, diagnostic codes, frozen
+contract changes, editing-kernel changes or out-of-scope files are introduced.
+
+Follow-ups for the orchestrator: finer yield points within paragraphs/tables and
+relation/reading passes; interned or compact keys; retention/eviction for deleted
+node maps in very long sessions; narrower table/region/relation memos. Style
+context memos are distinct internally while public graph style/shape units
+aggregate a block's contexts; block/frame and line/page units are explicit.
+Provisional region/relation viewport views must remain visibly provisional until
+`settled`; they are not a cached full result. Workers and a debug overlay are
+optional later additions. Split/join equivalence edits use existing authored
+text/node/succession primitives, without depending on the parallel editing kernel.
+
+Command tails from the final verified implementation:
+
+`cargo fmt --all`: no output, exit code 0.
+
+`cargo clippy --workspace --all-targets -- -D warnings`:
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.53s
+```
+
+`cargo test --workspace`:
+
+```text
+   Doc-tests reprise_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+`cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures`:
+
+```text
+    Checking reprise-layout v0.0.0 (F:\reprise-wt\incremental\crates\layout)
+    Checking reprise-fixtures v0.0.0 (F:\reprise-wt\incremental\crates\fixtures)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.75s
+```
