@@ -59,6 +59,7 @@ Codes in use:
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
 | clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped` |
 | export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure` |
+| bindings | `bindings.version`, `bindings.invalid`, `bindings.limit`, `bindings.id`, `bindings.stale`, `bindings.cancelled`, `bindings.layout-required`, `bindings.read-only`, `bindings.store`, `bindings.render` |
 
 ## Text store: `reprise-text`
 
@@ -652,3 +653,70 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
   PlainText, Html, Native and Pdf implement it. PDF requires current layout/fonts, wraps
   ordered rendering, and explicitly reports editable structure and relation graph loss,
   lack of PDF/UA structure, viewer-dependent text extraction, and layout omissions.
+
+
+## Bindings: external API v1 (`reprise`, `reprise-wasm`)
+
+The facade crates are version 0.1.0 and are the external application contract
+(02, 04, 28, 29, 38, 41). Core types remain private: all crossing records, enums,
+IDs, diagnostics, display operations and errors are facade-owned. No core type is
+re-exported. `crates/reprise/API.txt` pins native signatures; generated
+`crates/reprise-wasm/ts/types.d.ts` pins wire shapes. Changes to either require
+explicit review. See [bindings.md](bindings.md) for the full method overview,
+worker protocol, bounds, error meanings, packaging and host responsibilities.
+
+- Every standalone object payload is `Payload<T> { version: 1, data: T }`.
+  Nested records inherit the envelope version. Raw resource bytes are opaque
+  byte channels paired with versioned metadata, never JSON number-array APIs in
+  JavaScript. Native callers receive owned `Vec<u8>`; WASM uses `Uint8Array`.
+  Opaque WASM objects are local handles and are not serializable payloads.
+- Unsupported versions are refused before interpreting data. Native `decode`
+  bounds JSON bytes/depth; WASM snapshots and bounds a plain JS object tree
+  before deserializing it, rejects cycles and catches throwing property reads.
+  Decimal strings carry peer IDs and other 64-bit counters. Node/range/relation
+  IDs are canonical opaque strings; document IDs are 32 lowercase hex digits.
+  Geometry is integer 1/1024 pt; matrix coefficients are integer 16.16.
+- `Workspace` creates/opens independent `DocumentSession` replicas. Hosts supply
+  persistent document identity and distinct peers. All editing transactions,
+  paste and plugin edits use the editing kernel, including atomic validation,
+  position effects and per-peer undo/redo. Adding plugin schemas retains undo.
+  Compatible newer packages return `bindings.read-only`; the facade currently
+  cannot lay out the core's `DocumentAt` view and never exposes it as editable.
+- Layout jobs are owned, single-threaded continuations of the same incremental
+  coordinator. Each `step(session, budget)` charges at most its explicit budget,
+  may stop early for the viewport and returns pass, coverage, completeness,
+  settled/outside-document flags and work counters. Zero is a checked no-op.
+  Partial pages are available only inside advertised coverage. Navigation,
+  reading order, PDF and convenience rendering require complete current layout.
+- Every job/result is bound to native session identity, revision and generation.
+  New jobs/configuration changes supersede earlier jobs. Edits and sync invalidate
+  revision-bound results; cancellation is terminal. A stale/cancelled job cannot
+  publish. Hosts also gate messages already queued outside the engine against
+  their currently accepted token. Caches are isolated per session/configuration.
+- Saving finishes layout when needed, embeds used fonts and preserves document
+  ID, unknown sections, raw untouched manifests, opaque extensions and assets.
+  Saving never compacts history implicitly. SVG/PNG/PDF render the same display
+  operations; display JSON uses one canonical serializer natively and in WASM.
+- Clipboard supports versioned native fragments, plain/HTML selection projection
+  with loss reports, and bounded plain/HTML/native paste. Export supports plain,
+  HTML, native and PDF, always returning feature losses. Resources are declared,
+  enumerated and retrieved without I/O. Image bytes are opaque until the image
+  workstream's placement/display adapters are integrated.
+- Plugins are loaded against explicit content pins, manifests, grants and limits;
+  functions, geometry and relation schemas can be installed. Editing plugins
+  receive only explicit node handles and commit staged insertions atomically.
+  Modules share the core's deterministic wasmi sandbox on both platforms.
+- Sync v1 exchanges sorted version vectors and self-contained retained-history
+  snapshots as update packets. Import verifies document scope, distinct declared
+  peers and agreement of vector with bytes before merging. Compact delta packets
+  are a future version; no transport/server/authentication is inferred. Fonts,
+  assets and engine configuration use separate host-owned resource channels.
+  Awareness is bounded opaque bytes with document/peer metadata and no persistence.
+- The typed `Error` enum maps core notes without changing stable codes/severities.
+  Boundary refusal codes above have Error severity because the requested result
+  or operation is omitted. Successful explicit cancellation itself returns an
+  acknowledgement. Messages are explanatory and are not matched as contracts.
+- Neither facade uses unsafe code, required threads, clocks, random identity,
+  filesystem or network I/O. Sessions retain the core's single-threaded caches;
+  native hosts create and drive them on a dedicated engine thread/actor rather
+  than moving live jobs between arbitrary Tauri command threads.
