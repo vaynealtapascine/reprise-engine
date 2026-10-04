@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 36);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 37);
 }
 
 hostile_tests!(
@@ -763,4 +763,143 @@ fn a_block_that_cannot_start_in_the_current_frame_uses_the_next_frame_basis() {
         "{:?}",
         snapshot.diagnostics
     );
+}
+
+hostile_tests!(justified_bidi);
+
+#[test]
+fn justified_bidi_fills_intervals_and_adjusts_only_content_word_spaces() {
+    use reprise_compose::{BreakReason, is_word_space};
+    use reprise_compose::{ComposeRequest, Composer, Composition, LineFragment, Optimal};
+    use std::sync::{Arc, Mutex};
+    type Recorded = Arc<Mutex<Vec<(String, LineFragment)>>>;
+    struct Recording(Recorded);
+    impl Composer for Recording {
+        fn name(&self) -> &'static str {
+            "optimal-justified"
+        }
+        fn compose(&self, request: &ComposeRequest<'_>) -> Composition {
+            let composed = Optimal::justified().compose(request);
+            self.0.lock().unwrap().extend(
+                composed
+                    .lines
+                    .iter()
+                    .cloned()
+                    .map(|l| (request.text.to_string(), l)),
+            );
+            composed
+        }
+    }
+    let mut fixture = hostile::justified_bidi().unwrap();
+    let recorded = Recorded::default();
+    fixture.engine.composer = Box::new(Recording(recorded.clone()));
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let mut adjusted_lines = 0;
+    let mut rtl_hanging = false;
+    for block in &snapshot.blocks {
+        for line in &block.lines {
+            let source = &block.text[line.text.clone()];
+            let end = line.text.start + source.trim_end().len();
+            let spaces = source
+                .trim_end()
+                .chars()
+                .filter(|&c| is_word_space(c))
+                .count() as i64;
+            let all = recorded.lock().unwrap();
+            let (_, natural) = all
+                .iter()
+                .find(|(text, l)| {
+                    text == &block.text
+                        && l.text == line.text
+                        && l.block_offset == line.rect.origin.y
+                        && l.available.width() == line.rect.width
+                })
+                .unwrap();
+            let ws = line.explanation.adjustment.word_spacing;
+            let mut before = std::collections::BTreeMap::<(u32, u32), Vec<Length>>::new();
+            for glyph in natural.runs.iter().flat_map(|r| &r.glyphs) {
+                before
+                    .entry((glyph.cluster, glyph.id))
+                    .or_default()
+                    .push(glyph.advance);
+            }
+            let mut after = std::collections::BTreeMap::<(u32, u32), Vec<Length>>::new();
+            for run in &line.runs {
+                assert_eq!(
+                    run.width,
+                    run.glyphs.iter().fold(Length::ZERO, |w, g| w + g.advance)
+                );
+                for glyph in &run.glyphs {
+                    let c = glyph.cluster as usize;
+                    let space =
+                        c < end && block.text[c..].chars().next().is_some_and(is_word_space);
+                    let advance = glyph.advance - if space { ws } else { Length::ZERO };
+                    after
+                        .entry((glyph.cluster, glyph.id))
+                        .or_default()
+                        .push(advance);
+                }
+            }
+            for advances in before.values_mut() {
+                advances.sort();
+            }
+            for advances in after.values_mut() {
+                advances.sort();
+            }
+            assert_eq!(
+                before, after,
+                "only content word-space glyphs are adjusted: {source:?}"
+            );
+            let used = line
+                .runs
+                .iter()
+                .flat_map(|r| &r.glyphs)
+                .filter(|g| (g.cluster as usize) < end)
+                .fold(Length::ZERO, |w, g| w + g.advance);
+            assert_eq!(line.width, used);
+            for pair in line.runs.windows(2) {
+                assert_eq!(pair[1].x, pair[0].x + pair[0].width);
+            }
+            if line.explanation.reason == BreakReason::Opportunity
+                && line.explanation.score.is_some()
+                && spaces > 0
+            {
+                adjusted_lines += 1;
+                assert!(
+                    (line.width.0 as i64 - line.rect.width.0 as i64).abs() <= spaces,
+                    "{source:?}"
+                );
+                let mut actual_end = Length::MIN;
+                for run in &line.runs {
+                    let mut pen = run.x;
+                    for g in &run.glyphs {
+                        pen += g.advance;
+                        if (g.cluster as usize) < end {
+                            actual_end = actual_end.max(pen);
+                        }
+                    }
+                }
+                assert!(
+                    (actual_end.0 as i64 - line.rect.max_x().0 as i64).abs() <= spaces,
+                    "rendered end for {source:?}"
+                );
+                if block.text.starts_with("אבג")
+                    && line.runs.first().is_some_and(|r| r.x < line.rect.origin.x)
+                {
+                    rtl_hanging = true;
+                }
+            }
+            if matches!(
+                line.explanation.reason,
+                BreakReason::Forced | BreakReason::End
+            ) {
+                assert!(ws <= Length::ZERO, "forced and final lines never stretch");
+            }
+            if spaces == 0 {
+                assert_eq!(ws, Length::ZERO);
+            }
+        }
+    }
+    assert!(adjusted_lines > 10);
+    assert!(rtl_hanging, "RTL trailing spaces hang to the visual left");
 }

@@ -249,8 +249,6 @@ Codes in use:
     minimum width).
 -   **Conformance:** `compose/tests/conformance.rs` runs every composer against adversarial
     geometry, breaks, shaping and texts. A new composer must be added to it.
--   **Open:** layout doesn't yet apply `Adjustment` to glyph positions, so justified lines
-    render ragged.
 
 ## Layout snapshot: `reprise-layout::snapshot`
 

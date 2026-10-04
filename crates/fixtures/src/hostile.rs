@@ -90,6 +90,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         bidi_line_override()?,
         follow_lines_across_frames()?,
         style_fragment_basis()?,
+        justified_bidi()?,
     ])
 }
 
@@ -1230,4 +1231,33 @@ pub fn style_fragment_basis() -> Result<Fixture, DocError> {
         doc,
         &["style.basis-indefinite", "style.basis-unresolved"],
     ))
+}
+
+/// Justification attacks RTL hanging spaces, a wrapping RLO, mixed levels,
+/// non-ASCII word separators, single words and all-space forced lines.
+pub fn justified_bidi() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let rtl = format!("{}\nאבג 456    ", "אבג דהו זחט יכל 123 ".repeat(8));
+    doc.append_block(BlockKind::Paragraph, "body", &rtl)?;
+    let reversed = format!(
+        "Latin \u{202e}{}    \u{202c} normal end.   ",
+        "office 123 office 456 more words ".repeat(6)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &reversed)?;
+    let mixed = format!(
+        "{}\u{2028}A short last line.   ",
+        "Latin אבג 123 words דהו 456 office ".repeat(6)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &mixed)?;
+    doc.append_block(BlockKind::Paragraph, "body", "word\nword\n    \nword")?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        &"one\u{a0}two three\u{1361}four five six seven ".repeat(6),
+    )?;
+    doc.commit();
+    let mut fixture = Fixture::new("justified_bidi", doc, &[]);
+    fixture.engine.composer = Box::new(Optimal::justified());
+    Ok(fixture)
 }
