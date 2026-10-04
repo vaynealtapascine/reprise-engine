@@ -5,7 +5,8 @@ use std::ops::Range;
 use reprise_diag::{Note, Severity};
 use reprise_doc::{NodeId, RangeId, RelationId, SchemaError};
 
-/// A refused transaction: which command, and why. Nothing was changed.
+/// An editing error: which command, and why. Validation errors change nothing;
+/// `Store` identifies an unexpected document/store failure.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{}", match .command { Some(i) => format!("command {i}: {}", .reason), None => .reason.to_string() })]
 pub struct EditError {

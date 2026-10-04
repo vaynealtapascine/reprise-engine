@@ -164,8 +164,9 @@ impl Editor {
         self.apply(&Transaction::from(command))
     }
 
-    /// Validates and applies a transaction. On `Err` the document is exactly
-    /// as it was.
+    /// Validates and applies a transaction. A validation error leaves the
+    /// document exactly as it was. `Store` indicates an unexpected failure
+    /// while applying a prevalidated plan.
     pub fn apply(&mut self, transaction: &Transaction) -> Result<Applied, EditError> {
         let plan = plan::plan(&self.doc, &self.schemas, transaction.commands())?;
         if plan.steps.is_empty() {

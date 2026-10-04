@@ -12,7 +12,7 @@ interfaces.
 |  | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
 | `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas | 05–07, 15, 29 |
 |  | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`, `reprise.reading-order`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13, 14, 15, 27, 35 |
-|  | `src/structure.rs` | Tree navigation, structural queries (`evaluate`), succession links (`supersede`, `succession`) | 06, 13, 15 |
+|  | `src/structure.rs` | Live tree navigation and structural queries (`evaluate`), inherited deletion through table nesting, succession links (`supersede`, `succession`) | 06, 07, 13, 15, 24 |
 |  | `src/history.rs` | `DocumentAt` (a past version), `HistoryCache`, snapshot resolution, `compact_history` | 07, 13 |
 |  | `src/resolve.rs` | `resolve_target` / `resolve_relation`: any non-layout target, with `OnTargetDeleted` applied from tombstones; `dead_relations` | 13, 14, 15 |
 |  | `src/relation_tests.rs` | Tests for the three files above and for relation.rs | 13, 14, 15, 35 |
