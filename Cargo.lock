@@ -1794,9 +1794,11 @@ version = "0.0.0"
 dependencies = [
  "krilla",
  "lopdf",
+ "reprise-doc",
  "reprise-fixtures",
  "reprise-font",
  "reprise-geom",
+ "reprise-layout",
  "reprise-shape",
  "serde",
  "serde_json",
@@ -1856,6 +1858,21 @@ dependencies = [
  "serde",
  "sha2 0.11.0",
  "skrifa 0.46.2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "reprise-format"
+version = "0.0.0"
+dependencies = [
+ "reprise-diag",
+ "reprise-doc",
+ "reprise-fixtures",
+ "reprise-font",
+ "reprise-shape",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
 ]
 

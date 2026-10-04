@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 37);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 58);
 }
 
 hostile_tests!(
@@ -651,6 +651,362 @@ fn style_bases_that_are_missing_or_indefinite_are_reported() {
     }
     every_block_is_laid_out(&fixture);
 }
+
+hostile_tests!(bidi_line_override);
+
+#[test]
+fn line_bidi_resets_trailing_spaces_and_preserves_advances() {
+    let fixture = hostile::bidi_line_override().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    for (i, block) in snapshot.blocks.iter().enumerate() {
+        assert!(block.lines.len() > 1);
+        for line in &block.lines {
+            let end = line.text.start + block.text[line.text.clone()].trim_end().len();
+            for run in &line.runs {
+                assert_eq!(
+                    run.width,
+                    run.glyphs.iter().fold(Length::ZERO, |w, g| w + g.advance)
+                );
+                for glyph in &run.glyphs {
+                    if glyph.cluster as usize >= end {
+                        assert_eq!(
+                            run.level, i as u8,
+                            "trailing whitespace uses paragraph level"
+                        );
+                    }
+                }
+            }
+            for pair in line.runs.windows(2) {
+                assert_eq!(pair[1].x, pair[0].x + pair[0].width);
+            }
+        }
+    }
+}
+
+hostile_tests!(follow_lines_across_frames);
+
+hostile_tests!(style_fragment_basis);
+
+#[test]
+fn style_uses_the_actual_starting_frame_once_per_block() {
+    let fixture = hostile::style_fragment_basis().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let first = &snapshot.blocks[0];
+    assert_eq!(first.style.size, Length::from_pt(10));
+    assert!(
+        first
+            .lines
+            .iter()
+            .any(|l| snapshot.frame(l.frame).unwrap().name == "narrow")
+    );
+    for line in &first.lines {
+        for run in &line.runs {
+            assert_eq!(run.size, Length::from_pt(10));
+        }
+    }
+    for block in &snapshot.blocks {
+        for note in &block.style.notes {
+            assert!(snapshot.diagnostics.iter().any(|d| d.code == note.code
+                && d.severity == note.severity
+                && d.subject == Subject::Node(block.node)));
+        }
+    }
+    assert_eq!(snapshot.blocks[1].style.size, Length::from_pt(10));
+    let bases = hostile::style_bases().unwrap();
+    assert_eq!(
+        bases.engine.layout(&bases.doc).blocks[0].style.size,
+        Length::from_pt(12)
+    );
+}
+
+#[test]
+fn a_block_that_cannot_start_in_the_current_frame_uses_the_next_frame_basis() {
+    use reprise_doc::{Authored, Dim, Expr, PageTemplate, Property, Style};
+    use reprise_fixtures::templates::flow_frame;
+    let doc = Document::new(reprise_fixtures::PEER).unwrap();
+    reprise_fixtures::spike::define_styles(&doc).unwrap();
+    doc.set_page_template(
+        &PageTemplate::new("start-after-full-frame", Dim::pt(400), Dim::pt(100))
+            .with_frame(flow_frame(
+                "wide",
+                Dim::pt(0),
+                Dim::pt(0),
+                Dim::pt(200),
+                Dim::pt(20),
+            ))
+            .with_frame(flow_frame(
+                "narrow",
+                Dim::pt(210),
+                Dim::pt(0),
+                Dim::pt(100),
+                Dim::pt(40),
+            )),
+    )
+    .unwrap();
+    doc.append_block(BlockKind::Paragraph, "body", "Fills the first frame.")
+        .unwrap();
+    let mut style = Style::default();
+    style.set(
+        Property::Size,
+        Authored::Expr(Expr::parse("5% * frame-width").unwrap()),
+    );
+    doc.define_style("frame-sized", &style).unwrap();
+    let p = doc
+        .append_block(BlockKind::Paragraph, "frame-sized", "Starts here.")
+        .unwrap();
+    let snapshot = reprise_fixtures::engine().layout(&doc);
+    let block = snapshot.block(p).unwrap();
+    assert_eq!(snapshot.frame(block.lines[0].frame).unwrap().name, "narrow");
+    assert_eq!(block.style.size, Length::from_pt(5));
+    assert!(
+        snapshot.diagnostics.is_empty(),
+        "{:?}",
+        snapshot.diagnostics
+    );
+}
+
+hostile_tests!(justified_bidi);
+
+#[test]
+fn justified_bidi_fills_intervals_and_adjusts_only_content_word_spaces() {
+    use reprise_compose::{BreakReason, is_word_space};
+    use reprise_compose::{ComposeRequest, Composer, Composition, LineFragment, Optimal};
+    use std::sync::{Arc, Mutex};
+    type Recorded = Arc<Mutex<Vec<(String, LineFragment)>>>;
+    struct Recording(Recorded);
+    impl Composer for Recording {
+        fn name(&self) -> &'static str {
+            "optimal-justified"
+        }
+        fn compose(&self, request: &ComposeRequest<'_>) -> Composition {
+            let composed = Optimal::justified().compose(request);
+            self.0.lock().unwrap().extend(
+                composed
+                    .lines
+                    .iter()
+                    .cloned()
+                    .map(|l| (request.text.to_string(), l)),
+            );
+            composed
+        }
+    }
+    let mut fixture = hostile::justified_bidi().unwrap();
+    let recorded = Recorded::default();
+    fixture.engine.composer = Box::new(Recording(recorded.clone()));
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let mut adjusted_lines = 0;
+    let mut rtl_hanging = false;
+    for block in &snapshot.blocks {
+        for line in &block.lines {
+            let source = &block.text[line.text.clone()];
+            let end = line.text.start + source.trim_end().len();
+            let spaces = source
+                .trim_end()
+                .chars()
+                .filter(|&c| is_word_space(c))
+                .count() as i64;
+            let all = recorded.lock().unwrap();
+            let (_, natural) = all
+                .iter()
+                .find(|(text, l)| {
+                    text == &block.text
+                        && l.text == line.text
+                        && l.block_offset == line.rect.origin.y
+                        && l.available.width() == line.rect.width
+                })
+                .unwrap();
+            let ws = line.explanation.adjustment.word_spacing;
+            let mut before = std::collections::BTreeMap::<(u32, u32), Vec<Length>>::new();
+            for glyph in natural.runs.iter().flat_map(|r| &r.glyphs) {
+                before
+                    .entry((glyph.cluster, glyph.id))
+                    .or_default()
+                    .push(glyph.advance);
+            }
+            let mut after = std::collections::BTreeMap::<(u32, u32), Vec<Length>>::new();
+            for run in &line.runs {
+                assert_eq!(
+                    run.width,
+                    run.glyphs.iter().fold(Length::ZERO, |w, g| w + g.advance)
+                );
+                for glyph in &run.glyphs {
+                    let c = glyph.cluster as usize;
+                    let space =
+                        c < end && block.text[c..].chars().next().is_some_and(is_word_space);
+                    let advance = glyph.advance - if space { ws } else { Length::ZERO };
+                    after
+                        .entry((glyph.cluster, glyph.id))
+                        .or_default()
+                        .push(advance);
+                }
+            }
+            for advances in before.values_mut() {
+                advances.sort();
+            }
+            for advances in after.values_mut() {
+                advances.sort();
+            }
+            assert_eq!(
+                before, after,
+                "only content word-space glyphs are adjusted: {source:?}"
+            );
+            let used = line
+                .runs
+                .iter()
+                .flat_map(|r| &r.glyphs)
+                .filter(|g| (g.cluster as usize) < end)
+                .fold(Length::ZERO, |w, g| w + g.advance);
+            assert_eq!(line.width, used);
+            for pair in line.runs.windows(2) {
+                assert_eq!(pair[1].x, pair[0].x + pair[0].width);
+            }
+            if line.explanation.reason == BreakReason::Opportunity
+                && line.explanation.score.is_some()
+                && spaces > 0
+            {
+                adjusted_lines += 1;
+                assert!(
+                    (line.width.0 as i64 - line.rect.width.0 as i64).abs() <= spaces,
+                    "{source:?}"
+                );
+                let mut actual_end = Length::MIN;
+                for run in &line.runs {
+                    let mut pen = run.x;
+                    for g in &run.glyphs {
+                        pen += g.advance;
+                        if (g.cluster as usize) < end {
+                            actual_end = actual_end.max(pen);
+                        }
+                    }
+                }
+                assert!(
+                    (actual_end.0 as i64 - line.rect.max_x().0 as i64).abs() <= spaces,
+                    "rendered end for {source:?}"
+                );
+                if block.text.starts_with("אבג")
+                    && line.runs.first().is_some_and(|r| r.x < line.rect.origin.x)
+                {
+                    rtl_hanging = true;
+                }
+            }
+            if matches!(
+                line.explanation.reason,
+                BreakReason::Forced | BreakReason::End
+            ) {
+                assert!(ws <= Length::ZERO, "forced and final lines never stretch");
+            }
+            if spaces == 0 {
+                assert_eq!(ws, Length::ZERO);
+            }
+        }
+    }
+    assert!(adjusted_lines > 10);
+    assert!(rtl_hanging, "RTL trailing spaces hang to the visual left");
+}
+
+/// Orchestrator review: after line reordering (L1/L2) and justification
+/// rewrite a line's runs, every line of every fixture still has runs that
+/// cover disjoint bytes inside the line, sit edge to edge along the inline
+/// axis in visual order, and whose glyph advances add up to their width.
+#[test]
+fn positioned_runs_tile_their_lines() {
+    for fixture in hostile::all().expect("fixtures build") {
+        let name = fixture.name;
+        let snapshot = fixture.engine.layout(&fixture.doc);
+        for block in &snapshot.blocks {
+            for (i, line) in block.lines.iter().enumerate() {
+                let at = format!("{name}: {} line {i}", block.node);
+                let mut ranges: Vec<_> = line.runs.iter().map(|r| r.range.clone()).collect();
+                ranges.sort_by_key(|r| r.start);
+                for r in &ranges {
+                    assert!(
+                        line.text.start <= r.start && r.end <= line.text.end,
+                        "{at}: run {r:?} outside line {:?}",
+                        line.text
+                    );
+                }
+                for pair in ranges.windows(2) {
+                    assert!(pair[0].end <= pair[1].start, "{at}: runs overlap");
+                }
+                for pair in line.runs.windows(2) {
+                    assert_eq!(
+                        pair[0].x + pair[0].width,
+                        pair[1].x,
+                        "{at}: runs are not edge to edge"
+                    );
+                }
+                for run in &line.runs {
+                    let sum: Length = run.glyphs.iter().map(|g| g.advance).sum();
+                    assert_eq!(sum, run.width, "{at}: glyph advances vs run width");
+                }
+            }
+        }
+    }
+}
+hostile_tests!(persistence_tombstones);
+
+hostile_tests!(
+    transformed_rtl,
+    vertical_rl,
+    spiral_text,
+    reading_cycle,
+    degenerate_transform,
+    rational_rotation_extreme
+);
+
+// The frozen original fixture checks require annotations to be margin notes.
+// Regions add other authored roles; retain the original checks and separately
+// exercise the same text/query/backend invariants with their declared roles.
+fn check_region(fixture: Fixture) {
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    assert_eq!(
+        snapshot,
+        fixture.engine.layout(&fixture.doc),
+        "repeatable region layout"
+    );
+    check_diagnostics(fixture.name, &fixture, &snapshot);
+    check_lines(fixture.name, &snapshot);
+    check_queries(fixture.name, &snapshot);
+    check_backends(fixture.name, &fixture, &snapshot);
+    for block in &snapshot.blocks {
+        for line in &block.lines {
+            let frame = snapshot.frame(line.frame).unwrap();
+            assert!(frame.page < snapshot.pages.len());
+            assert!(
+                line.rect.origin.y + line.rect.height <= frame.rect.height,
+                "{}: line outside allocated frame",
+                fixture.name
+            );
+            match block.kind {
+                BlockKind::Paragraph => assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into())),
+                BlockKind::Annotation => {
+                    assert!(matches!(frame.role, FrameRole::Notes | FrameRole::Flow(_)))
+                }
+            }
+        }
+    }
+    insta::assert_snapshot!(fixture.name, snapshot.to_json());
+}
+
+macro_rules! region_hostile_tests {
+    ($($name:ident),* $(,)?) => {$(
+        #[test]
+        fn $name() { check_region(hostile::$name().unwrap()); }
+    )*};
+}
+
+region_hostile_tests!(
+    float_wider_than_frame,
+    float_moves_its_anchor,
+    note_taller_than_page,
+    notes_nested_three_deep,
+    note_on_last_line,
+    notes_take_over_page,
+    table_zero_columns,
+    table_conflicting_widths,
+    table_row_taller_than_page,
+    infeasible_solver_domain,
+);
 
 #[test]
 fn editing_concurrent_delete_undo() {

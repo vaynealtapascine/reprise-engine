@@ -15,6 +15,7 @@ use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule, Stroke};
 use krilla::surface::Surface;
+use krilla::tagging::{ContentTag, SpanTag};
 use krilla::text::{Font, GlyphId, KrillaGlyph};
 use reprise_font::{FaceId, FontStore};
 use reprise_geom::{Length, Matrix};
@@ -79,6 +80,14 @@ fn krilla_matrix(m: &Matrix) -> krilla::geom::Transform {
 
 /// Renders one page per display list. Each page's size in points matches its list.
 pub fn render(pages: &[DisplayList], fonts: &FontStore) -> Result<Vec<u8>, RenderError> {
+    render_impl(pages, fonts, false)
+}
+
+fn render_impl(
+    pages: &[DisplayList],
+    fonts: &FontStore,
+    ordered: bool,
+) -> Result<Vec<u8>, RenderError> {
     let mut doc = Document::new();
     let mut krilla_fonts = BTreeMap::new();
     for list in pages {
@@ -98,6 +107,7 @@ pub fn render(pages: &[DisplayList], fonts: &FontStore) -> Result<Vec<u8>, Rende
         let mut pdf = Pdf {
             fonts,
             krilla_fonts: &mut krilla_fonts,
+            ordered,
         };
         pdf.items(&mut surface, &list.items)?;
         surface.finish();
@@ -106,8 +116,97 @@ pub fn render(pages: &[DisplayList], fonts: &FontStore) -> Result<Vec<u8>, Rende
     doc.finish().map_err(|e| RenderError::Pdf(format!("{e:?}")))
 }
 
+/// A glyph-run address in an original display list, indexing Group children.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReadingRun {
+    pub page: usize,
+    pub path: Vec<usize>,
+}
+
+/// Emit text in explicit reading order, with a whole-run ActualText span.
+/// The order must address every glyph item exactly once. Nested transforms
+/// and clips are preserved. Non-text leaves paint first in original order.
+/// Pages stay in physical order; cross-page reversals return an error.
+/// This supplies extraction spans, not a PDF/UA semantic structure tree.
+pub fn render_ordered(
+    pages: &[DisplayList],
+    fonts: &FontStore,
+    order: &[ReadingRun],
+) -> Result<Vec<u8>, RenderError> {
+    let error = |s: &str| RenderError::Pdf(s.into());
+    let mut text = BTreeMap::new();
+    let mut output: Vec<DisplayList> = pages
+        .iter()
+        .map(|p| DisplayList {
+            width: p.width,
+            height: p.height,
+            items: Vec::new(),
+        })
+        .collect();
+    for (page, list) in pages.iter().enumerate() {
+        let mut stack = Vec::new();
+        for (i, item) in list.items.iter().enumerate().rev() {
+            stack.push((item, vec![i], Vec::<(Matrix, Option<Path>)>::new()));
+        }
+        while let Some((item, path, parents)) = stack.pop() {
+            if path.len() > 256 {
+                return Err(error("ordered PDF group nesting exceeds 256"));
+            }
+            if let Item::Group {
+                transform,
+                clip,
+                items,
+            } = item
+            {
+                let mut parents = parents;
+                parents.push((*transform, clip.clone()));
+                for (i, item) in items.iter().enumerate().rev() {
+                    let mut child = path.clone();
+                    child.push(i);
+                    stack.push((item, child, parents.clone()));
+                }
+            } else {
+                let mut wrapped = item.clone();
+                for (transform, clip) in parents.into_iter().rev() {
+                    wrapped = Item::Group {
+                        transform,
+                        clip,
+                        items: vec![wrapped],
+                    };
+                }
+                if matches!(item, Item::Glyphs(_)) {
+                    text.insert(ReadingRun { page, path }, wrapped);
+                } else {
+                    if let Some(page) = output.get_mut(page) {
+                        page.items.push(wrapped);
+                    }
+                }
+            }
+        }
+    }
+    let mut previous = 0;
+    for key in order {
+        if key.page < previous {
+            return Err(error("ordered PDF cannot reverse physical page order"));
+        }
+        previous = key.page;
+        let Some(item) = text.remove(key) else {
+            return Err(error("ordered PDF has a duplicate or missing run address"));
+        };
+        let Some(page) = output.get_mut(key.page) else {
+            return Err(error("ordered PDF page does not exist"));
+        };
+        page.items.push(item);
+    }
+    if !text.is_empty() {
+        return Err(error("ordered PDF order omits glyph runs"));
+    }
+    render_impl(&output, fonts, true)
+}
+
 struct Pdf<'a> {
     fonts: &'a FontStore,
+    ordered: bool,
     krilla_fonts: &'a mut BTreeMap<FaceId, Font>,
 }
 
@@ -190,6 +289,12 @@ impl Pdf<'_> {
                 )
             })
             .collect();
+        if self.ordered {
+            surface.start_tagged(ContentTag::Span(SpanTag {
+                actual_text: Some(&run.text),
+                ..SpanTag::empty()
+            }));
+        }
         surface.draw_glyphs(
             Point::from_xy(0.0, 0.0),
             &glyphs,
@@ -198,6 +303,9 @@ impl Pdf<'_> {
             size,
             false,
         );
+        if self.ordered {
+            surface.end_tagged();
+        }
         Ok(())
     }
 }

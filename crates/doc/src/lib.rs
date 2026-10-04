@@ -29,12 +29,16 @@ pub mod function;
 mod history;
 mod lifecycle;
 mod page;
+mod persist;
+pub mod reading;
+mod region_schema;
 pub mod relation;
 #[cfg(test)]
 mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
+mod table;
 
 pub use context::ResolutionContext;
 pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
@@ -44,9 +48,13 @@ pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
 };
 pub use page::{
-    Basis, Dim, FrameRole, FrameTemplate, MAIN_FLOW, Medium, PageTemplate, StoredTemplate,
-    TemplateChoice,
+    Basis, Dim, FrameRole, FrameTemplate, FrameTransform, MAIN_FLOW, Medium, PageTemplate,
+    Rotation, Spiral, StoredTemplate, TemplateChoice, WritingMode,
 };
+pub use persist::{
+    MAX_PERSIST_BYTES, MAX_PERSIST_EXPANDED_BYTES, MAX_PERSIST_OPS, PersistenceMode,
+};
+pub use region_schema::{FloatSide, NotePlacement};
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
     SnapshotOf, SnapshotRef, StructuralQuery, Target, TargetClass,
@@ -58,6 +66,7 @@ pub use style::{
     Authored, Computed, ComputedStyle, LengthExpr, Property, Specified, StageExplanation, Style,
     StyleResolution, default_style,
 };
+pub use table::{CellInfo, Column, ColumnWidth, RowInfo, TableColumns, TableRole};
 
 macro_rules! tree_ids {
     ($($(#[$m:meta])* $name:ident),*) => {$(

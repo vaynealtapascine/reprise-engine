@@ -87,6 +87,27 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         column_storm()?,
         concurrent_templates()?,
         no_margin_frame()?,
+        bidi_line_override()?,
+        follow_lines_across_frames()?,
+        style_fragment_basis()?,
+        justified_bidi()?,
+        persistence_tombstones()?,
+        transformed_rtl()?,
+        vertical_rl()?,
+        spiral_text()?,
+        reading_cycle()?,
+        degenerate_transform()?,
+        rational_rotation_extreme()?,
+        float_wider_than_frame()?,
+        float_moves_its_anchor()?,
+        note_taller_than_page()?,
+        notes_nested_three_deep()?,
+        note_on_last_line()?,
+        notes_take_over_page()?,
+        table_zero_columns()?,
+        table_conflicting_widths()?,
+        table_row_taller_than_page()?,
+        infeasible_solver_domain()?,
         editing_concurrent_delete_undo()?,
         editing_half_invalid()?,
         editing_empty_document()?,
@@ -185,7 +206,7 @@ pub fn zero_width_measure() -> Result<Fixture, DocError> {
     let mut template = PageTemplate::new("narrow", builtin.width, builtin.height);
     for mut frame in builtin.frames {
         match frame.role {
-            FrameRole::Margin => {
+            FrameRole::Margin | FrameRole::Notes => {
                 // Where a margin column after a zero-wide main column starts.
                 frame.x = Dim::pt(36 + 18);
                 frame.width = Dim::Pt(Length::from_pt(-10));
@@ -739,7 +760,7 @@ pub fn verse_turnover() -> Result<Fixture, DocError> {
     let mut template = PageTemplate::new("narrow-verse", builtin.width, builtin.height);
     for mut frame in builtin.frames {
         match frame.role {
-            FrameRole::Margin => frame.x = Dim::pt(36 + 110 + 18),
+            FrameRole::Margin | FrameRole::Notes => frame.x = Dim::pt(36 + 110 + 18),
             FrameRole::Flow(_) => frame.width = Dim::pt(110),
         }
         template.frames.push(frame);
@@ -776,9 +797,8 @@ fn paragraph_sized(doc: &Document, name: &str, value: Authored) -> Result<(), Do
 
 /// Style values that are too big, mistyped, unknown, from a newer format, or
 /// damaged (17, 34). Each style falls back to the value it inherited and the
-/// paragraph is laid out regardless. The `style.*` notes are reported by
-/// `Document::computed_style`; layout does not publish them yet, so `expect`
-/// is empty until the wiring lands and `tests/hostile.rs` checks the notes.
+/// paragraph is laid out regardless. Layout publishes the `style.*` notes
+/// from used style resolution on the affected node.
 pub fn style_expressions() -> Result<Fixture, DocError> {
     let doc = document()?;
     let deep = format!("expr1:{}1pt{}", "(".repeat(64), ")".repeat(64));
@@ -796,7 +816,17 @@ pub fn style_expressions() -> Result<Fixture, DocError> {
     )?;
     paragraph_sized(&doc, "damaged", Authored::Unparsed("furlongs:5".into()))?;
     doc.commit();
-    Ok(Fixture::new("style_expressions", doc, &[]))
+    Ok(Fixture::new(
+        "style_expressions",
+        doc,
+        &[
+            "style.expr-limit",
+            "style.type-error",
+            "style.unknown-function",
+            "style.function-failed",
+            "style.unparsed",
+        ],
+    ))
 }
 
 /// A font size in `lh`, a line height in `lh`, and style chains that loop or
@@ -833,7 +863,11 @@ pub fn style_cycles() -> Result<Fixture, DocError> {
         doc.append_block(BlockKind::Paragraph, name, "Under a hostile style.")?;
     }
     doc.commit();
-    Ok(Fixture::new("style_cycles", doc, &[]))
+    Ok(Fixture::new(
+        "style_cycles",
+        doc,
+        &["style.cycle", "style.parent-cycle", "style.parent-missing"],
+    ))
 }
 
 /// Percentages and references whose basis is missing or depends on its own
@@ -842,6 +876,26 @@ pub fn style_cycles() -> Result<Fixture, DocError> {
 /// and in a context where the main frame is auto-height.
 pub fn style_bases() -> Result<Fixture, DocError> {
     let doc = document()?;
+    // Half of a definite 24pt frame is a usable 12pt size. The shallow
+    // frame still forces pagination, rather than making a 114pt font from
+    // the built-in frame and overflowing every line.
+    doc.set_page_template(
+        &PageTemplate::new("style-bases", Dim::pt(360), Dim::pt(100))
+            .with_frame(flow_frame(
+                "main",
+                Dim::pt(10),
+                Dim::pt(10),
+                Dim::pt(200),
+                Dim::pt(24),
+            ))
+            .with_frame(margin_frame(
+                "margin",
+                Dim::pt(230),
+                Dim::pt(10),
+                Dim::pt(110),
+                Dim::pt(24),
+            )),
+    )?;
     paragraph_sized(&doc, "half-the-height", expr("50% * frame-height")?)?;
     paragraph_sized(&doc, "named-frame", expr("10% * frame-width(\"margin\")")?)?;
     paragraph_sized(
@@ -860,7 +914,11 @@ pub fn style_bases() -> Result<Fixture, DocError> {
         "Under a hostile style.",
     )?;
     doc.commit();
-    Ok(Fixture::new("style_bases", doc, &[]))
+    Ok(Fixture::new(
+        "style_bases",
+        doc,
+        &["style.basis-unresolved"],
+    ))
 }
 
 /// Every frame of the main flow is shorter than one line, so no line fits any
@@ -1112,6 +1170,532 @@ pub fn no_margin_frame() -> Result<Fixture, DocError> {
         "no_margin_frame",
         doc,
         &["relation.no-frame", "layout.unplaced"],
+    ))
+}
+
+/// RLO continues across soft and forced line breaks, with hanging spaces.
+pub fn bidi_line_override() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    doc.append_block(BlockKind::Paragraph, "body",
+        "Latin \u{202e}office 123 office 456 office 789    \nmore reversed office 321    \u{202c} normal end.   ")?;
+    doc.append_block(BlockKind::Paragraph, "body", "אבג 123 אבג    \nאבג 456    ")?;
+    doc.commit();
+    Ok(Fixture::new("bidi_line_override", doc, &[]))
+}
+
+/// A follow target covers lines on both sides of a frame break. A required
+/// single-line role must report all candidates as ambiguous and place none.
+pub fn follow_lines_across_frames() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let text = long_text(1);
+    let p = doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    let note = doc.append_block(BlockKind::Annotation, "note", "Which column?")?;
+    let range = doc.add_range(p, 0..text.len(), RangePolicy::FIXED)?;
+    let relation = Relation::new(reprise_doc::relation::builtin::FOLLOW)
+        .owned_by(note)
+        .target("line", Target::Layout(LayoutQuery::LinesIn { range }));
+    doc.add_relation(&SchemaRegistry::builtin(), &relation)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "follow_lines_across_frames",
+        doc,
+        &["relation.ambiguous", "layout.unplaced"],
+    ))
+}
+
+/// The style keeps its starting frame's 10pt size across a narrower column.
+/// Named frames and medium/page/block bases resolve, but auto block height
+/// and the unavailable line extent diagnose and fall back.
+pub fn style_fragment_basis() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(
+        &PageTemplate::new("unequal-style-columns", Dim::pt(420), Dim::pt(180))
+            .with_frame(flow_frame(
+                "wide",
+                Dim::pt(10),
+                Dim::pt(10),
+                Dim::pt(200),
+                Dim::pt(30),
+            ))
+            .with_frame(flow_frame(
+                "narrow",
+                Dim::pt(220),
+                Dim::pt(10),
+                Dim::pt(80),
+                Dim::pt(60),
+            ))
+            .with_frame(margin_frame(
+                "margin",
+                Dim::pt(310),
+                Dim::pt(10),
+                Dim::pt(100),
+                Dim::pt(60),
+            )),
+    )?;
+    let mut style = Style::default();
+    style.set(Property::Size, expr("5% * frame-width")?);
+    doc.define_style("frame-sized", &style)?;
+    doc.append_block(BlockKind::Paragraph, "frame-sized", &long_text(1))?;
+    paragraph_sized(&doc, "named-narrow", expr(r#"frame-width("narrow") / 8"#)?)?;
+    paragraph_sized(
+        &doc,
+        "medium-page-block",
+        expr("min(medium-width / 42, page-width / 42, block-width / 8)")?,
+    )?;
+    paragraph_sized(&doc, "auto-block-height", expr("10% * block-height")?)?;
+    paragraph_sized(&doc, "no-line-yet", expr("line-width / 20")?)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "style_fragment_basis",
+        doc,
+        &["style.basis-indefinite", "style.basis-unresolved"],
+    ))
+}
+
+/// Justification attacks RTL hanging spaces, a wrapping RLO, mixed levels,
+/// non-ASCII word separators, single words and all-space forced lines.
+pub fn justified_bidi() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let rtl = format!("{}\nאבג 456    ", "אבג דהו זחט יכל 123 ".repeat(8));
+    doc.append_block(BlockKind::Paragraph, "body", &rtl)?;
+    let reversed = format!(
+        "Latin \u{202e}{}    \u{202c} normal end.   ",
+        "office 123 office 456 more words ".repeat(6)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &reversed)?;
+    let mixed = format!(
+        "{}\u{2028}A short last line.   ",
+        "Latin אבג 123 words דהו 456 office ".repeat(6)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &mixed)?;
+    doc.append_block(BlockKind::Paragraph, "body", "word\nword\n    \nword")?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        &"one\u{a0}two three\u{1361}four five six seven ".repeat(6),
+    )?;
+    doc.commit();
+    let mut fixture = Fixture::new("justified_bidi", doc, &[]);
+    fixture.engine.composer = Box::new(Optimal::justified());
+    Ok(fixture)
+}
+
+/// Save must retain tombstoned characters and IDs, Unicode byte anchors,
+/// unreadable authored forms and a historical reference across reopening.
+pub fn persistence_tombstones() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let p = doc.append_block(BlockKind::Paragraph, "body", "a\u{301} corridor 🏠")?;
+    let range = doc.add_range(p, 4..12, RangePolicy::FIXED)?;
+    doc.commit();
+    let version = doc.revision();
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(REFERENCE).owned_by(p).target(
+            "to",
+            Target::Snapshot(SnapshotRef {
+                version,
+                of: SnapshotOf::Range(range),
+            }),
+        ),
+    )?;
+    let deleted = doc.append_block(BlockKind::Paragraph, "body", "discarded")?;
+    doc.delete_block(deleted)?;
+    doc.block(p)?.text.delete(4..5)?;
+    doc.store_raw_page_template("future-unused", "{future:opaque}")?;
+    doc.commit();
+    Ok(Fixture::new("persistence_tombstones", doc, &[]))
+}
+
+pub fn transformed_rtl() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "reflected",
+        Dim::pt(220),
+        Dim::pt(55),
+        Dim::pt(210),
+        Dim::pt(100),
+    );
+    f.transform.rotation = reprise_doc::Rotation::Quarter(1);
+    f.transform.mirror_x = true;
+    f.transform.origin_x = Dim::pt(105);
+    f.transform.origin_y = Dim::pt(50);
+    doc.set_page_template(
+        &PageTemplate::new("reflected", Dim::pt(420), Dim::pt(360)).with_frame(f),
+    )?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "אבג The hall turns backwards. דהו A mirror keeps the words in order.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("transformed_rtl", doc, &[]))
+}
+
+pub fn vertical_rl() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "vertical",
+        Dim::pt(30),
+        Dim::pt(25),
+        Dim::pt(100),
+        Dim::pt(240),
+    );
+    f.writing_mode = reprise_doc::WritingMode::VerticalRl;
+    doc.set_page_template(
+        &PageTemplate::new("vertical", Dim::pt(180), Dim::pt(300)).with_frame(f),
+    )?;
+    doc.append_block(BlockKind::Paragraph, "body", "The columns descend, one after another, from the right edge of the page. The house is taller inside than outside. The next column is a step to the left.")?;
+    doc.commit();
+    Ok(Fixture::new("vertical_rl", doc, &[]))
+}
+
+pub fn spiral_text() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.define_style(
+        "spiral",
+        &Style {
+            size: Some(LengthExpr::Pt(Length::from_pt(5))),
+            line_height: Some(LengthExpr::Pt(Length::from_pt(6))),
+            ..Default::default()
+        },
+    )?;
+    let mut f = flow_frame(
+        "spiral",
+        Dim::pt(190),
+        Dim::pt(190),
+        Dim::pt(20),
+        Dim::pt(7),
+    );
+    f.path = Some(reprise_doc::Spiral {
+        radius: Dim::pt(56),
+        growth: Dim::pt(32),
+        start_millidegrees: 0,
+        sweep_millidegrees: 1_080_000,
+        segments: 96,
+    });
+    doc.set_page_template(&PageTemplate::new("spiral", Dim::pt(380), Dim::pt(380)).with_frame(f))?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "spiral",
+        &"the hall is a lie a door is a hall ".repeat(32),
+    )?;
+    doc.commit();
+    Ok(Fixture::new("spiral_text", doc, &[]))
+}
+
+pub fn reading_cycle() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let a = doc.append_block(BlockKind::Paragraph, "body", "First room.")?;
+    let b = doc.append_block(BlockKind::Paragraph, "body", "Second room.")?;
+    let c = doc.append_block(BlockKind::Paragraph, "body", "Third room.")?;
+    for (before, after) in [(a, b), (b, c), (c, a), (b, a)] {
+        doc.add_relation(
+            &SchemaRegistry::builtin(),
+            &reprise_doc::reading::before(before, after),
+        )?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "reading_cycle",
+        doc,
+        &["layout.reading-cycle", "layout.reading-conflict"],
+    ))
+}
+
+pub fn degenerate_transform() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "singular",
+        Dim::pt(30),
+        Dim::pt(30),
+        Dim::pt(180),
+        Dim::pt(150),
+    );
+    f.transform.rotation = reprise_doc::Rotation::Matrix {
+        xx: reprise_geom::Fixed::ZERO,
+        yx: reprise_geom::Fixed::ZERO,
+        xy: reprise_geom::Fixed::ZERO,
+        yy: reprise_geom::Fixed::ONE,
+    };
+    doc.set_page_template(
+        &PageTemplate::new("singular", Dim::pt(250), Dim::pt(210)).with_frame(f),
+    )?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Zero scale cannot erase this room. Identity is the reported fallback.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "degenerate_transform",
+        doc,
+        &["layout.transform-unusable"],
+    ))
+}
+
+pub fn rational_rotation_extreme() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "awkward",
+        Dim::pt(220),
+        Dim::pt(180),
+        Dim::pt(160),
+        Dim::pt(90),
+    );
+    f.transform.rotation = reprise_doc::Rotation::Direction {
+        dx: i32::MIN,
+        dy: i32::MAX - 123_456_789,
+    };
+    doc.set_page_template(&PageTemplate::new("awkward", Dim::pt(360), Dim::pt(360)).with_frame(f))?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "An exact irrational direction, authored with integers near their limits.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("rational_rotation_extreme", doc, &[]))
+}
+
+fn region_document() -> Result<Document, DocError> {
+    let doc = Document::new(PEER)?;
+    define_styles(&doc)?;
+    for name in ["body", "note"] {
+        doc.define_style(
+            name,
+            &Style {
+                size: Some(LengthExpr::Pt(Length::from_pt(10))),
+                line_height: Some(LengthExpr::Pt(Length::from_pt(12))),
+                ..Default::default()
+            },
+        )?;
+    }
+    doc.define_page_template(
+        &PageTemplate::new("regions", Dim::pt(100), Dim::pt(60))
+            .with_frame(FrameTemplate::new(
+                "body",
+                FrameRole::Flow("main".into()),
+                (Dim::pt(0), Dim::pt(0)),
+                (Dim::pt(100), Dim::pt(60)),
+            ))
+            .with_frame(FrameTemplate::new(
+                "notes",
+                FrameRole::Notes,
+                (Dim::pt(0), Dim::pt(0)),
+                (Dim::pt(100), Dim::pt(60)),
+            )),
+    )?;
+    doc.use_page_template("regions")?;
+    Ok(doc)
+}
+
+fn attach_region(
+    doc: &Document,
+    schema: SchemaId,
+    owner: NodeId,
+    anchor: NodeId,
+    at: usize,
+) -> Result<reprise_doc::RelationId, DocError> {
+    let range = doc.add_range(anchor, at..at + 1, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(schema)
+            .owned_by(owner)
+            .target("anchor", Target::Range(range)),
+    )
+}
+
+pub fn float_wider_than_frame() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let body = doc.append_block(BlockKind::Paragraph, "body", "Anchor text.")?;
+    let owner = doc.append_block(BlockKind::Annotation, "note", "float")?;
+    let range = doc.add_range(body, 1..2, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(reprise_doc::relation::builtin::FLOAT)
+            .owned_by(owner)
+            .target("anchor", Target::Range(range))
+            .param(
+                "width",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::from_pt(101))),
+            ),
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "float_wider_than_frame",
+        doc,
+        &["layout.float-unplaceable"],
+    ))
+}
+
+pub fn float_moves_its_anchor() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let body = doc.append_block(BlockKind::Paragraph, "body", "Anchor text.")?;
+    let owner = doc.append_block(BlockKind::Annotation, "note", "float")?;
+    let range = doc.add_range(body, 1..2, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(reprise_doc::relation::builtin::FLOAT)
+            .owned_by(owner)
+            .target("anchor", Target::Range(range))
+            .param(
+                "width",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::from_pt(100))),
+            )
+            .param(
+                "margin",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::ZERO)),
+            ),
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "float_moves_its_anchor",
+        doc,
+        &["layout.region-cycle"],
+    ))
+}
+
+pub fn note_taller_than_page() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let body = doc.append_block(BlockKind::Paragraph, "body", "Anchor and later body text.")?;
+    let note = doc.append_block(
+        BlockKind::Annotation,
+        "note",
+        "aa\nbb\ncc\ndd\nee\nff\ngg\nhh\nii\njj\nkk",
+    )?;
+    attach_region(&doc, reprise_doc::relation::builtin::NOTE, note, body, 1)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "note_taller_than_page",
+        doc,
+        &["layout.note-continued"],
+    ))
+}
+
+pub fn notes_nested_three_deep() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let body = doc.append_block(BlockKind::Paragraph, "body", "Anchor text.")?;
+    let mut anchor = body;
+    for text in ["First note", "Second note", "Third note"] {
+        let note = doc.append_block(BlockKind::Annotation, "note", text)?;
+        attach_region(&doc, reprise_doc::relation::builtin::NOTE, note, anchor, 1)?;
+        anchor = note;
+    }
+    let range = doc.add_range(anchor, 1..2, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(REFERENCE)
+            .owned_by(body)
+            .target("to", Target::Layout(LayoutQuery::LineContaining { range })),
+    )?;
+    doc.commit();
+    Ok(Fixture::new("notes_nested_three_deep", doc, &[]))
+}
+
+pub fn note_on_last_line() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let text = "aa\nbb\ncc\ndd\nee";
+    let body = doc.append_block(BlockKind::Paragraph, "body", text)?;
+    let note = doc.append_block(BlockKind::Annotation, "note", "Last-line note")?;
+    attach_region(
+        &doc,
+        reprise_doc::relation::builtin::NOTE,
+        note,
+        body,
+        text.len() - 1,
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "note_on_last_line",
+        doc,
+        &["layout.note-continued"],
+    ))
+}
+
+pub fn notes_take_over_page() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let body = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Anchor text.\nLater body text.\nLater again.",
+    )?;
+    let note = doc.append_block(
+        BlockKind::Annotation,
+        "note",
+        "aa\nbb\ncc\ndd\nee\nff\ngg\nhh\nii\njj\nkk\nll\nmm",
+    )?;
+    attach_region(&doc, reprise_doc::relation::builtin::NOTE, note, body, 1)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "notes_take_over_page",
+        doc,
+        &["layout.note-continued"],
+    ))
+}
+
+pub fn table_zero_columns() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    doc.append_table(reprise_doc::TableColumns { columns: vec![] })?;
+    doc.append_block(BlockKind::Paragraph, "body", "The rest still flows.")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "table_zero_columns",
+        doc,
+        &["layout.table-invalid"],
+    ))
+}
+
+fn region_table(widths: Vec<reprise_doc::ColumnWidth>, text: &str) -> Result<Document, DocError> {
+    let doc = region_document()?;
+    let table = doc.append_table(reprise_doc::TableColumns {
+        columns: widths
+            .into_iter()
+            .map(|width| reprise_doc::Column { width })
+            .collect(),
+    })?;
+    let row = doc.append_table_row(table, false)?;
+    for column in 0..2 {
+        let cell = doc.append_table_cell(row, column)?;
+        doc.append_cell_block(cell, BlockKind::Paragraph, "body", text)?;
+    }
+    doc.commit();
+    Ok(doc)
+}
+
+pub fn table_conflicting_widths() -> Result<Fixture, DocError> {
+    let doc = region_table(
+        vec![reprise_doc::ColumnWidth::Fixed(Length::from_pt(90)); 2],
+        "cell",
+    )?;
+    Ok(Fixture::new(
+        "table_conflicting_widths",
+        doc,
+        &["layout.solver-infeasible"],
+    ))
+}
+
+pub fn table_row_taller_than_page() -> Result<Fixture, DocError> {
+    let doc = region_table(
+        vec![reprise_doc::ColumnWidth::Proportional(1); 2],
+        "aa\nbb\ncc\ndd\nee\nff\ngg\nhh\nii\njj\nkk",
+    )?;
+    Ok(Fixture::new("table_row_taller_than_page", doc, &[]))
+}
+
+pub fn infeasible_solver_domain() -> Result<Fixture, DocError> {
+    let doc = region_table(
+        vec![
+            reprise_doc::ColumnWidth::Fixed(Length::MIN),
+            reprise_doc::ColumnWidth::Proportional(u32::MAX),
+        ],
+        "cell",
+    )?;
+    Ok(Fixture::new(
+        "infeasible_solver_domain",
+        doc,
+        &["layout.solver-infeasible"],
     ))
 }
 

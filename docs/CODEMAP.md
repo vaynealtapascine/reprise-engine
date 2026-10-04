@@ -7,16 +7,14 @@ interfaces.
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
 | `diag` | `src/lib.rs` | `Note`, `Severity`, `Code`: diagnostics shared by every library | 37, 39 |
-| `geom` | `src/lib.rs` | `Length` (1/1024 pt) and `Fixed` (16.16), saturating and rounding rules, `Matrix`, typed spaces, `Point`, `Rect`, `Transform` | 19, 20 |
+| `geom` | `src/lib.rs` | `Length` (1/1024 pt) and `Fixed` (16.16), saturating and rounding rules, `Matrix` with exact integer direction/angle rotations, mirrors and pivot transforms, typed spaces, `Point`, `Rect`, `Transform` | 19, 20 |
 | `text` | `src/lib.rs` | `Text` (byte offsets over Loro), `Anchor`, `Affinity`, `RangePolicy`, `Resolved` | 09, 10, 12 |
 |  | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
-| `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge | 05–07, 15, 29 |
-|  | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13, 14, 15, 27, 35 |
+| `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas | 05–07, 15, 29 |
+|  | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`, `reprise.reading-order`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13, 14, 15, 27, 35 |
 |  | `src/structure.rs` | Tree navigation, structural queries (`evaluate`), succession links (`supersede`, `succession`) | 06, 13, 15 |
 |  | `src/history.rs` | `DocumentAt` (a past version), `HistoryCache`, snapshot resolution, `compact_history` | 07, 13 |
 |  | `src/resolve.rs` | `resolve_target` / `resolve_relation`: any non-layout target, with `OnTargetDeleted` applied from tombstones; `dead_relations` | 13, 14, 15 |
-|  | `src/lifecycle.rs`, `tests/lifecycle.rs` | Metadata deletion flags, inherited subtree liveness, restoration and invisible staging; identity and concurrency regressions | 07, 29 |
-|  | `src/edit.rs` | General insertion, moving, splitting and joining plus per-peer commit-based undo | 07, 12, 29 |
 |  | `src/relation_tests.rs` | Tests for the three files above and for relation.rs | 13, 14, 15, 35 |
 |  | `tests/history_hostile.rs` | Forged revisions resolve or report, never panic | 07, 13, 37 |
 |  | `src/style.rs` | `Style`, `LengthExpr`, `Authored` (stored forms), the four stages (`Specified`, `Computed`, used via `StyleResolution`), `ComputedStyle`, defaults | 08, 17, 18, 39 |
@@ -24,13 +22,13 @@ interfaces.
 |  | `src/function.rs` | `FunctionRegistry`, `PureFunction`, `Signature` and the built-in functions | 17, 36 |
 |  | `src/context.rs` | `ResolutionContext`, `Level`, `Basis`, definite, indefinite and unresolved bases | 18 |
 |  | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
-|  | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), their Loro storage and the built-in template | 05, 24, 34 |
+|  | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), v2 authored transforms, writing modes and spiral paths, v1-compatible Loro storage and the built-in template | 05, 20, 24, 34 |
+|  | `src/reading.rs` | Independent `reprise.reading-order` block-precedence schema and authoring helper | 01, 14, 33 |
 | `font` | `src/lib.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore` | 21, 22, 38 |
 | `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
 |  | `src/paragraph.rs` | `itemize` (fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
 |  | `src/unicode.rs`, `src/bidi-character-subset.txt` | ICU4X property adapter for UAX #9 (including N0) and UAX #24 script resolution; pinned Unicode conformance subset | 09, 22, 38 |
 |  | `src/line.rs` | Pure L1/L2 line reordering, preserving bidi groups across missing-font gaps | 20, 22, 30 |
-|  | `HANDOFF.md` | Unicode/version/cache bounds and instructions for layout's line-helper integration | 21, 22, 38 |
 | `compose` | `src/lib.rs` | `Composer` and `GeometryProvider` contracts, `Measure`, break opportunities, `LineFragment`, `Explanation` | 23 |
 |  | `src/greedy.rs` | The greedy composer, and the first-fit algorithm other composers fall back to | 23 |
 |  | `src/optimal.rs` | `Optimal`: Knuth–Plass total fit over variable geometry, ragged or justified; integer demerits, `Limits` | 19, 23, 39 |
@@ -41,27 +39,31 @@ interfaces.
 |  | `src/testing.rs` | Unit-test shaping with the bundled font | 39 |
 |  | `tests/conformance.rs` | Every composer against adversarial geometry and texts, checking every `Composer` guarantee | 23, 37, 39 |
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
-|  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
-|  | `tests/pdf_text.rs` | Generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
-| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `medium` and `FlowSettings`), `Engine::layout` | 24, 26, 38 |
+|  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, ordered run addresses and extraction spans, cluster ActualText and logical-run fallback for RTL/malformed ranges | 32, 33 |
+|  | `tests/pdf_text.rs` | Ordered PDF extraction through rotated, mirrored, vertical and spiral layouts; generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
+| `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `medium` and `FlowSettings`), `Engine::layout`, geometry and reading module wiring | 20, 24, 26, 33, 38 |
 |  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Resolution`, `Diagnostic`, queries | 05, 13, 37 |
+|  | `src/geometry.rs`, `docs/geometry.md` | Exact authored frame transforms, logical writing axes, bounded spiral expansion, inverse and path diagnostics | 19, 20, 37, 38 |
+|  | `src/reading.rs` | Snapshot reading-order queries with explicit document input, stable partial-order completion and iterative cycle repair | 01, 33, 37 |
 |  | `src/template.rs` | Resolving the document's page template against the medium; falling back to the built-in one | 24, 34, 37, 38 |
 |  | `src/region.rs` | `Bounded`: any geometry provider, ended at a frame's depth | 23, 24 |
-|  | `src/flow.rs` | Pass 1: shaping, composing and threading paragraphs through the main flow's frames, page after page | 24 |
+|  | `src/flow.rs` | Pass 1: per-starting-frame style resolution and diagnostics, shaping, line L1/L2 reordering and glyph spacing adjustments, composing and threading paragraphs through the main flow's frames, page after page | 08, 17, 18, 22, 23, 24, 30 |
 |  | `src/relations/mod.rs` | Pass 2: dispatching relations on their schema | 13–15, 26 |
 |  | `src/relations/follow.rs` | `reprise.follow`: placing a block in the margin frame of its target line's page | 13, 15, 24 |
-|  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; how `follow` switches over is documented at the top | 13, 14, 15 |
+|  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; shared by `follow` and other relation behaviours | 13, 14, 15 |
 |  | `src/query.rs` | Layout queries added by relations (`first_line`, `frame_of`, `answer`, ...) | 13, 16 |
-|  | `src/display.rs` | `to_display_list(s)` and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
+|  | `src/display.rs` | `to_display_list(s)`, ordered PDF run addresses and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
 |  | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text/bidi, relations, composers, styles and editing lifecycle, transaction refusal and empty/zero-width carets | 07, 17, 18, 29, 30, 37, 39 |
-|  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, editing undo/refusal/extreme-hit tests, content goldens and debug geometry snapshots | 07, 29, 30, 38, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases; transformed RTL, writing modes, spirals, reading cycles and degenerate/extreme transforms; editing lifecycle, transaction refusal and empty/zero-width carets | 17, 18, 20, 33, 37, 39 |
+|  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, editing undo/refusal/extreme-hit tests, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
+|  | `tests/geometry.rs` | Transform/caret round trips, bounds, rotated follow, spiral reflow, semantic and overridden reading order; SVG/PNG visual exports | 20, 33, 39 |
+|  | `tests/regions_geometry.rs` | Floats and nested notes inside rotated, mirrored and vertical frames: determinism, roles, backends, reading order | 20, 24, 33 |
 | `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties | 07, 29 |
 |  | `src/lib.rs`, `src/command.rs`, `src/editor.rs`, `src/plan.rs` | Validated typed commands, staged activation, atomic commit/undo, bounded transaction models and position effects | 02, 05, 07, 12, 29, 37 |
 |  | `src/error.rs`, `src/codes.rs` | Typed refusals and stable Error diagnostics for validation, resource bounds and store failures | 37 |
@@ -114,3 +116,36 @@ Other files:
     1.  Add a function in `fixtures/src/hostile.rs` and add it to `all()`.
     2.  Add a test in `fixtures/tests/hostile.rs`.
     3.  Record its snapshot with `INSTA_UPDATE=always`, then read it.
+
+## Persistence files
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/persist.rs` | Opaque snapshot export/import, explicit peer/history mode, allocation-free Loro/LZ4 expansion preflight | 07, 09, 29, 34, 37 |
+| `format` | `src/lib.rs`, `src/container.rs` | Versioned checksummed container, document identity, feature masks, hard bounds, typed errors and codes | 34, 37, 38 |
+| | `src/json.rs` | Iterative manifest bounds and canonical metadata | 34, 37, 38 |
+| | `src/assets.rs` | Font pins, bundled/external assets, hash validation and host resolution needs | 21, 34 |
+| | `src/migration.rs` | Pure checked N -> N+1 migrations, synthetic v0 | 34 |
+| | `src/package.rs` | Package save/open, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
+| | `src/tests.rs`, `tests/roundtrip.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
+| | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/` | Added persistence_tombstones: Unicode anchors, tombstones and retained historical references | 07, 09, 29, 34 |
+
+## Region subsystems
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/region_schema.rs`, registration in `lib.rs` and `relation.rs` | Owned float/note relation schemas and parameter vocabularies | 05, 13, 24 |
+| `doc` | `src/table.rs` | Versioned authored table/row/cell topology and column declarations on the movable tree | 05, 06, 24 |
+| `layout` | `src/solver.rs` | Explicit integer solver domains, bounded water filling and diagnosed fallbacks | 19, 25, 37 |
+| `layout` | `src/regions.rs`, entry in `lib.rs` | Bounded staged feedback, complete input-plan freeze on oscillation, dependency rounds | 24, 26, 37 |
+| `layout` | `src/floats.rs` | Side/edge float allocation, stacking, deferral, runaround exclusions | 24 |
+| `layout` | `src/notes.rs` | Anchor-preserving note allocation, continuation, nesting, endnotes and full-page reservations | 11, 24, 26 |
+| `layout` | `src/table.rs`, hooks in `flow.rs` | Content measurements, declared column allocation and synchronous row fragmentation | 24, 25 |
+| `layout` | `src/relations/mod.rs` | Final region relation reporting and references to note lines | 13, 26 |
+| - | `docs/regions.md` | Allocation, fragmentation, cycle and fallback design | 24–26 |
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/regions/tests.rs` | Adversarial mixed-region, cycles, dependency depth, fanout, pagination and table cursor unit tests | 24–26, 37 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/hostile__*.snap` | Ten hostile region fixtures, original invariant checks retained, region-role checks and paired layout/content goldens | 24–26, 37–39 |

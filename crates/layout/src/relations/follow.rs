@@ -5,13 +5,14 @@
 use std::collections::BTreeMap;
 
 use reprise_diag::Severity;
-use reprise_doc::{Document, LayoutQuery, Param, RangeState, Relation, RelationId, Target};
+use reprise_doc::{Param, Relation, RelationId, RelationSchema};
+
+use super::resolve::Resolver;
 use reprise_geom::{FrameSpace, Length, PageSpace, Point, Transform};
 
 use crate::flow::{Pending, place};
 use crate::{
-    Diagnostic, Engine, LayoutSnapshot, LineRef, RelationLayout, RelationStatus, Resolution,
-    Subject, TargetLayout, codes,
+    Diagnostic, Engine, LayoutSnapshot, LineRef, RelationLayout, Resolution, Subject, codes,
 };
 
 /// `reprise.follow`: the owner sits in the margin frame of its target line's
@@ -29,7 +30,8 @@ impl Follow {
     pub(super) fn apply(
         &mut self,
         engine: &Engine,
-        doc: &Document,
+        resolver: &mut Resolver<'_>,
+        schema: &RelationSchema,
         snapshot: &mut LayoutSnapshot,
         pending: &mut Vec<Pending>,
         id: RelationId,
@@ -42,56 +44,37 @@ impl Follow {
                 .diagnostics
                 .push(Diagnostic::new(severity, code, subject.clone(), message));
         };
-        let Some(Target::Layout(LayoutQuery::LineContaining { range })) = relation.first("line")
-        else {
+        if relation.first("line").is_none() {
             report(
                 snapshot,
                 Severity::Error,
                 codes::RELATION_BAD_TARGET,
-                "role `line` must hold a line-containing query".into(),
+                "role `line` must hold a layout query".into(),
             );
             return;
-        };
-        let mut target = TargetLayout {
-            role: "line".into(),
-            status: RelationStatus::Missing,
-            resolved: None,
-        };
-        let (status, node, bytes) = match doc.resolve_range(*range) {
-            RangeState::Valid { node, bytes } => (RelationStatus::Valid, node, bytes),
-            RangeState::Rebound { node, bytes } => {
-                report(
-                    snapshot,
-                    Severity::Info,
-                    codes::RELATION_REBOUND,
-                    format!("target range {range} lost part of its text; rebound"),
-                );
-                (RelationStatus::Rebound, node, bytes)
-            }
-            RangeState::Missing { .. } => {
+        }
+        let resolved = resolver.resolve(snapshot, id, schema, relation);
+        // LinesIn with several candidates remains Ambiguous: follow never
+        // silently selects one. A singleton list identifies a unique line.
+        let line = match resolved.unique("line") {
+            Some(Resolution::Line(line)) => Some(*line),
+            Some(Resolution::Lines(lines)) if lines.len() == 1 => lines.first().copied(),
+            Some(_) => {
                 report(
                     snapshot,
                     Severity::Error,
-                    codes::RELATION_MISSING_TARGET,
-                    format!("target range {range} is gone; owner not placed"),
+                    codes::RELATION_BAD_TARGET,
+                    "role `line` resolved to geometry without a unique line".into(),
                 );
-                result.targets.push(target);
-                return;
+                None
             }
+            None => None,
         };
-        let Some(line) = snapshot.line_containing(node, bytes.start) else {
-            report(
-                snapshot,
-                Severity::Error,
-                codes::RELATION_NO_MATCH,
-                format!("no line of {node} contains byte {}", bytes.start),
-            );
-            result.targets.push(target);
+        snapshot.diagnostics.extend(resolved.diagnostics);
+        result.targets.extend(resolved.targets);
+        let Some(line) = line else {
             return;
         };
-        target.status = status;
-        target.resolved = Some(Resolution::Line(line));
-        result.targets.push(target);
 
         let owner = relation.owner;
         let Some(pos) = pending.iter().position(|p| Some(p.block.node) == owner) else {

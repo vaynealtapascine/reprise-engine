@@ -1361,7 +1361,7 @@ expression: snapshot.to_json()
         "kind": "relation",
         "id": "2273@1"
       },
-      "message": "no line of 2183@1 contains byte 0",
+      "message": "layout has no answer for the query (not laid out, or past the edge)",
       "bytes": null
     },
     {

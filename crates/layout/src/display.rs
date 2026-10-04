@@ -112,6 +112,57 @@ impl LayoutSnapshot {
             .collect()
     }
 
+    /// Run addresses for `to_display_lists(DisplayOptions::default())`, in
+    /// semantic/overridden reading order. RTL runs sort by source bytes while
+    /// glyphs retain visual positions. Pass these to `pdf::render_ordered`.
+    pub fn pdf_reading_order(
+        &self,
+        doc: &reprise_doc::Document,
+    ) -> Vec<reprise_display::pdf::ReadingRun> {
+        use std::collections::BTreeMap;
+        let mut addresses =
+            BTreeMap::<crate::LineRef, Vec<(usize, reprise_display::pdf::ReadingRun)>>::new();
+        let mut groups = vec![0usize; self.pages.len()];
+        for (frame_index, frame) in self.frames.iter().enumerate() {
+            let Some(group) = groups.get_mut(frame.page) else {
+                continue;
+            };
+            let mut child = 0usize;
+            for block in &self.blocks {
+                for (line_index, line) in block
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| l.frame == frame_index)
+                {
+                    let at = crate::LineRef {
+                        node: block.node,
+                        line: line_index,
+                    };
+                    for run in &line.runs {
+                        addresses.entry(at).or_default().push((
+                            run.range.start,
+                            reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path: vec![*group, child],
+                            },
+                        ));
+                        child = child.saturating_add(1);
+                    }
+                }
+            }
+            *group = group.saturating_add(1);
+        }
+        self.reading_order(doc)
+            .into_iter()
+            .flat_map(|step| {
+                let mut runs = addresses.remove(&step.line).unwrap_or_default();
+                runs.sort_by_key(|(start, _)| *start);
+                runs.into_iter().map(|(_, key)| key)
+            })
+            .collect()
+    }
+
     /// The display list of one page; empty if there is no such page.
     pub fn to_display_list(&self, page: usize, options: DisplayOptions) -> DisplayList {
         let Some(size) = self.pages.get(page) else {

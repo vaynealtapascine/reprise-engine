@@ -65,3 +65,16 @@ pub const DEGENERATE_FRAME: Code = Code::new("layout.degenerate-frame");
 pub const PAGE_LIMIT: Code = Code::new("layout.page-limit");
 /// The page of the line a relation targets has no frame to place the owner in.
 pub const RELATION_NO_FRAME: Code = Code::new("relation.no-frame");
+
+pub const SOLVER_INFEASIBLE: Code = Code::new("layout.solver-infeasible");
+pub const SOLVER_UNDERCONSTRAINED: Code = Code::new("layout.solver-underconstrained");
+pub const SOLVER_LIMIT: Code = Code::new("layout.solver-limit");
+pub const REGION_CYCLE: Code = Code::new("layout.region-cycle");
+pub const REGION_LIMIT: Code = Code::new("layout.region-limit");
+pub const REGION_PARAMETER: Code = Code::new("layout.region-parameter");
+pub const FLOAT_DEFERRED: Code = Code::new("layout.float-deferred");
+pub const FLOAT_UNPLACEABLE: Code = Code::new("layout.float-unplaceable");
+pub const NOTE_CONTINUED: Code = Code::new("layout.note-continued");
+pub const NOTE_DEPTH: Code = Code::new("layout.note-depth");
+pub const TABLE_INVALID: Code = Code::new("layout.table-invalid");
+pub const TABLE_LIMIT: Code = Code::new("layout.table-limit");

@@ -13,7 +13,7 @@ use crate::flow::Pending;
 use crate::{Diagnostic, Engine, LayoutSnapshot, RelationLayout, RelationStatus, Subject, codes};
 
 mod follow;
-mod resolve;
+pub(crate) mod resolve;
 
 use follow::Follow;
 use resolve::Resolver;
@@ -23,6 +23,7 @@ pub(crate) fn run(
     doc: &Document,
     snapshot: &mut LayoutSnapshot,
     mut pending: Vec<Pending>,
+    applied: &std::collections::BTreeSet<reprise_doc::RelationId>,
 ) {
     let mut follow = Follow::default();
     let mut resolver = Resolver::new(doc);
@@ -73,7 +74,8 @@ pub(crate) fn run(
         if relation.schema == builtin::FOLLOW {
             follow.apply(
                 engine,
-                doc,
+                &mut resolver,
+                schema,
                 snapshot,
                 &mut pending,
                 id,
@@ -87,7 +89,11 @@ pub(crate) fn run(
             let usable = !resolved.deleted && resolved.unique("to").is_some();
             snapshot.diagnostics.extend(resolved.diagnostics);
             result.targets = resolved.targets;
-            if relation.schema == builtin::REFERENCE {
+            if relation.schema == reprise_doc::reading::READING_ORDER {
+                result.applied = resolved_order_endpoints(snapshot, &result.targets);
+            } else if relation.schema == builtin::FLOAT || relation.schema == builtin::NOTE {
+                result.applied = applied.contains(&id);
+            } else if relation.schema == builtin::REFERENCE {
                 // Resolving is all a reference does (14): it is in effect
                 // when its one target is usable.
                 result.applied = usable;
@@ -108,6 +114,9 @@ pub(crate) fn run(
             .unwrap_or(result.status);
         snapshot.relations.push(result);
     }
+    snapshot
+        .diagnostics
+        .extend(snapshot.reading_order_report(doc).diagnostics);
     for left in pending {
         snapshot.diagnostics.push(Diagnostic::new(
             Severity::Warning,
@@ -116,4 +125,14 @@ pub(crate) fn run(
             "no relation places this block; not drawn",
         ));
     }
+}
+
+fn resolved_order_endpoints(snapshot: &LayoutSnapshot, targets: &[crate::TargetLayout]) -> bool {
+    ["before", "after"].iter().all(|role| {
+        targets.iter().any(|t| {
+            &t.role == role
+                && matches!(t.status, RelationStatus::Valid | RelationStatus::Rebound)
+                && matches!(t.resolved, Some(crate::Resolution::Node(n)) if snapshot.block(n).is_some_and(|b| !b.lines.is_empty()))
+        })
+    })
 }

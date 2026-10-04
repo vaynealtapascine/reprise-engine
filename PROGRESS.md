@@ -2,6 +2,59 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-04: integration and the file format merged; wave 2b started
+
+**Done.**
+
+-   **Integration** (`ws/integrate`):
+    -   Layout applies bidi rules L1 and L2 per line with `reorder_line`. `shape/HANDOFF.md` is
+        gone.
+    -   `follow` uses the shared resolver, so it gets every layout query and the deletion
+        policies.
+    -   Styles resolve against the frame a block starts in, and `style.*` notes are published
+        as diagnostics. `Engine.functions` is new.
+    -   Justified `Optimal` lines now render justified: word and letter spacing reach the glyph
+        advances.
+    -   Snapshot changes: a trailing space at the paragraph level in `bidi_stray_controls`; the
+        style fixtures now publish their notes; `style_bases` has real frame bases; and three
+        relation messages are reworded, with the same codes.
+    -   Orchestrator test: positioned runs tile their lines in every fixture.
+-   **Workstream 9a, the file format** (`reprise-format`):
+    -   A versioned container with a document ID, checksummed sections and canonical JSON
+        metadata. The spec is `crates/format/SPEC.md`.
+    -   Bundled and external assets, checked against their hashes, and pinned fonts.
+    -   Migrations, and tagged derived caches that are ignored when they don't match.
+    -   Unknown data is kept byte for byte, and parsing is bounded.
+    -   Loro snapshots are preflighted before import.
+    -   Orchestrator tests: a pin on the Loro version that the preflight reads, and rejection
+        of Loro blobs that aren't documents.
+
+**In flight:**
+
+-   **7, the editing kernel** (`ws/edit`, `D:/!!Self/dev/reprise-wt/edit`).
+-   **5, frame transforms, writing modes, spiral text and reading order** (`ws/geometry`,
+    `F:/reprise-wt/geometry`, Opus 5.5). It owns `template.rs` `to_page`, `display.rs` and
+    the `FrameTemplate` transform fields.
+-   **3b, floats, notes, tables and solver domains** (`ws/regions`, `F:/reprise-wt/regions`,
+    Sonnet 5.5). It owns `flow.rs`, plus the new frame roles. It also writes
+    `docs/regions.md`, on where allocation, fragmentation and backtracking live.
+
+**Build disk.** At the user's request, checkouts and builds now go on **F:**, an SSD. New
+worktrees are in `F:/reprise-wt/`, with build output in `F:/reprise-target/<name>`.
+
+**Follow-ups from this round:**
+
+-   **Format:**
+    -   Hosts must resolve external assets and canonicalise engine configuration for cache
+        tags.
+    -   Serialising a layout cache is still layout's job.
+    -   Opening a newer file read-only needs a layout entry point that takes `DocumentAt`.
+-   **Layout:** a `follow` to a frame or page target resolves but can't place a note
+    without a unique line. Letter spacing inside a ligature would need shaping support.
+
+**Next:** 9b, the clipboard, after the kernel's insert API lands. Workstream 6 comes once 3b
+and 5 settle.
+
 ## 2026-10-04: phase 2, wave 1 merged
 
 **Done.** All six wave 1 workstreams are reviewed, merged and pushed. Each review reran fmt,

@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      145
+      147
     ]
   ],
   "adapter": {
@@ -25,13 +25,29 @@ expression: snapshot.to_json()
     "annotation_spacing": 4096
   },
   "template": {
-    "name": "default",
-    "source": "builtin"
+    "name": "style-bases",
+    "source": "document"
   },
   "pages": [
     {
-      "width": 430080,
-      "height": 307200
+      "width": 368640,
+      "height": 102400
+    },
+    {
+      "width": 368640,
+      "height": 102400
+    },
+    {
+      "width": 368640,
+      "height": 102400
+    },
+    {
+      "width": 368640,
+      "height": 102400
+    },
+    {
+      "width": 368640,
+      "height": 102400
     }
   ],
   "frames": [
@@ -46,16 +62,16 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 36864,
-        "ty": 36864
+        "tx": 10240,
+        "ty": 10240
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 225280,
-        "height": 233472
+        "width": 204800,
+        "height": 24576
       }
     },
     {
@@ -67,8 +83,8 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 280576,
-        "ty": 36864
+        "tx": 235520,
+        "ty": 10240
       },
       "rect": {
         "origin": {
@@ -76,31 +92,202 @@ expression: snapshot.to_json()
           "y": 0
         },
         "width": 112640,
-        "height": 233472
+        "height": 24576
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 1,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 10240,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 24576
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 1,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 235520,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 24576
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 10240,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 24576
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 235520,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 24576
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 3,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 10240,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 24576
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 3,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 235520,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 24576
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 4,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 10240,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 24576
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 4,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 235520,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 24576
       }
     }
   ],
   "blocks": [
     {
-      "node": "8@1",
+      "node": "10@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
-        "size": 10240,
-        "line_height": 12288,
+        "size": 12288,
+        "line_height": 14746,
         "explain": {
           "family": "default",
           "line-height": "default",
-          "size": "default"
+          "size": "style half-the-height"
         },
-        "notes": [
-          {
-            "severity": "warning",
-            "code": "style.basis-unresolved",
-            "message": "size in style half-the-height: frame-height does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
-            "bytes": null
-          }
-        ]
+        "bases": {
+          "size": "frame-height = 24pt"
+        }
       },
       "lines": [
         {
@@ -115,7 +302,136 @@ expression: snapshot.to_json()
               "x": 0,
               "y": 0
             },
-            "width": 225280,
+            "width": 204800,
+            "height": 14746
+          },
+          "baseline": 11680,
+          "width": 114969,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 12288,
+              "level": 0,
+              "x": 0,
+              "width": 114969
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "38@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style named-frame"
+        },
+        "bases": {
+          "size": "frame-width(\"margin\") = 110pt"
+        }
+      },
+      "lines": [
+        {
+          "frame": 2,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 204800,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 105391,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 105391
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "66@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.basis-unresolved",
+            "message": "size in style no-such-frame: frame-width(\"nowhere\") does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 4,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 204800,
             "height": 12288
           },
           "baseline": 9733,
@@ -149,141 +465,7 @@ expression: snapshot.to_json()
       ]
     },
     {
-      "node": "36@1",
-      "kind": "paragraph",
-      "style": {
-        "family": "Source Serif Pro",
-        "size": 10240,
-        "line_height": 12288,
-        "explain": {
-          "family": "default",
-          "line-height": "default",
-          "size": "default"
-        },
-        "notes": [
-          {
-            "severity": "warning",
-            "code": "style.basis-unresolved",
-            "message": "size in style named-frame: frame-width(\"margin\") does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
-            "bytes": null
-          }
-        ]
-      },
-      "lines": [
-        {
-          "frame": 0,
-          "text": {
-            "start": 0,
-            "end": 22
-          },
-          "preview": "Under a hostile style.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 20480
-            },
-            "width": 225280,
-            "height": 12288
-          },
-          "baseline": 30213,
-          "width": 95805,
-          "explanation": {
-            "reason": "end",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 0,
-                "end": 22
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 10240,
-              "level": 0,
-              "x": 0,
-              "width": 95805
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "node": "64@1",
-      "kind": "paragraph",
-      "style": {
-        "family": "Source Serif Pro",
-        "size": 10240,
-        "line_height": 12288,
-        "explain": {
-          "family": "default",
-          "line-height": "default",
-          "size": "default"
-        },
-        "notes": [
-          {
-            "severity": "warning",
-            "code": "style.basis-unresolved",
-            "message": "size in style no-such-frame: frame-width(\"nowhere\") does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
-            "bytes": null
-          }
-        ]
-      },
-      "lines": [
-        {
-          "frame": 0,
-          "text": {
-            "start": 0,
-            "end": 22
-          },
-          "preview": "Under a hostile style.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 40960
-            },
-            "width": 225280,
-            "height": 12288
-          },
-          "baseline": 50693,
-          "width": 95805,
-          "explanation": {
-            "reason": "end",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 0,
-                "end": 22
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 10240,
-              "level": 0,
-              "x": 0,
-              "width": 95805
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "node": "92@1",
+      "node": "94@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -300,7 +482,7 @@ expression: snapshot.to_json()
       },
       "lines": [
         {
-          "frame": 0,
+          "frame": 6,
           "text": {
             "start": 0,
             "end": 22
@@ -309,12 +491,12 @@ expression: snapshot.to_json()
           "rect": {
             "origin": {
               "x": 0,
-              "y": 61440
+              "y": 0
             },
-            "width": 225280,
+            "width": 204800,
             "height": 14746
           },
-          "baseline": 73120,
+          "baseline": 11680,
           "width": 114969,
           "explanation": {
             "reason": "end",
@@ -345,7 +527,7 @@ expression: snapshot.to_json()
       ]
     },
     {
-      "node": "120@1",
+      "node": "122@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -362,7 +544,7 @@ expression: snapshot.to_json()
       },
       "lines": [
         {
-          "frame": 0,
+          "frame": 8,
           "text": {
             "start": 0,
             "end": 22
@@ -371,12 +553,12 @@ expression: snapshot.to_json()
           "rect": {
             "origin": {
               "x": 0,
-              "y": 84378
+              "y": 0
             },
-            "width": 225280,
+            "width": 204800,
             "height": 15360
           },
-          "baseline": 95648,
+          "baseline": 11270,
           "width": 95805,
           "explanation": {
             "reason": "end",
@@ -408,5 +590,16 @@ expression: snapshot.to_json()
     }
   ],
   "relations": [],
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "style.basis-unresolved",
+      "subject": {
+        "kind": "node",
+        "id": "66@1"
+      },
+      "message": "size in style no-such-frame: frame-width(\"nowhere\") does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
+      "bytes": null
+    }
+  ]
 }

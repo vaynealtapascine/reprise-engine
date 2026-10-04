@@ -14,6 +14,7 @@ reprise-diag = { path = "crates/diag" }
 reprise-geom = { path = "crates/geom" }
 reprise-text = { path = "crates/text" }
 reprise-doc = { path = "crates/doc" }
+reprise-format = { path = "crates/format" }
 reprise-font = { path = "crates/font" }
 reprise-shape = { path = "crates/shape" }
 reprise-compose = { path = "crates/compose" }

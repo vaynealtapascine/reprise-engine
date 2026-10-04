@@ -619,5 +619,86 @@ expression: snapshot.to_json()
     }
   ],
   "relations": [],
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "style.expr-limit",
+      "subject": {
+        "kind": "node",
+        "id": "8@1"
+      },
+      "message": "size in style deep: the stored value \"expr1:((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((1pt))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\" can't be read: nested deeper than 32 levels; it is kept, and ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.expr-limit",
+      "subject": {
+        "kind": "node",
+        "id": "36@1"
+      },
+      "message": "size in style wide: the stored value \"expr1:1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt + 1pt\" can't be read: more than 256 nodes in one expression; it is kept, and ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.type-error",
+      "subject": {
+        "kind": "node",
+        "id": "64@1"
+      },
+      "message": "size in style type-error: cannot multiply a length and a length; this layer's value is ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.type-error",
+      "subject": {
+        "kind": "node",
+        "id": "92@1"
+      },
+      "message": "size in style not-a-length: expected a length, found a number; this layer's value is ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.unknown-function",
+      "subject": {
+        "kind": "node",
+        "id": "120@1"
+      },
+      "message": "size in style unknown-function: no function called frob is registered; this layer's value is ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.function-failed",
+      "subject": {
+        "kind": "node",
+        "id": "148@1"
+      },
+      "message": "size in style function-fails: ratio failed: the second term of a ratio is zero; this layer's value is ignored and the value inherited from before is used",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.unparsed",
+      "subject": {
+        "kind": "node",
+        "id": "176@1"
+      },
+      "message": "size in style from-the-future: the stored value \"expr2:quantum(3)\" can't be read: not a length this engine knows (a newer format, or damaged); it is kept, and ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.unparsed",
+      "subject": {
+        "kind": "node",
+        "id": "204@1"
+      },
+      "message": "size in style damaged: the stored value \"furlongs:5\" can't be read: not a length this engine knows (a newer format, or damaged); it is kept, and ignored",
+      "bytes": null
+    }
+  ]
 }

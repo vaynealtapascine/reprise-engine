@@ -351,7 +351,7 @@ expression: snapshot.to_json()
         "kind": "relation",
         "id": "79@1"
       },
-      "message": "target range 74@1 is gone; owner not placed",
+      "message": "range 74@1 is gone",
       "bytes": null
     },
     {
@@ -361,7 +361,7 @@ expression: snapshot.to_json()
         "kind": "relation",
         "id": "138@1"
       },
-      "message": "target range 133@1 lost part of its text; rebound",
+      "message": "target range lost part of its text; rebound",
       "bytes": null
     },
     {
@@ -371,7 +371,7 @@ expression: snapshot.to_json()
         "kind": "relation",
         "id": "185@1"
       },
-      "message": "target range 180@1 is gone; owner not placed",
+      "message": "range 180@1 is gone",
       "bytes": null
     },
     {

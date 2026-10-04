@@ -1,13 +1,14 @@
 //! Layout: from an authored [`Document`] to a derived [`LayoutSnapshot`] and
 //! [`DisplayList`]s (decisions 05, 24, 26, 28 and 37).
 //!
-//! Layout runs in two passes:
+//! Layout runs in staged passes, with bounded region feedback (26):
 //! 1. Flow ([`flow`]): the page template is resolved against the medium
 //!    ([`template`]), and paragraphs thread down its frames, page after page.
 //!    A paragraph that doesn't fit the rest of a frame continues in the next.
 //! 2. Relations ([`relations`]): blocks placed by relations, such as notes
 //!    beside the line they follow, which is only known after pass 1. That
-//!    ordering is the staged-pass rule (26).
+//!    ordering is the staged-pass rule (26). Floats and notes feed exclusions
+//!    and depth reservations back into flow for at most 16 complete passes.
 //!
 //! Layout never fails as a whole. Whatever can't be laid out is left out and
 //! reported in `diagnostics` (37).
@@ -17,15 +18,22 @@
 
 pub mod codes;
 mod display;
+mod floats;
 mod flow;
+pub mod geometry;
+mod notes;
 mod query;
+pub mod reading;
 mod region;
+mod regions;
 mod relations;
 mod snapshot;
+pub mod solver;
+mod table;
 mod template;
 
 use reprise_compose::{Composer, Greedy};
-use reprise_doc::{Document, Medium, SchemaRegistry};
+use reprise_doc::{Document, FunctionRegistry, Medium, SchemaRegistry};
 use reprise_font::FontStore;
 use reprise_geom::Length;
 use reprise_shape::{HarfRust, ShapingAdapter};
@@ -69,13 +77,15 @@ impl Default for FlowSettings {
 }
 
 /// The engine configuration: fonts, the shaping adapter, the composer, the
-/// relation schemas, the medium and the flow settings. All of it is an input
+/// relation schemas, style functions, the medium and the flow settings. All of it is an input
 /// to the determinism guarantee (38).
 pub struct Engine {
     pub fonts: FontStore,
     pub shaper: Box<dyn ShapingAdapter>,
     pub composer: Box<dyn Composer>,
     pub schemas: SchemaRegistry,
+    /// Pure functions available to authored style expressions.
+    pub functions: FunctionRegistry,
     /// What the document is laid out for. Page templates may size themselves
     /// from it. Not authored state: the same document lays out differently on
     /// a different medium.
@@ -90,6 +100,7 @@ impl Engine {
             shaper: Box::new(HarfRust),
             composer: Box::new(Greedy),
             schemas: SchemaRegistry::builtin(),
+            functions: FunctionRegistry::builtin(),
             medium: Medium::new(Length::from_pt(420), Length::from_pt(300)),
             flow: FlowSettings::default(),
         }
@@ -117,8 +128,6 @@ impl Engine {
             name: template.name.clone(),
             source: template.source,
         };
-        let pending = flow::run(self, doc, &template, &mut snapshot);
-        relations::run(self, doc, &mut snapshot, pending);
-        snapshot
+        regions::run(self, doc, &template, snapshot)
     }
 }
