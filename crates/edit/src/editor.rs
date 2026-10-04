@@ -254,7 +254,7 @@ impl Editor {
                 let new = blocks.get(*new).copied().ok_or_else(missing)?;
                 self.doc.activate_block_at(new, *parent, *index)?;
             }
-            Step::Trash { node } => self.doc.delete_block(*node)?,
+            Step::Delete { node } => self.doc.delete_block(*node)?,
             Step::Move {
                 node,
                 parent,

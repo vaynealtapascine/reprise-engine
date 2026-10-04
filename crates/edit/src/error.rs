@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+use reprise_diag::{Note, Severity};
 use reprise_doc::{NodeId, RangeId, RelationId, SchemaError};
 
 /// A refused transaction: which command, and why. Nothing was changed.
@@ -14,6 +15,20 @@ pub struct EditError {
 }
 
 impl EditError {
+    /// A stable diagnostic for a refused operation. Error severity means the
+    /// requested edit was omitted; validation errors leave authored state intact.
+    pub fn note(&self) -> Note {
+        let code = match self.reason {
+            Reason::TooManyCommands { .. }
+            | Reason::TextTooLong { .. }
+            | Reason::TransactionTooLarge { .. }
+            | Reason::TreeDepthLimit { .. } => crate::codes::LIMIT,
+            Reason::Store(_) => crate::codes::STORE,
+            _ => crate::codes::INVALID_COMMAND,
+        };
+        Note::new(Severity::Error, code, self.to_string())
+    }
+
     pub(crate) fn at(command: usize, reason: Reason) -> EditError {
         EditError {
             command: Some(command),
@@ -30,6 +45,10 @@ pub enum Reason {
     TooManyCommands { count: usize, max: usize },
     #[error("inserted text of {len} bytes is over the limit of {max}")]
     TextTooLong { len: usize, max: usize },
+    #[error("transaction payload of {len} bytes is over the limit of {max}")]
+    TransactionTooLarge { len: usize, max: usize },
+    #[error("ancestry of {node} exceeds the editing limit of {max} nodes")]
+    TreeDepthLimit { node: NodeId, max: usize },
     #[error("no live block {0}")]
     NoSuchBlock(NodeId),
     #[error("no live relation {0}")]

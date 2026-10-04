@@ -896,3 +896,178 @@ fn two_peers_editing_randomly_converge_and_stay_a_forest() {
         check_tree(one.document());
     }
 }
+
+#[test]
+fn relation_ranges_see_a_target_deleted_earlier_in_the_same_transaction() {
+    let doc = Document::new(1).unwrap();
+    let node = para(&doc, "target");
+    let note = doc
+        .append_block(BlockKind::Annotation, "note", "n")
+        .unwrap();
+    let range = doc.add_range(node, 0..6, RangePolicy::FIXED).unwrap();
+    let mut editor = editor(doc);
+    let tx = Transaction::new()
+        .with(Command::DeleteBlock { node })
+        .with(Command::AddRelation {
+            relation: Relation::new(FOLLOW).owned_by(note).target(
+                "line",
+                Target::Layout(LayoutQuery::LineContaining { range }),
+            ),
+        });
+    let error = refused(&mut editor, tx);
+    assert_eq!(error.command, Some(1));
+    assert_eq!(error.reason, Reason::DeadBlock(node));
+    assert_eq!(error.note().code.as_str(), "edit.invalid-command");
+    assert_eq!(error.note().severity, reprise_diag::Severity::Error);
+}
+
+#[test]
+fn ancestry_and_aggregate_payload_limits_report_instead_of_truncating() {
+    use reprise_edit::{MAX_ANCESTORS, MAX_TRANSACTION_BYTES};
+    let doc = Document::new(1).unwrap();
+    let root = para(&doc, "root");
+    let mut deepest = root;
+    for _ in 0..MAX_ANCESTORS {
+        deepest = doc
+            .insert_block_at(
+                Some(deepest),
+                0,
+                &NewBlock::new(BlockKind::Paragraph, "body", ""),
+            )
+            .unwrap();
+    }
+    let mut editor = editor(doc);
+    let before = editor.document().revision();
+    let error = editor
+        .apply_command(Command::InsertText {
+            node: deepest,
+            at: 0,
+            text: "x".into(),
+        })
+        .unwrap_err();
+    assert_eq!(before, editor.document().revision());
+    assert_eq!(editor.document().block(deepest).unwrap().text.len(), 0);
+    assert_eq!(
+        error.reason,
+        Reason::TreeDepthLimit {
+            node: deepest,
+            max: MAX_ANCESTORS
+        }
+    );
+    assert_eq!(error.note().code.as_str(), "edit.limit");
+    let half = "x".repeat(MAX_TRANSACTION_BYTES / 2 + 1);
+    let error = editor
+        .apply(
+            &Transaction::new()
+                .with(ins(root, 0, &half))
+                .with(ins(root, 0, &half)),
+        )
+        .unwrap_err();
+    assert_eq!(before, editor.document().revision());
+    assert_eq!(
+        editor.document().block(root).unwrap().text.to_string(),
+        "root"
+    );
+    assert!(matches!(error.reason, Reason::TransactionTooLarge { .. }));
+    assert_eq!(error.note().code.as_str(), "edit.limit");
+}
+
+#[test]
+fn every_command_round_trips_undo_redo_with_all_authored_fields() {
+    let doc = Document::new(1).unwrap();
+    let a = para(&doc, "alpha");
+    let b = para(&doc, "beta");
+    let child = doc
+        .insert_block_at(
+            Some(a),
+            0,
+            &NewBlock::new(BlockKind::Paragraph, "body", "child"),
+        )
+        .unwrap();
+    let note = doc
+        .append_block(BlockKind::Annotation, "note", "note")
+        .unwrap();
+    let range = doc.add_range(a, 0..2, RangePolicy::FIXED).unwrap();
+    let relation = Relation::new(FOLLOW).owned_by(note).target(
+        "line",
+        Target::Layout(LayoutQuery::LineContaining { range }),
+    );
+    let id = doc
+        .add_relation(&SchemaRegistry::builtin(), &relation)
+        .unwrap();
+    let mut editor = editor(doc);
+    // Compare authored fields. Resolving persistent character anchors is
+    // derived: text undo can reinsert characters with new CRDT identities,
+    // so deleted anchors retain the frozen Text/RangePolicy rebound semantics.
+    let state = |doc: &Document| {
+        (
+            doc.document_order()
+                .into_iter()
+                .map(|n| {
+                    let block = doc.block(n).unwrap();
+                    (
+                        n,
+                        doc.parent_of(n),
+                        block.text.to_string(),
+                        block.style,
+                        block.overrides,
+                        doc.successors(n),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            doc.relations(),
+        )
+    };
+    let commands = [
+        ins(a, 0, "X"),
+        Command::DeleteText {
+            node: a,
+            range: 0..1,
+        },
+        Command::SplitBlock { node: a, at: 2 },
+        Command::JoinBlocks {
+            first: a,
+            second: b,
+        },
+        Command::InsertBlock {
+            parent: Some(a),
+            index: 1,
+            block: NewBlock::new(BlockKind::Paragraph, "body", "inserted"),
+        },
+        Command::DeleteBlock { node: a },
+        Command::MoveBlock {
+            node: b,
+            parent: Some(a),
+            index: 0,
+        },
+        Command::SetStyleOverride {
+            node: a,
+            style: Style {
+                size: Some(LengthExpr::Pt(Length::MIN)),
+                line_height: Some(LengthExpr::Pt(Length::MAX)),
+                ..Default::default()
+            },
+        },
+        Command::AddRelation { relation },
+        Command::RemoveRelation { id },
+    ];
+    for command in commands {
+        let before = state(editor.document());
+        let label = format!("{command:?}");
+        editor.apply_command(command).unwrap();
+        let after = state(editor.document());
+        assert_eq!(editor.undo_count(), 1, "{label}");
+        assert!(editor.undo().unwrap());
+        assert_eq!(state(editor.document()), before, "{label}: undo");
+        assert!(editor.redo().unwrap());
+        assert_eq!(
+            state(editor.document()),
+            after,
+            "{label}: redo keeps IDs and fields"
+        );
+        assert!(editor.undo().unwrap());
+        assert_eq!(state(editor.document()), before, "{label}: undo after redo");
+        assert!(!editor.can_undo());
+        assert!(editor.document().is_live(child));
+    }
+}

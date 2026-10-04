@@ -54,6 +54,7 @@ Codes in use:
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
+| edit | `edit.limit`, `edit.invalid-command`, `edit.store` |
 
 ## Text store: `reprise-text`
 
@@ -367,3 +368,98 @@ Codes in use:
     -   Every merge keeps every hostile fixture passing.
     -   A snapshot changes only with a stated reason.
     -   New hostile cases are welcome. Removing one is a contract change.
+
+
+## Editing kernel: `reprise-edit`
+
+This section is the new workstream 7 contract, submitted for orchestrator review
+before freezing. Existing contracts above are unchanged.
+
+- **Authored operations (02, 05, 07, 09, 29):** `Command` is a pure typed description
+  of insert/delete text, split/join blocks, insert/delete/move blocks, replacement
+  style overrides, and add/remove relations. All text offsets/ranges are UTF-8
+  bytes on character boundaries. Block indices count live siblings; a move's
+  index counts siblings excluding the moved block. Commands reference existing
+  IDs; `Applied.blocks` and `Applied.relations` return new IDs in command order.
+- **Transactions:** `Editor::apply(&Transaction)` validates every command against
+  the state left by earlier commands before writing. Invalid ranges, offsets,
+  tree moves, missing/deleted targets and schema violations reject the whole
+  transaction with `EditError { command, reason }`; authored state, revision and
+  undo history are unchanged. Relations pass `SchemaRegistry::validate` and
+  target liveness checks, including range targets. An empty/no-op transaction
+  produces no undo step. Callers route mutations through the editor while it owns
+  the document; independent handles must not mutate it during apply.
+- **Commit and identity:** newly inserted blocks/relations are staged flagged and
+  invisible in excluded `reprise:stage` commits before the authored transaction.
+  Their activation and all other transaction commands form one `reprise:step`
+  commit and one undo step. Staging is never undone; undo/redo of insertion retains
+  the created ID. `Document::delete_block` writes `deleted = true` on the original
+  node without moving or committing it. Undo restores its previous flag and
+  position; `restore_block(id)` clears its flag in place. Ancestor flags hide the
+  entire subtree. Restoring a parent does not clear independently deleted children.
+  Loro physical tree tombstones also remain deleted. Relations and ranges observe
+  both kinds of tombstone under their existing deletion policies.
+- **Collaboration and undo:** `Editor::merge` imports peer operations;
+  `undo`/`redo` apply this peer's inverse operations while retaining concurrent
+  collaborators' edits. Text edits in a deleted node are retained without revival.
+  Concurrent flag delete/restore uses Loro map last-writer-wins, ordered by Lamport
+  timestamp then peer ID. Moves do not clear deletion. All identities use the real
+  peer. `UndoStack` defaults to 1,000 steps, with commit-based grouping and merge
+  interval zero; its limit and history can be adjusted/cleared. Physical purging
+  of flagged nodes is deferred to a reference-aware replica compaction policy.
+- **Structural primitives (12):** `NewBlock`, `insert_block_at`, `move_block`,
+  `split_block`, `split_block_into`, `join_blocks`, staging and activation are
+  reusable document operations for the kernel and future paste. Split copies the
+  tail into a new text container; join appends the second block's text and records
+  succession before flagging it. Blocks joined must have equal kinds, and the
+  second must have no live children. Persistent anchors/ranges remain attached to
+  their original text container and follow `RangePolicy`; they are not rehomed
+  across split/join. Node targets follow succession only under `Rebind` policy.
+- **Position effects:** `Applied.effects` and `map_position(node, offset, Bias)`
+  map UI byte positions through text edits, splits, joins and deletions. `Bias`
+  chooses before/after inserted text. Descendants of a deleted block must also
+  be checked against document liveness. Persistent positions use document anchors.
+- **Bounds and diagnostics (37, 38):** `MAX_COMMANDS = 10_000`,
+  `MAX_INSERT_BYTES = 16 MiB`, `MAX_TRANSACTION_BYTES = 16 MiB` of aggregate
+  inserted/copied text, and `MAX_ANCESTORS = 1_024` ancestor checks per command.
+  Exceeding a bound is a typed refusal. `EditError::note()` emits `edit.limit`,
+  `edit.invalid-command`, or `edit.store`, all `Error` because the edit is omitted.
+  `Store` identifies an unexpected document/store failure rather than invalid
+  author input. No clock, randomness or unordered iteration chooses editing output.
+- **Caret and geometry (20, 22, 30):** `Caret` contains `NodeId`, grapheme-boundary
+  byte offset and `Affinity::{Upstream,Downstream}`. Upstream attaches to preceding
+  text, downstream to following text; soft line breaks and bidi boundaries may
+  give two visual positions. `Navigator` borrows one immutable `LayoutSnapshot`.
+  `normalize` preserves logical offsets and canonicalizes equivalent affinities.
+  `caret_rect` returns integer page-space geometry; `hit(page, point)` finds the
+  nearest text caret, including outside frames and between lines. Glyph clusters
+  are subdivided proportionally by grapheme count, with integer half-away rounding.
+  Missing glyph spans retain zero-width logical stops. Run levels and visual order
+  govern bidi cells. Frame transforms map caret and selection geometry to pages.
+- **Hit equivalence:** rect-hit-rect preserves page and rectangle for drawable,
+  invertible geometry. Exact normalized identity is required where that visual
+  position is unique. Coincident offsets, zero-width cells and coincident lines
+  have a deterministic hit representative. A page without text uses the logical
+  end before it, or the logical start after it. An invalid page or a document
+  without laid-out text returns `None`. Invalid carets are rejected without panic.
+- **Movement (30, 33):** logical movement uses ICU4X grapheme/word segmentation;
+  visual left/right traverses grapheme cells along the frame's inline axis,
+  including bidi and zero-width cells. Line up/down preserves `Cursor.goal_x` in
+  frame space; other movements clear it. Logical and visual line edges, block
+  edges and document edges are explicit operations. Cross-block movement follows
+  `Document::document_order()` through `Navigator::semantic`; explicit reading
+  order plugs into `Navigator::new(snapshot, order)`. Repeated/unknown IDs are
+  ignored; omitted laid-out blocks follow in snapshot order. At a document edge
+  a valid caret remains unchanged. Unlaid-out content has no caret geometry.
+- **Selections and gestures (30, 31):** `Selection { anchor, focus }` produces
+  per-block logical `BlockRange`s independent of drag direction. A collapsed
+  selection produces one empty range and no rectangles. Invalid endpoints produce
+  no ranges/geometry. `selection_rects` coalesces adjacent selected grapheme cells
+  but preserves discontiguous bidi geometry, in block/line/visual order. Hard
+  breaks and zero-width cells contribute no area. `select_word`, `select_line`,
+  `select_block` and `select_all` are policy-free operations; a word-end caret
+  selects that word and a gap caret selects the gap. They do not mutate content.
+- **Pending snapshot addition:** the kernel currently infers paragraph direction
+  from ICU Bidi_Class (P2/P3). The proposed `BlockLayout.base_level`, omitted from
+  JSON when zero, is specified in `crates/edit/CONTRACT-PROPOSALS.md`; only the
+  orchestrator may add it after the layout/flow owner merges.

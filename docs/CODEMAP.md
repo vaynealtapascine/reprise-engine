@@ -63,6 +63,9 @@ interfaces.
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
 | `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties | 07, 29 |
+|  | `src/lib.rs`, `src/command.rs`, `src/editor.rs`, `src/plan.rs` | Validated typed commands, staged activation, atomic commit/undo, bounded transaction models and position effects | 02, 05, 07, 12, 29, 37 |
+|  | `src/error.rs`, `src/codes.rs` | Typed refusals and stable Error diagnostics for validation, resource bounds and store failures | 37 |
+|  | `CONTRACT-PROPOSALS.md` | Proposed resolved paragraph base level in the layout snapshot, with zero omitted from JSON | 22, 30 |
 |  | `tests/document_edits.rs` | General structural edit primitives and collaborative text undo | 07, 12, 29 |
 |  | `src/caret.rs`, `src/model.rs`, `src/navigator.rs` | Byte/affinity carets, cached cluster/grapheme cells, integer page geometry and deterministic hit testing | 09, 20, 22, 30 |
 |  | `src/movement.rs`, `src/select.rs` | Logical/visual navigation, goal-x line movement, reading order, logical selection ranges, bidi geometry and gesture operations | 30, 31, 33 |

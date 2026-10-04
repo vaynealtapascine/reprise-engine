@@ -28,9 +28,11 @@ pub const MAX_COMMANDS: usize = 10_000;
 /// The most text one `InsertText` or `InsertBlock` may carry, in bytes.
 pub const MAX_INSERT_BYTES: usize = 16 << 20;
 
-/// How far up the tree the model looks for a deleted ancestor: the same
-/// bound the document uses for liveness.
-const MAX_DEPTH: usize = 1 << 16;
+/// Maximum aggregate inserted block/text payload in one transaction.
+pub const MAX_TRANSACTION_BYTES: usize = 16 << 20;
+/// Maximum number of ancestors checked by one command. Excess is a typed
+/// `TreeDepthLimit` error (and `edit.limit` diagnostic), never silent truncation.
+pub const MAX_ANCESTORS: usize = 1024;
 
 #[derive(Debug)]
 pub(crate) enum Step {
@@ -58,7 +60,7 @@ pub(crate) enum Step {
         parent: Option<NodeId>,
         index: usize,
     },
-    Trash {
+    Delete {
         node: NodeId,
     },
     Move {
@@ -132,6 +134,7 @@ struct Model<'a> {
     /// The children of parents the transaction has changed.
     kids: BTreeMap<Option<NodeId>, Vec<Slot>>,
     live_relations: Option<BTreeSet<RelationId>>,
+    payload: usize,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -159,6 +162,7 @@ pub(crate) fn plan(
         parents: BTreeMap::new(),
         kids: BTreeMap::new(),
         live_relations: None,
+        payload: 0,
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -177,6 +181,18 @@ fn check_text_size(len: usize) -> Result<(), Reason> {
 }
 
 impl Model<'_> {
+    fn add_payload(&mut self, len: usize) -> Result<(), Reason> {
+        check_text_size(len)?;
+        self.payload = self.payload.saturating_add(len);
+        if self.payload > MAX_TRANSACTION_BYTES {
+            return Err(Reason::TransactionTooLarge {
+                len: self.payload,
+                max: MAX_TRANSACTION_BYTES,
+            });
+        }
+        Ok(())
+    }
+
     fn parent_of(&self, node: NodeId) -> Option<Option<NodeId>> {
         match self.parents.get(&node) {
             Some(&p) => Some(p),
@@ -186,26 +202,32 @@ impl Model<'_> {
 
     /// Alive now: alive in the document, and not under a block this
     /// transaction deleted.
-    fn live(&self, node: NodeId) -> bool {
+    fn live(&self, node: NodeId) -> Result<bool, Reason> {
         if !self.doc.is_live(node) {
-            return false;
+            return Ok(false);
         }
         let mut at = Some(node);
-        for _ in 0..MAX_DEPTH {
-            let Some(n) = at else { return true };
+        for _ in 0..MAX_ANCESTORS {
+            let Some(n) = at else { return Ok(true) };
             if self.killed.contains(&n) {
-                return false;
+                return Ok(false);
             }
             match self.parent_of(n) {
                 Some(p) => at = p,
-                None => return false,
+                None => return Ok(false),
             }
         }
-        false
+        if at.is_none() {
+            return Ok(true);
+        }
+        Err(Reason::TreeDepthLimit {
+            node,
+            max: MAX_ANCESTORS,
+        })
     }
 
     fn require(&self, node: NodeId) -> Result<(), Reason> {
-        if self.live(node) {
+        if self.live(node)? {
             Ok(())
         } else {
             Err(Reason::NoSuchBlock(node))
@@ -267,7 +289,7 @@ impl Model<'_> {
                 let (parent, at) = self.slot_of(*node)?;
                 self.kids(parent).remove(at);
                 self.killed.insert(*node);
-                self.plan.steps.push(Step::Trash { node: *node });
+                self.plan.steps.push(Step::Delete { node: *node });
                 self.plan.effects.push(PlannedEffect::Deleted(*node));
                 Ok(())
             }
@@ -301,7 +323,7 @@ impl Model<'_> {
     }
 
     fn insert_text(&mut self, node: NodeId, at: usize, text: &str) -> Result<(), Reason> {
-        check_text_size(text.len())?;
+        self.add_payload(text.len())?;
         let s = self.text(node)?;
         if !s.is_char_boundary(at) {
             return Err(Reason::BadOffset { node, offset: at });
@@ -360,6 +382,7 @@ impl Model<'_> {
             return Err(Reason::BadOffset { node, offset: at });
         }
         let tail = s.split_off(at);
+        self.add_payload(tail.len())?;
         let block = self
             .doc
             .block(node)
@@ -399,6 +422,7 @@ impl Model<'_> {
             return Err(Reason::HasChildren(second));
         }
         let tail = self.text(second)?.clone();
+        self.add_payload(tail.len())?;
         let head = self.text(first)?;
         let join_at = head.len();
         head.push_str(&tail);
@@ -419,7 +443,7 @@ impl Model<'_> {
         index: usize,
         block: &NewBlock,
     ) -> Result<(), Reason> {
-        check_text_size(block.text.len())?;
+        self.add_payload(block.text.len())?;
         self.check_parent(parent)?;
         let new = self.plan.blocks.len();
         let kids = self.kids(parent);
@@ -444,12 +468,18 @@ impl Model<'_> {
         self.require(node)?;
         self.check_parent(parent)?;
         let mut up = parent;
-        for _ in 0..MAX_DEPTH {
+        for _ in 0..MAX_ANCESTORS {
             match up {
                 Some(p) if p == node => return Err(Reason::Cycle(node)),
                 Some(p) => up = self.parent_of(p).flatten(),
                 None => break,
             }
+        }
+        if up.is_some() {
+            return Err(Reason::TreeDepthLimit {
+                node,
+                max: MAX_ANCESTORS,
+            });
         }
         let (old_parent, at) = self.slot_of(node)?;
         self.kids(old_parent).remove(at);
@@ -472,7 +502,7 @@ impl Model<'_> {
     fn add_relation(&mut self, relation: &Relation) -> Result<(), Reason> {
         self.schemas.validate(relation).map_err(Reason::Schema)?;
         if let Some(owner) = relation.owner {
-            self.require(owner).map_err(|_| Reason::DeadBlock(owner))?;
+            self.require(owner).map_err(|r| dead_block(r, owner))?;
         }
         for target in relation.targets.values().flatten() {
             self.check_target(target)?;
@@ -487,11 +517,12 @@ impl Model<'_> {
     /// policies are for), but not what is deleted or missing when it is made:
     /// that is a mistake of the caller's.
     fn check_target(&self, target: &Target) -> Result<(), Reason> {
-        let node = |n: NodeId| self.require(n).map_err(|_| Reason::DeadBlock(n));
+        let node = |n: NodeId| self.require(n).map_err(|r| dead_block(r, n));
         let range = |r| match self.doc.resolve_range(r) {
             RangeState::Missing { node: None } => Err(Reason::DeadRange(r)),
-            RangeState::Missing { node: Some(n) } if !self.live(n) => Err(Reason::DeadBlock(n)),
-            _ => Ok(()),
+            RangeState::Valid { node: n, .. }
+            | RangeState::Rebound { node: n, .. }
+            | RangeState::Missing { node: Some(n) } => node(n),
         };
         match target {
             Target::Node(n) => node(*n),
@@ -511,5 +542,12 @@ impl Model<'_> {
 impl From<DocError> for Reason {
     fn from(e: DocError) -> Reason {
         Reason::Store(e.to_string())
+    }
+}
+
+fn dead_block(reason: Reason, node: NodeId) -> Reason {
+    match reason {
+        Reason::NoSuchBlock(_) => Reason::DeadBlock(node),
+        other => other,
     }
 }
