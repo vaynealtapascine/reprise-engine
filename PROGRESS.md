@@ -2,43 +2,86 @@
 
 The hand-off log. Newest first.
 
-## 2026-10-03: phase 2 started (decision 40, step 3)
+## 2026-10-04: phase 2, wave 1 merged
 
-**In flight: wave 1.** Each workstream has its own worktree under `D:/!!Self/dev/reprise-wt/`
-and its own `ws/*` branch. The shared rules every agent follows are in
-`reprise-wt/BRIEF-COMMON.md`.
+**Done.** All six wave 1 workstreams are reviewed, merged and pushed. Each review reran fmt,
+clippy, the tests and the WASM check, and added at least one hostile test the author hadn't
+written.
 
-| Branch | Workstream | Decisions | Model |
-| --- | --- | --- | --- |
-| `ws/shape` | 1: UAX #9 bidi and UAX #24 scripts in `itemize`, line reordering helper (L1/L2), shaping-data cache | 21, 22 | GPT-6.1-Sol |
-| `ws/compose` | 2: Knuth–Plass composer, authored-break (verse) composer, polygon and runaround geometry, composer conformance suite | 11, 23 | Opus 5.5 |
-| `ws/flow` | 3a: authored page templates (`doc/src/page.rs`) replacing `PageSettings`, a responsive medium, frame threading, pagination and fragmentation | 24, 25 | Sonnet 5.5 |
-| `ws/relations` | 4a: `Structural` and `Snapshot` targets, more layout queries, `Ambiguous`, `OnTargetDeleted`, copy planning | 13–16 | Sonnet 5.5 |
-| `ws/styles` | 4b: typed bounded expressions, registered pure functions, resolution contexts, explicit value stages | 08, 17, 18 | Sonnet 5.5 |
-| `ws/display` | 8: PDF ToUnicode and ActualText, a richer debug overlay | 32, 39 | GPT-6.1-Sol |
+| Workstream | What landed | Orchestrator's added test |
+| --- | --- | --- |
+| 1: text and shaping | UAX #9 bidi (ICU4X data, Unicode 17) and UAX #24 scripts in `itemize`; `Itemized.levels`; `reorder_line` (L1/L2); a per-face shaping-data cache | Every line split of hostile mixed-direction text keeps every glyph exactly once |
+| 2: composition | `Optimal` (Knuth–Plass, ragged or justified), `AuthoredBreak` (verse turnovers), `Polygon` and `Runaround` geometry, a conformance suite; two `Greedy` bugs fixed | Every composer survives shaping from a stale text |
+| 3a: flow and regions | Authored page templates (`doc/src/page.rs`) replacing `PageSettings`; a responsive `Medium`; frame threading, fragmentation and pagination with a page limit; `follow` on any page | Responsive templates under degenerate media |
+| 4a: relations | `Structural` and `Snapshot` targets, seven layout queries, `Ambiguous`, deletion policies from tombstones, copy planning, `reprise.reference` | Forged revisions never panic Loro |
+| 4b: styles | Bounded typed expressions, a `FunctionRegistry`, `ResolutionContext`, explicit value stages; unreadable values kept | Concurrent style expressions converge |
+| 8: display | PDF ToUnicode and ActualText; a debug overlay with selectable families | Text in transformed groups and at tiny sizes extracts |
 
-**Split to avoid contention:** workstream 3 became 3a (core flow, now) and 3b (floats,
-tables, notes and solver domains, after 3a and the geometry providers of 2). Workstream 4
-became 4a (relations) and 4b (styles), which use different files. Layout's `codes` and the
-`follow` behaviour moved into their own files first (`eabf5d0`).
+**Contract change:** `RelationStatus::Deleted`, for relations a `Delete` policy has taken out
+of effect (`d0e0893`). `contracts.md` now describes what each workstream built.
 
-**Integration the orchestrator does after merging** (each workstream was told not to touch
-the other's files):
+**Snapshot changes in wave 1**, each explained in its merge commit:
 
--   Wire workstream 1's L1/L2 line reordering into `layout/src/flow.rs`.
--   Switch `relations/follow.rs` to workstream 4a's shared target resolver.
--   Pass frame and page resolution contexts from flow into workstream 4b's styles.
--   Apply `Adjustment` (justified Knuth–Plass) to glyph positions in layout.
+-   Runs split at bidi levels (`rtl_mixed`), and an RLO span shapes right to left.
+-   The snapshot's `page` was replaced by `medium`, `settings` and `template`, and frames gained a
+    `role`.
+-   In `extreme_lengths`, a paragraph that sat at `Length::MAX` now starts page 2.
 
-**Wave 2, queued:**
+No line moved in the spike.
 
--   5: rotated and mirrored frames, writing modes, and reading-order overrides (after 3a and 8).
--   3b: floats, tables, notes and solver domains (after 2 and 3a).
--   7: the editing kernel (after 1 and 3a).
--   9: persistence and clipboard (after 4a).
+**Build note.** D: is a slow laptop disk, and seven build directories on it stalled every
+build. Each checkout has a git-ignored `.cargo/config.toml` (listed in `info/exclude`) that
+puts build output on `G:/reprise-target/<name>`, with less debug info.
 
-**Later:** workstream 6 (incremental evaluation and scheduling), once 1–5 stabilise, then 10
-(plugins) and 11 (bindings).
+**Integration still to do** (next, one agent):
+
+-   **L1/L2:** call `reprise_shape::reorder_line` from `layout/src/flow.rs` instead of
+    `visual_order`. See `crates/shape/HANDOFF.md`, which can be deleted once this lands.
+-   **Follow:** switch `relations/follow.rs` to the shared `relations/resolve.rs` resolver,
+    which the top of that file documents.
+-   **Styles in flow:** build a `ResolutionContext` per frame in flow, call
+    `computed_style_with`, and publish `ComputedStyle.notes`. Add `Engine.functions`, and
+    replace `Dim` in templates with expressions when it fits.
+-   **Justification:** apply `Adjustment.word_spacing` to glyph positions, so justified
+    `Optimal` lines render justified.
+
+**Decisions taken by the orchestrator, open to the user:**
+
+-   **Undo and identity (07).** Loro's undo restores a deleted block under a *new* ID. To keep
+    IDs stable, as decision 07 intends, deletion should become a move into a trash parent, so
+    undo moves the block back with the same ID. The editing kernel will do this.
+-   **Snapshot references.** A `Revision` names no document. The file format (34) should
+    record a document ID beside any snapshot reference.
+
+**Known gaps, from the hand-offs:**
+
+-   **PDF:** right-to-left runs and malformed ranges extract as whole-run ActualText, with
+    no glyph-level text mapping.
+-   **Relations:** `Dependency` exists twice, for styles (`reprise_doc::Dependency`) and for
+    relations (`relation::Dependency`); workstream 6 should unify them. Rebinding is
+    O(nodes) per rebinding relation.
+-   **Composition:** layout passes `Measure` only, so polygon and runaround geometry isn't
+    used yet. There are no verse-line entities in the document yet (11). `Greedy` reports
+    `Overflow` where the optimal composers report `Forced` for an overflowing line that ends
+    at a forced break.
+-   **Flow:** one template serves every page, and there are no first, left or right rules.
+    `follow` uses only the first margin frame on a page. Continuation across frames is
+    quadratic in paragraph length. There are no widows or orphans, and overlapping or
+    off-page frames aren't checked.
+-   **Styles:** relation `Param::Length` can't hold an expression yet. A stored property that
+    isn't a string is still dropped on read.
+
+**Next: wave 2.** It runs alongside the integration where files don't overlap:
+
+-   7: the editing kernel, including trash-based deletion.
+-   9: persistence and clipboard.
+
+After the integration lands:
+
+-   5: frame transforms, writing modes and reading order.
+-   3b: floats, notes, tables and solver domains.
+
+Workstream 6 comes once those settle.
 
 ## 2026-10-03: contracts frozen (decision 40, step 2)
 
