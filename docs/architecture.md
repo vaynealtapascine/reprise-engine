@@ -629,6 +629,29 @@ These were chosen on 2026-10-03, before the spike.
 -   **API versioning (04), decided 2026-10-04:** only stable API types cross the bindings
     boundary, every serialised payload carries a version, and the binding crates follow
     semver. Internal crates may change freely behind them.
+-   **Plugin runtime (36), decided 2026-10-04:** `wasmi`, a pure-Rust WebAssembly
+    interpreter (MIT/Apache), is the one plugin backend, natively and inside the engine's
+    own WASM build.
+    -   Budgets are counted in fuel, so a plugin that runs out stops at the same instruction
+        everywhere.
+    -   The host sits behind one internal interface, so wasmtime can be added later as a
+        native accelerator that passes the same conformance suite.
+    -   Plugins may use floats internally. NaNs are canonicalised and relaxed SIMD is
+        disabled.
+    -   Layout-time host APIs exchange only integer `Length` and `Fixed` values.
+-   **Font supply (21), decided 2026-10-04:**
+    -   **Sources:** fonts come from the frontend, for example user imports declared like
+        CSS `@font-face` or font files in a project. The engine accepts font data and never
+        discovers system fonts.
+    -   **Pin and embed:** every font a document uses is embedded as a file in its package
+        (34), pinned by its `FaceId`.
+    -   **Opening elsewhere:** a missing font is substituted and reported, and the frontend
+        asks the user what to do.
+    -   **Fallback:** a CSS-like chain that ends in a required generic class (for example
+        serif, sans-serif or script). Each class resolves to an engine default face, so the
+        engine ships one default per class.
+    -   **Licensing:** the engine doesn't check font licences or embedding flags. Licensing
+        fonts correctly is the user's responsibility.
 -   **Spike output:** four headless backends for the display list (32):
     -   JSON snapshots of the layout and display list, for test fixtures and diffs
     -   SVG, with debug overlays
