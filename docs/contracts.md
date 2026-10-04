@@ -54,6 +54,7 @@ Codes in use:
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
+| format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 
 ## Text store: `reprise-text`
 
@@ -367,3 +368,39 @@ Codes in use:
     -   Every merge keeps every hostile fixture passing.
     -   A snapshot changes only with a stated reason.
     -   New hostile cases are welcome. Removing one is a contract change.
+
+## File format: `reprise-format`
+
+- `Package` is one versioned container with a checksummed magic/version header,
+  persistent host-assigned `DocumentId`, required and optional feature masks,
+  and ordered checksummed sections. [The v1 spec](../crates/format/SPEC.md) pins
+  the wire encoding, hard bounds, compatibility and diagnostic severity rules.
+- `Document::export(PersistenceMode) -> Vec<u8>`, `try_export(...) ->
+  Result<Vec<u8>, DocError>` and `import(bytes, peer) -> Result<Document, DocError>`
+  live in `doc/src/persist.rs`. Only doc sees Loro; format carries its snapshot
+  opaquely. History is retained unless Shallow is explicitly requested. The
+  infallible convenience returns an empty invalid blob on encoding failure;
+  package APIs always use try_export. Import validates self-contained snapshots,
+  bounds embedded LZ4 expansion before Loro runs, and never chooses a random peer.
+- Unknown optional features, unknown sections (including flags/codec/payload),
+  extension bytes and untouched manifest fields round-trip verbatim. Unknown
+  required features/sections refuse with typed `FormatError`s. Corrupt authored
+  data or ambiguous framing refuses; safely framed corrupt caches are discarded
+  with Info `format.cache-dropped`. All parsing is bounded and length-checked.
+- `FontPin` records FaceId family/hash plus an explicit host-supplied version.
+  `Asset` records bundled bytes or external path/URL and a full content hash.
+  `AssetAvailability` returns needed, verified bundled, missing, usable fonts
+  and notes. Fonts with mismatched bytes or identities are reported and excluded.
+  External resources are never fetched; the host resolves them.
+- `MigrationRegistry` applies pure N -> N+1 container migrations on open and
+  reports each step. Saves write the current version. Compatible newer files
+  expose `DocumentAt` read-only; editable access and saving return `ReadOnly`.
+  Container migrations never duplicate authored schema migrations inside Loro.
+- `CacheTags` binds opaque derived bytes to document ID, revision, engine
+  version, complete AdapterInfo and canonical engine-configuration hash. Bytes
+  are exposed only through `usable_cache` with a matching context. Stale caches
+  are ignored (Info `format.cache-ignored`); caches never enter Loro. Producing
+  and interpreting layout caches is layout/host work.
+- A saved snapshot reference must have a document identity: `SnapshotReference`
+  pairs `DocumentId` with `SnapshotRef`. Existing in-document references are
+  scoped by their containing document. A Revision alone identifies no document.

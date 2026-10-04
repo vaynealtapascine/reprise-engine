@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 33);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 34);
 }
 
 hostile_tests!(
@@ -651,3 +651,4 @@ fn style_bases_that_are_missing_or_indefinite_are_reported() {
     }
     every_block_is_laid_out(&fixture);
 }
+hostile_tests!(persistence_tombstones);

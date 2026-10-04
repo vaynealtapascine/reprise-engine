@@ -1844,6 +1844,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reprise-format"
+version = "0.0.0"
+dependencies = [
+ "reprise-diag",
+ "reprise-doc",
+ "reprise-fixtures",
+ "reprise-font",
+ "reprise-shape",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "reprise-geom"
 version = "0.0.0"
 dependencies = [
