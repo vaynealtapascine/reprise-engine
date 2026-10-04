@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      2274
+      486
     ]
   ],
   "adapter": {
@@ -20,27 +20,35 @@ expression: snapshot.to_json()
     "height": 307200
   },
   "settings": {
-    "max_pages": 2,
+    "max_pages": 1000,
     "paragraph_spacing": 8192,
     "annotation_spacing": 4096
   },
   "template": {
-    "name": "two-columns",
+    "name": "unequal-style-columns",
     "source": "document"
   },
   "pages": [
     {
       "width": 430080,
-      "height": 307200
+      "height": 184320
     },
     {
       "width": 430080,
-      "height": 307200
+      "height": 184320
+    },
+    {
+      "width": 430080,
+      "height": 184320
+    },
+    {
+      "width": 430080,
+      "height": 184320
     }
   ],
   "frames": [
     {
-      "name": "left",
+      "name": "wide",
       "role": {
         "flow": "main"
       },
@@ -50,20 +58,20 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 24576,
-        "ty": 30720
+        "tx": 10240,
+        "ty": 10240
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 133120,
-        "height": 81920
+        "width": 204800,
+        "height": 30720
       }
     },
     {
-      "name": "right",
+      "name": "narrow",
       "role": {
         "flow": "main"
       },
@@ -73,16 +81,16 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 167936,
-        "ty": 30720
+        "tx": 225280,
+        "ty": 10240
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 133120,
-        "height": 81920
+        "width": 81920,
+        "height": 61440
       }
     },
     {
@@ -94,8 +102,8 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 311296,
-        "ty": 30720
+        "tx": 317440,
+        "ty": 10240
       },
       "rect": {
         "origin": {
@@ -103,11 +111,11 @@ expression: snapshot.to_json()
           "y": 0
         },
         "width": 102400,
-        "height": 81920
+        "height": 61440
       }
     },
     {
-      "name": "left",
+      "name": "wide",
       "role": {
         "flow": "main"
       },
@@ -117,20 +125,20 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 24576,
-        "ty": 30720
+        "tx": 10240,
+        "ty": 10240
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 133120,
-        "height": 81920
+        "width": 204800,
+        "height": 30720
       }
     },
     {
-      "name": "right",
+      "name": "narrow",
       "role": {
         "flow": "main"
       },
@@ -140,16 +148,16 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 167936,
-        "ty": 30720
+        "tx": 225280,
+        "ty": 10240
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 133120,
-        "height": 81920
+        "width": 81920,
+        "height": 61440
       }
     },
     {
@@ -161,8 +169,8 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 311296,
-        "ty": 30720
+        "tx": 317440,
+        "ty": 10240
       },
       "rect": {
         "origin": {
@@ -170,22 +178,159 @@ expression: snapshot.to_json()
           "y": 0
         },
         "width": 102400,
-        "height": 81920
+        "height": 61440
+      }
+    },
+    {
+      "name": "wide",
+      "role": {
+        "flow": "main"
+      },
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 10240,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 30720
+      }
+    },
+    {
+      "name": "narrow",
+      "role": {
+        "flow": "main"
+      },
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 225280,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 81920,
+        "height": 61440
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 317440,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 102400,
+        "height": 61440
+      }
+    },
+    {
+      "name": "wide",
+      "role": {
+        "flow": "main"
+      },
+      "page": 3,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 10240,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 30720
+      }
+    },
+    {
+      "name": "narrow",
+      "role": {
+        "flow": "main"
+      },
+      "page": 3,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 225280,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 81920,
+        "height": 61440
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 3,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 317440,
+        "ty": 10240
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 102400,
+        "height": 61440
       }
     }
   ],
   "blocks": [
     {
-      "node": "8@1",
+      "node": "10@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
-        "size": 11264,
-        "line_height": 13517,
+        "size": 10240,
+        "line_height": 12288,
         "explain": {
           "family": "default",
           "line-height": "default",
-          "size": "style body"
+          "size": "style frame-sized"
+        },
+        "bases": {
+          "size": "frame-width = 200pt"
         }
       },
       "lines": [
@@ -193,19 +338,19 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 23
+            "end": 44
           },
-          "preview": "The house was a little",
+          "preview": "The house was a little larger on the inside",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 133120,
-            "height": 13517
+            "width": 204800,
+            "height": 12288
           },
-          "baseline": 10707,
-          "width": 107879,
+          "baseline": 9733,
+          "width": 189019,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -219,36 +364,36 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 23
+                "end": 44
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 110504
+              "width": 191405
             }
           ]
         },
         {
           "frame": 0,
           "text": {
-            "start": 23,
-            "end": 49
+            "start": 44,
+            "end": 87
           },
-          "preview": "larger on the inside than",
+          "preview": "than on the outside. Nobody measured it at",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 13517
+              "y": 12288
             },
-            "width": 133120,
-            "height": 13517
+            "width": 204800,
+            "height": 12288
           },
-          "baseline": 24224,
-          "width": 122986,
+          "baseline": 22021,
+          "width": 195746,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -261,80 +406,37 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 23,
-                "end": 49
+                "start": 44,
+                "end": 87
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 125611
+              "width": 198132
             }
           ]
         },
         {
-          "frame": 0,
+          "frame": 1,
           "text": {
-            "start": 49,
-            "end": 72
-          },
-          "preview": "on the outside. Nobody",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 27034
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 37741,
-          "width": 115729,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 49,
-                "end": 72
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 118354
-            }
-          ]
-        },
-        {
-          "frame": 0,
-          "text": {
-            "start": 72,
+            "start": 87,
             "end": 98
           },
-          "preview": "measured it at first; the",
+          "preview": "first; the",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 40551
+              "y": 0
             },
-            "width": 133120,
-            "height": 13517
+            "width": 81920,
+            "height": 12288
           },
-          "baseline": 51258,
-          "width": 116373,
+          "baseline": 9733,
+          "width": 38481,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -347,37 +449,37 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 72,
+                "start": 87,
                 "end": 98
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 118998
+              "width": 40867
             }
           ]
         },
         {
-          "frame": 0,
+          "frame": 1,
           "text": {
             "start": 98,
-            "end": 123
+            "end": 115
           },
-          "preview": "difference was a quarter",
+          "preview": "difference was a",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 54068
+              "y": 12288
             },
-            "width": 133120,
-            "height": 13517
+            "width": 81920,
+            "height": 12288
           },
-          "baseline": 64775,
-          "width": 121520,
+          "baseline": 22021,
+          "width": 73839,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -391,36 +493,36 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 98,
-                "end": 123
+                "end": 115
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 124145
+              "width": 76225
             }
           ]
         },
         {
-          "frame": 0,
+          "frame": 1,
           "text": {
-            "start": 123,
-            "end": 149
+            "start": 115,
+            "end": 129
           },
-          "preview": "of an inch, and a quarter",
+          "preview": "quarter of an",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 67585
+              "y": 24576
             },
-            "width": 133120,
-            "height": 13517
+            "width": 81920,
+            "height": 12288
           },
-          "baseline": 78292,
-          "width": 123795,
+          "baseline": 34309,
+          "width": 59628,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -433,37 +535,123 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 123,
-                "end": 149
+                "start": 115,
+                "end": 129
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 126420
+              "width": 62014
             }
           ]
         },
         {
           "frame": 1,
           "text": {
-            "start": 149,
-            "end": 171
+            "start": 129,
+            "end": 141
           },
-          "preview": "of an inch is easy to",
+          "preview": "inch, and a",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 36864
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 46597,
+          "width": 50523,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 129,
+                "end": 141
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 52909
+            }
+          ]
+        },
+        {
+          "frame": 1,
+          "text": {
+            "start": 141,
+            "end": 155
+          },
+          "preview": "quarter of an",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 49152
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 58885,
+          "width": 59628,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 141,
+                "end": 155
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 62014
+            }
+          ]
+        },
+        {
+          "frame": 3,
+          "text": {
+            "start": 155,
+            "end": 202
+          },
+          "preview": "inch is easy to forgive. Later a door appeared",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 133120,
-            "height": 13517
+            "width": 204800,
+            "height": 12288
           },
-          "baseline": 10707,
-          "width": 98237,
+          "baseline": 9733,
+          "width": 203509,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -476,37 +664,37 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 149,
-                "end": 171
+                "start": 155,
+                "end": 202
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 100862
+              "width": 205895
             }
           ]
         },
         {
-          "frame": 1,
+          "frame": 3,
           "text": {
-            "start": 171,
-            "end": 193
+            "start": 202,
+            "end": 244
           },
-          "preview": "forgive. Later a door",
+          "preview": "in a wall where no door had been, opening",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 13517
+              "y": 12288
             },
-            "width": 133120,
-            "height": 13517
+            "width": 204800,
+            "height": 12288
           },
-          "baseline": 24224,
-          "width": 101682,
+          "baseline": 22021,
+          "width": 194466,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -519,123 +707,37 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 171,
-                "end": 193
+                "start": 202,
+                "end": 244
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 104307
+              "width": 196852
             }
           ]
         },
         {
-          "frame": 1,
+          "frame": 4,
           "text": {
-            "start": 193,
-            "end": 218
-          },
-          "preview": "appeared in a wall where",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 27034
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 37741,
-          "width": 125202,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 193,
-                "end": 218
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 127827
-            }
-          ]
-        },
-        {
-          "frame": 1,
-          "text": {
-            "start": 218,
-            "end": 236
-          },
-          "preview": "no door had been,",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 40551
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 51258,
-          "width": 91489,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 218,
-                "end": 236
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 94114
-            }
-          ]
-        },
-        {
-          "frame": 1,
-          "text": {
-            "start": 236,
+            "start": 244,
             "end": 260
           },
-          "preview": "opening onto a corridor",
+          "preview": "onto a corridor",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 54068
+              "y": 0
             },
-            "width": 133120,
-            "height": 13517
+            "width": 81920,
+            "height": 12288
           },
-          "baseline": 64775,
-          "width": 119538,
+          "baseline": 9733,
+          "width": 68805,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -648,37 +750,37 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 236,
+                "start": 244,
                 "end": 260
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 122163
+              "width": 71191
             }
           ]
         },
         {
-          "frame": 1,
+          "frame": 4,
           "text": {
             "start": 260,
-            "end": 286
+            "end": 273
           },
-          "preview": "that went on further than",
+          "preview": "that went on",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 67585
+              "y": 12288
             },
-            "width": 133120,
-            "height": 13517
+            "width": 81920,
+            "height": 12288
           },
-          "baseline": 78292,
-          "width": 127187,
+          "baseline": 22021,
+          "width": 56944,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -692,38 +794,167 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 260,
-                "end": 286
+                "end": 273
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 129812
+              "width": 59330
             }
           ]
         },
         {
-          "frame": 3,
+          "frame": 4,
           "text": {
-            "start": 286,
-            "end": 312
+            "start": 273,
+            "end": 290
           },
-          "preview": "the house could hold. Its",
+          "preview": "further than the",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 24576
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 34309,
+          "width": 73379,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 273,
+                "end": 290
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 75765
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 290,
+            "end": 308
+          },
+          "preview": "house could hold.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 36864
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 46597,
+          "width": 81028,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 290,
+                "end": 308
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 83414
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 308,
+            "end": 323
+          },
+          "preview": "Its walls were",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 49152
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 58885,
+          "width": 61953,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 308,
+                "end": 323
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 64339
+            }
+          ]
+        },
+        {
+          "frame": 6,
+          "text": {
+            "start": 323,
+            "end": 361
+          },
+          "preview": "smooth and cold and the colour of ash.",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 133120,
-            "height": 13517
+            "width": 204800,
+            "height": 12288
           },
-          "baseline": 10707,
-          "width": 123177,
+          "baseline": 9733,
+          "width": 176833,
           "explanation": {
-            "reason": "opportunity",
+            "reason": "end",
             "score": null,
             "adjustment": {
               "word_spacing": 0,
@@ -734,526 +965,271 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 286,
-                "end": 312
+                "start": 323,
+                "end": 361
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 11264,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 125802
-            }
-          ]
-        },
-        {
-          "frame": 3,
-          "text": {
-            "start": 312,
-            "end": 334
-          },
-          "preview": "walls were smooth and",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 13517
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 24224,
-          "width": 114772,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 312,
-                "end": 334
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 117397
-            }
-          ]
-        },
-        {
-          "frame": 3,
-          "text": {
-            "start": 334,
-            "end": 362
-          },
-          "preview": "cold and the colour of ash.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 27034
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 37741,
-          "width": 132660,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": true
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 334,
-                "end": 362
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 135285
-            }
-          ]
-        },
-        {
-          "frame": 3,
-          "text": {
-            "start": 362,
-            "end": 385
-          },
-          "preview": "The house was a little",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 40551
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 51258,
-          "width": 107879,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": true
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 362,
-                "end": 385
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 110504
-            }
-          ]
-        },
-        {
-          "frame": 3,
-          "text": {
-            "start": 385,
-            "end": 411
-          },
-          "preview": "larger on the inside than",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 54068
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 64775,
-          "width": 122986,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 385,
-                "end": 411
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 125611
-            }
-          ]
-        },
-        {
-          "frame": 3,
-          "text": {
-            "start": 411,
-            "end": 434
-          },
-          "preview": "on the outside. Nobody",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 67585
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 78292,
-          "width": 115729,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 411,
-                "end": 434
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 118354
-            }
-          ]
-        },
-        {
-          "frame": 4,
-          "text": {
-            "start": 434,
-            "end": 460
-          },
-          "preview": "measured it at first; the",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 0
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 10707,
-          "width": 116373,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 434,
-                "end": 460
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 118998
-            }
-          ]
-        },
-        {
-          "frame": 4,
-          "text": {
-            "start": 460,
-            "end": 485
-          },
-          "preview": "difference was a quarter",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 13517
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 24224,
-          "width": 121520,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 460,
-                "end": 485
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 124145
-            }
-          ]
-        },
-        {
-          "frame": 4,
-          "text": {
-            "start": 485,
-            "end": 511
-          },
-          "preview": "of an inch, and a quarter",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 27034
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 37741,
-          "width": 123795,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 485,
-                "end": 511
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 126420
-            }
-          ]
-        },
-        {
-          "frame": 4,
-          "text": {
-            "start": 511,
-            "end": 533
-          },
-          "preview": "of an inch is easy to",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 40551
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 51258,
-          "width": 98237,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 511,
-                "end": 533
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 100862
-            }
-          ]
-        },
-        {
-          "frame": 4,
-          "text": {
-            "start": 533,
-            "end": 555
-          },
-          "preview": "forgive. Later a door",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 54068
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 64775,
-          "width": 101682,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 533,
-                "end": 555
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 104307
-            }
-          ]
-        },
-        {
-          "frame": 4,
-          "text": {
-            "start": 555,
-            "end": 580
-          },
-          "preview": "appeared in a wall where",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 67585
-            },
-            "width": 133120,
-            "height": 13517
-          },
-          "baseline": 78292,
-          "width": 125202,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 555,
-                "end": 580
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 127827
+              "width": 176833
             }
           ]
         }
       ]
     },
     {
-      "node": "2214@1",
-      "kind": "annotation",
+      "node": "377@1",
+      "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
-        "size": 8448,
-        "line_height": 10560,
+        "size": 10240,
+        "line_height": 12288,
         "explain": {
           "family": "default",
-          "line-height": "style note",
-          "size": "style note"
+          "line-height": "default",
+          "size": "style named-narrow"
+        },
+        "bases": {
+          "size": "frame-width(\"narrow\") = 80pt"
         }
       },
       "lines": [
         {
-          "frame": 2,
+          "frame": 7,
           "text": {
             "start": 0,
-            "end": 18
+            "end": 16
           },
-          "preview": "On the first page.",
+          "preview": "Under a hostile",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 102400,
-            "height": 10560
+            "width": 81920,
+            "height": 12288
           },
-          "baseline": 8241,
-          "width": 64270,
+          "baseline": 9733,
+          "width": 69560,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 16
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 71946
+            }
+          ]
+        },
+        {
+          "frame": 7,
+          "text": {
+            "start": 16,
+            "end": 22
+          },
+          "preview": "style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 12288
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 22021,
+          "width": 23859,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 16,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 23859
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "405@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style medium-page-block"
+        },
+        "bases": {
+          "size": "block-width = 80pt; medium-width = 420pt; page-width = 420pt"
+        }
+      },
+      "lines": [
+        {
+          "frame": 7,
+          "text": {
+            "start": 0,
+            "end": 16
+          },
+          "preview": "Under a hostile",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 32768
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 42501,
+          "width": 69560,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 16
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 71946
+            }
+          ]
+        },
+        {
+          "frame": 7,
+          "text": {
+            "start": 16,
+            "end": 22
+          },
+          "preview": "style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 45056
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 54789,
+          "width": 23859,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 16,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 23859
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "433@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.basis-indefinite",
+            "message": "size in style auto-block-height: block-height depends on its own content here; counted as zero; this layer's value is ignored and the value inherited from before is used",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 9,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 204800,
+            "height": 12288
+          },
+          "baseline": 9733,
+          "width": 95805,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -1267,111 +1243,152 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 18
+                "end": 22
               },
               "face": {
                 "family": "Source Serif Pro",
                 "hash": "199c8adc83479480d9aa5d942afe8f52"
               },
-              "size": 8448,
+              "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 64270
+              "width": 95805
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "461@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.basis-unresolved",
+            "message": "size in style no-line-yet: line-width does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 10,
+          "text": {
+            "start": 0,
+            "end": 16
+          },
+          "preview": "Under a hostile",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 9733,
+          "width": 69560,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 16
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 71946
+            }
+          ]
+        },
+        {
+          "frame": 10,
+          "text": {
+            "start": 16,
+            "end": 22
+          },
+          "preview": "style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 12288
+            },
+            "width": 81920,
+            "height": 12288
+          },
+          "baseline": 22021,
+          "width": 23859,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 16,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 23859
             }
           ]
         }
       ]
     }
   ],
-  "relations": [
-    {
-      "id": "2241@1",
-      "schema": "reprise.follow",
-      "owner": "2214@1",
-      "status": "valid",
-      "applied": true,
-      "targets": [
-        {
-          "role": "line",
-          "status": "valid",
-          "resolved": {
-            "line": {
-              "node": "8@1",
-              "line": 0
-            }
-          }
-        }
-      ]
-    },
-    {
-      "id": "2273@1",
-      "schema": "reprise.follow",
-      "owner": "2243@1",
-      "status": "missing",
-      "applied": false,
-      "targets": [
-        {
-          "role": "line",
-          "status": "missing",
-          "resolved": null
-        }
-      ]
-    }
-  ],
+  "relations": [],
   "diagnostics": [
     {
-      "severity": "error",
-      "code": "layout.page-limit",
-      "subject": {
-        "kind": "document"
-      },
-      "message": "the text needs more than 2 pages; the rest was left out",
-      "bytes": null
-    },
-    {
-      "severity": "error",
-      "code": "layout.text-unplaced",
+      "severity": "warning",
+      "code": "style.basis-indefinite",
       "subject": {
         "kind": "node",
-        "id": "8@1"
+        "id": "433@1"
       },
-      "message": "bytes 580..2171 were not placed",
-      "bytes": {
-        "start": 580,
-        "end": 2171
-      }
-    },
-    {
-      "severity": "error",
-      "code": "layout.text-unplaced",
-      "subject": {
-        "kind": "node",
-        "id": "2183@1"
-      },
-      "message": "bytes 0..27 were not placed",
-      "bytes": {
-        "start": 0,
-        "end": 27
-      }
-    },
-    {
-      "severity": "error",
-      "code": "relation.no-match",
-      "subject": {
-        "kind": "relation",
-        "id": "2273@1"
-      },
-      "message": "layout has no answer for the query (not laid out, or past the edge)",
+      "message": "size in style auto-block-height: block-height depends on its own content here; counted as zero; this layer's value is ignored and the value inherited from before is used",
       "bytes": null
     },
     {
       "severity": "warning",
-      "code": "layout.unplaced",
+      "code": "style.basis-unresolved",
       "subject": {
         "kind": "node",
-        "id": "2243@1"
+        "id": "461@1"
       },
-      "message": "no relation places this block; not drawn",
+      "message": "size in style no-line-yet: line-width does not exist in this context; counted as zero; this layer's value is ignored and the value inherited from before is used",
       "bytes": null
     }
   ]

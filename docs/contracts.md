@@ -183,8 +183,7 @@ Codes in use:
     cut the chain at the problem and report it (`style.parent-cycle`,
     `style.parent-missing`, `style.chain-too-long`). What was collected stays in use.
 -   **Open:** `Param::Length` still holds a `LengthExpr`. Letting relation parameters hold
-    an `Expr` is a follow-up. Layout does not yet publish `ComputedStyle.notes` or build a
-    `ResolutionContext` per frame; the wiring is described in the style workstream's hand-off.
+    an `Expr` is a follow-up.
 
 ## Shaping: `reprise-shape`
 
@@ -250,8 +249,6 @@ Codes in use:
     minimum width).
 -   **Conformance:** `compose/tests/conformance.rs` runs every composer against adversarial
     geometry, breaks, shaping and texts. A new composer must be added to it.
--   **Open:** layout doesn't yet apply `Adjustment` to glyph positions, so justified lines
-    render ragged.
 
 ## Layout snapshot: `reprise-layout::snapshot`
 

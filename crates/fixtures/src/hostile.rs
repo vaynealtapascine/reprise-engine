@@ -87,6 +87,10 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         column_storm()?,
         concurrent_templates()?,
         no_margin_frame()?,
+        bidi_line_override()?,
+        follow_lines_across_frames()?,
+        style_fragment_basis()?,
+        justified_bidi()?,
     ])
 }
 
@@ -772,9 +776,8 @@ fn paragraph_sized(doc: &Document, name: &str, value: Authored) -> Result<(), Do
 
 /// Style values that are too big, mistyped, unknown, from a newer format, or
 /// damaged (17, 34). Each style falls back to the value it inherited and the
-/// paragraph is laid out regardless. The `style.*` notes are reported by
-/// `Document::computed_style`; layout does not publish them yet, so `expect`
-/// is empty until the wiring lands and `tests/hostile.rs` checks the notes.
+/// paragraph is laid out regardless. Layout publishes the `style.*` notes
+/// from used style resolution on the affected node.
 pub fn style_expressions() -> Result<Fixture, DocError> {
     let doc = document()?;
     let deep = format!("expr1:{}1pt{}", "(".repeat(64), ")".repeat(64));
@@ -792,7 +795,17 @@ pub fn style_expressions() -> Result<Fixture, DocError> {
     )?;
     paragraph_sized(&doc, "damaged", Authored::Unparsed("furlongs:5".into()))?;
     doc.commit();
-    Ok(Fixture::new("style_expressions", doc, &[]))
+    Ok(Fixture::new(
+        "style_expressions",
+        doc,
+        &[
+            "style.expr-limit",
+            "style.type-error",
+            "style.unknown-function",
+            "style.function-failed",
+            "style.unparsed",
+        ],
+    ))
 }
 
 /// A font size in `lh`, a line height in `lh`, and style chains that loop or
@@ -829,7 +842,11 @@ pub fn style_cycles() -> Result<Fixture, DocError> {
         doc.append_block(BlockKind::Paragraph, name, "Under a hostile style.")?;
     }
     doc.commit();
-    Ok(Fixture::new("style_cycles", doc, &[]))
+    Ok(Fixture::new(
+        "style_cycles",
+        doc,
+        &["style.cycle", "style.parent-cycle", "style.parent-missing"],
+    ))
 }
 
 /// Percentages and references whose basis is missing or depends on its own
@@ -838,6 +855,26 @@ pub fn style_cycles() -> Result<Fixture, DocError> {
 /// and in a context where the main frame is auto-height.
 pub fn style_bases() -> Result<Fixture, DocError> {
     let doc = document()?;
+    // Half of a definite 24pt frame is a usable 12pt size. The shallow
+    // frame still forces pagination, rather than making a 114pt font from
+    // the built-in frame and overflowing every line.
+    doc.set_page_template(
+        &PageTemplate::new("style-bases", Dim::pt(360), Dim::pt(100))
+            .with_frame(flow_frame(
+                "main",
+                Dim::pt(10),
+                Dim::pt(10),
+                Dim::pt(200),
+                Dim::pt(24),
+            ))
+            .with_frame(margin_frame(
+                "margin",
+                Dim::pt(230),
+                Dim::pt(10),
+                Dim::pt(110),
+                Dim::pt(24),
+            )),
+    )?;
     paragraph_sized(&doc, "half-the-height", expr("50% * frame-height")?)?;
     paragraph_sized(&doc, "named-frame", expr("10% * frame-width(\"margin\")")?)?;
     paragraph_sized(
@@ -856,7 +893,11 @@ pub fn style_bases() -> Result<Fixture, DocError> {
         "Under a hostile style.",
     )?;
     doc.commit();
-    Ok(Fixture::new("style_bases", doc, &[]))
+    Ok(Fixture::new(
+        "style_bases",
+        doc,
+        &["style.basis-unresolved"],
+    ))
 }
 
 /// Every frame of the main flow is shorter than one line, so no line fits any
@@ -1109,4 +1150,114 @@ pub fn no_margin_frame() -> Result<Fixture, DocError> {
         doc,
         &["relation.no-frame", "layout.unplaced"],
     ))
+}
+
+/// RLO continues across soft and forced line breaks, with hanging spaces.
+pub fn bidi_line_override() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    doc.append_block(BlockKind::Paragraph, "body",
+        "Latin \u{202e}office 123 office 456 office 789    \nmore reversed office 321    \u{202c} normal end.   ")?;
+    doc.append_block(BlockKind::Paragraph, "body", "אבג 123 אבג    \nאבג 456    ")?;
+    doc.commit();
+    Ok(Fixture::new("bidi_line_override", doc, &[]))
+}
+
+/// A follow target covers lines on both sides of a frame break. A required
+/// single-line role must report all candidates as ambiguous and place none.
+pub fn follow_lines_across_frames() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let text = long_text(1);
+    let p = doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    let note = doc.append_block(BlockKind::Annotation, "note", "Which column?")?;
+    let range = doc.add_range(p, 0..text.len(), RangePolicy::FIXED)?;
+    let relation = Relation::new(reprise_doc::relation::builtin::FOLLOW)
+        .owned_by(note)
+        .target("line", Target::Layout(LayoutQuery::LinesIn { range }));
+    doc.add_relation(&SchemaRegistry::builtin(), &relation)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "follow_lines_across_frames",
+        doc,
+        &["relation.ambiguous", "layout.unplaced"],
+    ))
+}
+
+/// The style keeps its starting frame's 10pt size across a narrower column.
+/// Named frames and medium/page/block bases resolve, but auto block height
+/// and the unavailable line extent diagnose and fall back.
+pub fn style_fragment_basis() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(
+        &PageTemplate::new("unequal-style-columns", Dim::pt(420), Dim::pt(180))
+            .with_frame(flow_frame(
+                "wide",
+                Dim::pt(10),
+                Dim::pt(10),
+                Dim::pt(200),
+                Dim::pt(30),
+            ))
+            .with_frame(flow_frame(
+                "narrow",
+                Dim::pt(220),
+                Dim::pt(10),
+                Dim::pt(80),
+                Dim::pt(60),
+            ))
+            .with_frame(margin_frame(
+                "margin",
+                Dim::pt(310),
+                Dim::pt(10),
+                Dim::pt(100),
+                Dim::pt(60),
+            )),
+    )?;
+    let mut style = Style::default();
+    style.set(Property::Size, expr("5% * frame-width")?);
+    doc.define_style("frame-sized", &style)?;
+    doc.append_block(BlockKind::Paragraph, "frame-sized", &long_text(1))?;
+    paragraph_sized(&doc, "named-narrow", expr(r#"frame-width("narrow") / 8"#)?)?;
+    paragraph_sized(
+        &doc,
+        "medium-page-block",
+        expr("min(medium-width / 42, page-width / 42, block-width / 8)")?,
+    )?;
+    paragraph_sized(&doc, "auto-block-height", expr("10% * block-height")?)?;
+    paragraph_sized(&doc, "no-line-yet", expr("line-width / 20")?)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "style_fragment_basis",
+        doc,
+        &["style.basis-indefinite", "style.basis-unresolved"],
+    ))
+}
+
+/// Justification attacks RTL hanging spaces, a wrapping RLO, mixed levels,
+/// non-ASCII word separators, single words and all-space forced lines.
+pub fn justified_bidi() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let rtl = format!("{}\nאבג 456    ", "אבג דהו זחט יכל 123 ".repeat(8));
+    doc.append_block(BlockKind::Paragraph, "body", &rtl)?;
+    let reversed = format!(
+        "Latin \u{202e}{}    \u{202c} normal end.   ",
+        "office 123 office 456 more words ".repeat(6)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &reversed)?;
+    let mixed = format!(
+        "{}\u{2028}A short last line.   ",
+        "Latin אבג 123 words דהו 456 office ".repeat(6)
+    );
+    doc.append_block(BlockKind::Paragraph, "body", &mixed)?;
+    doc.append_block(BlockKind::Paragraph, "body", "word\nword\n    \nword")?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        &"one\u{a0}two three\u{1361}four five six seven ".repeat(6),
+    )?;
+    doc.commit();
+    let mut fixture = Fixture::new("justified_bidi", doc, &[]);
+    fixture.engine.composer = Box::new(Optimal::justified());
+    Ok(fixture)
 }

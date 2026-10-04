@@ -485,5 +485,66 @@ expression: snapshot.to_json()
     }
   ],
   "relations": [],
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "style.cycle",
+      "subject": {
+        "kind": "node",
+        "id": "8@1"
+      },
+      "message": "size in style size-in-lh: line height depends on the value being computed; this layer's value is ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.cycle",
+      "subject": {
+        "kind": "node",
+        "id": "36@1"
+      },
+      "message": "line-height in style line-height-in-lh: line height depends on the value being computed; this layer's value is ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.parent-cycle",
+      "subject": {
+        "kind": "node",
+        "id": "73@1"
+      },
+      "message": "style loop-a is its own ancestor (reached from style loop-b); the chain stops before it repeats",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.parent-cycle",
+      "subject": {
+        "kind": "node",
+        "id": "99@1"
+      },
+      "message": "style self is its own ancestor (reached from style self); the chain stops before it repeats",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.parent-missing",
+      "subject": {
+        "kind": "node",
+        "id": "125@1"
+      },
+      "message": "style orphan refers to style nobody, which is not defined",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "style.parent-missing",
+      "subject": {
+        "kind": "node",
+        "id": "151@1"
+      },
+      "message": "the block refers to style undefined, which is not defined",
+      "bytes": null
+    }
+  ]
 }

@@ -23,30 +23,11 @@
 //!     simply matches nothing.
 //! -   `Rebound` is `Info`: the schema asked for rebinding.
 //! -   A policy-deleted relation is `Info` (`relation.target-deleted`): the
-//!     output is what the schema declared. Its targets are `Missing`, as the
-//!     status has no deleted value yet.
+//!     output is what the schema declared. Its targets have `Deleted` status.
 //!
-//! # Switching `follow` over
-//!
-//! `follow.rs` still resolves its one target by hand. To switch it:
-//!
-//! 1.  Build a [`Resolver`] once in `relations::run` (it is already there, as
-//!     `resolver`) and pass `&mut resolver` and the relation's schema to
-//!     `Follow::apply`.
-//! 2.  Replace the `match doc.resolve_range(..)` and `line_containing(..)`
-//!     block with
-//!     `let resolved = resolver.resolve(snapshot, id, schema, relation);`.
-//! 3.  Push `resolved.diagnostics` into `snapshot.diagnostics` and
-//!     `resolved.targets` into `result.targets`.
-//! 4.  Take the line with `resolved.unique("line")`. It is `Some(&Resolution)`
-//!     only for a `Valid` or `Rebound` target, so a missing, ambiguous or
-//!     deleted target returns before placing, and the owner is reported as
-//!     unplaced. Match `Resolution::Line(line)`.
-//! 5.  The existing codes carry over unchanged: `relation.missing-target`,
-//!     `relation.no-match` and `relation.rebound` come out with the same
-//!     severities for the `line` role (it has `min = 1`).
-//!
-//! The same resolver then gives `follow` every new `LayoutQuery` for free.
+//! `follow` shares this resolver. Its required `line` role retains the
+//! existing missing/no-match Error and rebound Info codes. A singleton
+//! `LinesIn` identifies one line; multiple matches remain ambiguous.
 
 use reprise_diag::{Code, Severity};
 use reprise_doc::{
@@ -67,7 +48,7 @@ pub(crate) struct Resolver<'a> {
 /// A relation's targets, resolved and reported.
 pub(crate) struct Resolved {
     /// The schema deletes the relation and a target is deleted (14). Every
-    /// target is `Missing`.
+    /// target is `Deleted`.
     pub deleted: bool,
     pub targets: Vec<TargetLayout>,
     pub diagnostics: Vec<Diagnostic>,
@@ -265,7 +246,17 @@ impl Context<'_> {
                                 ),
                             );
                         }
-                        if self.owner.is_some_and(|o| names(&resolution, o)) {
+                        // Legacy follow/LineContaining reported only the
+                        // placement failure for an owner targeting itself.
+                        // Preserve its public diagnostic set when sharing
+                        // resolution; other queries retain self-reference info.
+                        let legacy_follow = self.schema.id
+                            == reprise_doc::relation::builtin::FOLLOW
+                            && matches!(
+                                target.target,
+                                Target::Layout(reprise_doc::LayoutQuery::LineContaining { .. })
+                            );
+                        if !legacy_follow && self.owner.is_some_and(|o| names(&resolution, o)) {
                             say(
                                 Severity::Info,
                                 codes::RELATION_SELF_REFERENCE,
@@ -322,5 +313,41 @@ fn answer(snapshot: &LayoutSnapshot, target: &Target, found: &Found) -> Option<R
             bytes: bytes.clone(),
         }),
         Found::Snapshot(c) => Some(Resolution::Snapshot(c.clone())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unique_never_selects_ambiguous_deleted_or_multiple_targets() {
+        let mut resolved = Resolved {
+            deleted: false,
+            targets: vec![],
+            diagnostics: vec![],
+        };
+        assert!(resolved.unique("line").is_none());
+        for status in [
+            RelationStatus::Missing,
+            RelationStatus::Ambiguous,
+            RelationStatus::Deleted,
+        ] {
+            resolved.targets = vec![TargetLayout {
+                role: "line".into(),
+                status,
+                resolved: Some(Resolution::Lines(vec![])),
+            }];
+            assert!(resolved.unique("line").is_none());
+        }
+        let target = TargetLayout {
+            role: "line".into(),
+            status: RelationStatus::Valid,
+            resolved: Some(Resolution::Lines(vec![])),
+        };
+        resolved.targets = vec![target.clone()];
+        assert!(resolved.unique("line").is_some());
+        resolved.targets = vec![target; 4096];
+        assert!(resolved.unique("line").is_none());
     }
 }
