@@ -176,3 +176,11 @@ undo, concurrent merging and input bounds. Clipboard is included in CI/WASM chec
 | `layout` | `src/regions.rs`, `src/regions/tests.rs`, `src/relations/mod.rs`, `src/template.rs` | Shared bounded-feedback outcome/freeze helpers, exact comparable templates, explicit relation/reading stages; unchanged reference output | 26, 37, 38 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, paired `incremental_page_seam` snapshots | UTF-8 pagination seam with a following annotation and explicit reading precedence | 27, 38, 39 |
 | - | `docs/incremental.md`, additive section in `docs/contracts.md` | Exact memo keys and reuse argument, scheduling/partial semantics, limits and Salsa evaluation | 16, 26-28, 39, 41 |
+
+Clipboard fixture coverage: `fixtures/src/hostile.rs` appends `clipboard_unicode_seams`
+(expanding/fixed/point ranges across ligatures, combining text and RTL, plus note/reference
+edges); `fixtures/tests/hostile.rs` registers it and its paired layout/content snapshots.
+`clipboard/tests/roundtrip.rs` compares every hostile fixture's live topology, range
+policies and rendered page/frame/block/glyph geometry after native copy/paste and undo/redo.
+`clipboard/tests/import_export.rs` attacks parser caps and malformed tag soup, verifies
+resource hashes, reading order and every exporter's House-of-Leaves loss reports.
