@@ -518,7 +518,8 @@ expression: snapshot.to_json()
             }
           ]
         }
-      ]
+      ],
+      "base_level": 1
     }
   ],
   "relations": [],

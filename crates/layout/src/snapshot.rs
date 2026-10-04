@@ -91,6 +91,15 @@ pub struct BlockLayout {
     pub text: String,
     /// In logical order. A block's lines may sit in several frames.
     pub lines: Vec<LineLayout>,
+    /// The paragraph's resolved bidi base level (22): 0 for left to right,
+    /// 1 for right to left. Carets, visual movement and line alignment need
+    /// it. Left out of JSON snapshots when 0.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub base_level: u8,
+}
+
+fn is_zero(level: &u8) -> bool {
+    *level == 0
 }
 
 /// One line fragment: a line's text in one interval of one frame.
