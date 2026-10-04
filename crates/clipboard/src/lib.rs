@@ -24,12 +24,17 @@ pub enum ClipboardError {
     Invalid(String),
     #[error("resource hash or font identity mismatch")]
     ResourceHash,
+    #[error(transparent)]
+    Edit(#[from] reprise_edit::EditError),
     #[error("export failed: {0}")]
     Export(String),
 }
 
 impl ClipboardError {
     pub fn note(&self) -> reprise_diag::Note {
+        if let Self::Edit(error) = self {
+            return error.note();
+        }
         let code = match self {
             Self::Limit(_) | Self::Fragment(FragmentError::Limit(_)) => codes::LIMIT,
             Self::Fragment(FragmentError::Version(_)) => codes::VERSION,

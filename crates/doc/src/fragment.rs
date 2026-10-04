@@ -150,6 +150,32 @@ pub struct CopyBlock {
 }
 
 impl Document {
+    /// Supplies inferred columns after a conservative HTML table import.
+    /// Does not commit; callers include this authored metadata in their step.
+    pub fn set_fragment_table_columns(
+        &self,
+        node: NodeId,
+        columns: crate::TableColumns,
+    ) -> Result<(), DocError> {
+        if !matches!(self.table_role(node)?, Some(crate::TableRole::Table(_))) {
+            return Err(DocError::Malformed(node, "table role"));
+        }
+        #[derive(Serialize)]
+        struct Envelope {
+            version: u32,
+            role: crate::TableRole,
+        }
+        let raw = serde_json::to_string(&Envelope {
+            version: 1,
+            role: crate::TableRole::Table(columns),
+        })
+        .map_err(|e| DocError::Store(e.to_string()))?;
+        self.tree("content")
+            .get_meta(node.0)?
+            .insert("table1", raw)?;
+        Ok(())
+    }
+
     /// Extract live authored content deterministically. The caller reports policy losses.
     pub fn copy_fragment(
         &self,
@@ -395,6 +421,40 @@ impl Document {
         self.tree("ranges")
             .get_meta(id.0)?
             .insert("deleted", false)?;
+        Ok(())
+    }
+
+    /// Moves an existing range onto replacement text without changing its identity.
+    /// This is authored and undoable; the operation does not commit.
+    pub fn reanchor_fragment_range(
+        &self,
+        id: RangeId,
+        node: NodeId,
+        bytes: Range<usize>,
+        policy: RangePolicy,
+    ) -> Result<(), DocError> {
+        if bytes.start > bytes.end {
+            return Err(crate::text::TextError::BadRange(bytes).into());
+        }
+        let tree = self.tree("ranges");
+        if !self.live(&tree, id.0) {
+            return Err(DocError::Store(format!("no live range {id}")));
+        }
+        let text = self.block(node)?.text;
+        let start = text.anchor(bytes.start, policy.start)?;
+        let end = text.anchor(bytes.end, policy.end)?;
+        let meta = tree.get_meta(id.0)?;
+        meta.insert("node", node.to_string())?;
+        meta.insert("start", start.encode())?;
+        meta.insert("end", end.encode())?;
+        meta.insert(
+            "empty",
+            if policy.empty == Empty::Keep {
+                "keep"
+            } else {
+                "missing"
+            },
+        )?;
         Ok(())
     }
 }

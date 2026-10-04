@@ -53,6 +53,83 @@ fn plain_html_unicode_breaks_styles_and_tables() {
 }
 
 #[test]
+fn imported_tables_have_inferred_columns_and_render_all_cells() {
+    let imported = import_html(
+        "<table><tr><td>AAA</td><td>BBB</td></tr><tr><td>CCC</td><td>DDD</td></tr></table>",
+        ImportLimits::default(),
+    )
+    .unwrap();
+    let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
+    imported
+        .fragment
+        .paste(&mut editor, None, "target")
+        .unwrap();
+    let engine = reprise_fixtures::engine();
+    let layout = engine.layout(editor.document());
+    assert!(
+        layout
+            .diagnostics_with("layout.table-invalid")
+            .next()
+            .is_none()
+    );
+    for text in ["AAA", "BBB", "CCC", "DDD"] {
+        assert!(
+            layout
+                .blocks
+                .iter()
+                .any(|b| b.text == text && !b.lines.is_empty())
+        );
+    }
+    let html = format!("<table><tr>{}</tr></table>", "<td>x</td>".repeat(129));
+    assert!(matches!(
+        import_html(&html, ImportLimits::default()),
+        Err(reprise_clipboard::ClipboardError::Limit(
+            "HTML table columns"
+        ))
+    ));
+}
+
+#[test]
+fn html_direction_matches_shaping_for_pinned_unicode_17_and_isolates() {
+    let engine = reprise_fixtures::engine();
+    for text in [
+        "\u{10940}",
+        "123 אב",
+        "\u{2067}אב\u{2069} Latin",
+        "\u{2068}Latin\u{2069} אב",
+        "\u{202e}Latin\u{202c}",
+        "\nאב",
+    ] {
+        let doc = Document::new(1).unwrap();
+        let node = doc
+            .append_block(reprise_doc::BlockKind::Paragraph, "", text)
+            .unwrap();
+        doc.commit();
+        let snapshot = engine.layout(&doc);
+        let base = snapshot
+            .blocks
+            .iter()
+            .find(|b| b.node == node)
+            .unwrap()
+            .base_level;
+        let options = ExportOptions {
+            source_namespace: "source",
+            schemas: &engine.schemas,
+            fonts: None,
+        };
+        let html = String::from_utf8(Html.export(&doc, None, &options).unwrap().bytes).unwrap();
+        assert!(
+            html.contains(if base % 2 == 1 {
+                "dir=\"rtl\""
+            } else {
+                "dir=\"ltr\""
+            }),
+            "direction differs for {text:?}"
+        );
+    }
+}
+
+#[test]
 fn huge_deep_token_heavy_unbalanced_and_active_html_are_bounded() {
     for (html, limits) in [
         (
@@ -292,4 +369,89 @@ fn reading_order_is_respected_and_html_text_is_escaped() {
     doc.block(a).unwrap().text.insert(0, "new").unwrap();
     doc.commit();
     assert!(PlainText.export(&doc, Some(&snapshot), &options).is_err());
+}
+
+#[test]
+fn whitespace_direction_attribute_and_css_limits_are_explicit() {
+    let imported = import_plain("  one   two\tthree\n four  ").unwrap();
+    let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
+    imported
+        .fragment
+        .paste(&mut editor, None, "target")
+        .unwrap();
+    let schemas = SchemaRegistry::builtin();
+    let options = ExportOptions {
+        source_namespace: "target",
+        schemas: &schemas,
+        fonts: None,
+    };
+    let html = String::from_utf8(
+        Html.export(editor.document(), None, &options)
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    assert_eq!(
+        text(&import_html(&html, ImportLimits::default()).unwrap()),
+        text(&imported)
+    );
+    let explicit = import_html("<p dir='rtl'>123 Latin</p>", ImportLimits::default()).unwrap();
+    assert!(
+        explicit
+            .notes
+            .iter()
+            .any(|n| n.code == "clipboard.html-approximated")
+    );
+    for html in [
+        format!("<p {}>x</p>", "x='y' ".repeat(129)),
+        format!("<p style='{}'>x</p>", "font-size:1pt;".repeat(129)),
+    ] {
+        let error = match import_html(&html, ImportLimits::default()) {
+            Err(error) => error,
+            Ok(_) => panic!("silent truncation"),
+        };
+        assert_eq!(error.note().code, "clipboard.limit");
+    }
+}
+
+#[test]
+fn plain_export_retains_the_unplaced_tail_and_resource_dedup_keeps_font_pins() {
+    let fixture = reprise_fixtures::hostile::page_limit().unwrap();
+    let layout = fixture.engine.layout(&fixture.doc);
+    let options = ExportOptions {
+        source_namespace: "source",
+        schemas: &fixture.engine.schemas,
+        fonts: Some(&fixture.engine.fonts),
+    };
+    let plain = String::from_utf8(
+        PlainText
+            .export(&fixture.doc, Some(&layout), &options)
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    for node in fixture.doc.blocks() {
+        let text = fixture.doc.block(node).unwrap().text.to_string();
+        assert!(plain.contains(&text), "unplaced tail lost");
+    }
+    let mut native = copy_all(
+        &fixture.doc,
+        "source",
+        &fixture.engine.schemas,
+        Some(&layout),
+        Some(&fixture.engine.fonts),
+    )
+    .unwrap();
+    let font = native
+        .resources
+        .values()
+        .find(|r| matches!(r.kind, reprise_clipboard::ResourceKind::Font(_)))
+        .unwrap()
+        .bytes
+        .clone();
+    let hash = native.attach_asset(font).unwrap();
+    assert!(matches!(
+        native.resources[&hash].kind,
+        reprise_clipboard::ResourceKind::Font(_)
+    ));
 }

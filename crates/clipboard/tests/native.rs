@@ -415,3 +415,292 @@ fn invalid_future_deep_deleted_and_mixed_paste_leave_revision_unchanged() {
     fragment.blocks[0].text = "x".repeat(17 << 20);
     assert!(matches!(fragment.validate(), Err(FragmentError::Limit(_))));
 }
+
+#[test]
+fn missing_source_styles_cannot_accidentally_bind_to_target_definitions() {
+    let source = Document::new(1).unwrap();
+    source
+        .define_style(
+            "child",
+            &Style {
+                parent: Some("absent".into()),
+                ..Style::default()
+            },
+        )
+        .unwrap();
+    let node = source
+        .append_block(BlockKind::Paragraph, "child", "x")
+        .unwrap();
+    let expected = source.computed_style(node).unwrap().size;
+    let target = Document::new(2).unwrap();
+    target
+        .define_style(
+            "absent",
+            &Style {
+                size: Some(LengthExpr::Pt(Length::from_pt(100))),
+                ..Style::default()
+            },
+        )
+        .unwrap();
+    let mut editor = Editor::new(target, SchemaRegistry::builtin());
+    let pasted = editor
+        .paste(&copy(&source).fragment, None, "target")
+        .unwrap();
+    assert_eq!(
+        editor
+            .document()
+            .computed_style(pasted.applied.blocks[0])
+            .unwrap()
+            .size,
+        expected
+    );
+    assert!(
+        pasted
+            .notes
+            .iter()
+            .any(|n| n.code == "clipboard.style-clash")
+    );
+    assert!(editor.document().style("absent (paste 1)").is_none());
+}
+
+#[test]
+fn complete_table_selections_keep_topology_and_partial_selections_report_flattening() {
+    let fixture = reprise_fixtures::hostile::table_conflicting_widths().unwrap();
+    let layout = fixture.engine.layout(&fixture.doc);
+    let nav = reprise_edit::Navigator::semantic(&layout, &fixture.doc);
+    let selection = nav.select_all().unwrap();
+    let fragment = copy_selection(
+        &fixture.doc,
+        "source",
+        &selection,
+        &layout,
+        &fixture.engine.schemas,
+        None,
+    )
+    .unwrap();
+    assert!(fragment.fragment.blocks.iter().any(|b| b.table.is_some()));
+    let all = fixture
+        .doc
+        .copy_all_fragment("source", &fixture.engine.schemas)
+        .unwrap();
+    assert_eq!(all.blocks.len(), fragment.fragment.blocks.len());
+    let text_block = fragment
+        .fragment
+        .blocks
+        .iter()
+        .find(|b| b.table.is_none() && !b.text.is_empty())
+        .unwrap();
+    let selection = Selection {
+        anchor: Caret::new(text_block.id, 0),
+        focus: Caret::new(text_block.id, 1),
+    };
+    let fragment = copy_selection(
+        &fixture.doc,
+        "source",
+        &selection,
+        &layout,
+        &fixture.engine.schemas,
+        None,
+    )
+    .unwrap();
+    assert!(fragment.fragment.blocks.iter().all(|b| b.table.is_none()));
+    assert!(
+        fragment
+            .notes
+            .iter()
+            .any(|n| n.code == "clipboard.selection-table")
+    );
+    let selection = Selection {
+        anchor: Caret::new(text_block.id, 0),
+        focus: Caret::new(text_block.id, 0),
+    };
+    let fragment = copy_selection(
+        &fixture.doc,
+        "source",
+        &selection,
+        &layout,
+        &fixture.engine.schemas,
+        None,
+    )
+    .unwrap();
+    assert!(fragment.fragment.blocks.is_empty());
+}
+
+#[test]
+fn command_paste_tables_at_a_caret_and_position_effects_roundtrip() {
+    let source = reprise_fixtures::hostile::table_row_taller_than_page().unwrap();
+    let fragment = copy(&source.doc).fragment;
+    let target = doc(2, "headtail");
+    let host = target.blocks()[0];
+    let mut editor = Editor::new(target, SchemaRegistry::builtin());
+    let result = editor
+        .apply_command(Command::Paste {
+            fragment: Box::new(fragment),
+            at: Some((host, 4)),
+            target_namespace: "target".into(),
+        })
+        .unwrap();
+    let roots = editor.document().blocks();
+    assert_eq!(
+        editor.document().block(roots[0]).unwrap().text.to_string(),
+        "head"
+    );
+    assert_eq!(
+        editor
+            .document()
+            .block(*roots.last().unwrap())
+            .unwrap()
+            .text
+            .to_string(),
+        "tail"
+    );
+    assert!(editor.document().table_role(roots[1]).unwrap().is_some());
+    assert!(!result.blocks.is_empty());
+    assert_eq!(editor.undo_count(), 1);
+    editor.undo().unwrap();
+    assert_eq!(editor.document().blocks(), [host]);
+    editor.redo().unwrap();
+    assert_eq!(editor.document().blocks(), roots);
+
+    let plain = copy(&doc(5, "X")).fragment;
+    let target = doc(6, "AB");
+    let host = target.blocks()[0];
+    let mut editor = Editor::new(target, SchemaRegistry::builtin());
+    let pasted = editor.paste(&plain, Some((host, 1)), "target").unwrap();
+    let new = pasted.applied.blocks[0];
+    assert_eq!(
+        pasted
+            .applied
+            .map_position(host, 0, reprise_edit::Bias::After),
+        Some((new, 0))
+    );
+    assert_eq!(
+        pasted
+            .applied
+            .map_position(host, 1, reprise_edit::Bias::After),
+        Some((new, 2))
+    );
+    assert_eq!(
+        pasted
+            .applied
+            .map_position(host, 2, reprise_edit::Bias::After),
+        Some((new, 3))
+    );
+}
+
+#[test]
+fn host_ranges_keep_their_ids_and_affinities_through_single_block_paste() {
+    let target = doc(2, "ABCDEF");
+    let host = target.blocks()[0];
+    let cases = [
+        (0..2, RangePolicy::FIXED, 0..2),
+        (4..6, RangePolicy::FIXED, 5..7),
+        (2..5, RangePolicy::FIXED, 2..6),
+        (3..3, RangePolicy::POINT, 3..3),
+        (1..3, RangePolicy::EXPANDING, 1..4),
+    ];
+    let ranges: Vec<_> = cases
+        .iter()
+        .map(|(bytes, policy, _)| target.add_range(host, bytes.clone(), *policy).unwrap())
+        .collect();
+    target.commit();
+    let mut editor = Editor::new(target, SchemaRegistry::builtin());
+    let fragment = copy(&doc(5, "X"));
+    let pasted = editor
+        .paste(&fragment.fragment, Some((host, 3)), "target")
+        .unwrap();
+    let new = pasted.applied.blocks[0];
+    assert!(
+        pasted
+            .notes
+            .iter()
+            .all(|n| n.code != "clipboard.host-range-dropped")
+    );
+    for (range, (_, _, expected)) in ranges.iter().zip(&cases) {
+        assert!(
+            matches!(editor.document().resolve_range(*range), reprise_doc::RangeState::Valid { node, bytes } if node == new && bytes == *expected)
+        );
+    }
+    assert_eq!(editor.undo_count(), 1);
+    editor.undo().unwrap();
+    for (range, (original, _, _)) in ranges.iter().zip(&cases) {
+        assert!(
+            matches!(editor.document().resolve_range(*range), reprise_doc::RangeState::Valid { node, bytes } if node == host && bytes == *original)
+        );
+    }
+    editor.redo().unwrap();
+    for (range, (_, _, expected)) in ranges.iter().zip(&cases) {
+        assert!(
+            matches!(editor.document().resolve_range(*range), reprise_doc::RangeState::Valid { node, bytes } if node == new && bytes == *expected)
+        );
+    }
+}
+
+#[test]
+fn multi_block_paste_moves_local_host_ranges_and_reports_unrepresentable_spans() {
+    let source = doc(5, "X");
+    source.append_block(BlockKind::Paragraph, "", "Y").unwrap();
+    let fragment = copy(&source);
+    let target = doc(2, "abcdef");
+    let host = target.blocks()[0];
+    let before = target.add_range(host, 1..2, RangePolicy::FIXED).unwrap();
+    let after = target.add_range(host, 4..6, RangePolicy::FIXED).unwrap();
+    let crossing = target.add_range(host, 2..5, RangePolicy::FIXED).unwrap();
+    target.commit();
+    let mut editor = Editor::new(target, SchemaRegistry::builtin());
+    let pasted = editor
+        .paste(&fragment.fragment, Some((host, 3)), "target")
+        .unwrap();
+    assert!(
+        matches!(editor.document().resolve_range(before), reprise_doc::RangeState::Valid { node, bytes } if node == pasted.applied.blocks[0] && bytes == (1..2))
+    );
+    assert!(
+        matches!(editor.document().resolve_range(after), reprise_doc::RangeState::Valid { node, bytes } if node == pasted.applied.blocks[1] && bytes == (2..4))
+    );
+    assert!(matches!(
+        editor.document().resolve_range(crossing),
+        reprise_doc::RangeState::Missing { .. }
+    ));
+    assert!(
+        pasted
+            .notes
+            .iter()
+            .any(|n| n.code == "clipboard.host-range-dropped"
+                && n.severity == reprise_diag::Severity::Error)
+    );
+    editor.undo().unwrap();
+    assert!(
+        matches!(editor.document().resolve_range(crossing), reprise_doc::RangeState::Valid { node, bytes } if node == host && bytes == (2..5))
+    );
+}
+
+#[test]
+fn concurrent_caret_pastes_with_host_ranges_converge() {
+    let source = doc(10, "X");
+    let fragment = copy(&source);
+    let target = doc(1, "AB");
+    let host = target.blocks()[0];
+    let range = target
+        .add_range(host, 0..2, RangePolicy::EXPANDING)
+        .unwrap();
+    target.commit();
+    let peer = target.fork(2).unwrap();
+    let mut a = Editor::new(target, SchemaRegistry::builtin());
+    let mut b = Editor::new(peer, SchemaRegistry::builtin());
+    a.paste(&fragment.fragment, Some((host, 1)), "target")
+        .unwrap();
+    b.paste(&fragment.fragment, Some((host, 1)), "target")
+        .unwrap();
+    a.merge(b.document()).unwrap();
+    b.merge(a.document()).unwrap();
+    assert_eq!(a.document().blocks(), b.document().blocks());
+    assert_eq!(
+        a.document().resolve_range(range),
+        b.document().resolve_range(range)
+    );
+    let engine = reprise_fixtures::engine();
+    assert_eq!(
+        engine.layout(a.document()).to_json(),
+        engine.layout(b.document()).to_json()
+    );
+}

@@ -56,7 +56,7 @@ Codes in use:
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 | edit | `edit.limit`, `edit.invalid-command`, `edit.store` |
-| clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity` |
+| clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped` |
 | export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure` |
 
 ## Text store: `reprise-text`
@@ -542,7 +542,7 @@ here: through a dedicated `feat(contracts)` commit.
 - `Fragment` is authored data in `reprise-doc::fragment`, version 1. Source IDs are
   labels. `copy_fragment` accepts whole subtrees or explicit UTF-8 byte ranges;
   intersecting persistent ranges are clipped with their observable cursor policies.
-  Styles include inherited parents. Copy-all also carries raw authored page setup.
+  Styles include inherited parents. Copy-all also carries raw authored page setup. Kernel selections promote fully selected tables to subtrees; partial table selections flatten cell text with `clipboard.selection-table` Warning. Collapsed selections copy nothing.
 - Hosts supply a nonempty source/target namespace (normally the package DocumentId).
   Only equal namespaces authorize external relation targets. Peer equality does not.
   `plan_copy` is authoritative at both copy and paste; cross-document crossing relations
@@ -562,11 +562,11 @@ here: through a dedicated `feat(contracts)` commit.
 - At a paragraph caret the prefix/first pasted paragraph and last paragraph/suffix join.
   The pasted blocks retain new identities; the original host is tombstoned with a
   succession link. Tables and annotation boundaries keep separate prefix/suffix blocks.
-  Existing host ranges follow the kernel's split/join limitation (they do not migrate).
+  Existing host ranges migrate with the prefix/suffix while retaining IDs. A range that would span several pasted blocks remains missing, reported with `clipboard.host-range-dropped` Error; undo restores it.
   `at=None` appends; page setup is imported only into an empty document.
 - Missing styles are defined. If any named style clashes by content, the entire imported
   style graph is renamed deterministically to available `name (paste N)` names, retaining
-  inheritance, and `clipboard.style-clash` reports Warning. Original styles stay intact.
+  inheritance, and `clipboard.style-clash` reports Warning. Dangling source style references are also renamed when necessary to prevent accidental target binding. Original styles stay intact.
 - Native fragment limits: 4,096 blocks, 8,192 ranges/relations, 1,024 styles/templates,
   depth 64, 16 MiB payload and resources each, 96 MiB JSON envelope. Future versions are
   rejected with `clipboard.version` Error; malformed data with `clipboard.invalid` Error;
@@ -577,13 +577,13 @@ here: through a dedicated `feat(contracts)` commit.
   between cells and LF between rows. Soft wraps do not add characters. With a current
   layout it follows `reading_order`; unplaced text follows in semantic order.
 - HTML export emits semantic paragraphs, paragraph `dir`, computed CSS family/point size/
-  line height, `br`, and table/row/cell tags. Notes/floats become paragraphs; transforms,
+  line height, whitespace preservation, `br`, and table/row/cell tags. Notes/floats become paragraphs; transforms,
   symbolic styles, column constraints and relation graphs are reported as losses.
 - The handwritten HTML reader accepts paragraphs/divisions, breaks, nonnested tables,
-  basic point CSS and common/numeric entities. Unsupported markup retains text with
+  basic point CSS, pre-wrap whitespace and common/numeric entities. Tables infer equal proportional columns (at most 128) from their rows. Direction inference uses shaping's pinned ICU Unicode 17 properties. Unsupported markup retains text with
   `clipboard.html-approximated` Warning. Active/non-content HTML is omitted with
   `clipboard.html-dropped` Error. It fetches nothing. Explicit caps: 8 MiB input,
-  100,000 tokens, depth 64, 4,096 blocks; exceeding a cap rejects the whole import.
+  100,000 tokens, depth 64, 4,096 blocks, 128 attributes/tag and CSS declarations/block; exceeding a cap rejects the whole import. Conflicting explicit HTML dir values are reported as approximated: the authored model infers direction from Unicode.
 - `Exporter::export(doc, layout?, options) -> Result<ExportResult, ClipboardError>` is the
   extension point for DOCX/EPUB. Results contain bytes and `LossReport`: exactly one stable
   feature code for relations, reading order, transforms, notes/floats, tables, styles,

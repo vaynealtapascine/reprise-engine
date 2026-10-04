@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use reprise_diag::Code;
 use reprise_doc::{Document, NodeId, SchemaRegistry, TableRole};
@@ -96,6 +96,28 @@ pub struct Html;
 pub struct Native;
 pub struct Pdf;
 
+/// Use the same pinned Unicode property provider as shaping. Only paragraph
+/// direction is read here; bracket resolution cannot affect rules P2/P3.
+pub(crate) fn inferred_base(text: &str) -> u8 {
+    struct Data;
+    impl unicode_bidi::data_source::BidiDataSource for Data {
+        fn bidi_class(&self, c: char) -> unicode_bidi::BidiClass {
+            icu_properties::CodePointMapData::<icu_properties::props::BidiClass>::new()
+                .get(c)
+                .into()
+        }
+        fn bidi_matched_opening_bracket(
+            &self,
+            _: char,
+        ) -> Option<unicode_bidi::data_source::BidiMatchedOpeningBracket> {
+            None
+        }
+    }
+    unicode_bidi::ParagraphBidiInfo::new_with_data_source(&Data, text, None)
+        .paragraph_level
+        .number()
+}
+
 fn report(dispositions: [Disposition; 10], details: [&str; 10]) -> LossReport {
     LossReport {
         features: Feature::ALL
@@ -179,34 +201,37 @@ impl Exporter for PlainText {
         validate_layout(doc, layout)?;
         let mut out = String::new();
         let mut previous = None;
-        let mut emitted = BTreeMap::<NodeId, usize>::new();
+        let mut emitted = BTreeSet::new();
+        let mut unplaced = false;
         if let Some(layout) = layout {
             for step in layout.reading_order(doc) {
                 let Some(block) = layout.blocks.iter().find(|b| b.node == step.line.node) else {
                     continue;
                 };
-                let Some(line) = block.lines.get(step.line.line) else {
+                if !emitted.insert(block.node) {
                     continue;
-                };
+                }
                 if let Some(previous) = previous
                     && previous != block.node
                 {
                     append(&mut out, separator(doc, previous, block.node))?;
                 }
-                append(
-                    &mut out,
-                    block
-                        .text
-                        .get(line.text.clone())
-                        .ok_or_else(|| ClipboardError::Invalid("layout text range".into()))?,
-                )?;
+                let text = doc
+                    .block(block.node)
+                    .map_err(|e| ClipboardError::Invalid(e.to_string()))?
+                    .text
+                    .to_string();
+                // Reading order is block precedence with lines in source order. Export
+                // the whole authored block, including a tail omitted by a page limit.
+                append(&mut out, &text)?;
+                unplaced |= block.lines.last().is_none_or(|l| l.text.end < text.len());
                 previous = Some(block.node);
-                let end = emitted.entry(block.node).or_default();
-                *end = (*end).max(line.text.end);
             }
         }
-        let mut unplaced = false;
         for node in semantic(doc)? {
+            if emitted.contains(&node) {
+                continue;
+            }
             if doc
                 .table_role(node)
                 .map_err(|e| ClipboardError::Invalid(e.to_string()))?
@@ -218,20 +243,12 @@ impl Exporter for PlainText {
                 .block(node)
                 .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
             let text = block.text.to_string();
-            let start = emitted.get(&node).copied().unwrap_or(0);
-            if emitted.contains_key(&node) && start >= text.len() {
-                continue;
-            }
             if let Some(previous) = previous
                 && previous != node
             {
                 append(&mut out, separator(doc, previous, node))?;
             }
-            append(
-                &mut out,
-                text.get(start..)
-                    .ok_or_else(|| ClipboardError::Invalid("unplaced UTF-8 range".into()))?,
-            )?;
+            append(&mut out, &text)?;
             previous = Some(node);
             unplaced |= layout.is_some();
         }
@@ -325,12 +342,7 @@ fn paragraph(
     let base = layout
         .and_then(|l| l.blocks.iter().find(|b| b.node == node))
         .map(|b| b.base_level)
-        .unwrap_or_else(|| {
-            unicode_bidi::BidiInfo::new(&text, None)
-                .paragraphs
-                .first()
-                .map_or(0, |p| p.level.number())
-        });
+        .unwrap_or_else(|| inferred_base(&text));
     // CSS string quoting also escapes backslashes/newlines, so a family can't inject CSS.
     let family = style
         .family
@@ -340,7 +352,7 @@ fn paragraph(
     append(
         out,
         &format!(
-            "<p dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt\">",
+            "<p dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap\">",
             if base % 2 == 1 { "rtl" } else { "ltr" },
             escape(&family),
             points(style.size),

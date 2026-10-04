@@ -85,14 +85,11 @@ impl NativeFragment {
     pub fn attach_asset(&mut self, bytes: Vec<u8>) -> Result<String, ClipboardError> {
         let hash = content_hash(&bytes);
         let mut resources = self.resources.clone();
-        resources.insert(
-            hash.clone(),
-            EmbeddedResource {
-                kind: ResourceKind::Asset,
-                hash: hash.clone(),
-                bytes,
-            },
-        );
+        resources.entry(hash.clone()).or_insert(EmbeddedResource {
+            kind: ResourceKind::Asset,
+            hash: hash.clone(),
+            bytes,
+        });
         let candidate = Self {
             fragment: self.fragment.clone(),
             resources,
@@ -114,7 +111,7 @@ impl NativeFragment {
         self.validate()?;
         let mut result = editor
             .paste(&self.fragment, at, target)
-            .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+            .map_err(ClipboardError::Edit)?;
         result.notes.extend(self.notes.clone());
         Ok(result)
     }
@@ -256,12 +253,93 @@ pub fn copy_selection(
             "selection endpoints are absent".into(),
         ));
     }
-    let blocks: Vec<_> = ranges
-        .into_iter()
-        .map(|r| CopyBlock {
-            node: r.node,
-            bytes: Some(r.bytes),
-        })
-        .collect();
-    copy_blocks(doc, source, &blocks, schemas, Some(layout), fonts)
+    if ranges.len() == 1 && ranges.first().is_some_and(|r| r.bytes.is_empty()) {
+        return copy_blocks(doc, source, &[], schemas, Some(layout), fonts);
+    }
+    let selected: BTreeMap<_, _> = ranges.iter().map(|r| (r.node, r.bytes.clone())).collect();
+    let mut candidates = BTreeSet::new();
+    let mut in_table = BTreeSet::new();
+    for range in &ranges {
+        let mut up = Some(range.node);
+        for _ in 0..=reprise_doc::fragment::MAX_FRAGMENT_DEPTH {
+            let Some(node) = up else { break };
+            if matches!(
+                doc.table_role(node),
+                Ok(Some(reprise_doc::TableRole::Table(_)))
+            ) {
+                candidates.insert(node);
+                in_table.insert(range.node);
+            }
+            up = doc.parent_of(node).flatten();
+        }
+        if up.is_some() {
+            return Err(ClipboardError::Limit("selection ancestors"));
+        }
+    }
+    let mut promoted = BTreeMap::new();
+    let mut covered = BTreeSet::new();
+    for table in candidates {
+        if covered.contains(&table) {
+            continue;
+        }
+        let mut members = Vec::new();
+        let mut todo = vec![(table, 0usize)];
+        let mut full = true;
+        while let Some((node, depth)) = todo.pop() {
+            if depth > reprise_doc::fragment::MAX_FRAGMENT_DEPTH
+                || members.len() >= reprise_doc::fragment::MAX_FRAGMENT_BLOCKS
+            {
+                return Err(ClipboardError::Limit("selection table"));
+            }
+            members.push(node);
+            if matches!(doc.table_role(node), Ok(None)) {
+                let block = doc
+                    .block(node)
+                    .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+                if selected.get(&node) != Some(&(0..block.text.len())) {
+                    full = false;
+                }
+            }
+            todo.extend(
+                doc.children(Some(node))
+                    .into_iter()
+                    .rev()
+                    .map(|n| (n, depth + 1)),
+            );
+        }
+        if full {
+            for node in members {
+                covered.insert(node);
+                if selected.contains_key(&node) {
+                    promoted.insert(node, table);
+                }
+            }
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut blocks = Vec::new();
+    let flattened = in_table.iter().any(|n| !promoted.contains_key(n));
+    for range in ranges {
+        if let Some(&table) = promoted.get(&range.node) {
+            if seen.insert(table) {
+                blocks.push(CopyBlock {
+                    node: table,
+                    bytes: None,
+                });
+            }
+        } else {
+            blocks.push(CopyBlock {
+                node: range.node,
+                bytes: Some(range.bytes),
+            });
+        }
+    }
+    let mut fragment = copy_blocks(doc, source, &blocks, schemas, Some(layout), fonts)?;
+    if flattened {
+        fragment.notes.push(Note::warning(
+            codes::SELECTION_TABLE,
+            "partial table selections become independent paragraph blocks",
+        ));
+    }
+    Ok(fragment)
 }

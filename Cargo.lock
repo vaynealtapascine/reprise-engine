@@ -1772,6 +1772,7 @@ dependencies = [
 name = "reprise-clipboard"
 version = "0.0.0"
 dependencies = [
+ "icu_properties",
  "reprise-diag",
  "reprise-display",
  "reprise-doc",

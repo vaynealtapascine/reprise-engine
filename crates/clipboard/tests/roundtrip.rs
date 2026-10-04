@@ -52,7 +52,7 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
             fixture.name
         );
         let mut editor = Editor::new(Document::new(1001).unwrap(), fixture.engine.schemas.clone());
-        let pasted = editor.paste(&fragment.fragment, None, "source").unwrap();
+        let pasted = editor.paste(&fragment.fragment, None, "target").unwrap();
         let after = fixture.engine.layout(editor.document());
         equal_geometry(&before, &after, &pasted.ids.nodes, fixture.name);
         let again = editor
@@ -85,6 +85,26 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
                 .unwrap();
             assert_eq!(new.bytes, old.bytes);
             assert_eq!(new.policy, old.policy);
+        }
+        for old in &fragment.fragment.relations {
+            if let Some(new_id) = pasted.relations.get(&old.id) {
+                let new = again.relations.iter().find(|r| r.id == *new_id).unwrap();
+                assert_eq!(
+                    new.relation,
+                    old.relation.remapped(&pasted.ids),
+                    "{}: relation graph",
+                    fixture.name
+                );
+            } else {
+                assert!(
+                    pasted
+                        .notes
+                        .iter()
+                        .any(|n| n.code == "clipboard.relation-dropped"),
+                    "{}: unreported edge loss",
+                    fixture.name
+                );
+            }
         }
         if !fragment.fragment.blocks.is_empty() {
             assert_eq!(editor.undo_count(), 1, "{}: one undo", fixture.name);

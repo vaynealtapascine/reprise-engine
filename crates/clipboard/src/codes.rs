@@ -9,3 +9,5 @@ pub const RESOURCE_HASH: Code = Code::new("clipboard.resource-hash");
 pub const RELATION_DROPPED: Code = Code::new("clipboard.relation-dropped");
 pub const STYLE_CLASH: Code = Code::new("clipboard.style-clash");
 pub const RANGE_AFFINITY: Code = Code::new("clipboard.range-affinity");
+pub const SELECTION_TABLE: Code = Code::new("clipboard.selection-table");
+pub const HOST_RANGE_DROPPED: Code = Code::new("clipboard.host-range-dropped");

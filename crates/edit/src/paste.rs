@@ -1,8 +1,8 @@
 //! Fully validated native paste, staged before its single undoable commit.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use reprise_diag::{Code, Note};
-use reprise_doc::fragment::{Fragment, FragmentError};
+use reprise_doc::fragment::{CopyBlock, Fragment, FragmentError, FragmentRange};
 use reprise_doc::relation::{CopyAction, CopySet, IdMap, plan_copy};
 use reprise_doc::{
     BlockKind, DocError, Document, NewBlock, NodeId, RelationId, SchemaRegistry, Style,
@@ -12,6 +12,7 @@ use crate::{Applied, EditError, Editor, Effect, Reason};
 
 pub const STYLE_CLASH: Code = Code::new("clipboard.style-clash");
 pub const RELATION_DROPPED: Code = Code::new("clipboard.relation-dropped");
+pub const HOST_RANGE_DROPPED: Code = Code::new("clipboard.host-range-dropped");
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pasted {
@@ -33,6 +34,7 @@ pub(crate) struct Prepared {
     prefix: String,
     suffix: String,
     host: Option<NewBlock>,
+    host_ranges: Vec<FragmentRange>,
     notes: Vec<Note>,
 }
 
@@ -72,6 +74,7 @@ pub(crate) fn prepare(
         prefix: String::new(),
         suffix: String::new(),
         host: None,
+        host_ranges: Vec::new(),
         notes: Vec::new(),
     };
     if let Some((node, offset)) = at {
@@ -129,27 +132,46 @@ pub(crate) fn prepare(
             overrides: block.overrides,
             text: String::new(),
         });
+        prepared.host_ranges = doc
+            .copy_fragment(target, &[CopyBlock { node, bytes: None }], schemas)
+            .map_err(invalid)?
+            .ranges;
     }
     // A clash anywhere in an inheritance chain renames the entire imported style graph.
     // Otherwise a non-clashing child could accidentally inherit the target's parent.
+    let mut references: BTreeSet<_> = fragment.styles.keys().cloned().collect();
+    for block in &fragment.blocks {
+        references.insert(block.style.clone());
+        if let Some(parent) = &block.overrides.parent {
+            references.insert(parent.clone());
+        }
+    }
+    for style in fragment.styles.values() {
+        if let Some(parent) = &style.parent {
+            references.insert(parent.clone());
+        }
+    }
     let clash = fragment
         .styles
         .iter()
-        .any(|(n, s)| doc.style(n).is_some_and(|t| t != *s));
+        .any(|(n, s)| doc.style(n).is_some_and(|t| t != *s))
+        || references
+            .iter()
+            .any(|n| !fragment.styles.contains_key(n) && doc.style(n).is_some());
     if clash {
         prepared.notes.push(Note::warning(
             STYLE_CLASH,
             "imported style graph renamed to preserve source inheritance",
         ));
     }
-    for name in fragment.styles.keys() {
+    for name in &references {
         let mut candidate = name.clone();
         if clash {
             let mut found = false;
             for serial in 1..=4096 {
                 candidate = format!("{name} (paste {serial})");
                 if doc.style(&candidate).is_none()
-                    && !fragment.styles.contains_key(&candidate)
+                    && !references.contains(&candidate)
                     && !prepared.names.values().any(|n| n == &candidate)
                 {
                     found = true;
@@ -241,6 +263,7 @@ pub(crate) fn write(
         prefix,
         suffix,
         host,
+        host_ranges,
         notes,
     } = prepared;
     let mut result = Pasted {
@@ -282,6 +305,9 @@ pub(crate) fn write(
     if !join_first && let Some(mut block) = host.clone() {
         block.text = prefix.clone();
         leading = Some(doc.stage_block(&block).map_err(store)?);
+        if let Some(new) = leading {
+            result.applied.blocks.push(new);
+        }
     }
     for block in &fragment.blocks {
         let mut text = block.text.clone();
@@ -324,6 +350,9 @@ pub(crate) fn write(
     if !join_last && let Some(mut block) = host {
         block.text = suffix;
         trailing = Some(doc.stage_block(&block).map_err(store)?);
+        if let Some(new) = trailing {
+            result.applied.blocks.push(new);
+        }
     }
     for range in &fragment.ranges {
         let shift = if join_first && Some(range.node) == first {
@@ -447,6 +476,30 @@ pub(crate) fn write(
             } else {
                 0
             };
+            let move_end = |old: usize, affinity: reprise_doc::text::Affinity| {
+                if old < offset
+                    || (old == offset && affinity == reprise_doc::text::Affinity::Before)
+                {
+                    (head, old)
+                } else {
+                    (tail, tail_start.saturating_add(old.saturating_sub(offset)))
+                }
+            };
+            for range in host_ranges {
+                let (start_node, start) = move_end(range.bytes.start, range.policy.start);
+                let (end_node, end) = move_end(range.bytes.end, range.policy.end);
+                if start_node == end_node {
+                    doc.reanchor_fragment_range(
+                        range.id,
+                        start_node,
+                        start..end.max(start),
+                        range.policy,
+                    )
+                    .map_err(store)?;
+                } else {
+                    result.notes.push(Note::error(HOST_RANGE_DROPPED, format!("range {} would span pasted blocks; the single-block range model cannot represent it", range.id)));
+                }
+            }
             result.applied.effects.push(Effect::Text {
                 node: tail,
                 at: 0,

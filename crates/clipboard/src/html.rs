@@ -94,7 +94,7 @@ fn entities(text: &str) -> String {
 }
 
 // ASCII HTML names and quotes, with no slices at unverified Unicode boundaries.
-fn attributes(raw: &str) -> BTreeMap<String, String> {
+fn attributes(raw: &str) -> Result<BTreeMap<String, String>, ClipboardError> {
     let mut out = BTreeMap::new();
     let mut rest = raw;
     for _ in 0..128 {
@@ -131,7 +131,10 @@ fn attributes(raw: &str) -> BTreeMap<String, String> {
         out.entry(name).or_insert_with(|| entities(value));
         rest = rest.get(consumed..).unwrap_or_default();
     }
-    out
+    if !rest.trim().is_empty() && rest.trim() != "/" {
+        return Err(ClipboardError::Limit("HTML attributes"));
+    }
+    Ok(out)
 }
 
 fn css_length(text: &str) -> Option<Length> {
@@ -170,10 +173,13 @@ fn css_length(text: &str) -> Option<Length> {
     };
     Some(Length(i32::try_from(signed).ok()?))
 }
-fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Style {
+fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Result<Style, ClipboardError> {
     let mut style = Style::default();
     if let Some(raw) = attrs.get("style") {
-        for declaration in raw.split(';').take(128) {
+        for (index, declaration) in raw.split(';').enumerate() {
+            if index >= 128 {
+                return Err(ClipboardError::Limit("CSS declarations"));
+            }
             let Some((key, value)) = declaration.split_once(':') else {
                 continue;
             };
@@ -209,6 +215,7 @@ fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Style {
                         );
                     }
                 }
+                "white-space" if matches!(value, "pre-wrap" | "normal") => {}
                 _ => once(
                     notes,
                     codes::HTML_APPROXIMATED,
@@ -218,7 +225,7 @@ fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Style {
             }
         }
     }
-    style
+    Ok(style)
 }
 fn once(notes: &mut Vec<Note>, code: reprise_diag::Code, message: &str, omitted: bool) {
     if !notes.iter().any(|n| n.code == code) {
@@ -235,14 +242,37 @@ struct Reader {
     notes: Vec<Note>,
     text: String,
     style: Style,
+    preserve_space: bool,
+    direction: Option<u8>,
     cell: Option<NodeId>,
     table: Option<NodeId>,
     row: Option<NodeId>,
     column: u32,
+    max_columns: u32,
     count: usize,
     limits: ImportLimits,
 }
 impl Reader {
+    fn finish_table(&mut self) -> Result<(), ClipboardError> {
+        if let Some(table) = self.table {
+            let count = usize::try_from(self.max_columns.max(1))
+                .map_err(|_| ClipboardError::Limit("HTML columns"))?;
+            self.doc
+                .set_fragment_table_columns(
+                    table,
+                    TableColumns {
+                        columns: vec![
+                            reprise_doc::Column {
+                                width: reprise_doc::ColumnWidth::Proportional(1)
+                            };
+                            count
+                        ],
+                    },
+                )
+                .map_err(store)?;
+        }
+        Ok(())
+    }
     fn count(&mut self) -> Result<(), ClipboardError> {
         self.count = self.count.saturating_add(1);
         if self.count > self.limits.blocks.min(4096) {
@@ -255,6 +285,17 @@ impl Reader {
             return Ok(());
         }
         self.count()?;
+        if let Some(direction) = self.direction {
+            let inferred = crate::export::inferred_base(&self.text);
+            if direction != inferred {
+                once(
+                    &mut self.notes,
+                    codes::HTML_APPROXIMATED,
+                    "explicit HTML direction differs from Unicode inference; the authored model has no paragraph direction property",
+                    false,
+                );
+            }
+        }
         let node = if let Some(cell) = self.cell {
             self.doc
                 .append_cell_block(cell, BlockKind::Paragraph, "", &self.text)
@@ -269,7 +310,7 @@ impl Reader {
     fn text(&mut self, raw: &str) -> Result<(), ClipboardError> {
         // HTML whitespace collapses. A single pending space survives token seams.
         for c in entities(raw).chars() {
-            if c.is_ascii_whitespace() {
+            if c.is_ascii_whitespace() && !self.preserve_space {
                 if !self.text.is_empty() && !self.text.ends_with([' ', '\n']) {
                     self.text.push(' ');
                 }
@@ -300,15 +341,31 @@ impl Reader {
             ("br", false) => self.text.push('\n'),
             ("p" | "div" | "li" | "h1" | "h2" | "h3" | "blockquote", false) => {
                 self.flush(false)?;
-                self.style = css(attrs, &mut self.notes);
+                self.style = css(attrs, &mut self.notes)?;
+                self.preserve_space = attrs.get("style").is_some_and(|s| {
+                    s.split(';').any(|d| {
+                        d.split_once(':').is_some_and(|(k, v)| {
+                            k.trim().eq_ignore_ascii_case("white-space") && v.trim() == "pre-wrap"
+                        })
+                    })
+                });
+                self.direction = match attrs.get("dir").map(String::as_str) {
+                    Some("rtl") => Some(1),
+                    Some("ltr") => Some(0),
+                    _ => None,
+                };
             }
             ("p", true) => {
                 self.flush(true)?;
                 self.style = Style::default();
+                self.preserve_space = false;
+                self.direction = None;
             }
             ("div" | "li" | "h1" | "h2" | "h3" | "blockquote", true) => {
                 self.flush(false)?;
                 self.style = Style::default();
+                self.preserve_space = false;
+                self.direction = None;
             }
             ("table", false) => {
                 self.flush(false)?;
@@ -318,6 +375,7 @@ impl Reader {
                     ));
                 }
                 self.count()?;
+                self.max_columns = 0;
                 self.table = Some(
                     self.doc
                         .append_table(TableColumns {
@@ -352,6 +410,10 @@ impl Reader {
                             .map_err(store)?,
                     );
                     self.column = self.column.saturating_add(1);
+                    self.max_columns = self.max_columns.max(self.column);
+                    if self.max_columns > 128 {
+                        return Err(ClipboardError::Limit("HTML table columns"));
+                    }
                 } else {
                     once(
                         &mut self.notes,
@@ -372,6 +434,7 @@ impl Reader {
             }
             ("table", true) => {
                 self.flush(false)?;
+                self.finish_table()?;
                 self.cell = None;
                 self.row = None;
                 self.table = None;
@@ -400,10 +463,13 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         notes: Vec::new(),
         text: String::new(),
         style: Style::default(),
+        preserve_space: false,
+        direction: None,
         cell: None,
         table: None,
         row: None,
         column: 0,
+        max_columns: 0,
         count: 0,
         limits,
     };
@@ -528,7 +594,7 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         reader.tag(
             &name,
             closing,
-            &attributes(raw.get(name_end..).unwrap_or_default()),
+            &attributes(raw.get(name_end..).unwrap_or_default())?,
         )?;
     }
     if !stack.is_empty() {
@@ -548,6 +614,7 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         );
     }
     reader.flush(false)?;
+    reader.finish_table()?;
     fragment(reader.doc, reader.notes)
 }
 

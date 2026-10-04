@@ -184,3 +184,17 @@ edges); `fixtures/tests/hostile.rs` registers it and its paired layout/content s
 policies and rendered page/frame/block/glyph geometry after native copy/paste and undo/redo.
 `clipboard/tests/import_export.rs` attacks parser caps and malformed tag soup, verifies
 resource hashes, reading order and every exporter's House-of-Leaves loss reports.
+
+Clipboard refinements: native selection promotes full tables and reports partial-table
+flattening; paste preserves unresolved style references, reanchors existing host ranges
+without changing their IDs, reports cross-block ranges it cannot represent, and returns
+all activated prefix/suffix IDs. HTML import enforces attribute/CSS caps and honors
+pre-wrap whitespace; conflicting explicit direction is reported. Plain export retains
+page-limited tails. The native/import_export/roundtrip tests cover these cases plus
+concurrent caret pastes and cross-document graph remapping.
+
+HTML tables infer proportional column metadata through the additive
+`Document::set_fragment_table_columns`; without that metadata the table subsystem
+would omit imported cells. HTML direction inference shares shaping's pinned ICU
+Unicode 17 properties. Import/export tests verify actual cell rendering and direction
+agreement for isolates, controls, paragraph breaks and newly added RTL characters.
