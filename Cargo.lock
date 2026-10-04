@@ -1824,7 +1824,6 @@ dependencies = [
 name = "reprise-edit"
 version = "0.0.0"
 dependencies = [
- "icu_properties",
  "reprise-diag",
  "reprise-doc",
  "reprise-fixtures",

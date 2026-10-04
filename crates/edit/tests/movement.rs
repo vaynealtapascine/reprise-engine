@@ -645,3 +645,43 @@ fn inline_movement_follows_the_spiral_without_skipping_or_repeating_cells() {
     assert_eq!(caret.offset, 0);
     assert!(!nav.graphemes(at).is_empty());
 }
+
+#[test]
+fn paragraph_crossing_uses_snapshot_base_level_instead_of_first_strong_text() {
+    let (doc, ids, mut snapshot) = laid_out(&["abc\ndef"]);
+    let node = ids[0];
+    // An LTR embedding inside an explicitly RTL paragraph still has LTR
+    // cells. The paragraph's base, rather than the first Latin character,
+    // determines which neighboring line follows an inline edge.
+    let block = snapshot.blocks.iter_mut().find(|b| b.node == node).unwrap();
+    block.base_level = 1;
+    for line in &mut block.lines {
+        for run in &mut line.runs {
+            run.level = 2;
+        }
+    }
+    let nav = Navigator::semantic(&snapshot, &doc);
+    let end = nav
+        .move_caret(Caret::new(node, 0), Movement::LineInlineEnd)
+        .unwrap();
+    assert_eq!(
+        nav.move_caret(end, Movement::InlineForward),
+        Some(end),
+        "RTL reading starts at the inline-right edge of the first line"
+    );
+    let next = nav
+        .move_caret(Caret::new(node, 0), Movement::InlineBackward)
+        .unwrap();
+    assert_eq!(nav.caret_rect(next).unwrap().line.line, 1);
+    assert_eq!(next.offset, 7);
+
+    let (empty_doc, ids, mut empty) = laid_out(&[""]);
+    empty.blocks[0].base_level = 1;
+    let nav = Navigator::semantic(&empty, &empty_doc);
+    let rect = nav.caret_rect(Caret::new(ids[0], 0)).unwrap();
+    assert_eq!(rect.x, empty.blocks[0].lines[0].rect.max_x());
+    assert_eq!(
+        rect.level, 1,
+        "empty carets retain the resolved paragraph level"
+    );
+}

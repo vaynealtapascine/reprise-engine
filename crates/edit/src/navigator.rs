@@ -80,7 +80,10 @@ impl<'a> Navigator<'a> {
         let rank = ordered.iter().enumerate().map(|(i, n)| (*n, i)).collect();
         let info = position
             .iter()
-            .map(|(n, &i)| (*n, BlockInfo::new(&snapshot.blocks[i].text)))
+            .map(|(n, &i)| {
+                let block = &snapshot.blocks[i];
+                (*n, BlockInfo::new(&block.text, block.base_level))
+            })
             .collect();
         let models = position
             .iter()

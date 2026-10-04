@@ -13,8 +13,6 @@
 use std::collections::BTreeSet;
 use std::ops::Range;
 
-use icu_properties::CodePointMapData;
-use icu_properties::props::BidiClass;
 use reprise_doc::text::segment;
 use reprise_geom::{Length, div_round};
 use reprise_layout::{BlockLayout, LineLayout};
@@ -25,17 +23,17 @@ use crate::caret::{Affinity, GraphemeCell};
 pub(crate) struct BlockInfo {
     /// Every grapheme boundary, `0` and the length included.
     pub boundaries: Vec<usize>,
-    /// Whether the paragraph runs right to left (UAX #9, rules P2 and P3).
+    /// The paragraph direction actually used by layout, from its base level.
     pub rtl: bool,
     /// Word-like segments, for word movement.
     pub words: Vec<Range<usize>>,
 }
 
 impl BlockInfo {
-    pub fn new(text: &str) -> BlockInfo {
+    pub fn new(text: &str, base_level: u8) -> BlockInfo {
         BlockInfo {
             boundaries: segment::grapheme_boundaries(text),
-            rtl: paragraph_is_rtl(text),
+            rtl: base_level % 2 == 1,
             words: segment::words(text),
         }
     }
@@ -55,26 +53,6 @@ impl BlockInfo {
     pub fn is_boundary(&self, at: usize) -> bool {
         self.boundaries.binary_search(&at).is_ok()
     }
-}
-
-/// The paragraph direction by the first strong character, skipping isolates:
-/// UAX #9 rules P2 and P3. Layout uses the same rules when no direction is
-/// given. This stands in until the snapshot records each block's base level.
-fn paragraph_is_rtl(text: &str) -> bool {
-    let classes = CodePointMapData::<BidiClass>::new();
-    let mut isolates = 0usize;
-    for c in text.chars() {
-        match classes.get(c) {
-            BidiClass::LeftToRightIsolate
-            | BidiClass::RightToLeftIsolate
-            | BidiClass::FirstStrongIsolate => isolates += 1,
-            BidiClass::PopDirectionalIsolate => isolates = isolates.saturating_sub(1),
-            BidiClass::LeftToRight if isolates == 0 => return false,
-            BidiClass::RightToLeft | BidiClass::ArabicLetter if isolates == 0 => return true,
-            _ => {}
-        }
-    }
-    false
 }
 
 /// A hard line break: it ends a line, and a caret is never drawn after it on
@@ -134,6 +112,7 @@ pub(crate) struct LineModel {
     pub end_limit: usize,
     /// Where an empty line's caret goes.
     pub empty_x: Length,
+    pub empty_level: u8,
 }
 
 impl LineModel {
@@ -229,6 +208,7 @@ impl LineModel {
             start: line.text.start,
             end_limit: limit.max(line.text.start),
             empty_x,
+            empty_level: block.base_level,
         }
     }
 
@@ -263,7 +243,7 @@ impl LineModel {
             offset: self.start,
             affinity: Affinity::Downstream,
             left_edge: true,
-            level: 0,
+            level: self.empty_level,
             junction: 0,
         }
     }

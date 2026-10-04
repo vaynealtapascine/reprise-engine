@@ -506,7 +506,7 @@ before freezing. Existing contracts above are unchanged.
   breaks and zero-width cells contribute no area. `select_word`, `select_line`,
   `select_block` and `select_all` are policy-free operations; a word-end caret
   selects that word and a gap caret selects the gap. They do not mutate content.
-- **Pending snapshot addition:** the kernel currently infers paragraph direction
-  from ICU Bidi_Class (P2/P3). The proposed `BlockLayout.base_level`, omitted from
-  JSON when zero, is specified in `crates/edit/CONTRACT-PROPOSALS.md`; only the
-  orchestrator may add it after the layout/flow owner merges.
+- **Snapshot base direction:** the kernel uses `BlockLayout.base_level`, supplied
+  by layout and omitted from JSON when zero. It does not infer paragraph direction
+  from source text. The resolved base level controls transitions between visual
+  lines and the inline edge of an empty line; run levels control intra-line cells.

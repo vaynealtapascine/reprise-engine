@@ -1,38 +1,36 @@
-# Paragraph base level proposal (30)
+# Paragraph base level integration (22, 30)
 
-This is a proposal only. Workstream 7 does not modify the frozen snapshot or
-workstream 3b's `flow.rs`. The orchestrator will add it after that workstream merges.
+The proposal was accepted and implemented on main in `1183221`, after workstream
+3b merged. Workstream 7 imports that contract; it does not edit layout or flow.
 
-Proposed addition to `reprise_layout::BlockLayout` in `snapshot.rs`:
+The approved field in `reprise_layout::BlockLayout` is:
 
 ```rust
 /// Resolved UAX #9 paragraph base level (0 or 1), from paragraph itemization.
-#[serde(skip_serializing_if = "zero_base_level")]
+#[serde(skip_serializing_if = "is_zero")]
 pub base_level: u8,
 ```
 
-The serialization helper would be:
+The serialization helper is:
 
 ```rust
-fn zero_base_level(level: &u8) -> bool { *level == 0 }
+fn is_zero(level: &u8) -> bool { *level == 0 }
 ```
 
-Proposed wording in the Layout snapshot contract:
+The approved Layout snapshot contract says:
 
-> Every block records its resolved paragraph `base_level`. Navigation uses it
-> to choose the reading direction when crossing visual line boundaries and the
-> inline edge of an empty line. Level 0 is omitted from JSON; level 1 is emitted.
-> Run levels remain the resolved levels used for visual ordering within lines.
+> Each `BlockLayout` records its paragraph's resolved bidi `base_level` (0 left to
+> right, 1 right to left; left out of JSON when 0). Carets, visual movement and
+> alignment use it instead of re-deriving it.
 
-Today `BlockInfo` infers this using ICU4X Bidi_Class, the first strong character
-outside isolates (P2/P3). This works for implicit paragraph direction. It cannot
-know a future explicitly authored paragraph direction or a layout direction
-override; the snapshot must expose the direction actually used by shaping.
+`BlockInfo` now uses this field. The former ICU4X first-strong inference and
+the editing crate's direct `icu_properties` dependency have been removed.
+This keeps navigation aligned with the direction actually used by shaping,
+including a base level that differs from the source's first strong character.
 
-Affected owners: layout/flow (populate the field), shaping (supply resolved base
-level), editing (replace inference), and fixtures (update RTL JSON snapshots with
-an explained new field). Existing LTR JSON should be byte-for-byte unchanged.
+Layout/flow populates the field from shaping. The orchestrator's commit adds
+the field to three RTL layout goldens; zero-valued/LTR serialization is unchanged.
 
-No other snapshot mapping is needed for the current acceptance tests. A point
+There is no outstanding snapshot mapping proposal. A point
 cannot distinguish coincident carets; the contract therefore compares geometry
 and requires exact normalized identity only for unique visual positions.
