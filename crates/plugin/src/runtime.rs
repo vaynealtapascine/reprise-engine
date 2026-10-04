@@ -7,7 +7,7 @@ use wasmi::{
     Caller, CompilationMode, Config, Engine, ExternType, FuncType, Linker, Module, Store,
     StoreLimits, StoreLimitsBuilder, ValType,
 };
-use wasmparser::{Parser, Payload};
+use wasmparser::{Operator, Parser, Payload, Validator, WasmFeatures};
 
 use crate::{
     ABI_VERSION, CallContext, CallResult, Capability, Envelope, Limits, Manifest, TextInsertion,
@@ -103,10 +103,37 @@ fn preflight(bytes: &[u8], limits: &Limits) -> Result<(), Note> {
                         return Err(limited());
                     }
                 }
+                let mut depth = 0u32;
+                for operator in body.get_operators_reader().map_err(|_| invalid())? {
+                    match operator.map_err(|_| invalid())? {
+                        Operator::Block { .. } | Operator::Loop { .. } | Operator::If { .. } => {
+                            depth = depth.saturating_add(1);
+                            if depth > 256 {
+                                return Err(limited());
+                            }
+                        }
+                        Operator::End => depth = depth.saturating_sub(1),
+                        _ => {}
+                    }
+                }
             }
             _ => {}
         }
     }
+    // Enforce policy independently of Cargo feature unification in downstream hosts.
+    let mut features = WasmFeatures::default();
+    features.remove(
+        WasmFeatures::SIMD
+            | WasmFeatures::RELAXED_SIMD
+            | WasmFeatures::THREADS
+            | WasmFeatures::SHARED_EVERYTHING_THREADS
+            | WasmFeatures::MEMORY64
+            | WasmFeatures::MULTI_MEMORY
+            | WasmFeatures::CUSTOM_PAGE_SIZES,
+    );
+    Validator::new_with_features(features)
+        .validate_all(bytes)
+        .map_err(|_| invalid())?;
     Ok(())
 }
 

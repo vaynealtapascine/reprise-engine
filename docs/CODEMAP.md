@@ -89,7 +89,7 @@ Other files:
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
 | `plugin` | `Cargo.toml`, `src/lib.rs`, `src/codes.rs` | Content-hash identities, manifests, ordered capabilities, phase grants, explicit limits and reproduction pins; staged editing-kernel interface and stable failures | 04, 19, 36–38 |
-| | `src/runtime.rs` | Private Runtime boundary and wasmi backend, static preflight, typed import allowlist, fuel, memory/table/stack limits, fresh instances, checked buffers and deterministic host-copy fuel | 36–38 |
+| | `src/runtime.rs` | Private Runtime boundary and wasmi backend, static preflight/proposal validator, nesting bound, typed import allowlist, fuel, memory/table/stack limits, fresh instances, checked buffers and deterministic host-copy fuel | 36–38 |
 | | `src/abi.rs`, `docs/plugins.md` | Language-independent ABI v1: integer values, UTF-8 byte offsets, linear-memory records, imports/exports and statuses | 04, 19, 36 |
 | | `src/function.rs` | Atomic FunctionRegistry registration and typed PureFunction adapter; frozen style failure diagnostic | 17, 36, 37 |
 | | `src/geometry.rs` | Shape provider with containment/order/progress validation and exact frame-room fallback; wrapper over conforming composers | 20, 23, 36, 37 |

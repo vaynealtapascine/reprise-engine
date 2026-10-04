@@ -39,5 +39,5 @@ sha2 = "0.11"
 insta = { version = "1.49", features = ["json"] }
 lopdf = { version = "0.38", default-features = false }
 wasmi = { version = "=2.0.0", default-features = false, features = ["stable", "std", "validate", "deterministic", "portable-dispatch", "prefer-btree-collections"] }
-wasmparser = { version = "=0.228.0", default-features = false, features = ["std"] }
+wasmparser = { version = "=0.228.0", default-features = false, features = ["std", "validate", "features"] }
 wat = { version = "=1.261.0", default-features = false }

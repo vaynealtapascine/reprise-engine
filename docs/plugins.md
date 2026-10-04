@@ -17,7 +17,7 @@ Loading recomputes and verifies the hash before any code executes. Names and
 versions are nonempty and at most 256 bytes. Host declarations are pinned
 configuration, not self-authenticating claims by a module.
 
-`Envelope` records identity, runtime version, phase, grants, declared imports,
+`Envelope` records ABI version, identity, runtime version, phase, grants, declared imports,
 limits, and each function's name, operation and complete signature. Use
 `Engine::install_plugin_functions`, `install_plugin_geometry` and
 `install_plugin_relation` to retain these pins in `Engine.plugins.envelope()`.
@@ -171,8 +171,8 @@ edit → layout → plugin → edit dependency cycle. A trap, negative status,
 nonempty result or kernel rejection applies nothing. `Plugin::call` exposes
 staged requests for inspection only, and never changes authored state.
 
-Each host import costs 32 fuel plus one fuel per copied byte (copy is an
-additional charged operation). The immutable context contains at most 256 texts,
+Each host import costs 32 fuel for lookup/validation, then another 32 plus one
+fuel per copied byte if a copy occurs. The immutable context contains at most 256 texts,
 256 editable handles and buffer_bytes total text bytes. All execution authority
 and the immutable context are explicit inputs.
 
@@ -181,9 +181,12 @@ and the immutable context are explicit inputs.
 Defaults: 100,000 fuel/call; 16 memory pages (64 KiB each); 1024 table elements;
 65,536 bytes per input/output/context/staged-edit buffer. Hard host maxima:
 100,000,000 fuel, 256 pages, 65,536 table elements, 1 MiB buffers/module,
-4096 types/functions/globals/exports and locals per function, 128 call depth,
+4096 types/functions/globals/exports and locals per function, 256 structured
+block nesting depth, 128 call depth,
 65,536 operand stack slots. There is one memory/table/instance. Eager validation
 and the module byte limit bound preparation; execution is fuel-metered.
+Proposal rejection is also checked by an explicit wasmparser validator, so a
+downstream crate enabling extra wasmi features cannot broaden the sandbox policy.
 
 | Code | Severity | Fallback |
 | --- | --- | --- |
@@ -217,3 +220,22 @@ geometry/value records, budgets, instance isolation and editing atomicity.
 
 Implementation references: [wasmi source and license](https://github.com/wasmi-labs/wasmi),
 [pinned config source](https://docs.rs/crate/wasmi/2.0.0/source/src/engine/config.rs).
+
+## Added dependency licenses
+
+Checked against the downloaded packages' Cargo.toml license declarations.
+MIT alternatives are selected where offered. No incompatible license is added.
+
+| Added package | Version | Available license |
+| --- | --- | --- |
+| wasmi (direct) | 2.0.0 | MIT / Apache-2.0 |
+| wasmparser (direct preflight) | 0.228.0 | MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception |
+| wat (direct, development only) | 1.261.0 | MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception |
+| wasmi_collections, wasmi_core, wasmi_ir | 2.0.0 each | MIT / Apache-2.0 |
+| string-interner | 0.19.0 | MIT / Apache-2.0 |
+| hashbrown | 0.15.5 | MIT OR Apache-2.0 |
+| foldhash | 0.1.5 | Zlib |
+| leb128fmt | 0.1.0 | MIT OR Apache-2.0 |
+| unicode-width | 0.2.2 | MIT OR Apache-2.0 |
+| wasm-encoder, wasmparser (WAT transitive) | 0.261.0 each | MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception |
+| wast | 261.0.0 | MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception |

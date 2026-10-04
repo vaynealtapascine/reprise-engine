@@ -24,6 +24,7 @@ pub struct PluginRegistry {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginEnvelope {
+    pub abi_version: u32,
     pub modules: Vec<Envelope>,
     pub geometry: Option<(Envelope, u32)>,
     pub relations: Vec<(SchemaId, Option<Envelope>, u32)>,
@@ -38,6 +39,7 @@ impl PluginRegistry {
             }
         }
         PluginEnvelope {
+            abi_version: reprise_plugin::ABI_VERSION,
             modules: modules.into_iter().collect(),
             geometry: self.geometry.clone(),
             relations: self

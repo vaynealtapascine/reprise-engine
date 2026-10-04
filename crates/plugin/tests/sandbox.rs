@@ -183,7 +183,8 @@ fn global_and_memory_state_never_leak_and_fuel_counts_are_pinned() {
         .call(0, &[], &CallContext::default())
         .unwrap()
         .fuel_used;
-    assert!(used > 0);
+    // Literal cost is checked on all CI platforms, not re-derived per platform.
+    assert_eq!(used, 18, "pinned wasmi/profile fuel cost changed");
     assert!(
         load_limits(
             &module,
@@ -330,4 +331,74 @@ fn checked_in_binaries_match_the_pinned_wat_sources() {
     ] {
         assert_eq!(wat::parse_str(source).unwrap(), binary);
     }
+}
+
+#[test]
+fn structured_nesting_is_refused_before_compilation() {
+    let deep = format!("{}{}i32.const 0", "block ".repeat(257), "end ".repeat(257));
+    assert_eq!(error_code(&bytes(&deep, "")), "plugin.limit");
+    let bounded = format!("{}{}i32.const 0", "block ".repeat(256), "end ".repeat(256));
+    assert!(
+        load(&bytes(&bounded, ""))
+            .call(0, &[], &CallContext::default())
+            .is_ok()
+    );
+}
+
+#[test]
+fn memory_counter_is_reset_for_every_call() {
+    let plugin = load(&bytes(
+        "i32.const 64 i32.const 64 i32.load i32.const 1 i32.add i32.store local.get $out i32.const 64 i32.load i32.store i32.const 4",
+        "",
+    ));
+    let first = plugin.call(0, &[], &CallContext::default()).unwrap();
+    assert_eq!(abi::read_i32(&first.bytes, 0).unwrap(), 1);
+    for _ in 0..4 {
+        assert_eq!(plugin.call(0, &[], &CallContext::default()).unwrap(), first);
+    }
+}
+
+#[test]
+fn version_and_allocator_cannot_escape_the_checked_abi() {
+    for (version, pointer, code) in [
+        (2, 64, "plugin.abi"),
+        (1, -1, "plugin.result"),
+        (1, 64, "plugin.result"),
+        (1, 131072, "plugin.result"),
+    ] {
+        let source = format!(
+            r#"(module
+          (memory (export "memory") 2 16)
+          (func (export "reprise_abi_version") (result i32) i32.const {version})
+          (func (export "reprise_alloc") (param i32) (result i32) i32.const {pointer})
+          (func (export "reprise_call") (param i32 i32 i32 i32 i32) (result i32) i32.const 0))"#
+        );
+        let module = wat::parse_str(source).unwrap();
+        assert_eq!(
+            load(&module)
+                .call(0, &[1], &CallContext::default())
+                .unwrap_err()
+                .code,
+            code
+        );
+    }
+    let wrong_type = wat::parse_str(
+        r#"(module
+      (memory (export "memory") 2 16)
+      (func (export "reprise_abi_version") (result f32) f32.const nan)
+      (func (export "reprise_alloc") (param i32) (result i32) i32.const 0)
+      (func (export "reprise_call") (param i32 i32 i32 i32 i32) (result i32) i32.const 0))"#,
+    )
+    .unwrap();
+    assert_eq!(error_code(&wrong_type), "plugin.abi");
+}
+
+#[test]
+fn f64_arithmetic_nans_are_canonical_too() {
+    let module = bytes(
+        "local.get $out f64.const nan:0x123456 f64.const 0 f64.add i64.reinterpret_f64 i64.store i32.const 8",
+        "",
+    );
+    let result = load(&module).call(0, &[], &CallContext::default()).unwrap();
+    assert_eq!(result.bytes, 0x7ff8_0000_0000_0000u64.to_le_bytes());
 }

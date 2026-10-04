@@ -102,6 +102,7 @@ impl Manifest {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Envelope {
+    pub abi_version: u32,
     pub identity: Identity,
     pub runtime: String,
     pub phase: Phase,
@@ -242,6 +243,7 @@ impl Plugin {
             })
             .collect();
         let envelope = Envelope {
+            abi_version: ABI_VERSION,
             identity: manifest.identity.clone(),
             runtime: RUNTIME_VERSION.into(),
             phase,
