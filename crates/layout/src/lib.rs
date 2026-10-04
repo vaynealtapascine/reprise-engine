@@ -16,6 +16,7 @@
 pub mod codes;
 mod display;
 mod flow;
+mod query;
 mod relations;
 mod snapshot;
 

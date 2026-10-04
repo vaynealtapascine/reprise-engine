@@ -212,30 +212,72 @@ impl LayoutSnapshot {
                 out.push(debug_path(cross(to), status_color(rel.status)));
             }
             for target in &rel.targets {
-                let from_line = match &target.resolved {
-                    Some(Resolution::Line(at)) => self.line(*at),
-                    Some(Resolution::Node(node)) => self.block(*node).and_then(|b| b.lines.first()),
-                    Some(Resolution::Range { node, bytes }) => self
-                        .line_containing(*node, bytes.start)
-                        .and_then(|at| self.line(at)),
-                    None => None,
-                };
                 let color = status_color(target.status);
-                if let Some(line) = from_line
-                    && let Some(frame) = self.frame(line.frame)
-                    && frame.page == page
-                {
-                    let from = frame
-                        .to_page
-                        .apply(Point::new(line.rect.origin.x + line.width, line.baseline));
-                    out.push(debug_path(Path::line(from, to), color));
-                } else {
-                    // A same-page link cannot show a cross-page endpoint.
+                let ends = self.link_ends(target.resolved.as_ref());
+                let mut drawn = false;
+                for (on, from) in ends {
+                    if on == page {
+                        out.push(debug_path(Path::line(from, to), color));
+                        drawn = true;
+                    }
+                }
+                if !drawn {
+                    // No geometry on this page: a missing target, a page
+                    // target, or one whose endpoints are on other pages.
                     out.push(debug_path(cross(to), color));
                 }
             }
         }
         out
+    }
+
+    /// Where links to a resolved target start: the end of each line it
+    /// names, or a frame's start corner, with the page each is on.
+    fn link_ends(
+        &self,
+        resolved: Option<&Resolution>,
+    ) -> Vec<(usize, Point<reprise_geom::PageSpace>)> {
+        let line_end = |line: &LineLayout| {
+            self.frame(line.frame).map(|frame| {
+                (
+                    frame.page,
+                    frame
+                        .to_page
+                        .apply(Point::new(line.rect.origin.x + line.width, line.baseline)),
+                )
+            })
+        };
+        let first_line = |node| self.block(node).and_then(|b| b.lines.first());
+        match resolved {
+            Some(Resolution::Line(at)) => self.line(*at).and_then(line_end).into_iter().collect(),
+            Some(Resolution::Node(node)) => {
+                first_line(*node).and_then(line_end).into_iter().collect()
+            }
+            Some(Resolution::Range { node, bytes }) => self
+                .line_containing(*node, bytes.start)
+                .and_then(|at| self.line(at))
+                .and_then(line_end)
+                .into_iter()
+                .collect(),
+            Some(Resolution::Nodes(nodes)) => nodes
+                .iter()
+                .filter_map(|&n| first_line(n).and_then(line_end))
+                .collect(),
+            Some(Resolution::Lines(lines)) => lines
+                .iter()
+                .filter_map(|&at| self.line(at).and_then(line_end))
+                .collect(),
+            Some(Resolution::Frame(index)) => self
+                .frame(*index)
+                .map(|f| (f.page, f.to_page.apply(f.rect.origin)))
+                .into_iter()
+                .collect(),
+            Some(Resolution::Snapshot(content)) if content.exists_now => first_line(content.node)
+                .and_then(line_end)
+                .into_iter()
+                .collect(),
+            Some(Resolution::Snapshot(_) | Resolution::Page(_)) | None => Vec::new(),
+        }
     }
 }
 

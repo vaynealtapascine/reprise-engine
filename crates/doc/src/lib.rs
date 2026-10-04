@@ -23,14 +23,24 @@ use reprise_geom::Length;
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+mod history;
 pub mod relation;
+#[cfg(test)]
+mod relation_tests;
+mod resolve;
+mod structure;
 mod style;
 
+pub use history::{
+    DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
+};
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
-    Target, TargetClass,
+    SnapshotOf, SnapshotRef, StructuralQuery, Target, TargetClass,
 };
 pub use reprise_text as text;
+pub use resolve::{Binding, Cause, Found, Gone, Outcome, ResolvedRelation, ResolvedTarget};
+pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
 pub use style::{ComputedStyle, LengthExpr, Style, default_style};
 
 macro_rules! tree_ids {
@@ -292,8 +302,10 @@ impl Document {
         Ok(())
     }
 
-    /// Deletes a block, leaving a tombstone. What happens to relations that
-    /// involve it is up to their schemas; that is not applied yet.
+    /// Deletes a block, leaving a tombstone. Relations that involve it are not
+    /// touched: each schema's `OnTargetDeleted` policy is applied when the
+    /// relation is resolved, from the tombstone (see [`relation::OnTargetDeleted`]).
+    /// To say what replaced the block, call [`Document::supersede`] first.
     pub fn delete_block(&self, id: NodeId) -> Result<(), DocError> {
         Ok(self.tree("content").delete(id.0)?)
     }

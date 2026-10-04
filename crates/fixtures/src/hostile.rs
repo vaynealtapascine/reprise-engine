@@ -9,13 +9,15 @@
 //! font fallback so emoji stop being `.notdef`, it updates `expect` here and
 //! says why in its commit.
 
+use reprise_doc::relation::builtin::REFERENCE;
 use reprise_doc::relation::{
     CopyCrossing, CopyInside, CopyPolicy, OnTargetDeleted, Ownership, RoleSpec,
 };
 use reprise_doc::text::RangePolicy;
 use reprise_doc::{
-    BlockKind, DocError, Document, LengthExpr, Relation, RelationSchema, SchemaId, SchemaRegistry,
-    Style, Target, TargetClass,
+    BlockKind, DocError, Document, LayoutQuery, LengthExpr, NodeId, Relation, RelationSchema,
+    Revision, SchemaId, SchemaRegistry, SnapshotOf, SnapshotRef, StructuralQuery, Style, Target,
+    TargetClass,
 };
 use reprise_geom::Length;
 use reprise_layout::{Engine, PageSettings};
@@ -63,6 +65,11 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         bidi_override_ligature()?,
         scripts_common_inherited()?,
         display_text_clusters()?,
+        structural_matches()?,
+        snapshot_targets()?,
+        snapshot_compacted()?,
+        concurrent_policy_deletion()?,
+        self_reference()?,
     ])
 }
 
@@ -379,4 +386,279 @@ pub fn display_text_clusters() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("display_text_clusters", doc, &[]))
+}
+
+/// A `reprise.reference` from `owner` to `target`.
+fn reference(owner: NodeId, target: Target) -> Relation {
+    Relation::new(REFERENCE)
+        .owned_by(owner)
+        .target("to", target)
+}
+
+fn next_sibling(from: NodeId, kind: Option<BlockKind>) -> Target {
+    Target::Structural(StructuralQuery::NextSibling { from, kind })
+}
+
+/// Structural queries that match nothing, one block, and several; a node
+/// deleted with two equally good successors; and one deleted with none.
+pub fn structural_matches() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let schemas = SchemaRegistry::builtin();
+    let first = doc.append_block(BlockKind::Paragraph, "body", "The first paragraph.")?;
+    let second = doc.append_block(BlockKind::Paragraph, "body", "The second paragraph.")?;
+    let last = doc.append_block(BlockKind::Paragraph, "body", "The last paragraph.")?;
+    let lost = doc.append_block(BlockKind::Paragraph, "body", "Deleted without an heir.")?;
+    let doomed = doc.append_block(BlockKind::Paragraph, "body", "Replaced by two halves.")?;
+    let half_a = doc.append_block(BlockKind::Paragraph, "body", "Replaced by")?;
+    let half_b = doc.append_block(BlockKind::Paragraph, "body", "two halves.")?;
+
+    // One match: the paragraph after the first.
+    doc.add_relation(&schemas, &reference(first, next_sibling(first, None)))?;
+    // Zero matches: nothing follows the last block, and no block is an annotation.
+    doc.add_relation(&schemas, &reference(second, next_sibling(half_b, None)))?;
+    doc.add_relation(
+        &schemas,
+        &reference(second, next_sibling(second, Some(BlockKind::Annotation))),
+    )?;
+    // Several matches in a role that takes one: ambiguous, none chosen.
+    let all = StructuralQuery::Children {
+        of: None,
+        kind: Some(BlockKind::Paragraph),
+    };
+    doc.add_relation(&schemas, &reference(last, Target::Structural(all)))?;
+    // A deleted block split into two halves: two equally good successors.
+    doc.add_relation(&schemas, &reference(first, Target::Node(doomed)))?;
+    // A deleted block nothing replaced: nothing to rebind on.
+    doc.add_relation(&schemas, &reference(first, Target::Node(lost)))?;
+
+    doc.supersede(doomed, half_a)?;
+    doc.supersede(doomed, half_b)?;
+    doc.delete_block(doomed)?;
+    doc.delete_block(lost)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "structural_matches",
+        doc,
+        &[
+            "relation.no-match",
+            "relation.ambiguous",
+            "relation.missing-target",
+        ],
+    ))
+}
+
+/// Snapshot targets at a version that exists, at one before the subject
+/// did, and at ones that don't exist or can't be: all fail soft.
+pub fn snapshot_targets() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let schemas = SchemaRegistry::builtin();
+    let owner = doc.append_block(BlockKind::Paragraph, "body", "The owner.")?;
+    let quoted = doc.append_block(BlockKind::Paragraph, "body", "The original wording.")?;
+    let range = doc.add_range(quoted, 4..12, RangePolicy::FIXED)?;
+    doc.commit();
+    let then = doc.revision();
+
+    let later = doc.append_block(BlockKind::Paragraph, "body", "Written afterwards.")?;
+    doc.block(quoted)?.text.delete(4..12)?;
+    doc.block(quoted)?.text.insert(4, "revised")?;
+    doc.commit();
+
+    let snapshot = |version: &Revision, of| {
+        Target::Snapshot(SnapshotRef {
+            version: version.clone(),
+            of,
+        })
+    };
+    // Found: the text as it was, though it has changed since.
+    let found = snapshot(&then, SnapshotOf::Node(quoted));
+    doc.add_relation(&schemas, &reference(owner, found))?;
+    let found = snapshot(&then, SnapshotOf::Range(range));
+    doc.add_relation(&schemas, &reference(owner, found))?;
+    // The subject was not written yet.
+    let early = snapshot(&then, SnapshotOf::Node(later));
+    doc.add_relation(&schemas, &reference(owner, early))?;
+    // The empty version: before anything.
+    let empty = snapshot(&Revision(vec![]), SnapshotOf::Node(owner));
+    doc.add_relation(&schemas, &reference(owner, empty))?;
+    // Versions that don't exist, and ones that are not versions.
+    for version in [
+        Revision(vec![(PEER, i32::MAX)]),
+        Revision(vec![(OTHER_PEER + 40, 3)]),
+        Revision(vec![(PEER, -1)]),
+        Revision(vec![(PEER, 2), (PEER, 1)]),
+    ] {
+        let missing = snapshot(&version, SnapshotOf::Node(quoted));
+        doc.add_relation(&schemas, &reference(owner, missing))?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "snapshot_targets",
+        doc,
+        &["relation.no-match", "relation.snapshot-unavailable"],
+    ))
+}
+
+/// A snapshot target whose version was compacted away (07).
+pub fn snapshot_compacted() -> Result<Fixture, DocError> {
+    let schemas = SchemaRegistry::builtin();
+    let doc = document()?;
+    let owner = doc.append_block(BlockKind::Paragraph, "body", "The owner.")?;
+    let quoted = doc.append_block(BlockKind::Paragraph, "body", "Before compaction.")?;
+    doc.commit();
+    let old = doc.revision();
+    doc.block(quoted)?.text.insert(0, "Edited. ")?;
+    doc.commit();
+    let kept = doc.revision();
+    doc.block(quoted)?.text.insert(0, "Edited again. ")?;
+    doc.commit();
+
+    // The compacted replica is the document from here on.
+    let doc = doc.compact_history(&kept, PEER)?;
+    let at = |version: &Revision| {
+        reference(
+            owner,
+            Target::Snapshot(SnapshotRef {
+                version: version.clone(),
+                of: SnapshotOf::Node(quoted),
+            }),
+        )
+    };
+    doc.add_relation(&schemas, &at(&old))?;
+    doc.add_relation(&schemas, &at(&kept))?;
+    doc.commit();
+    Ok(Fixture::new(
+        "snapshot_compacted",
+        doc,
+        &["relation.snapshot-unavailable"],
+    ))
+}
+
+/// A relation schema with an `OnTargetDeleted` policy and no layout
+/// behaviour: layout resolves and reports it.
+fn policy_schema(id: &'static str, on_target_deleted: OnTargetDeleted) -> RelationSchema {
+    RelationSchema {
+        id: SchemaId::new(id),
+        version: 1,
+        ownership: Ownership::Owned,
+        roles: vec![RoleSpec {
+            name: "to".into(),
+            accepts: vec![TargetClass::Node].into(),
+            min: 1,
+            max: Some(1),
+        }],
+        params: Vec::new(),
+        on_target_deleted,
+        on_copy: CopyPolicy {
+            inside: CopyInside::Duplicate,
+            crossing: CopyCrossing::KeepOutside,
+        },
+    }
+}
+
+/// Registers the two policy schemas that `reprise.reference` doesn't cover:
+/// `fixtures.keep` (`KeepMissing`) and `fixtures.delete` (`Delete`).
+pub fn policy_schemas(schemas: &mut SchemaRegistry) -> Result<(), DocError> {
+    schemas.register(policy_schema("fixtures.keep", OnTargetDeleted::KeepMissing))?;
+    schemas.register(policy_schema("fixtures.delete", OnTargetDeleted::Delete))?;
+    Ok(())
+}
+
+/// Targets deleted by one peer while the other works. One relation of each
+/// deletion policy: rebind (to a successor the other peer recorded at the
+/// same time), keep missing, and delete. Both replicas must agree.
+pub fn concurrent_policy_deletion() -> Result<Fixture, DocError> {
+    let mut engine = engine();
+    policy_schemas(&mut engine.schemas)?;
+    let doc = document()?;
+    let owner = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "The owner of three relations.",
+    )?;
+    let rebinds = doc.append_block(BlockKind::Paragraph, "body", "A target that gets replaced.")?;
+    let keeps = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "A target that is only missed.",
+    )?;
+    let deletes = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "A target that takes its relation.",
+    )?;
+    let heir = doc.append_block(BlockKind::Paragraph, "body", "The replacement.")?;
+    doc.add_relation(&engine.schemas, &reference(owner, Target::Node(rebinds)))?;
+    for (schema, target) in [("fixtures.keep", keeps), ("fixtures.delete", deletes)] {
+        let relation = Relation::new(SchemaId::new(schema))
+            .owned_by(owner)
+            .target("to", Target::Node(target));
+        doc.add_relation(&engine.schemas, &relation)?;
+    }
+    doc.commit();
+
+    let other = doc.fork(OTHER_PEER)?;
+    // Peer 1 replaces the first target, and keeps writing.
+    doc.supersede(rebinds, heir)?;
+    doc.block(heir)?.text.insert(0, "Edited: ")?;
+    // Peer 2 deletes all three targets.
+    for node in [rebinds, keeps, deletes] {
+        other.delete_block(node)?;
+    }
+    doc.merge(&other)?;
+    other.merge(&doc)?;
+    let mut fixture = Fixture::new(
+        "concurrent_policy_deletion",
+        doc,
+        &[
+            "relation.rebound",
+            "relation.missing-target",
+            "relation.target-deleted",
+            "relation.not-applied",
+        ],
+    );
+    fixture.engine = engine;
+    fixture.replica = Some(other);
+    Ok(fixture)
+}
+
+/// Relations whose structural or layout query resolves to their own owner.
+pub fn self_reference() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let schemas = SchemaRegistry::builtin();
+    let text = "A paragraph that refers to itself, and then to another.";
+    let first = doc.append_block(BlockKind::Paragraph, "body", text)?;
+    let second = doc.append_block(BlockKind::Paragraph, "body", "The second paragraph.")?;
+    let note = doc.append_block(BlockKind::Annotation, "note", "A note.")?;
+    let on = doc.add_range(first, 0..11, RangePolicy::FIXED)?;
+    doc.add_relation(&schemas, &follow(note, on))?;
+
+    // The next block after the one before the owner is the owner.
+    doc.add_relation(&schemas, &reference(second, next_sibling(first, None)))?;
+    // The first block is the owner.
+    let nth = StructuralQuery::NthChild {
+        of: None,
+        index: 0,
+        from_end: false,
+        kind: None,
+    };
+    doc.add_relation(&schemas, &reference(first, Target::Structural(nth)))?;
+    // The last annotation is the owner, which is an annotation.
+    let last = StructuralQuery::LastChild {
+        of: None,
+        kind: Some(BlockKind::Annotation),
+    };
+    doc.add_relation(&schemas, &reference(note, Target::Structural(last)))?;
+    // A node targeting itself, and a layout query for its own first line.
+    doc.add_relation(&schemas, &reference(first, Target::Node(first)))?;
+    let own_line = Target::Layout(LayoutQuery::FirstLine { node: first });
+    doc.add_relation(&schemas, &reference(first, own_line))?;
+    // Its own parent: a top-level block has none.
+    let parent = Target::Structural(StructuralQuery::Parent { of: first });
+    doc.add_relation(&schemas, &reference(first, parent))?;
+    doc.commit();
+    Ok(Fixture::new(
+        "self_reference",
+        doc,
+        &["relation.self-reference", "relation.no-match"],
+    ))
 }

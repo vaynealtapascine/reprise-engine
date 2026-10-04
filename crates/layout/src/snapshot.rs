@@ -10,7 +10,9 @@ use std::ops::Range;
 
 use reprise_compose::Explanation;
 use reprise_diag::{Code, Note, Severity};
-use reprise_doc::{BlockKind, ComputedStyle, NodeId, RangeId, RelationId, Revision, SchemaId};
+use reprise_doc::{
+    BlockKind, ComputedStyle, NodeId, RangeId, RelationId, Revision, SchemaId, SnapshotContent,
+};
 use reprise_font::FaceId;
 use reprise_geom::{FrameSpace, Length, LineSpace, Matrix, PageSpace, Rect, Transform};
 use reprise_shape::{AdapterInfo, ShapedGlyph};
@@ -132,8 +134,22 @@ pub enum RelationStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum Resolution {
     Node(NodeId),
-    Range { node: NodeId, bytes: Range<usize> },
+    Range {
+        node: NodeId,
+        bytes: Range<usize>,
+    },
     Line(LineRef),
+    /// Several blocks: the matches of a structural query that can have
+    /// several, or the candidates of an ambiguous target.
+    Nodes(Vec<NodeId>),
+    /// Several lines, in order.
+    Lines(Vec<LineRef>),
+    /// A frame, by index into [`LayoutSnapshot::frames`].
+    Frame(usize),
+    /// A page, by index into [`LayoutSnapshot::pages`].
+    Page(usize),
+    /// Content as it was at an earlier version, and whether it still exists.
+    Snapshot(SnapshotContent),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
