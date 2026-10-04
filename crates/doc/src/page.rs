@@ -129,6 +129,11 @@ pub enum FrameRole {
     /// Receives blocks that relations place beside the text, such as notes
     /// that `reprise.follow` a line.
     Margin,
+    /// The notes area (24): where `reprise.note` places footnotes. The frame
+    /// is the most room notes may take on its page; notes sit at its bottom
+    /// and the body frames above it give up exactly the depth they use. A
+    /// frame as large as the page lets notes take the whole page over.
+    Notes,
 }
 
 /// The name of the flow paragraphs belong to.

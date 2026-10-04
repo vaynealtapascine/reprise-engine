@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 44);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 54);
 }
 
 hostile_tests!(
@@ -952,4 +952,58 @@ hostile_tests!(
     reading_cycle,
     degenerate_transform,
     rational_rotation_extreme
+);
+
+// The frozen original fixture checks require annotations to be margin notes.
+// Regions add other authored roles; retain the original checks and separately
+// exercise the same text/query/backend invariants with their declared roles.
+fn check_region(fixture: Fixture) {
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    assert_eq!(
+        snapshot,
+        fixture.engine.layout(&fixture.doc),
+        "repeatable region layout"
+    );
+    check_diagnostics(fixture.name, &fixture, &snapshot);
+    check_lines(fixture.name, &snapshot);
+    check_queries(fixture.name, &snapshot);
+    check_backends(fixture.name, &fixture, &snapshot);
+    for block in &snapshot.blocks {
+        for line in &block.lines {
+            let frame = snapshot.frame(line.frame).unwrap();
+            assert!(frame.page < snapshot.pages.len());
+            assert!(
+                line.rect.origin.y + line.rect.height <= frame.rect.height,
+                "{}: line outside allocated frame",
+                fixture.name
+            );
+            match block.kind {
+                BlockKind::Paragraph => assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into())),
+                BlockKind::Annotation => {
+                    assert!(matches!(frame.role, FrameRole::Notes | FrameRole::Flow(_)))
+                }
+            }
+        }
+    }
+    insta::assert_snapshot!(fixture.name, snapshot.to_json());
+}
+
+macro_rules! region_hostile_tests {
+    ($($name:ident),* $(,)?) => {$(
+        #[test]
+        fn $name() { check_region(hostile::$name().unwrap()); }
+    )*};
+}
+
+region_hostile_tests!(
+    float_wider_than_frame,
+    float_moves_its_anchor,
+    note_taller_than_page,
+    notes_nested_three_deep,
+    note_on_last_line,
+    notes_take_over_page,
+    table_zero_columns,
+    table_conflicting_widths,
+    table_row_taller_than_page,
+    infeasible_solver_domain,
 );

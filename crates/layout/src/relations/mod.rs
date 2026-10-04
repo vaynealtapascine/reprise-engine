@@ -13,7 +13,7 @@ use crate::flow::Pending;
 use crate::{Diagnostic, Engine, LayoutSnapshot, RelationLayout, RelationStatus, Subject, codes};
 
 mod follow;
-mod resolve;
+pub(crate) mod resolve;
 
 use follow::Follow;
 use resolve::Resolver;
@@ -23,6 +23,7 @@ pub(crate) fn run(
     doc: &Document,
     snapshot: &mut LayoutSnapshot,
     mut pending: Vec<Pending>,
+    applied: &std::collections::BTreeSet<reprise_doc::RelationId>,
 ) {
     let mut follow = Follow::default();
     let mut resolver = Resolver::new(doc);
@@ -90,6 +91,8 @@ pub(crate) fn run(
             result.targets = resolved.targets;
             if relation.schema == reprise_doc::reading::READING_ORDER {
                 result.applied = resolved_order_endpoints(snapshot, &result.targets);
+            } else if relation.schema == builtin::FLOAT || relation.schema == builtin::NOTE {
+                result.applied = applied.contains(&id);
             } else if relation.schema == builtin::REFERENCE {
                 // Resolving is all a reference does (14): it is in effect
                 // when its one target is usable.

@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use reprise_compose::{
-    Adjustment, Break, ComposeRequest, GeometryProvider, LineFragment, Measure,
+    Adjustment, Break, ComposeRequest, GeometryProvider, LineFragment, Measure, Polygon, Runaround,
     break_opportunities, is_word_space,
 };
 use reprise_diag::Severity;
@@ -27,6 +27,7 @@ use reprise_shape::{
 };
 
 use crate::region::Bounded;
+use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
 use crate::{
     BlockLayout, Diagnostic, Engine, FrameLayout, LayoutSnapshot, LineLayout, PageLayout,
@@ -47,6 +48,7 @@ pub(crate) fn run(
     doc: &Document,
     template: &ResolvedTemplate,
     snapshot: &mut LayoutSnapshot,
+    plan: &Plan,
 ) -> Vec<Pending> {
     let thread = template.main_thread();
     let max_depth = thread
@@ -59,6 +61,7 @@ pub(crate) fn run(
         engine,
         template,
         snapshot,
+        plan,
         thread,
         max_depth,
         page_base: Vec::new(),
@@ -67,12 +70,29 @@ pub(crate) fn run(
         pos: 0,
         // No frame to flow through: unreachable, but nothing may panic.
         limit_hit: thread_is_empty,
+        pending: Vec::new(),
+        region_owners: crate::regions::owners(engine, doc),
     };
     // Even an empty document gets a page.
     flow.new_page();
 
-    let mut pending = Vec::new();
     for node in doc.blocks() {
+        match doc.table_role(node) {
+            Ok(Some(reprise_doc::TableRole::Table(columns))) => {
+                flow.table(doc, node, &columns);
+                continue;
+            }
+            Ok(Some(_)) | Err(_) => {
+                flow.snapshot.diagnostics.push(Diagnostic::new(
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    Subject::Node(node),
+                    "unreadable or misplaced table container",
+                ));
+                continue;
+            }
+            Ok(None) => {}
+        }
         let kind = match doc.block(node) {
             Ok(b) => b.kind,
             Err(e) => {
@@ -87,10 +107,21 @@ pub(crate) fn run(
         };
         match kind {
             BlockKind::Paragraph => flow.paragraph(doc, node),
-            BlockKind::Annotation => pending.extend(flow.annotation(doc, node)),
+            BlockKind::Annotation => {
+                if !flow.region_owners.contains(&node)
+                    && let Some(annotation) = flow.annotation(doc, node)
+                {
+                    flow.pending.push(annotation);
+                }
+            }
         }
     }
-    pending
+    while flow.snapshot.pages.len() < plan.pages {
+        if !flow.new_page() {
+            break;
+        }
+    }
+    flow.pending
 }
 
 /// How much of a frame the flow has used.
@@ -102,10 +133,13 @@ struct Fill {
     empty: bool,
 }
 
-struct Flow<'a> {
-    engine: &'a Engine,
-    template: &'a ResolvedTemplate,
-    snapshot: &'a mut LayoutSnapshot,
+pub(crate) struct Flow<'a> {
+    pub(crate) pending: Vec<Pending>,
+    pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
+    pub(crate) engine: &'a Engine,
+    pub(crate) template: &'a ResolvedTemplate,
+    pub(crate) snapshot: &'a mut LayoutSnapshot,
+    plan: &'a Plan,
     /// Template indices of the main flow's frames, in threading order.
     thread: Vec<usize>,
     /// The deepest frame in the thread: a line taller than this fits nowhere.
@@ -150,13 +184,13 @@ impl Flow<'_> {
     }
 
     /// The snapshot index of the frame the flow is in.
-    fn frame_index(&self) -> usize {
+    pub(crate) fn frame_index(&self) -> usize {
         self.page_base[self.page] + self.thread[self.pos]
     }
 
     /// Moves on to the next frame of the thread, or the first of a new page.
     /// False when the page limit stops it, which is reported once.
-    fn advance(&mut self) -> bool {
+    pub(crate) fn advance(&mut self) -> bool {
         if self.pos + 1 < self.thread.len() {
             self.pos += 1;
             return true;
@@ -212,12 +246,30 @@ impl Flow<'_> {
             let frame = &template.frames[self.thread[self.pos]];
             let y = if fill.empty { Length::ZERO } else { fill.used };
             let measure = Measure(frame.width);
-            let bounded = Bounded {
-                inner: &measure,
-                depth: frame.depth,
+            let runaround = Runaround {
+                base: measure,
+                exclusions: self
+                    .plan
+                    .exclusions
+                    .get(&index)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .map(Polygon::rect)
+                    .collect(),
+                margin: Length::ZERO,
+                min_width: Length(1),
             };
-            let unbounded = prepared.style.line_height > self.max_depth || forced;
-            let geometry: &dyn GeometryProvider = if unbounded { &measure } else { &bounded };
+            let depth = self.depth(index, frame.depth);
+            let inner: &dyn GeometryProvider = if runaround.exclusions.is_empty() {
+                &runaround.base
+            } else {
+                &runaround
+            };
+            let bounded = Bounded { inner, depth };
+            let unbounded =
+                (prepared.style.line_height > self.max_depth || forced) && depth > Length::ZERO;
+            let geometry: &dyn GeometryProvider = if unbounded { inner } else { &bounded };
             let mut composition_notes = Vec::new();
             let composed = prepared.compose(
                 engine,
@@ -234,7 +286,7 @@ impl Flow<'_> {
                 // already partly full. A whole page of empty frames that can't
                 // take a line means the geometry will never allow one: place it
                 // anyway, overflowing.
-                stalls += usize::from(fill.empty);
+                stalls += usize::from(fill.empty && depth > Length::ZERO);
                 if stalls > self.thread.len() && !forced {
                     forced = true;
                 } else if !self.advance() {
@@ -299,6 +351,43 @@ impl Flow<'_> {
         }
     }
 
+    pub(crate) fn depth(&self, index: usize, full: Length) -> Length {
+        (full
+            - self
+                .plan
+                .reservations
+                .get(&index)
+                .copied()
+                .unwrap_or_default())
+        .max(Length::ZERO)
+    }
+
+    pub(crate) fn used(&self) -> Length {
+        self.fills
+            .get(self.frame_index())
+            .map_or(Length::ZERO, |f| f.used)
+    }
+
+    pub(crate) fn set_used(&mut self, used: Length) {
+        let index = self.frame_index();
+        if let Some(fill) = self.fills.get_mut(index) {
+            fill.used = used;
+            fill.empty = false;
+        }
+    }
+
+    /// Tables retain rectangular columns: pass below all float exclusions in
+    /// this frame instead of overlapping them or changing column widths.
+    pub(crate) fn table_top(&self) -> Length {
+        self.plan
+            .exclusions
+            .get(&self.frame_index())
+            .into_iter()
+            .flatten()
+            .map(|r| r.origin.y + r.height)
+            .fold(self.used(), Length::max)
+    }
+
     /// Style is frozen once the block places its first line. A continuation
     /// keeps that starting frame's context even when later widths differ.
     fn paragraph_context(&self) -> ResolutionContext {
@@ -318,7 +407,7 @@ impl Flow<'_> {
     /// isn't known yet, so it is composed at the margin frame's width, or the
     /// main frame's when the template has no margin frame (then no relation
     /// can place it, and that is reported when one tries).
-    fn annotation(&mut self, doc: &Document, node: NodeId) -> Option<Pending> {
+    pub(crate) fn annotation(&mut self, doc: &Document, node: NodeId) -> Option<Pending> {
         let engine = self.engine;
         let subject = Subject::Node(node);
         let frame = self
@@ -362,7 +451,7 @@ impl Flow<'_> {
 
 /// All pages currently use the same resolved template. Named bases include
 /// every frame on that page; block height stays indefinite until composed.
-fn resolution_context(
+pub(crate) fn resolution_context(
     engine: &Engine,
     template: &ResolvedTemplate,
     frame: Option<&ResolvedFrame>,
@@ -380,7 +469,7 @@ fn resolution_context(
     ctx.with_block(Extent::auto_height(width))
 }
 
-fn unplaced(diagnostics: &mut Vec<Diagnostic>, subject: &Subject, bytes: Range<usize>) {
+pub(crate) fn unplaced(diagnostics: &mut Vec<Diagnostic>, subject: &Subject, bytes: Range<usize>) {
     let mut d = Diagnostic::new(
         Severity::Error,
         codes::TEXT_UNPLACED,
@@ -392,31 +481,31 @@ fn unplaced(diagnostics: &mut Vec<Diagnostic>, subject: &Subject, bytes: Range<u
 }
 
 /// A block shaped and ready to compose into one or more regions.
-struct Prepared {
+pub(crate) struct Prepared {
     node: NodeId,
     kind: BlockKind,
-    style: ComputedStyle,
-    text: String,
+    pub(crate) style: ComputedStyle,
+    pub(crate) text: String,
     items: Vec<Item>,
     levels: Vec<u8>,
     base_level: u8,
-    shaped: ShapedText,
-    breaks: Vec<Break>,
+    pub(crate) shaped: ShapedText,
+    pub(crate) breaks: Vec<Break>,
     /// Empty lines take their vertical metrics from the style's own face.
     fallback: Option<(FaceId, Length)>,
 }
 
 /// What composing a block into one region produced.
-struct Composed {
-    lines: Vec<LineLayout>,
+pub(crate) struct Composed {
+    pub(crate) lines: Vec<LineLayout>,
     /// Where the text continues, if the region ended before it did.
-    rest: Option<usize>,
-    block_end: Length,
+    pub(crate) rest: Option<usize>,
+    pub(crate) block_end: Length,
 }
 
 /// Resolves a block's style and shapes its text. `None` when it can't be laid
 /// out at all; the diagnostics say why.
-fn prepare(
+pub(crate) fn prepare(
     engine: &Engine,
     doc: &Document,
     node: NodeId,
@@ -424,7 +513,18 @@ fn prepare(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Prepared> {
     let subject = Subject::Node(node);
-    let block = doc.block(node).ok()?;
+    let block = match doc.block(node) {
+        Ok(block) => block,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                Severity::Error,
+                codes::MALFORMED_BLOCK,
+                subject,
+                error.to_string(),
+            ));
+            return None;
+        }
+    };
     let style = match doc.computed_style_with(node, ctx, &engine.functions) {
         Ok(s) => s,
         Err(e) => {
@@ -503,11 +603,14 @@ fn prepare(
 }
 
 impl Prepared {
+    pub(crate) fn node(&self) -> NodeId {
+        self.node
+    }
     /// Composes the text from byte `start` into one region, with its first
     /// line `block_start` down the frame's block axis. Lines are in frame
     /// `frame`.
     #[allow(clippy::too_many_arguments)]
-    fn compose(
+    pub(crate) fn compose(
         &self,
         engine: &Engine,
         geometry: &dyn GeometryProvider,
@@ -550,7 +653,7 @@ impl Prepared {
         }
     }
 
-    fn into_block(self, lines: Vec<LineLayout>) -> BlockLayout {
+    pub(crate) fn into_block(self, lines: Vec<LineLayout>) -> BlockLayout {
         BlockLayout {
             node: self.node,
             kind: self.kind,
@@ -998,5 +1101,27 @@ mod tests {
             .unwrap();
         assert_eq!(note.severity, Severity::Warning);
         assert_eq!(note.subject, Subject::Node(node));
+    }
+
+    #[test]
+    fn missing_cell_content_preparation_reports_instead_of_disappearing() {
+        let engine = Engine::new(FontStore::default());
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "cell").unwrap();
+        doc.delete_block(node).unwrap();
+        let mut diagnostics = Vec::new();
+        assert!(
+            prepare(
+                &engine,
+                &doc,
+                node,
+                &ResolutionContext::default(),
+                &mut diagnostics
+            )
+            .is_none()
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, codes::MALFORMED_BLOCK);
+        assert_eq!(diagnostics[0].severity, Severity::Error);
     }
 }

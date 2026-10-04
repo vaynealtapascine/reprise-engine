@@ -63,6 +63,7 @@ interfaces.
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
 |  | `tests/geometry.rs` | Transform/caret round trips, bounds, rotated follow, spiral reflow, semantic and overridden reading order; SVG/PNG visual exports | 20, 33, 39 |
+|  | `tests/regions_geometry.rs` | Floats and nested notes inside rotated, mirrored and vertical frames: determinism, roles, backends, reading order | 20, 24, 33 |
 | `cli` | `src/lib.rs` | `write_outputs`: layout JSON, and display list JSON, SVG and PNG for every page, plus a PDF | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
@@ -121,3 +122,22 @@ Other files:
 | | `src/tests.rs`, `tests/roundtrip.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
 | | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/` | Added persistence_tombstones: Unicode anchors, tombstones and retained historical references | 07, 09, 29, 34 |
+
+## Region subsystems
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/region_schema.rs`, registration in `lib.rs` and `relation.rs` | Owned float/note relation schemas and parameter vocabularies | 05, 13, 24 |
+| `doc` | `src/table.rs` | Versioned authored table/row/cell topology and column declarations on the movable tree | 05, 06, 24 |
+| `layout` | `src/solver.rs` | Explicit integer solver domains, bounded water filling and diagnosed fallbacks | 19, 25, 37 |
+| `layout` | `src/regions.rs`, entry in `lib.rs` | Bounded staged feedback, complete input-plan freeze on oscillation, dependency rounds | 24, 26, 37 |
+| `layout` | `src/floats.rs` | Side/edge float allocation, stacking, deferral, runaround exclusions | 24 |
+| `layout` | `src/notes.rs` | Anchor-preserving note allocation, continuation, nesting, endnotes and full-page reservations | 11, 24, 26 |
+| `layout` | `src/table.rs`, hooks in `flow.rs` | Content measurements, declared column allocation and synchronous row fragmentation | 24, 25 |
+| `layout` | `src/relations/mod.rs` | Final region relation reporting and references to note lines | 13, 26 |
+| - | `docs/regions.md` | Allocation, fragmentation, cycle and fallback design | 24–26 |
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/regions/tests.rs` | Adversarial mixed-region, cycles, dependency depth, fanout, pagination and table cursor unit tests | 24–26, 37 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/hostile__*.snap` | Ten hostile region fixtures, original invariant checks retained, region-role checks and paired layout/content goldens | 24–26, 37–39 |

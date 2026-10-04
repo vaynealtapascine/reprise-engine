@@ -29,12 +29,14 @@ mod history;
 mod page;
 mod persist;
 pub mod reading;
+mod region_schema;
 pub mod relation;
 #[cfg(test)]
 mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
+mod table;
 
 pub use context::ResolutionContext;
 pub use expr::{ComputedLength, Dependency, Expr};
@@ -49,6 +51,7 @@ pub use page::{
 pub use persist::{
     MAX_PERSIST_BYTES, MAX_PERSIST_EXPANDED_BYTES, MAX_PERSIST_OPS, PersistenceMode,
 };
+pub use region_schema::{FloatSide, NotePlacement};
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
     SnapshotOf, SnapshotRef, StructuralQuery, Target, TargetClass,
@@ -60,6 +63,7 @@ pub use style::{
     Authored, Computed, ComputedStyle, LengthExpr, Property, Specified, StageExplanation, Style,
     StyleResolution, default_style,
 };
+pub use table::{CellInfo, Column, ColumnWidth, RowInfo, TableColumns, TableRole};
 
 macro_rules! tree_ids {
     ($($(#[$m:meta])* $name:ident),*) => {$(
