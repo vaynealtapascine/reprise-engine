@@ -41,16 +41,14 @@ fn odd_revisions_resolve_or_report_without_panicking() {
         late.clone(),
     ];
     for version in revisions {
-        for of in [SnapshotOf::Node(a)] {
-            let state = one.resolve_snapshot(&SnapshotRef {
-                version: version.clone(),
-                of,
-            });
-            // Any answer is fine; the point is that there is one. A version
-            // that resolves must give the block's text as some prefix state.
-            if let SnapshotState::Found(content) = state {
-                assert!(content.text.ends_with("first words"), "{version:?}");
-            }
+        let state = one.resolve_snapshot(&SnapshotRef {
+            version: version.clone(),
+            of: SnapshotOf::Node(a),
+        });
+        // Any answer is fine; the point is that there is one. A version that
+        // resolves must show the block's text as it was then.
+        if let SnapshotState::Found(content) = state {
+            assert!(content.text.ends_with("first words"), "{version:?}");
         }
         let _ = one.at(&version);
     }
