@@ -108,6 +108,26 @@ pub(crate) fn begin(
                 // Resolving is all a reference does (14): it is in effect
                 // when its one target is usable.
                 result.applied = usable;
+            } else if let Some(binding) = engine.plugins.relations.get(&relation.schema) {
+                if !resolved.deleted {
+                    match binding.report(&result.targets) {
+                        Ok(applied) => result.applied = applied,
+                        Err(note) => snapshot.diagnostics.push(Diagnostic::new(
+                            note.severity,
+                            note.code,
+                            Subject::Relation(id),
+                            note.message,
+                        )),
+                    }
+                }
+                if !result.applied {
+                    snapshot.diagnostics.push(Diagnostic::new(
+                        Severity::Info,
+                        codes::RELATION_NOT_APPLIED,
+                        Subject::Relation(id),
+                        format!("plugin behaviour for {} was not applied", relation.schema),
+                    ));
+                }
             } else {
                 snapshot.diagnostics.push(Diagnostic::new(
                     Severity::Info,

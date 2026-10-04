@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 64);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 66);
 }
 
 hostile_tests!(
@@ -1104,3 +1104,4 @@ hostile_tests!(
     font_corrupt_declaration,
     font_collection_index
 );
+hostile_tests!(plugin_fuel, plugin_extensions);

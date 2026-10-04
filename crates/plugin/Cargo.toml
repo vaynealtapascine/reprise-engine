@@ -1,5 +1,5 @@
 [package]
-name = "reprise-layout"
+name = "reprise-plugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,12 +9,12 @@ publish.workspace = true
 [dependencies]
 reprise-diag.workspace = true
 reprise-geom.workspace = true
-reprise-text.workspace = true
 reprise-doc.workspace = true
-reprise-font.workspace = true
-reprise-shape.workspace = true
 reprise-compose.workspace = true
-reprise-plugin.workspace = true
-reprise-display.workspace = true
-serde_json.workspace = true
 serde.workspace = true
+sha2.workspace = true
+wasmi.workspace = true
+wasmparser.workspace = true
+
+[dev-dependencies]
+wat.workspace = true

@@ -14,6 +14,7 @@ use reprise_layout::Engine;
 
 pub mod fonts;
 pub mod hostile;
+pub mod plugins;
 pub mod spike;
 pub mod templates;
 

@@ -23,6 +23,7 @@ mod flow;
 pub mod geometry;
 pub mod incremental;
 mod notes;
+pub mod plugins;
 mod query;
 pub mod reading;
 mod region;
@@ -87,6 +88,8 @@ pub struct Engine {
     pub schemas: SchemaRegistry,
     /// Pure functions available to authored style expressions.
     pub functions: FunctionRegistry,
+    /// Pinned sandbox configuration and plugin relation behaviours.
+    pub plugins: plugins::PluginRegistry,
     /// What the document is laid out for. Page templates may size themselves
     /// from it. Not authored state: the same document lays out differently on
     /// a different medium.
@@ -102,6 +105,7 @@ impl Engine {
             composer: Box::new(Greedy),
             schemas: SchemaRegistry::builtin(),
             functions: FunctionRegistry::builtin(),
+            plugins: plugins::PluginRegistry::default(),
             medium: Medium::new(Length::from_pt(420), Length::from_pt(300)),
             flow: FlowSettings::default(),
         }

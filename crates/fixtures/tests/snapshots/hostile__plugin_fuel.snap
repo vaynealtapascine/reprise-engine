@@ -1,0 +1,327 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      103
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "plugin-geometry",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "default",
+    "source": "builtin"
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "8@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.function-failed",
+            "message": "size in style plugin-loop: plugin-size failed: plugin.fuel: plugin exhausted its per-call fuel budget; this layer's value is ignored and the value inherited from before is used",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 12288
+          },
+          "baseline": 9733,
+          "width": 95805,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 95805
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "34@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 45
+          },
+          "preview": "Fuel is a deterministic bound. Text survives",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 20480
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 31187,
+          "width": 217019,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 45
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 219644
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 45,
+            "end": 64
+          },
+          "preview": "a failed extension.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 33997
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 44704,
+          "width": 92086,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 45,
+                "end": 64
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 92086
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "102@1",
+      "schema": "fixture.plugin-report",
+      "owner": null,
+      "status": "valid",
+      "applied": false,
+      "targets": [
+        {
+          "role": "to",
+          "status": "valid",
+          "resolved": {
+            "line": {
+              "node": "34@1",
+              "line": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "style.function-failed",
+      "subject": {
+        "kind": "node",
+        "id": "8@1"
+      },
+      "message": "size in style plugin-loop: plugin-size failed: plugin.fuel: plugin exhausted its per-call fuel budget; this layer's value is ignored and the value inherited from before is used",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "plugin.fuel",
+      "subject": {
+        "kind": "node",
+        "id": "8@1"
+      },
+      "message": "plugin exhausted its per-call fuel budget",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "plugin.fuel",
+      "subject": {
+        "kind": "node",
+        "id": "34@1"
+      },
+      "message": "plugin exhausted its per-call fuel budget",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "plugin.fuel",
+      "subject": {
+        "kind": "relation",
+        "id": "102@1"
+      },
+      "message": "plugin exhausted its per-call fuel budget",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.not-applied",
+      "subject": {
+        "kind": "relation",
+        "id": "102@1"
+      },
+      "message": "plugin behaviour for fixture.plugin-report was not applied",
+      "bytes": null
+    }
+  ]
+}
