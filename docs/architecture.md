@@ -393,8 +393,17 @@ A fragment records its adjustments, the reason for its break and its score (39).
 Floats, tables and notes are each their own subsystem.
 
 **Note:** This is a large scope. The spike (40) covers only ordered flow plus one annotation.
-The others follow as parallel modules once the contracts are frozen. It is still open where
-allocation, fragmentation and backtracking live.
+The others followed as parallel modules once the contracts were frozen.
+
+**Resolved (2026-10-04):** where allocation, fragmentation and backtracking live. See
+[regions.md](regions.md).
+
+-   **Allocation** lives in each subsystem: flow owns frames and pages, floats their
+    placement and exclusions, notes their areas and body reservations, and tables their
+    columns, through a declared solver domain (25).
+-   **Fragmentation** advances monotonic cursors within a pass.
+-   **Backtracking** is a complete reflow, run by a coordinator with a bounded number of
+    passes (26). Line breaking stays inside composers.
 
 ---
 
@@ -630,6 +639,17 @@ These were chosen on 2026-10-03, before the spike.
 
 ## Open questions
 
--   **Numbers to fix during implementation:** tombstone compaction, fixed-point resolution, and
-    the iteration limit and cycle classes.
--   **Where allocation, fragmentation and backtracking live** in block and region flow (24).
+-   **Tombstone compaction (07).** Still to decide: when deleted blocks, history and old
+    versions may be dropped. It affects snapshot targets (13), which can't read compacted
+    history, and the file format (34).
+
+Resolved:
+
+-   **Numbers fixed during implementation (2026-10-04):**
+    -   Fixed-point resolution (19): `Length` is 1/1024 pt and `Fixed` is 16.16, saturating
+        and rounding half away from zero.
+    -   Iteration limits and cycle classes (26): these are documented in
+        [regions.md](regions.md) and [incremental.md](incremental.md), and include 16
+        region-feedback passes and a note depth of 32.
+-   **Where allocation, fragmentation and backtracking live (24):** see
+    [regions.md](regions.md) and the note under decision 24.
