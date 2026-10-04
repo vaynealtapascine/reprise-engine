@@ -44,7 +44,7 @@ interfaces.
 | `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`, `functions`, `medium` and `FlowSettings`), `Engine::layout`, geometry and reading module wiring | 20, 24, 26, 33, 38 |
 |  | `src/codes.rs` | Diagnostic codes reported by layout and the relation pass | 37 |
 |  | `src/snapshot.rs` | `LayoutSnapshot` (pages, frames, blocks), `RelationLayout`, `Resolution`, `Diagnostic`, queries | 05, 13, 37 |
-|  | `src/geometry.rs`, `src/GEOMETRY.md` | Exact authored frame transforms, logical writing axes, bounded spiral expansion, inverse and path diagnostics | 19, 20, 37, 38 |
+|  | `src/geometry.rs`, `docs/geometry.md` | Exact authored frame transforms, logical writing axes, bounded spiral expansion, inverse and path diagnostics | 19, 20, 37, 38 |
 |  | `src/reading.rs` | Snapshot reading-order queries with explicit document input, stable partial-order completion and iterative cycle repair | 01, 33, 37 |
 |  | `src/template.rs` | Resolving the document's page template against the medium; falling back to the built-in one | 24, 34, 37, 38 |
 |  | `src/region.rs` | `Bounded`: any geometry provider, ended at a frame's depth | 23, 24 |

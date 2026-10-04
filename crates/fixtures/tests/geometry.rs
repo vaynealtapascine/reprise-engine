@@ -388,3 +388,96 @@ fn empty_document_has_an_empty_total_reading_order() {
     assert!(s.reading_order(&doc).is_empty());
     assert!(s.pdf_reading_order(&doc).is_empty());
 }
+
+/// Orchestrator review: authors can store any `Fixed` coefficients in a
+/// `Rotation::Matrix`, and any spiral parameters. Layout must stay total under
+/// the extremes: no panic, every frame on a real page, every line in a frame
+/// that exists, transforms that it keeps invertible, and the same output twice.
+#[test]
+fn extreme_authored_transforms_and_spirals_stay_total() {
+    use reprise_doc::Spiral;
+    use reprise_geom::Fixed;
+    let f = |v: i32| Fixed(v);
+    let matrices = [
+        (f(i32::MIN), f(i32::MAX), f(i32::MIN), f(i32::MIN)),
+        (f(i32::MAX), f(i32::MAX), f(i32::MAX), f(i32::MAX)),
+        (f(1), f(0), f(0), f(1)),
+        (f(0), f(i32::MIN), f(i32::MIN), f(0)),
+        (f(-1), f(1), f(1), f(-1)),
+    ];
+    let spirals = [
+        Spiral {
+            radius: Dim::Pt(Length::MAX),
+            growth: Dim::Pt(Length::MIN),
+            start_millidegrees: i64::MIN,
+            sweep_millidegrees: i64::MAX,
+            segments: u32::MAX,
+        },
+        Spiral {
+            radius: Dim::pt(0),
+            growth: Dim::pt(0),
+            start_millidegrees: 0,
+            sweep_millidegrees: 0,
+            segments: 0,
+        },
+        Spiral {
+            radius: Dim::pt(-50),
+            growth: Dim::pt(1),
+            start_millidegrees: -1,
+            sweep_millidegrees: -3_600_000,
+            segments: 7,
+        },
+    ];
+    let mut cases = Vec::new();
+    for (xx, yx, xy, yy) in matrices {
+        let mut frame = flow_frame("main", Dim::pt(30), Dim::pt(30), Dim::pt(200), Dim::pt(200));
+        frame.transform.rotation = Rotation::Matrix { xx, yx, xy, yy };
+        frame.transform.origin_x = Dim::Pt(Length::MAX);
+        frame.transform.origin_y = Dim::Pt(Length::MIN);
+        cases.push(frame);
+    }
+    for spiral in spirals {
+        let mut frame = flow_frame("main", Dim::pt(30), Dim::pt(30), Dim::pt(200), Dim::pt(200));
+        frame.path = Some(spiral);
+        frame.writing_mode = WritingMode::VerticalRl;
+        cases.push(frame);
+    }
+    for (i, frame) in cases.into_iter().enumerate() {
+        let doc = Document::new(PEER).unwrap();
+        define_styles(&doc).unwrap();
+        doc.set_page_template(
+            &PageTemplate::new("extreme", Dim::pt(300), Dim::pt(300)).with_frame(frame),
+        )
+        .unwrap();
+        doc.append_block(
+            BlockKind::Paragraph,
+            "body",
+            "Words that must land somewhere, or be reported.",
+        )
+        .unwrap();
+        doc.commit();
+        let engine = engine();
+        let snapshot = engine.layout(&doc);
+        assert!(!snapshot.pages.is_empty(), "case {i}");
+        for frame in &snapshot.frames {
+            assert!(
+                frame.page < snapshot.pages.len(),
+                "case {i}: frame on a page"
+            );
+            assert!(
+                frame.to_page.inverse().is_some(),
+                "case {i}: kept transform is invertible"
+            );
+        }
+        for block in &snapshot.blocks {
+            for line in &block.lines {
+                assert!(
+                    snapshot.frame(line.frame).is_some(),
+                    "case {i}: line in a frame"
+                );
+            }
+        }
+        assert_eq!(snapshot, engine.layout(&doc), "case {i}: deterministic");
+        let _ = snapshot.to_display_lists(DisplayOptions::default());
+    }
+}
