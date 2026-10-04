@@ -148,7 +148,47 @@ impl LineModel {
         for run in &line.runs {
             run_cells(run, info, &mut cells);
         }
-        cells.retain(|c| c.range.end <= limit);
+        cells.retain(|c| {
+            c.range.start >= line.text.start
+                && c.range.end <= limit
+                && info.is_boundary(c.range.start)
+                && info.is_boundary(c.range.end)
+        });
+        // Missing-font spans may have no runs at all. Keep their logical
+        // grapheme stops, with zero width at the nearest mapped text edge.
+        let covered: BTreeSet<usize> = cells.iter().map(|c| c.range.start).collect();
+        let mut missing = Vec::new();
+        let first = info.boundaries.partition_point(|&b| b < line.text.start);
+        for edge in info.boundaries.get(first..).unwrap_or_default().windows(2) {
+            if edge[1] > limit {
+                break;
+            }
+            if covered.contains(&edge[0]) {
+                continue;
+            }
+            let nearest = cells.iter().min_by_key(|c| c.range.start.abs_diff(edge[0]));
+            let x = nearest.map_or(line.rect.origin.x, |c| {
+                let before = edge[1] <= c.range.start;
+                if before != (c.level % 2 == 1) {
+                    c.x0
+                } else {
+                    c.x1
+                }
+            });
+            missing.push(GraphemeCell {
+                range: edge[0]..edge[1],
+                x0: x,
+                x1: x,
+                level: u8::from(info.rtl),
+            });
+        }
+        if !missing.is_empty() {
+            if info.rtl {
+                missing.reverse();
+            }
+            cells.extend(missing);
+            cells.sort_by_key(|c| c.x0);
+        }
         let mut stops = Vec::with_capacity(cells.len() * 2);
         for (i, cell) in cells.iter().enumerate() {
             let rtl = cell.level % 2 == 1;
@@ -228,12 +268,15 @@ impl LineModel {
         }
     }
 
-    /// Where two carets drawn at the same x are one place: the stop that is
-    /// the left edge of the cell to its right, if any (so a point on a cell
-    /// boundary belongs to the cell on its right), else the right end of the
-    /// line.
+    /// Normalizes affinity only when the logical offset also agrees. Equal x
+    /// alone does not identify a caret: zero-width text and bidi junctions
+    /// can put distinct logical positions at the same visual location.
     pub fn canonical(&self, stop: Stop) -> Stop {
-        let at: Vec<&Stop> = self.stops.iter().filter(|s| s.x == stop.x).collect();
+        let at: Vec<&Stop> = self
+            .stops
+            .iter()
+            .filter(|s| s.x == stop.x && s.offset == stop.offset)
+            .collect();
         at.iter()
             .find(|s| s.left_edge)
             .or_else(|| at.last())
@@ -250,21 +293,24 @@ impl LineModel {
             .collect()
     }
 
-    /// The stop to land on at `junction`, preferring `prefer` when the
-    /// junction is a split caret (so a step lands where it crossed to), and
-    /// the canonical stop otherwise.
+    /// The stop to land on at `junction`. A junction has one stop, or two
+    /// when it joins the right edge of one cell to the left edge of the next.
+    /// If the two agree on the offset, the left edge of the cell on the right
+    /// is the one (as for a hit). If they don't (a bidi boundary, or a gap),
+    /// it is a split caret, and `prefer` says which, so that a step lands where
+    /// it crossed to; without a preference it is the same left edge.
+    ///
+    /// This picks by junction, not by x: zero-width cells share an x, and a
+    /// step must still get past them.
     pub fn arrive(&self, junction: usize, prefer: Option<Stop>) -> Stop {
         let here = self.at_junction(junction);
-        let first = match here.first() {
-            Some(s) => *s,
-            None => return self.empty_stop(),
+        let left = here.iter().find(|s| s.left_edge).or(here.first()).copied();
+        let Some(left) = left else {
+            return self.empty_stop();
         };
-        if here.iter().all(|s| s.offset == first.offset) {
-            return self.canonical(first);
-        }
         prefer
-            .filter(|p| here.iter().any(|s| s == p))
-            .unwrap_or_else(|| self.canonical(first))
+            .filter(|p| here.iter().any(|s| s == p) && here.iter().any(|s| s.offset != left.offset))
+            .unwrap_or(left)
     }
 
     /// The cell nearest to `x` (distance 0 when inside, edges included), the
@@ -322,7 +368,7 @@ fn run_cells(run: &reprise_layout::PositionedRun, info: &BlockInfo, out: &mut Ve
             _ => groups.push((cluster, from, pen)),
         }
     }
-    groups.retain(|(c, ..)| range.contains(c));
+    groups.retain(|(c, ..)| range.contains(c) && info.is_boundary(*c));
     // A cluster runs to the next larger cluster, or to the run's end.
     let starts: BTreeSet<usize> = groups.iter().map(|(c, ..)| *c).collect();
     let end_of = |c: usize| {
@@ -352,7 +398,9 @@ fn run_cells(run: &reprise_layout::PositionedRun, info: &BlockInfo, out: &mut Ve
         let at = |k: usize| {
             let share = div_round(width.saturating_mul(k as i64), n as i64);
             Length(
-                lo.0.saturating_add(share.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32),
+                i64::from(lo.0)
+                    .saturating_add(share)
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
             )
         };
         for k in 0..n {

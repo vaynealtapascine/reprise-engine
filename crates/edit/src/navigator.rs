@@ -20,10 +20,12 @@
 //! A caret is a block, a byte offset on a grapheme boundary, and an
 //! [`Affinity`]. Several carets can be drawn in the same place, and one offset
 //! can be drawn in two places, so [`Navigator::normalize`] picks one
-//! representative per place: [`Navigator::hit`] and the movements return only
-//! those, and `rect` followed by `hit` gives a caret back unchanged.
+//! representative affinity per logical position. Hit testing returns a
+//! deterministic representative when positions coincide; rect then hit then
+//! rect preserves geometry, with exact identity where the position is unique.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
 
 use reprise_doc::{Document, NodeId};
 use reprise_geom::{Length, PageSpace, Point, Rect};
@@ -31,6 +33,12 @@ use reprise_layout::{BlockLayout, LayoutSnapshot, LineLayout, LineRef};
 
 use crate::caret::{Affinity, Caret, CaretRect, GraphemeCell, Hit};
 use crate::model::{BlockInfo, LineModel, Stop, gap};
+
+type InsideCandidate = (
+    (i64, (usize, usize)),
+    LineRef,
+    Point<reprise_geom::FrameSpace>,
+);
 
 pub struct Navigator<'a> {
     pub(crate) snapshot: &'a LayoutSnapshot,
@@ -40,6 +48,8 @@ pub struct Navigator<'a> {
     /// Index into `snapshot.blocks`.
     pub(crate) position: BTreeMap<NodeId, usize>,
     pub(crate) info: BTreeMap<NodeId, BlockInfo>,
+    /// Each line's model, made the first time it is asked for.
+    models: BTreeMap<NodeId, Vec<OnceLock<LineModel>>>,
 }
 
 impl<'a> Navigator<'a> {
@@ -71,12 +81,20 @@ impl<'a> Navigator<'a> {
             .iter()
             .map(|(n, &i)| (*n, BlockInfo::new(&snapshot.blocks[i].text)))
             .collect();
+        let models = position
+            .iter()
+            .map(|(n, &i)| {
+                let lines = snapshot.blocks[i].lines.len();
+                (*n, (0..lines).map(|_| OnceLock::new()).collect())
+            })
+            .collect();
         Navigator {
             snapshot,
             order: ordered,
             rank,
             position,
             info,
+            models,
         }
     }
 
@@ -109,13 +127,13 @@ impl<'a> Navigator<'a> {
         &self,
         node: NodeId,
         line: usize,
-    ) -> Option<(LineModel, &'a LineLayout)> {
+    ) -> Option<(&LineModel, &'a LineLayout)> {
         let block = self.block(node)?;
         let layout = block.lines.get(line)?;
-        Some((
-            LineModel::new(block, self.info(node)?, line, layout),
-            layout,
-        ))
+        let cell = self.models.get(&node)?.get(line)?;
+        let info = self.info.get(&node)?;
+        let model = cell.get_or_init(|| LineModel::new(block, info, line, layout));
+        Some((model, layout))
     }
 
     /// The line that draws a caret at `offset` with `affinity`: the line
@@ -154,7 +172,7 @@ impl<'a> Navigator<'a> {
     }
 
     /// The line and stop where `caret` is drawn.
-    pub(crate) fn locate(&self, caret: &Caret) -> Option<(usize, LineModel, Stop)> {
+    pub(crate) fn locate(&self, caret: &Caret) -> Option<(usize, &LineModel, Stop)> {
         if !self.valid(caret) {
             return None;
         }
@@ -220,7 +238,7 @@ impl<'a> Navigator<'a> {
     /// The graphemes of a line with their extents, in visual order.
     pub fn graphemes(&self, at: LineRef) -> Vec<GraphemeCell> {
         self.line_model(at.node, at.line)
-            .map(|(m, _)| m.cells)
+            .map(|(m, _)| m.cells.clone())
             .unwrap_or_default()
     }
 
@@ -302,11 +320,7 @@ impl<'a> Navigator<'a> {
         // Several lines can contain the point (overflow, or a note drawn over
         // text): the one with a caret nearest the point wins, then the earlier
         // in reading order.
-        let mut inside: Option<(
-            (i64, (usize, usize)),
-            LineRef,
-            Point<reprise_geom::FrameSpace>,
-        )> = None;
+        let mut inside: Option<InsideCandidate> = None;
         for (frame, p) in &spaces {
             for r in &by_frame[frame] {
                 if extent(r, p) != Some((0, 0)) {
@@ -393,9 +407,9 @@ impl<'a> Navigator<'a> {
             })?;
         let (model, _) = self.line_model(line.node, line.line)?;
         let stop = if at_end {
-            model.arrive(model.cells.len(), None)
+            model.canonical(model.locate(model.end_limit, Affinity::Upstream))
         } else {
-            model.arrive(0, None)
+            model.canonical(model.locate(model.start, Affinity::Downstream))
         };
         Some(Hit {
             caret: self.caret_of(line.node, &stop),

@@ -64,6 +64,9 @@ interfaces.
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
 | `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties | 07, 29 |
 |  | `tests/document_edits.rs` | General structural edit primitives and collaborative text undo | 07, 12, 29 |
+|  | `src/caret.rs`, `src/model.rs`, `src/navigator.rs` | Byte/affinity carets, cached cluster/grapheme cells, integer page geometry and deterministic hit testing | 09, 20, 22, 30 |
+|  | `src/movement.rs`, `src/select.rs` | Logical/visual navigation, goal-x line movement, reading order, logical selection ranges, bidi geometry and gesture operations | 30, 31, 33 |
+|  | `tests/common/mod.rs`, `tests/navigation.rs`, `tests/movement.rs`, `tests/selection.rs` | All-hostile geometric round trips, bidi/zero-width traversal, empty input, transforms and selection coverage | 20, 30, 31, 33, 37 |
 | `cli` | `src/lib.rs` | `write_outputs`: layout JSON, and display list JSON, SVG and PNG for every page, plus a PDF | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |

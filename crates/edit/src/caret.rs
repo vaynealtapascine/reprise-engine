@@ -95,7 +95,8 @@ pub struct CaretRect {
 }
 
 impl CaretRect {
-    /// A page point on the caret that [`crate::Navigator::hit`] maps back to it.
+    /// A page point on the caret. Hit testing returns a caret at the same
+    /// visual position; coincident caret identities cannot be distinguished.
     pub fn point(&self) -> Point<PageSpace> {
         let r = &self.rect;
         Point::new(

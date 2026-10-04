@@ -80,6 +80,9 @@ impl Navigator<'_> {
     /// collapsed selection gives one empty range. A caret that isn't in the
     /// snapshot gives nothing.
     pub fn selection_ranges(&self, selection: &Selection) -> Vec<BlockRange> {
+        if self.locate(&selection.anchor).is_none() || self.locate(&selection.focus).is_none() {
+            return Vec::new();
+        }
         let key = |c: &Caret| self.rank.get(&c.node).map(|&r| (r, c.offset));
         let (Some(a), Some(b)) = (key(&selection.anchor), key(&selection.focus)) else {
             return Vec::new();

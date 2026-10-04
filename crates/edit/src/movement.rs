@@ -75,7 +75,7 @@ impl Navigator<'_> {
                 }
             }
             Movement::VisualRight | Movement::VisualLeft => {
-                self.visual(caret, line, &model, stop, movement == Movement::VisualRight)
+                self.visual(caret, line, model, stop, movement == Movement::VisualRight)
             }
             Movement::LineUp | Movement::LineDown => {
                 let goal = from.goal_x.unwrap_or(stop.x);
@@ -193,7 +193,8 @@ impl Navigator<'_> {
     /// line of the next block in reading order.
     pub fn line_after(&self, node: NodeId, line: usize) -> Option<LineRef> {
         let block = self.block(node)?;
-        if line + 1 < block.lines.len() {
+        block.lines.get(line)?;
+        if line.saturating_add(1) < block.lines.len() {
             return Some(LineRef {
                 node,
                 line: line + 1,
@@ -203,6 +204,7 @@ impl Navigator<'_> {
     }
 
     pub fn line_before(&self, node: NodeId, line: usize) -> Option<LineRef> {
+        self.block(node)?.lines.get(line)?;
         if let Some(l) = line.checked_sub(1) {
             return Some(LineRef { node, line: l });
         }
