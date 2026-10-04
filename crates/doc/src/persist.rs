@@ -391,4 +391,66 @@ mod tests {
             assert!(Document::import(&bytes[..end], 2).is_err());
         }
     }
+
+    /// Orchestrator review: the preflight reads Loro 1.16's private snapshot
+    /// encoding and fails closed on anything else. Bumping Loro must be a
+    /// deliberate step that rechecks it, so pin the version here, as
+    /// `reprise-shape` pins harfrust.
+    #[test]
+    fn preflight_is_pinned_to_the_loro_version_it_reads() {
+        let lock = include_str!("../../../Cargo.lock").replace(
+            "
+", "
+",
+        );
+        assert!(
+            lock.contains(
+                "name = \"loro\"
+version = \"1.16.2\""
+            ),
+            "Loro changed: recheck preflight_snapshot against its encoding, then update this pin"
+        );
+    }
+
+    /// Orchestrator review: blobs Loro itself produces but that aren't
+    /// documents (updates, updates from another peer, a snapshot followed by
+    /// trailing bytes, two snapshots back to back) are rejected, never
+    /// imported half-way or panicked on.
+    #[test]
+    fn loro_blobs_that_are_not_documents_are_rejected() {
+        use crate::BlockKind;
+        let doc = Document::new(1).unwrap();
+        doc.append_block(BlockKind::Paragraph, "body", "words")
+            .unwrap();
+        doc.commit();
+        let updates = doc.doc.export(ExportMode::all_updates()).unwrap();
+        assert!(
+            Document::import(&updates, 1).is_err(),
+            "updates are not a document"
+        );
+        let other = doc.fork(2).unwrap();
+        other
+            .append_block(BlockKind::Paragraph, "body", "more")
+            .unwrap();
+        other.commit();
+        let delta = other
+            .doc
+            .export(ExportMode::updates(&doc.doc.oplog_vv()))
+            .unwrap();
+        assert!(
+            Document::import(&delta, 1).is_err(),
+            "a delta is not a document"
+        );
+        let snapshot = doc.export(PersistenceMode::History);
+        let mut trailing = snapshot.clone();
+        trailing.extend_from_slice(b" trailing");
+        assert!(Document::import(&trailing, 1).is_err(), "trailing bytes");
+        let mut twice = snapshot.clone();
+        twice.extend_from_slice(&snapshot);
+        assert!(Document::import(&twice, 1).is_err(), "two snapshots");
+        assert!(
+            Document::import(&snapshot, 1).is_ok(),
+            "the snapshot itself opens"
+        );
+    }
 }
