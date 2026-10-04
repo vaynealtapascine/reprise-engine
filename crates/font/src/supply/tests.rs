@@ -155,3 +155,118 @@ fn parser_boundary_is_bounded_and_never_panics() {
     assert!(Face::declared(SERIF, Some(invalid)).is_err());
     assert!(Face::from_bytes(vec![0; MAX_FONT_BYTES + 1]).is_err());
 }
+
+#[test]
+fn matching_prioritizes_actual_stretch_then_style_then_weight() {
+    let mut store = FontStore::default();
+    let normal = store
+        .register(bundled()[0].data(), decl(700, FontStyle::Normal, 1000))
+        .unwrap();
+    let italic = store
+        .register(bundled()[1].data(), decl(400, FontStyle::Italic, 1000))
+        .unwrap();
+    let narrow = store
+        .register(bundled()[2].data(), decl(700, FontStyle::Italic, 900))
+        .unwrap();
+    let oblique = store
+        .register(bundled()[3].data(), decl(700, FontStyle::Oblique, 1000))
+        .unwrap();
+    for (wanted, expected) in [
+        (
+            Descriptors {
+                weight: 700,
+                style: FontStyle::Italic,
+                stretch: 1000,
+            },
+            &italic,
+        ),
+        (
+            Descriptors {
+                weight: 700,
+                style: FontStyle::Normal,
+                stretch: 1000,
+            },
+            &normal,
+        ),
+        (
+            Descriptors {
+                weight: 700,
+                style: FontStyle::Italic,
+                stretch: 900,
+            },
+            &narrow,
+        ),
+        (
+            Descriptors {
+                weight: 700,
+                style: FontStyle::Oblique,
+                stretch: 1000,
+            },
+            &oblique,
+        ),
+    ] {
+        assert_eq!(
+            store.match_family("Test", wanted).unwrap().face.id(),
+            expected
+        );
+    }
+    let requested = Descriptors {
+        weight: 700,
+        style: FontStyle::Italic,
+        stretch: 1000,
+    };
+    let result = store.match_family("Test", requested).unwrap();
+    assert_eq!(result.notes[0].code, codes::NEAREST);
+    assert_eq!(result.notes[0].severity, reprise_diag::Severity::Warning);
+    let mut store = FontStore::default();
+    let narrow = store
+        .register(bundled()[0].data(), decl(400, FontStyle::Normal, 900))
+        .unwrap();
+    let wide = store
+        .register(bundled()[1].data(), decl(400, FontStyle::Normal, 1001))
+        .unwrap();
+    assert_eq!(
+        store
+            .match_family("Test", Descriptors::default())
+            .unwrap()
+            .face
+            .id(),
+        &narrow
+    );
+    assert_eq!(
+        store
+            .match_family(
+                "Test",
+                Descriptors {
+                    stretch: 1001,
+                    ..Descriptors::default()
+                }
+            )
+            .unwrap()
+            .face
+            .id(),
+        &wide
+    );
+}
+
+#[test]
+fn absurd_integer_metrics_remain_exact_without_overflow() {
+    let font = Face::from_bytes(SERIF).unwrap();
+    let hhea = font
+        .font_ref()
+        .table_directory()
+        .table_records()
+        .iter()
+        .find(|r| r.tag() == skrifa::raw::types::Tag::new(b"hhea"))
+        .unwrap()
+        .offset() as usize;
+    let mut bytes = SERIF.to_vec();
+    bytes[hhea + 4..hhea + 6].copy_from_slice(&i16::MAX.to_be_bytes());
+    bytes[hhea + 6..hhea + 8].copy_from_slice(&i16::MIN.to_be_bytes());
+    bytes[hhea + 8..hhea + 10].copy_from_slice(&i16::MAX.to_be_bytes());
+    let face = Face::from_bytes(bytes).unwrap();
+    assert_eq!(face.metrics().ascent, 32767);
+    assert_eq!(face.metrics().descent, 32768);
+    assert_eq!(face.metrics().line_gap, 32767);
+    assert!(face.covers('a'));
+}

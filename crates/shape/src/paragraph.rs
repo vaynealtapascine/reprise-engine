@@ -153,8 +153,14 @@ fn itemize_inner(
         if r.is_empty() {
             continue;
         }
-        let mut families: Vec<&str> = run.families.iter().take(64).map(String::as_str).collect();
-        if run.families.len() > 64 {
+        let chain_limit = if generic_defaults { 64 } else { usize::MAX };
+        let mut families: Vec<&str> = run
+            .families
+            .iter()
+            .take(chain_limit)
+            .map(String::as_str)
+            .collect();
+        if generic_defaults && run.families.len() > 64 {
             out.notes.push(
                 Note::warning(
                     codes::FONT_CHAIN_LIMIT,
@@ -225,6 +231,8 @@ fn itemize_inner(
         }
         let mut chosen = (initial_index, initial_face);
         let mut cluster_end = r.start;
+        let mut cluster_level = base_level;
+        let mut cluster_script = None;
         let first = resolved.partition_point(|(range, _, _)| range.start < r.start);
         for (range, level, script) in resolved
             .iter()
@@ -232,6 +240,11 @@ fn itemize_inner(
             .take_while(|(range, _, _)| range.start < r.end)
         {
             if generic_defaults && range.start >= cluster_end {
+                // A mark can have its own Script property. Keep the whole
+                // grapheme in the base scalar's script/level, so adapter runs
+                // and caret clusters never split it when those properties differ.
+                cluster_level = *level;
+                cluster_script = Some(*script);
                 let boundary = boundaries.partition_point(|b| *b <= range.start);
                 cluster_end = boundaries
                     .get(boundary)
@@ -275,12 +288,22 @@ fn itemize_inner(
                 }
             }
             let face = chosen.1;
+            let level = if generic_defaults {
+                cluster_level
+            } else {
+                *level
+            };
+            let script = if generic_defaults {
+                cluster_script
+            } else {
+                Some(*script)
+            };
             if let Some(last) = out.items.last_mut().filter(|last| {
                 last.face == *face.id()
                     && last.range.start >= r.start
                     && last.range.end == range.start
-                    && last.level == *level
-                    && last.script == Some(*script)
+                    && last.level == level
+                    && last.script == script
             }) {
                 last.range.end = range.end;
                 continue;
@@ -289,8 +312,8 @@ fn itemize_inner(
                 range: range.clone(),
                 face: face.id().clone(),
                 size: run.size,
-                level: *level,
-                script: Some(*script),
+                level,
+                script,
                 language: run.language.clone(),
                 features: run.features.clone(),
             });

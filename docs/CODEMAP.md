@@ -24,7 +24,7 @@ interfaces.
 |  | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
 |  | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), v2 authored transforms, writing modes and spiral paths, v1-compatible Loro storage and the built-in template | 05, 20, 24, 34 |
 |  | `src/reading.rs` | Independent `reprise.reading-order` block-precedence schema and authoring helper | 01, 14, 33 |
-| `font` | `src/lib.rs`, `src/supply.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore`, frontend declarations, CSS-inspired matching and pinned generic defaults | 21, 22, 38 |
+| `font` | `src/lib.rs`, `src/supply.rs`, `src/supply/tests.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore`, frontend declarations, CSS-inspired matching and pinned generic defaults | 21, 22, 38 |
 | `shape` | `src/lib.rs`, `src/fallback_tests.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
 |  | `src/paragraph.rs` | `itemize` / `itemize_families` (legacy and grapheme-preserving generic fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
 |  | `src/unicode.rs`, `src/bidi-character-subset.txt` | ICU4X property adapter for UAX #9 (including N0) and UAX #24 script resolution; pinned Unicode conformance subset | 09, 22, 38 |

@@ -73,13 +73,9 @@ pub enum GenericFamily {
 }
 impl GenericFamily {
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "serif" => Some(Self::Serif),
-            "sans-serif" => Some(Self::SansSerif),
-            "monospace" => Some(Self::Monospace),
-            "script" => Some(Self::Script),
-            _ => None,
-        }
+        [Self::Serif, Self::SansSerif, Self::Monospace, Self::Script]
+            .into_iter()
+            .find(|generic| s.eq_ignore_ascii_case(generic.name()))
     }
     pub fn name(self) -> &'static str {
         match self {

@@ -205,7 +205,17 @@ Codes in use:
     in the generic default with `.notdef` (`font.missing`, Warning). Each later
     family selection reports `font.fallback` (Warning). Legacy `itemize` and
     single-family documents retain the existing availability-only contract.
+    Explicit-chain runs use a grapheme's base scalar script/level even when
+    a combining mark has its own script, preserving adapter cluster boundaries.
 
+-   **Frontend supply:** `FontDeclaration` declares a family alias, weight 1..1000,
+    style and positive stretch in permille, plus a collection index. `FontStore::register`
+    rejects unreadable imports with `font.unreadable` (Error); font bytes are bounded
+    to 32 MiB. `match_family` searches stretch, style, then weight in CSS-inspired
+    order, breaking ties by `FaceId` and reporting nearest matches with `font.nearest`
+    (Warning). Versions and collection descriptors supplement the frozen `FaceId`;
+    package pins retain them. No synthetic outlines, variable-axis instancing,
+    system discovery, license checks or embedding-flag checks are performed.
 
 -   **Three steps:**
     1.  `itemize(ParagraphInput, &FontStore)` splits the paragraph into `Item`s. Each item

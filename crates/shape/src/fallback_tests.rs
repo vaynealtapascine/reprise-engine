@@ -161,3 +161,61 @@ fn limits_extremes_empty_and_malformed_style_ranges_are_total() {
     let text = "a".repeat(32_768);
     assert_eq!(item(&text, &["serif"], &fonts).items.len(), 1);
 }
+
+#[test]
+fn mixed_script_marks_do_not_split_graphemes_into_adapter_runs() {
+    let fonts = FontStore::default();
+    // Hebrew and Devanagari marks have their own script, rather than Inherited.
+    // A Latin base plus either is still one extended grapheme cluster.
+    for text in ["a\u{05b0}", "a\u{093f}", "a\u{05b0}\u{093f}"] {
+        let out = item(text, &["serif"], &fonts);
+        assert_eq!(out.items.len(), 1);
+        assert_eq!(out.items[0].range, 0..text.len());
+        let shaped = Shaper {
+            text,
+            items: &out.items,
+            fonts: &fonts,
+            adapter: &HarfRust,
+        }
+        .shape();
+        assert!(
+            shaped
+                .runs
+                .iter()
+                .flat_map(|r| &r.glyphs)
+                .all(|g| g.cluster == 0)
+        );
+    }
+}
+
+#[test]
+fn legacy_entrypoint_keeps_its_full_family_search_contract() {
+    let mut fonts = FontStore::default();
+    fonts.add(
+        reprise_font::Face::from_bytes(
+            include_bytes!("../../../fixtures/fonts/SourceSerifPro-Regular.otf").as_slice(),
+        )
+        .unwrap(),
+    );
+    let mut style = run("abc", &[]);
+    style.families = vec!["unavailable".into(); 100];
+    style.families.push("Source Serif Pro".into());
+    let out = itemize(
+        &ParagraphInput {
+            text: "abc",
+            styles: &[style],
+            direction: None,
+        },
+        &fonts,
+    );
+    assert_eq!(out.items.len(), 1);
+    assert_eq!(out.items[0].face.family, "Source Serif Pro");
+    assert_eq!(out.notes.len(), 1);
+    assert_eq!(out.notes[0].code, codes::FONT_FALLBACK);
+    let explicit = item("abc", &["SANS-SERIF"], &fonts);
+    assert_eq!(
+        explicit.items[0].face,
+        *fonts.generic(GenericFamily::SansSerif).id()
+    );
+    assert!(explicit.notes.is_empty());
+}
