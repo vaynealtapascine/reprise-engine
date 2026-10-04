@@ -138,7 +138,7 @@ fn edit(engine: &Engine, doc: &Document, rng: &mut Rng) {
             block.text.insert(0, "edited while deleted ").unwrap();
             doc.merge(&peer).unwrap();
         }
-        8 | 9 | 10 => {
+        8..=10 => {
             if kind != Some(BlockKind::Paragraph) || text.is_empty() {
                 return;
             }
