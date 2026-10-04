@@ -31,7 +31,8 @@ pub enum Command {
         at: usize,
     },
     /// `second`'s text is appended to `first` and `second` is deleted.
-    /// Relations that named `second` follow the text to `first`.
+    /// Node targets follow the recorded succession only under `Rebind` policy;
+    /// persistent ranges and anchors stay in their original text container.
     JoinBlocks {
         first: NodeId,
         second: NodeId,
