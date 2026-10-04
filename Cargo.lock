@@ -1819,6 +1819,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reprise-edit"
+version = "0.0.0"
+dependencies = [
+ "reprise-doc",
+ "reprise-fixtures",
+ "reprise-font",
+ "reprise-geom",
+ "reprise-layout",
+ "reprise-shape",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "reprise-fixtures"
 version = "0.0.0"
 dependencies = [
