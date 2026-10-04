@@ -2,6 +2,56 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-04: workstream 7, the editing kernel, merged; plugin and font choices recorded
+
+**Done.** Workstream 7 started on Sonnet and was finished by Sol.
+
+-   **`reprise-edit`:**
+    -   Typed commands and transactions that are validated before anything is written. A
+        rejected transaction changes nothing.
+    -   Per-peer undo and redo that keep collaborators' edits.
+    -   Carets with affinity, hit testing and integer caret geometry.
+    -   Logical and visual movement through bidi text, ligatures and transformed, vertical
+        and spiral frames.
+    -   Selections, with discontiguous geometry where directions mix.
+    -   Movement across blocks follows `reading_order`.
+    -   The "Editing kernel" contract in `contracts.md` is frozen.
+-   **Identity (07): soft deletion.**
+    -   A delete writes a `deleted` flag on the node. Undo restores it in place, with the
+        same ID.
+    -   Descendants inherit deletion, including tables, rows and cells.
+    -   A concurrent delete and restore resolve last-writer-wins.
+    -   Inserted blocks are staged invisibly and activated in the transaction's own commit,
+        so redo brings back the same IDs.
+-   **Orchestrator test:** undo, redo and merges interleaved on two peers converge, and no
+    new ID repeats.
+
+**Decisions recorded in `architecture.md`** (implementation choices under decision 41):
+
+-   **Collaboration transport:** the engine provides sync primitives only.
+-   **Compaction:** opt-in and explicit.
+-   **Formal model:** deferred.
+-   **API versioning:** stable types at the bindings boundary.
+-   **Plugins:** wasmi everywhere, open to wasmtime later. Floats are allowed inside
+    plugins, with NaN canonicalisation and no relaxed SIMD. Layout-time host APIs are
+    integer-only.
+-   **Fonts:**
+    -   Frontends supply font data.
+    -   Used fonts are embedded in the package.
+    -   A missing font is reported and the user is asked.
+    -   CSS-like fallback chains end in a generic class with an engine default face.
+    -   Licensing is the user's responsibility.
+
+The open questions in `architecture.md` are all resolved.
+
+**Next, on Sol, in parallel:**
+
+-   9b: clipboard and exporters.
+-   10: plugins on wasmi.
+-   Font supply: generic fallback classes, default faces, embedding fonts on use.
+
+After those: images, then 11, the bindings.
+
 ## 2026-10-04: workstream 6, incremental layout and scheduling, merged
 
 **Done** (Sol). The design and its verification are described in `docs/incremental.md`.
