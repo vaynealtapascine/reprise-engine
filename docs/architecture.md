@@ -616,6 +616,19 @@ These were chosen on 2026-10-03, before the spike.
     the network clause also covers hosted editors and collaboration servers. Every dependency
     must be compatible with GPLv3: permissive licenses and Apache-2.0 are fine, GPLv2-only is
     not. Crates declare `license = "AGPL-3.0-or-later"`.
+-   **Collaboration transport (29), decided 2026-10-04:** the engine exposes sync primitives
+    only: exporting and importing updates, version information, and awareness data. How
+    peers exchange them (a sync server, peer to peer, or the host's channel) belongs to
+    Reprise or a server, not the engine.
+-   **Tombstone compaction (07), decided 2026-10-04:** compaction is opt-in and explicit, for
+    example on "save compact" or export, and never automatic. A snapshot target (13) that
+    names a compacted version reports `relation.snapshot-unavailable`.
+-   **Formal model of core rules (41), decided 2026-10-04:** deferred. Seeded property and
+    equivalence tests cover IDs, convergence, anchors and rebinding for now. Kani proofs on
+    `reprise-doc` remain a candidate later workstream.
+-   **API versioning (04), decided 2026-10-04:** only stable API types cross the bindings
+    boundary, every serialised payload carries a version, and the binding crates follow
+    semver. Internal crates may change freely behind them.
 -   **Spike output:** four headless backends for the display list (32):
     -   JSON snapshots of the layout and display list, for test fixtures and diffs
     -   SVG, with debug overlays
@@ -639,11 +652,10 @@ These were chosen on 2026-10-03, before the spike.
 
 ## Open questions
 
--   **Tombstone compaction (07).** Still to decide: when deleted blocks, history and old
-    versions may be dropped. It affects snapshot targets (13), which can't read compacted
-    history, and the file format (34).
-
 Resolved:
+
+-   **Tombstone compaction (07):** opt-in and explicit; see the implementation choices
+    under decision 41.
 
 -   **Numbers fixed during implementation (2026-10-04):**
     -   Fixed-point resolution (19): `Length` is 1/1024 pt and `Fixed` is 16.16, saturating
