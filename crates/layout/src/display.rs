@@ -74,6 +74,8 @@ fn status_color(status: RelationStatus) -> Color {
         RelationStatus::Rebound => Color(30, 130, 210, 220),
         RelationStatus::Ambiguous => severity_color(Severity::Warning),
         RelationStatus::Missing | RelationStatus::OwnerDeleted => severity_color(Severity::Error),
+        // Out of effect by the schema's own policy: not a problem, so grey.
+        RelationStatus::Deleted => Color(130, 130, 130, 200),
     }
 }
 

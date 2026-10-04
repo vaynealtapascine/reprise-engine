@@ -168,6 +168,7 @@ impl Context<'_> {
         let outcome = &target.outcome;
         match outcome.binding {
             Binding::Deleted => {
+                layout.status = RelationStatus::Deleted;
                 if let Cause::Deleted(gone) = outcome.cause {
                     say(
                         Severity::Info,

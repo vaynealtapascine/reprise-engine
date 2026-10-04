@@ -127,6 +127,11 @@ pub enum RelationStatus {
     /// The relation is owned and its owner was deleted, so it is no longer in
     /// effect (07, 14). It stays in the document until tombstones are compacted.
     OwnerDeleted,
+    /// A target was deleted and the schema's `OnTargetDeleted` is `Delete`, so
+    /// the relation is no longer in effect (14). Like `OwnerDeleted`, it stays
+    /// in the document; it is decided from tombstones at resolution time, so a
+    /// deletion merged from another peer gives the same status.
+    Deleted,
 }
 
 /// What a target resolved to.

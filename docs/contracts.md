@@ -96,11 +96,35 @@ Codes in use:
     reported with `relation.not-applied`.
 -   **An owned relation goes with its owner.** If the owner is deleted, layout reports
     `relation.owner-deleted` (`Info`) and status `OwnerDeleted` (07, 14).
--   **Open:**
-    -   `TargetClass::Structural` and `TargetClass::Snapshot` are reserved; their `Target`
-        variants come with the relations workstream.
-    -   `LayoutQuery` has only `LineContaining` so far.
-    -   `Ambiguous` exists in `RelationStatus` but nothing produces it yet.
+-   **Targets** (13):
+    -   `Target::Structural(StructuralQuery)`: siblings, children, the nth child or the
+        parent of a block (the document root when `of` is `None`), optionally filtered by
+        `BlockKind`. Only `Children` can match several.
+    -   `Target::Snapshot(SnapshotRef)`: a node or range as it was at a `Revision`. An
+        unreadable version is `relation.snapshot-unavailable`. A subject deleted since is
+        still `Valid`, because a snapshot reference is meant not to change.
+    -   `LayoutQuery`: `LineContaining`, `PreviousLine`, `NextLine`, `FirstLine`,
+        `LastLine`, `LinesIn`, `FrameContaining` and `PageContaining`. Only `LinesIn` can
+        match several.
+    -   Zero matches is `Missing` with `relation.no-match`. A role that takes one target
+        but gets several candidates is `Ambiguous` (`relation.ambiguous`): none is chosen,
+        and all are listed.
+-   **Deletion policies** (14, 15) are evaluated at resolution time from tombstones, never
+    by mutating the document, so a deletion merged from another peer behaves exactly like
+    a local one.
+    -   `Rebind` follows succession links (`Document::supersede`) to the nearest
+        generation of live successors. Several equally near is `Ambiguous`, and no
+        successor is `Missing`.
+    -   `KeepMissing` reports the target `Missing`.
+    -   `Delete` takes the whole relation out of effect: status `Deleted`, with
+        `relation.target-deleted` (`Info`).
+-   **Copying:** `plan_copy` decides, per relation, whether a copy duplicates it with
+    remapped IDs, keeps it pointing outside, or drops it, following its `CopyPolicy` (35).
+-   **Dependencies:** `Relation::dependencies()` lists what resolving it reads, in order,
+    for incremental evaluation (27).
+-   **Layout behaviour:** `reprise.follow` places its owner; `reprise.reference` only
+    resolves and reports. Every other registered schema has its targets resolved and
+    reported, plus `relation.not-applied`.
 
 ## Styles: `reprise-doc::style`
 
@@ -194,6 +218,11 @@ Codes in use:
     These queries are the API that relations and the editing kernel use.
 -   **Relation results:** every relation gets a `RelationLayout`, with its overall status,
     whether it was `applied`, and each target's status and `Resolution`.
+    -   `RelationStatus` is `Valid`, `Rebound`, `Ambiguous`, `Missing`, `OwnerDeleted` or
+        `Deleted`, in increasing order of severity. The overall status is the worst
+        target's.
+    -   `Resolution` is `Node`, `Range`, `Line`, `Nodes`, `Lines`, `Frame`, `Page` or
+        `Snapshot`.
 -   **Invariants**, checked on every hostile fixture:
     -   Every block has at least one line.
     -   Lines cover the text contiguously and start on grapheme boundaries.

@@ -233,12 +233,12 @@ expression: snapshot.to_json()
       "id": "165@1",
       "schema": "fixtures.delete",
       "owner": "6@1",
-      "status": "missing",
+      "status": "deleted",
       "applied": false,
       "targets": [
         {
           "role": "to",
-          "status": "missing",
+          "status": "deleted",
           "resolved": null
         }
       ]

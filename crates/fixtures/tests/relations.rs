@@ -400,7 +400,7 @@ fn each_policy_behaves_the_same_whether_the_delete_was_local_or_merged() {
     assert_eq!(keep.targets[0].resolved, None);
     // Delete: not in effect, and said so at info: it is what the schema asked for.
     let delete = by("fixtures.delete");
-    assert_eq!(delete.status, RelationStatus::Missing);
+    assert_eq!(delete.status, RelationStatus::Deleted);
     assert!(!delete.applied);
     assert_eq!(
         severity(&local, "relation.target-deleted"),
