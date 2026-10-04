@@ -53,6 +53,7 @@ Codes in use:
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit` |
+| style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 
 ## Text store: `reprise-text`
 
@@ -139,8 +140,51 @@ Codes in use:
     -   `explain` names the layer that set each property (39).
     -   **Used lengths are never negative.** Negative values are clamped to zero and listed
         in `clamped`, and layout reports each with `layout.style-clamped`.
--   **Open:** typed expressions with registered pure functions (17), and resolution
-    contexts beyond em (18), come with the relations-and-document workstream.
+-   **Expressions (17):** `reprise-doc::expr`. Bounded typed expressions, like `calc()`.
+    -   **Types:** length, number, percentage and ratio, checked before evaluation.
+        `length * length` is a type error. Units are `pt`, `em`, `lh` and `%`, plus
+        geometric references (`medium-`, `page-`, `frame-`, `block-`, `line-` `width` and
+        `height`, `frame-width("name")`, `nearest-width("level")`). Operators are
+        `+ - * /`, with `min`, `max` and `clamp`.
+    -   **Bounds:** at most 256 nodes, 32 deep and 2048 bytes of text, enforced when an
+        expression is parsed or built. Nothing recurses past them.
+    -   **Numbers:** integer arithmetic only. Every operation saturates (`style.saturated`),
+        every division rounds half away from zero, and division by zero saturates by the
+        sign of the numerator (`style.divide-by-zero`).
+    -   **Dependencies (27):** `Expr::dependencies` returns an ordered set of `Dependency`
+        values: `Em`, `Lh`, `PercentBasis`, a `Basis`, or a `Function`.
+    -   **Stored form:** one string per property: `pt:N` or `em:N` (the original form),
+        or `expr1:<text>`. The text form is canonical and round-trips. A value this engine
+        can't read is **kept verbatim and reported** (`style.unparsed`), never dropped (34).
+    -   **Functions (17, 36):** a `FunctionRegistry` is engine configuration, like
+        `SchemaRegistry`. Functions are pure and deterministic, with a declarative
+        `Signature`. An unknown function is kept and reported (`style.unknown-function`).
+        `ratio`, `scale` and `round-to` are built in.
+-   **Resolution contexts (18):** `reprise-doc::context`. A `ResolutionContext` has a
+    medium, page, frame (current and named), block and line, each with a width and height
+    that is `Definite`, `Indefinite` (depends on its own content, like an auto-height
+    frame) or `Unresolved`. The default context resolves nothing.
+    -   `em` is the element's font size, except in `size`, where it is the inherited size.
+    -   `lh` is the used line height. It is a cycle (`style.cycle`) in `size` and
+        `line-height`.
+    -   `%` is of the property's declared basis: the inherited size for `size`, the
+        element's size for `line-height`. `50% * frame-width("main")` names another basis.
+    -   A basis that is unresolved or indefinite counts as zero (`Warning`), and a style
+        layer that depends on one is skipped: the property keeps the value it inherited.
+-   **The four stages (08):** `Specified` (the layers), then inherited and `Computed`
+    (symbolic where it depends on a context), then used (`Computed::used`, giving a
+    `StyleResolution`). `Document::computed_style` is the default context.
+    `computed_style_in` and `computed_style_with` take a context and a function registry.
+    `resolve_style` also explains all four stages for each property.
+-   **`ComputedStyle.notes`:** the `style.*` problems met while resolving. `bases` says what
+    percentages and references were resolved against. Both are skipped when empty, so
+    styles that use only `pt` and `em` serialise as they always did.
+-   **Named-style chains:** a parent cycle, a missing parent and a chain over 32 styles
+    cut the chain at the problem and report it (`style.parent-cycle`,
+    `style.parent-missing`, `style.chain-too-long`). What was collected stays in use.
+-   **Open:** `Param::Length` still holds a `LengthExpr`. Letting relation parameters hold
+    an `Expr` is a follow-up. Layout does not yet publish `ComputedStyle.notes` or build a
+    `ResolutionContext` per frame; the wiring is described in the style workstream's hand-off.
 
 ## Shaping: `reprise-shape`
 
@@ -275,7 +319,7 @@ Codes in use:
 -   **Pinned inputs:** `fonts()` and `engine()` use only the bundled font. Peer IDs are 1,
     and 2 for second replicas.
 -   **`spike`:** the end-to-end spike document.
--   **`hostile`:** nine documents built to break things:
+-   **`hostile`:** documents built to break things, one per function in `all()`:
     -   `empty_text`
     -   `combining_marks`
     -   `emoji_zwj`
@@ -285,6 +329,21 @@ Codes in use:
     -   `deleted_targets`
     -   `concurrent_edits`
     -   `extreme_lengths`
+    -   `bidi_stray_controls`
+    -   `bidi_override_ligature`
+    -   `scripts_common_inherited`
+    -   `display_text_clusters`
+    -   `structural_matches`
+    -   `snapshot_targets`
+    -   `snapshot_compacted`
+    -   `concurrent_policy_deletion`
+    -   `self_reference`
+    -   `optimal_paragraph`
+    -   `verse_turnover`
+    -   `optimal_extreme_lengths`
+    -   `style_expressions`
+    -   `style_cycles`
+    -   `style_bases`
 -   **`tests/hostile.rs`** runs every hostile fixture and checks:
     -   determinism, and that replicas converge to the same layout
     -   the expected diagnostic codes, and no unexpected Warning or Error

@@ -16,9 +16,9 @@ use reprise_doc::relation::{
 };
 use reprise_doc::text::RangePolicy;
 use reprise_doc::{
-    BlockKind, DocError, Document, LayoutQuery, LengthExpr, NodeId, Relation, RelationSchema,
-    Revision, SchemaId, SchemaRegistry, SnapshotOf, SnapshotRef, StructuralQuery, Style, Target,
-    TargetClass,
+    Authored, BlockKind, DocError, Document, Expr, LayoutQuery, LengthExpr, NodeId, Property,
+    Relation, RelationSchema, Revision, SchemaId, SchemaRegistry, SnapshotOf, SnapshotRef,
+    StructuralQuery, Style, Target, TargetClass,
 };
 use reprise_geom::Length;
 use reprise_layout::{Engine, PageSettings};
@@ -74,6 +74,9 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         optimal_paragraph()?,
         verse_turnover()?,
         optimal_extreme_lengths()?,
+        style_expressions()?,
+        style_cycles()?,
+        style_bases()?,
     ])
 }
 
@@ -717,4 +720,108 @@ pub fn optimal_extreme_lengths() -> Result<Fixture, DocError> {
     fixture.name = "optimal_extreme_lengths";
     fixture.engine.composer = Box::new(Optimal::justified());
     Ok(fixture)
+}
+
+fn expr(text: &str) -> Result<Authored, DocError> {
+    Expr::parse(text)
+        .map(Authored::Expr)
+        .map_err(|e| DocError::Store(format!("fixture expression {text:?}: {e}")))
+}
+
+/// Defines a style whose `size` is `value` and lays out a paragraph in it.
+fn paragraph_sized(doc: &Document, name: &str, value: Authored) -> Result<(), DocError> {
+    let mut style = Style::default();
+    style.set(Property::Size, value);
+    doc.define_style(name, &style)?;
+    doc.append_block(BlockKind::Paragraph, name, "Under a hostile style.")?;
+    Ok(())
+}
+
+/// Style values that are too big, mistyped, unknown, from a newer format, or
+/// damaged (17, 34). Each style falls back to the value it inherited and the
+/// paragraph is laid out regardless. The `style.*` notes are reported by
+/// `Document::computed_style`; layout does not publish them yet, so `expect`
+/// is empty until the wiring lands and `tests/hostile.rs` checks the notes.
+pub fn style_expressions() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let deep = format!("expr1:{}1pt{}", "(".repeat(64), ")".repeat(64));
+    let wide = format!("expr1:{}", vec!["1pt"; 300].join(" + "));
+    paragraph_sized(&doc, "deep", Authored::Unparsed(deep))?;
+    paragraph_sized(&doc, "wide", Authored::Unparsed(wide))?;
+    paragraph_sized(&doc, "type-error", expr("1pt * 2pt")?)?;
+    paragraph_sized(&doc, "not-a-length", expr("2")?)?;
+    paragraph_sized(&doc, "unknown-function", expr("frob(12pt) + 1em")?)?;
+    paragraph_sized(&doc, "function-fails", expr("scale(1em, ratio(1, 0))")?)?;
+    paragraph_sized(
+        &doc,
+        "from-the-future",
+        Authored::Unparsed("expr2:quantum(3)".into()),
+    )?;
+    paragraph_sized(&doc, "damaged", Authored::Unparsed("furlongs:5".into()))?;
+    doc.commit();
+    Ok(Fixture::new("style_expressions", doc, &[]))
+}
+
+/// A font size in `lh`, a line height in `lh`, and style chains that loop or
+/// lead nowhere (18). Cycles are cut and reported, never followed forever.
+pub fn style_cycles() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    paragraph_sized(&doc, "size-in-lh", expr("2lh")?)?;
+    let mut style = Style::default();
+    style.set(Property::LineHeight, expr("3lh")?);
+    doc.define_style("line-height-in-lh", &style)?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "line-height-in-lh",
+        "Under a hostile style.",
+    )?;
+    for (name, parent) in [("loop-a", "loop-b"), ("loop-b", "loop-a"), ("self", "self")] {
+        doc.define_style(
+            name,
+            &Style {
+                parent: Some(parent.into()),
+                size: Some(LengthExpr::Pt(Length::from_pt(9))),
+                ..Default::default()
+            },
+        )?;
+    }
+    doc.define_style(
+        "orphan",
+        &Style {
+            parent: Some("nobody".into()),
+            ..Default::default()
+        },
+    )?;
+    for name in ["loop-a", "self", "orphan", "undefined"] {
+        doc.append_block(BlockKind::Paragraph, name, "Under a hostile style.")?;
+    }
+    doc.commit();
+    Ok(Fixture::new("style_cycles", doc, &[]))
+}
+
+/// Percentages and references whose basis is missing or depends on its own
+/// content, such as the height of an auto-height frame (18). `tests/hostile.rs`
+/// resolves it both in the default context, where every basis is unresolved,
+/// and in a context where the main frame is auto-height.
+pub fn style_bases() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    paragraph_sized(&doc, "half-the-height", expr("50% * frame-height")?)?;
+    paragraph_sized(&doc, "named-frame", expr("10% * frame-width(\"margin\")")?)?;
+    paragraph_sized(
+        &doc,
+        "no-such-frame",
+        expr("frame-width(\"nowhere\") / 20")?,
+    )?;
+    // These need no frame and are fine in every context.
+    paragraph_sized(&doc, "of-the-inherited-size", expr("120%")?)?;
+    let mut style = Style::default();
+    style.set(Property::LineHeight, expr("150%")?);
+    doc.define_style("line-height-percent", &style)?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "line-height-percent",
+        "Under a hostile style.",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("style_bases", doc, &[]))
 }

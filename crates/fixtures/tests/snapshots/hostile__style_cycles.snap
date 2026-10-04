@@ -1,0 +1,483 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      176
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "page": {
+    "width": 430080,
+    "height": 307200,
+    "margin_top": 36864,
+    "margin_left": 36864,
+    "column_width": 225280,
+    "gutter": 18432,
+    "margin_column_width": 112640,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "8@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.cycle",
+            "message": "size in style size-in-lh: line height depends on the value being computed; this layer's value is ignored",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 12288
+          },
+          "baseline": 9733,
+          "width": 95805,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 95805
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "36@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.cycle",
+            "message": "line-height in style line-height-in-lh: line height depends on the value being computed; this layer's value is ignored",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 20480
+            },
+            "width": 225280,
+            "height": 12288
+          },
+          "baseline": 30213,
+          "width": 95805,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 95805
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "73@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 9216,
+        "line_height": 11059,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style loop-a"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.parent-cycle",
+            "message": "style loop-a is its own ancestor (reached from style loop-b); the chain stops before it repeats",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 40960
+            },
+            "width": 225280,
+            "height": 11059
+          },
+          "baseline": 49720,
+          "width": 86223,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 9216,
+              "level": 0,
+              "x": 0,
+              "width": 86223
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "99@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 9216,
+        "line_height": 11059,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style self"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.parent-cycle",
+            "message": "style self is its own ancestor (reached from style self); the chain stops before it repeats",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 60211
+            },
+            "width": 225280,
+            "height": 11059
+          },
+          "baseline": 68971,
+          "width": 86223,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 9216,
+              "level": 0,
+              "x": 0,
+              "width": 86223
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "125@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.parent-missing",
+            "message": "style orphan refers to style nobody, which is not defined",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 79462
+            },
+            "width": 225280,
+            "height": 12288
+          },
+          "baseline": 89195,
+          "width": 95805,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 95805
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "151@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "default"
+        },
+        "notes": [
+          {
+            "severity": "warning",
+            "code": "style.parent-missing",
+            "message": "the block refers to style undefined, which is not defined",
+            "bytes": null
+          }
+        ]
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 22
+          },
+          "preview": "Under a hostile style.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 99942
+            },
+            "width": 225280,
+            "height": 12288
+          },
+          "baseline": 109675,
+          "width": 95805,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 95805
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": []
+}

@@ -17,7 +17,11 @@ interfaces.
 |  | `src/resolve.rs` | `resolve_target` / `resolve_relation`: any non-layout target, with `OnTargetDeleted` applied from tombstones; `dead_relations` | 13, 14, 15 |
 |  | `src/relation_tests.rs` | Tests for the three files above and for relation.rs | 13, 14, 15, 35 |
 |  | `tests/history_hostile.rs` | Forged revisions resolve or report, never panic | 07, 13, 37 |
-|  | `src/style.rs` | `Style`, `LengthExpr`, `ComputedStyle`, defaults | 08, 17, 18 |
+|  | `src/style.rs` | `Style`, `LengthExpr`, `Authored` (stored forms), the four stages (`Specified`, `Computed`, used via `StyleResolution`), `ComputedStyle`, defaults | 08, 17, 18, 39 |
+|  | `src/expr.rs` (`src/expr/tests.rs`) | `Expr`: bounded typed expressions with a canonical text form, type check, folding, saturating evaluation and dependency sets | 17, 19, 27 |
+|  | `src/function.rs` | `FunctionRegistry`, `PureFunction`, `Signature` and the built-in functions | 17, 36 |
+|  | `src/context.rs` | `ResolutionContext`, `Level`, `Basis`, definite, indefinite and unresolved bases | 18 |
+|  | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
 | `font` | `src/lib.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore` | 21, 22, 38 |
 | `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
 |  | `src/paragraph.rs` | `itemize` (fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
@@ -47,9 +51,10 @@ interfaces.
 |  | `src/display.rs` | `to_display_list(s)` and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing, including `display_text_clusters` (ligature, stacked marks, RLO and ZWJ) | 37, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases | 17, 18, 37, 39 |
 |  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
+|  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 | `cli` | `src/lib.rs` | `write_outputs`: every output format for a snapshot | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
@@ -82,7 +87,7 @@ Other files:
     3.  Emit it from `layout/src/display.rs`.
 -   **Add a style property:**
     1.  Add the field to `Style` and `ComputedStyle` in `doc/src/style.rs`.
-    2.  Resolve it in `Document::computed_style`, recording its source in `explain` and
+    2.  Add it to `Property` and resolve it in `Computed` (`style.rs`), recording its source in `explain` and
         clamping it if negative values make no sense.
 -   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module
     (`layout/src/codes.rs` for layout) and to the table in `contracts.md`.

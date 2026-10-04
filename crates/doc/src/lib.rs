@@ -14,15 +14,17 @@
 //!
 //! Layout and display are derived from this and never stored here (05).
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Range;
 
 use loro::{Container, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID, ValueOrContainer};
-use reprise_geom::Length;
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+pub mod codes;
+pub mod context;
+pub mod expr;
+pub mod function;
 mod history;
 pub mod relation;
 #[cfg(test)]
@@ -31,6 +33,9 @@ mod resolve;
 mod structure;
 mod style;
 
+pub use context::ResolutionContext;
+pub use expr::{ComputedLength, Dependency, Expr};
+pub use function::FunctionRegistry;
 pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
 };
@@ -41,7 +46,10 @@ pub use relation::{
 pub use reprise_text as text;
 pub use resolve::{Binding, Cause, Found, Gone, Outcome, ResolvedRelation, ResolvedTarget};
 pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
-pub use style::{ComputedStyle, LengthExpr, Style, default_style};
+pub use style::{
+    Authored, Computed, ComputedStyle, LengthExpr, Property, Specified, StageExplanation, Style,
+    StyleResolution, default_style,
+};
 
 macro_rules! tree_ids {
     ($($(#[$m:meta])* $name:ident),*) => {$(
@@ -310,71 +318,50 @@ impl Document {
         Ok(self.tree("content").delete(id.0)?)
     }
 
-    /// Resolves a block's style: defaults, then its named style chain, then
-    /// its direct overrides. Ems resolve against the font size at each step.
+    /// Resolves a block's style in the default context: defaults, then its
+    /// named style chain, then its direct overrides. Ems resolve against the
+    /// font size at each step. Nothing geometric is known, so every frame,
+    /// page and medium reference is unresolved (18); styles that use only `pt`
+    /// and `em` resolve exactly as in any other context.
     pub fn computed_style(&self, id: NodeId) -> Result<ComputedStyle, DocError> {
-        let block = self.block(id)?;
-        let mut layers = vec![("default".to_string(), default_style())];
-        let mut chain = Vec::new();
-        let mut next = block.style.clone();
-        while let Some(name) = next {
-            if chain.iter().any(|(n, _)| n == &name) || chain.len() > 32 {
-                break; // A cycle or a runaway chain; stop at what we have.
-            }
-            let Some(style) = self.style(&name) else {
-                break;
-            };
-            next = style.parent.clone();
-            chain.push((name, style));
-        }
-        layers.extend(
-            chain
-                .into_iter()
-                .rev()
-                .map(|(n, s)| (format!("style {n}"), s)),
-        );
-        layers.push(("direct".into(), block.overrides));
+        self.computed_style_in(id, &ResolutionContext::default())
+    }
 
-        let mut explain = BTreeMap::new();
-        let mut family = String::new();
-        let mut size = Length::ZERO;
-        let mut line_height = None;
-        for (layer, style) in &layers {
-            if let Some(f) = &style.family {
-                family = f.clone();
-                explain.insert("family".into(), layer.clone());
-            }
-            if let Some(s) = style.size {
-                size = s.resolve(size); // An em size is relative to the inherited size.
-                explain.insert("size".into(), layer.clone());
-            }
-            if let Some(l) = style.line_height {
-                line_height = Some(l);
-                explain.insert("line-height".into(), layer.clone());
-            }
-        }
-        // Line height resolves against the final font size, so an inherited
-        // 1.2em follows a size change further down the chain.
-        let line_height = line_height.map_or(size, |l| l.resolve(size));
-        // Used values (08) can't be negative. Hostile or mistaken values are
-        // clamped here, once, so nothing downstream lays out upwards.
-        let mut clamped = Vec::new();
-        let mut used = |name: &str, value: Length| {
-            if value < Length::ZERO {
-                clamped.push(name.to_string());
-                Length::ZERO
-            } else {
-                value
-            }
-        };
-        let (size, line_height) = (used("size", size), used("line-height", line_height));
-        Ok(ComputedStyle {
-            family,
-            size,
-            line_height,
-            explain,
-            clamped,
-        })
+    /// Resolves a block's style against a context, with the built-in functions.
+    pub fn computed_style_in(
+        &self,
+        id: NodeId,
+        context: &ResolutionContext,
+    ) -> Result<ComputedStyle, DocError> {
+        self.computed_style_with(id, context, &FunctionRegistry::builtin())
+    }
+
+    /// Resolves a block's style against a context, with the engine's functions.
+    pub fn computed_style_with(
+        &self,
+        id: NodeId,
+        context: &ResolutionContext,
+        functions: &FunctionRegistry,
+    ) -> Result<ComputedStyle, DocError> {
+        Ok(self.resolve_style(id, context, functions)?.style)
+    }
+
+    /// Like [`Document::computed_style_with`], with all four stages explained.
+    pub fn resolve_style(
+        &self,
+        id: NodeId,
+        context: &ResolutionContext,
+        functions: &FunctionRegistry,
+    ) -> Result<StyleResolution, DocError> {
+        Ok(self
+            .specified_style(id)?
+            .compute(functions)
+            .used(context, functions))
+    }
+
+    /// Stage 1 (08): the layers of a block's style, as authored.
+    pub fn specified_style(&self, id: NodeId) -> Result<Specified, DocError> {
+        Ok(style::specify(self, &self.block(id)?))
     }
 
     /// Creates a persistent range over part of a block's text.
@@ -495,6 +482,7 @@ fn get_str(map: &LoroMap, key: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::relation::builtin::FOLLOW;
+    use reprise_geom::Length;
 
     fn follow(owner: NodeId, range: RangeId) -> Relation {
         Relation::new(FOLLOW).owned_by(owner).target(
