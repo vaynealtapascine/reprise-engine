@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod codes;
 pub mod context;
+mod edit;
 pub mod expr;
 pub mod function;
 mod history;
@@ -36,6 +37,7 @@ mod style;
 mod trash;
 
 pub use context::ResolutionContext;
+pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
 pub use expr::{ComputedLength, Dependency, Expr};
 pub use function::FunctionRegistry;
 pub use history::{
@@ -168,6 +170,8 @@ pub enum DocError {
     Text(#[from] reprise_text::TextError),
     #[error("the document store refused the change: {0}")]
     Store(String),
+    #[error("index {index} is past the end of {len} children")]
+    BadIndex { index: usize, len: usize },
 }
 
 impl From<loro::LoroError> for DocError {

@@ -59,9 +59,10 @@
 //! moves them out again, and the ID is the same throughout. See
 //! [`Document::stage_block`].
 
-use loro::{LoroText, LoroTree, LoroValue, TreeID, TreeParentId, ValueOrContainer};
+use loro::{LoroMap, LoroText, LoroTree, LoroValue, TreeID, TreeParentId, ValueOrContainer};
 
-use crate::{BlockKind, DocError, Document, NodeId, RelationId};
+use crate::edit::NewBlock;
+use crate::{DocError, Document, NodeId, RelationId};
 
 /// The metadata key that marks a trash root.
 const TRASH_KEY: &str = "trash";
@@ -233,10 +234,10 @@ impl Document {
             (None, Some(&last)) if index == live.len() => tree.mov_after(id, last)?,
             (None, None) if index == 0 => tree.mov(id, loro_parent)?,
             _ => {
-                return Err(DocError::Malformed(
-                    NodeId(id),
-                    "index past the end of the siblings",
-                ));
+                return Err(DocError::BadIndex {
+                    index,
+                    len: live.len(),
+                });
             }
         }
         Ok(())
@@ -247,22 +248,21 @@ impl Document {
     /// can insert it and undo and redo move the same node (see the module
     /// documentation). Commits what was pending first, so call it before a
     /// transaction's own changes, not in the middle of them.
-    pub fn stage_block(
-        &self,
-        kind: BlockKind,
-        style: &str,
-        text: &str,
-    ) -> Result<NodeId, DocError> {
+    pub fn stage_block(&self, block: &NewBlock) -> Result<NodeId, DocError> {
         let tree = self.tree("content");
         let trash = self.trash_root(Store::Content)?;
         self.commit();
         self.doc.set_next_commit_origin(STAGE_ORIGIN);
         let id = tree.create(trash)?;
         let meta = tree.get_meta(id)?;
-        meta.insert("kind", kind.as_str())?;
-        meta.insert("style", style)?;
+        meta.insert("kind", block.kind.as_str())?;
+        meta.insert("style", block.style.as_str())?;
         let t = meta.insert_container("text", LoroText::new())?;
-        t.insert_utf8(0, text)?;
+        t.insert_utf8(0, &block.text)?;
+        if block.overrides != crate::Style::default() {
+            let map = meta.insert_container("overrides", LoroMap::new())?;
+            block.overrides.write(&map)?;
+        }
         self.doc.commit();
         Ok(NodeId(id))
     }
