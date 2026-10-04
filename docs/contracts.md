@@ -443,9 +443,13 @@ before freezing. Existing contracts above are unchanged.
   end before it, or the logical start after it. An invalid page or a document
   without laid-out text returns `None`. Invalid carets are rejected without panic.
 - **Movement (30, 33):** logical movement uses ICU4X grapheme/word segmentation;
-  visual left/right traverses grapheme cells along the frame's inline axis,
-  including bidi and zero-width cells. Line up/down preserves `Cursor.goal_x` in
-  frame space; other movements clear it. Logical and visual line edges, block
+  visual left/right maps page-horizontal direction through the inverse frame
+  transform to its dominant axis (inline on ties). Inline steps traverse bidi
+  and zero-width grapheme cells; mirrors reverse the step. Quarter-turns step
+  between logical lines. Singular transforms leave visual arrows unchanged.
+  Line steps preserve `Cursor.goal_x` in frame space; inline and other movements
+  clear it. Page-left/right line edges use the frame's first/last inline edge
+  when their page x coincides. Logical and visual line edges, block
   edges and document edges are explicit operations. Cross-block movement follows
   `Document::document_order()` through `Navigator::semantic`; explicit reading
   order plugs into `Navigator::new(snapshot, order)`. Repeated/unknown IDs are

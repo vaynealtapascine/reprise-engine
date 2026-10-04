@@ -432,9 +432,88 @@ fn a_right_to_left_paragraph_runs_the_other_way() {
         left_from_end.node, ids[1],
         "past the visual left end: the next line"
     );
+    assert_eq!(
+        left_from_end.offset, 0,
+        "enter the LTR block at its reading start"
+    );
     // Next grapheme is logical: it goes from the start toward the end.
     let next = nav.move_caret(start, Movement::NextGrapheme).unwrap();
     assert_eq!(next.offset, 2);
     assert!(x_of(&nav, &next) < x_of(&nav, &start));
     assert_eq!(start.affinity, Affinity::Downstream);
+}
+
+#[test]
+fn page_horizontal_movement_respects_mirrors_and_rotated_frames() {
+    use reprise_geom::{Fixed, Matrix, Transform};
+    let (doc, ids, snapshot) = laid_out(&["office אבג xyz\noffice אבג xyz\noffice אבג xyz"]);
+    let node = ids[0];
+    assert_eq!(snapshot.block(node).unwrap().lines.len(), 3);
+
+    for matrix in [Matrix::mirror_x(), Matrix::rotate_quarter(2)] {
+        let mut mirrored = snapshot.clone();
+        for frame in &mut mirrored.frames {
+            frame.to_page = Transform::new(matrix);
+        }
+        let nav = Navigator::semantic(&mirrored, &doc);
+        let at = LineRef { node, line: 1 };
+        let cells = nav.graphemes(at);
+        for right in [true, false] {
+            let visited = walk(&nav, at, right);
+            assert_eq!(visited.len(), cells.len() + 1);
+            for pair in visited.windows(2) {
+                let before = nav.caret_rect(pair[0]).unwrap().point().x;
+                let after = nav.caret_rect(pair[1]).unwrap().point().x;
+                assert!(if right {
+                    after >= before
+                } else {
+                    after <= before
+                });
+            }
+        }
+    }
+
+    // A quarter-turn puts the inline axis vertically on the page. A page
+    // horizontal arrow therefore changes lines, retaining the inline goal.
+    let middle = snapshot.block(node).unwrap().lines[1].text.start + 1;
+    for turns in [1, 3] {
+        let mut rotated = snapshot.clone();
+        for frame in &mut rotated.frames {
+            frame.to_page = Transform::new(Matrix::rotate_quarter(turns));
+        }
+        let nav = Navigator::semantic(&rotated, &doc);
+        let from = Cursor::from(Caret::new(node, middle));
+        let before = nav.caret_rect(from.caret).unwrap();
+        for right in [true, false] {
+            let movement = if right {
+                Movement::VisualRight
+            } else {
+                Movement::VisualLeft
+            };
+            let moved = nav.move_cursor(&from, movement).unwrap();
+            let after = nav.caret_rect(moved.caret).unwrap();
+            assert_ne!(after.line, before.line);
+            assert_eq!(moved.goal_x, Some(before.x));
+            assert_eq!(after.x, before.x);
+            assert!(if right {
+                after.point().x > before.point().x
+            } else {
+                after.point().x < before.point().x
+            });
+        }
+    }
+
+    // A singular transform has no page direction in frame space. Refuse to
+    // invent one, while logical movement still remains available.
+    let mut singular = snapshot.clone();
+    singular.frames[0].to_page = Transform::new(Matrix::scale(Fixed::ZERO, Fixed::ONE));
+    let nav = Navigator::semantic(&singular, &doc);
+    let caret = Caret::new(node, 1);
+    assert_eq!(nav.move_caret(caret, Movement::VisualRight), Some(caret));
+    assert_eq!(
+        nav.move_caret(caret, Movement::NextGrapheme)
+            .unwrap()
+            .offset,
+        2
+    );
 }

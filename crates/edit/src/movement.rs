@@ -5,8 +5,10 @@
 //! by byte offset. **Visual** movement follows the screen: right is right,
 //! and a step crosses one grapheme cell of the line's runs in the order they
 //! are drawn, so it passes through right-to-left runs and across bidi
-//! boundaries correctly. At a line's visual end it continues on the next line
-//! in reading direction.
+//! boundaries correctly. Page-horizontal arrows map through the frame's inverse
+//! transform to its dominant axis: mirrored text reverses the inline step,
+//! and quarter-turned text moves between lines. At an inline end, movement
+//! continues on the next line in reading direction.
 //!
 //! Between blocks, movement follows the [reading order](crate::Navigator)
 //! (33), never the geometry. Between the lines of one block it follows the
@@ -75,32 +77,34 @@ impl Navigator<'_> {
                 }
             }
             Movement::VisualRight | Movement::VisualLeft => {
-                self.visual(caret, line, model, stop, movement == Movement::VisualRight)
+                let (_, layout) = self.line_model(node, line)?;
+                let frame = self.snapshot.frame(layout.frame)?;
+                let Some(inverse) = frame.to_page.inverse() else {
+                    return Some(Cursor {
+                        caret,
+                        goal_x: None,
+                    });
+                };
+                let axis = inverse.matrix();
+                let right = movement == Movement::VisualRight;
+                if i64::from(axis.xx.0).abs() >= i64::from(axis.yx.0).abs() {
+                    self.visual(caret, line, model, stop, right == (axis.xx.0 > 0))
+                } else {
+                    return self.vertical(from, line, model, stop, right != (axis.yx.0 > 0));
+                }
             }
             Movement::LineUp | Movement::LineDown => {
-                let goal = from.goal_x.unwrap_or(stop.x);
-                let up = movement == Movement::LineUp;
-                let target = if up {
-                    self.line_before(node, line)
-                } else {
-                    self.line_after(node, line)
-                };
-                let caret = match target {
-                    Some(t) => self.caret_at_x(t, goal),
-                    // The edge of the document: go to the end of the line.
-                    None if up => self.place(node, model.start),
-                    None => self.place(node, model.end_limit),
-                };
-                return caret.map(|caret| Cursor {
-                    caret,
-                    goal_x: Some(goal),
-                });
+                return self.vertical(from, line, model, stop, movement == Movement::LineUp);
             }
             Movement::LineStart => self.place(node, model.start),
             Movement::LineEnd => self.place_upstream(node, model.end_limit),
-            Movement::LineLeftmost => Some(self.caret_of(node, &model.arrive(0, None))),
-            Movement::LineRightmost => {
-                Some(self.caret_of(node, &model.arrive(model.cells.len(), None)))
+            Movement::LineLeftmost | Movement::LineRightmost => {
+                let (_, layout) = self.line_model(node, line)?;
+                let frame = self.snapshot.frame(layout.frame)?;
+                let reversed = frame.to_page.matrix().xx.0 < 0;
+                let last = (movement == Movement::LineRightmost) != reversed;
+                let junction = if last { model.cells.len() } else { 0 };
+                Some(self.caret_of(node, &model.arrive(junction, None)))
             }
             Movement::BlockStart => self.place(node, 0),
             Movement::BlockEnd => self.place(node, len),
@@ -116,7 +120,34 @@ impl Navigator<'_> {
         })
     }
 
-    /// One step right or left on the screen.
+    /// Move between logical lines, retaining the inline goal.
+    fn vertical(
+        &self,
+        from: &Cursor,
+        line: usize,
+        model: &crate::model::LineModel,
+        stop: crate::model::Stop,
+        up: bool,
+    ) -> Option<Cursor> {
+        let node = from.caret.node;
+        let goal = from.goal_x.unwrap_or(stop.x);
+        let target = if up {
+            self.line_before(node, line)
+        } else {
+            self.line_after(node, line)
+        };
+        let caret = match target {
+            Some(t) => self.caret_at_x(t, goal),
+            None if up => self.place(node, model.start),
+            None => self.place_upstream(node, model.end_limit),
+        };
+        caret.map(|caret| Cursor {
+            caret,
+            goal_x: Some(goal),
+        })
+    }
+
+    /// One step along the frame's inline axis.
     fn visual(
         &self,
         from: Caret,
@@ -149,11 +180,10 @@ impl Navigator<'_> {
             return Some(from);
         };
         let (tm, _) = self.line_model(target.node, target.line)?;
-        let stop = if right {
-            tm.arrive(0, None)
-        } else {
-            tm.arrive(tm.cells.len(), None)
-        };
+        // The next block may have a different paragraph direction. Enter its
+        // reading start/end, rather than copying the current line's edge.
+        let last = reading_forward == self.info(target.node)?.rtl;
+        let stop = tm.arrive(if last { tm.cells.len() } else { 0 }, None);
         Some(self.caret_of(target.node, &stop))
     }
 

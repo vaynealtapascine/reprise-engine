@@ -157,8 +157,9 @@ pub enum Movement {
     NextWord,
     /// To the start of the previous word, or the block's start.
     PreviousWord,
-    /// One grapheme to the right on the screen, crossing bidi runs in visual
-    /// order.
+    /// One step to the right on the page: a grapheme in visual order along
+    /// the inline axis, or a line step for a quarter-turned frame. General
+    /// transforms use the dominant inverse-mapped axis (inline on ties).
     VisualRight,
     VisualLeft,
     /// To the previous line, keeping the goal x. On the first line of the
@@ -172,7 +173,8 @@ pub enum Movement {
     LineStart,
     /// To the logical end of the line, before a hard line break.
     LineEnd,
-    /// To the visual left or right end of the line.
+    /// To the page-left or page-right end of the line. If both have the same
+    /// page x (a quarter turn), use the frame's first/last inline edge.
     LineLeftmost,
     LineRightmost,
     BlockStart,
