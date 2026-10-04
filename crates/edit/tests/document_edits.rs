@@ -118,3 +118,129 @@ fn two_peers_edit_and_each_undoes_only_their_own_text() {
     assert!(undo.redo().unwrap());
     assert_eq!(texts(&one), ["ME abc YOU"]);
 }
+
+#[test]
+fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
+    use reprise_doc::text::RangePolicy;
+    use reprise_doc::{
+        Column, ColumnWidth, RangeState, SchemaRegistry, StructuralQuery, TableColumns,
+    };
+    use reprise_edit::{Command, Editor};
+    use reprise_fixtures::{engine, spike::define_styles};
+    use reprise_geom::Length;
+
+    for level in 0..3 {
+        let doc = Document::new(1).unwrap();
+        define_styles(&doc).unwrap();
+        let before = para(&doc, "before");
+        let table = doc
+            .append_table(TableColumns {
+                columns: (0..2)
+                    .map(|_| Column {
+                        width: ColumnWidth::Fixed(Length::from_pt(80)),
+                    })
+                    .collect(),
+            })
+            .unwrap();
+        let mut rows = Vec::new();
+        let mut cells = Vec::new();
+        let mut paragraphs = Vec::new();
+        for r in 0..2 {
+            let row = doc.append_table_row(table, r == 0).unwrap();
+            rows.push(row);
+            for c in 0..2 {
+                let cell = doc.append_table_cell(row, c).unwrap();
+                cells.push(cell);
+                paragraphs.push(
+                    doc.append_cell_block(cell, BlockKind::Paragraph, "body", "cell text")
+                        .unwrap(),
+                );
+            }
+        }
+        let after = para(&doc, "after");
+        let range = doc
+            .add_range(paragraphs[0], 0..4, RangePolicy::FIXED)
+            .unwrap();
+        let topology: Vec<_> = doc
+            .document_order()
+            .into_iter()
+            .map(|id| (id, doc.parent_of(id), doc.table_role(id).unwrap()))
+            .collect();
+        let target = [table, rows[0], cells[0]][level];
+        let mut hidden = vec![target];
+        let mut index = 0;
+        while index < hidden.len() {
+            hidden.extend(doc.children(Some(hidden[index])));
+            index += 1;
+        }
+        let layout = engine();
+        let baseline = layout.layout(&doc);
+        assert!(paragraphs.iter().all(|id| baseline.block(*id).is_some()));
+        let mut editor = Editor::new(doc, SchemaRegistry::builtin());
+        editor
+            .apply_command(Command::DeleteBlock { node: target })
+            .unwrap();
+        assert_eq!(editor.undo_count(), 1);
+        let doc = editor.document();
+        assert_eq!(
+            doc.blocks(),
+            if level == 0 {
+                vec![before, after]
+            } else {
+                vec![before, table, after]
+            }
+        );
+        for id in &hidden {
+            assert!(!doc.is_live(*id));
+            assert!(doc.block(*id).is_err());
+            assert!(doc.table_role(*id).is_err());
+            assert_eq!(doc.parent_of(*id), None);
+            assert!(doc.children(Some(*id)).is_empty());
+            assert!(
+                doc.evaluate(&StructuralQuery::Children {
+                    of: Some(*id),
+                    kind: None
+                })
+                .is_empty()
+            );
+            assert!(
+                doc.evaluate(&StructuralQuery::Parent { of: *id })
+                    .is_empty()
+            );
+            assert!(!doc.document_order().contains(id));
+        }
+        assert!(matches!(
+            doc.resolve_range(range),
+            RangeState::Missing { .. }
+        ));
+        let deleted = layout.layout(doc);
+        assert!(hidden.iter().all(|id| deleted.block(*id).is_none()));
+        assert!(deleted.block(before).is_some() && deleted.block(after).is_some());
+        for id in paragraphs.iter().filter(|id| !hidden.contains(id)) {
+            assert!(
+                deleted.block(*id).is_some(),
+                "live sibling cell still lays out"
+            );
+        }
+
+        assert!(editor.undo().unwrap());
+        let doc = editor.document();
+        assert_eq!(
+            doc.document_order(),
+            topology.iter().map(|(id, ..)| *id).collect::<Vec<_>>()
+        );
+        for (id, parent, role) in &topology {
+            assert!(doc.is_live(*id));
+            assert_eq!(doc.parent_of(*id), *parent);
+            assert_eq!(doc.table_role(*id).unwrap(), *role);
+        }
+        assert!(
+            matches!(doc.resolve_range(range), RangeState::Valid { node, bytes } if node == paragraphs[0] && bytes == (0..4))
+        );
+        assert_eq!(layout.layout(doc).blocks, baseline.blocks);
+        assert!(editor.redo().unwrap());
+        assert!(hidden.iter().all(|id| !editor.document().is_live(*id)));
+        assert!(editor.undo().unwrap());
+        assert!(hidden.iter().all(|id| editor.document().is_live(*id)));
+    }
+}
