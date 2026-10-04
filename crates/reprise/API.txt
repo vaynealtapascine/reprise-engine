@@ -1,0 +1,60 @@
+lib
+pub use dto::*;
+pub use error::{Error, Result};
+pub use session::{DocumentSession, LayoutJob, Plugin, Workspace};
+pub const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
+pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_AWARENESS_BYTES: usize = 64 * 1024;
+pub fn validate<T>(payload: &Payload<T>) -> Result<&T>
+pub fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<Payload<T>>
+session
+pub fn new() -> Self
+pub fn create(&self, request: &Payload<Create>) -> Result<DocumentSession>
+pub fn open(&self, request: &Payload<Open>, bytes: &[u8]) -> Result<DocumentSession>
+pub fn state(&self) -> Result<Payload<State>>
+pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>>
+pub fn undo(&mut self) -> Result<Payload<bool>>
+pub fn redo(&mut self) -> Result<Payload<bool>>
+pub fn declare_font( &mut self, request: &Payload<FontDeclaration>, bytes: &[u8], ) -> Result<Payload<Face>>
+pub fn register_asset( &mut self, request: &Payload<AssetDeclaration>, bytes: &[u8], ) -> Result<Payload<String>>
+pub fn start_layout(&mut self, request: &Payload<LayoutOptions>) -> Result<LayoutJob>
+pub fn move_cursor(&self, request: &Payload<Move>) -> Result<Payload<Cursor>>
+pub fn caret_rect(&self, request: &Payload<Caret>) -> Result<Payload<PageRect>>
+pub fn hit_test(&self, request: &Payload<HitTest>) -> Result<Payload<Hit>>
+pub fn selection_rects(&self, request: &Payload<Selection>) -> Result<Payload<Vec<PageRect>>>
+pub fn copy(&self, request: &Payload<Selection>) -> Result<Payload<Bytes>>
+pub fn copy_as(&self, request: &Payload<CopyAs>) -> Result<Payload<Exported>>
+pub fn resources(&self) -> Result<Payload<Vec<Resource>>>
+pub fn resource_bytes(&self, request: &Payload<String>) -> Result<Payload<Bytes>>
+pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>>
+pub fn import_text(&mut self, request: &Payload<TextImport>) -> Result<Payload<Applied>>
+pub fn save(&mut self) -> Result<Payload<Bytes>>
+pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>>
+pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>>
+pub fn display_json(&self, page: u32) -> Result<Payload<String>>
+pub fn svg(&self, page: u32) -> Result<Payload<String>>
+pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>>
+pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>>
+pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>>
+pub fn sync_info(&self) -> Payload<SyncInfo>
+pub fn export_updates(&self) -> Result<Payload<SyncUpdate>>
+pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>>
+pub fn awareness(&self, bytes: &[u8]) -> Result<Payload<Awareness>>
+pub fn validate_awareness(&self, request: &Payload<Awareness>) -> Result<Payload<Bytes>>
+pub fn load_plugin(&self, request: &Payload<PluginSpec>, bytes: &[u8]) -> Result<Plugin>
+pub fn install_plugin( &mut self, plugin: &Plugin, request: &Payload<PluginInstall>, ) -> Result<Payload<bool>>
+pub fn run_plugin_edit( &mut self, plugin: &Plugin, request: &Payload<PluginEdit>, bytes: &[u8], ) -> Result<Payload<Applied>>
+pub fn cancel(&mut self)
+pub fn step( &mut self, session: &mut DocumentSession, budget: u32, ) -> Result<Payload<LayoutProgress>>
+pub fn display_page( &self, session: &DocumentSession, page: u32, ) -> Result<Payload<DisplayPage>>
+error
+pub type Result<T> = std::result::Result<T, Error>;
+pub fn code(&self) -> &str
+pub fn payload(&self) -> Payload<ErrorPayload>
+typescript
+pub fn declarations() -> String
+dto
+pub const API_VERSION: u32 = 1;
+pub fn new(data: T) -> Self
+pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error>
+pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error>

@@ -146,6 +146,14 @@ impl Editor {
         &self.doc
     }
 
+    /// Add configuration without replacing this peer's undo history.
+    pub fn register_schema(
+        &mut self,
+        schema: reprise_doc::RelationSchema,
+    ) -> Result<(), reprise_doc::SchemaError> {
+        self.schemas.register(schema)
+    }
+
     pub fn schemas(&self) -> &SchemaRegistry {
         &self.schemas
     }

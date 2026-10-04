@@ -1,0 +1,1039 @@
+use crate::convert as cv;
+use crate::*;
+use reprise_doc::{Document, PersistenceMode};
+use reprise_layout::incremental::{LayoutCache, LayoutContinuation, LayoutSession};
+use reprise_layout::{Engine, LayoutSnapshot};
+use std::collections::BTreeMap;
+use std::rc::{Rc, Weak};
+
+/// Workspace factory. Each document owns isolated font/plugin configuration.
+#[derive(Default)]
+pub struct Workspace;
+impl Workspace {
+    pub fn new() -> Self {
+        Self
+    }
+    pub fn create(&self, request: &Payload<Create>) -> Result<DocumentSession> {
+        let r = validate(request)?;
+        let id = cv::document_id(&r.document_id)?;
+        let peer = cv::peer(&r.peer_id)?;
+        let doc = Document::new(peer)?;
+        let package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
+        Ok(DocumentSession::new(
+            doc,
+            package,
+            r.document_id.clone(),
+            r.peer_id.clone(),
+            Engine::new(reprise_font::FontStore::default()),
+            Vec::new(),
+        ))
+    }
+    pub fn open(&self, request: &Payload<Open>, bytes: &[u8]) -> Result<DocumentSession> {
+        let r = validate(request)?;
+        let peer = cv::peer(&r.peer_id)?;
+        if bytes.len() > 128 * 1024 * 1024 {
+            return Err(Error::Limit("package bytes".into()));
+        }
+        let mut opened = reprise_format::Package::open(
+            bytes,
+            peer,
+            reprise_format::Limits::default(),
+            &reprise_format::MigrationRegistry::builtin(),
+        )?;
+        // The core has no DocumentAt layout entry point; do not expose editable newer state.
+        if opened.is_read_only() {
+            return Err(Error::ReadOnly);
+        }
+        let mut engine = Engine::new(reprise_font::FontStore::default());
+        opened.restore_fonts(&mut engine.fonts);
+        let package = opened.package().clone();
+        let id = package
+            .document_id()
+            .0
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let notes = opened.notes.clone();
+        let doc = opened.into_document()?;
+        Ok(DocumentSession::new(
+            doc,
+            package,
+            id,
+            r.peer_id.clone(),
+            engine,
+            notes,
+        ))
+    }
+}
+/// A single editable replica. Neither core nor CRDT handles cross the facade.
+pub struct DocumentSession {
+    editor: Box<reprise_edit::Editor>,
+    engine: Engine,
+    package: reprise_format::Package,
+    document_id: String,
+    peer_id: String,
+    cache: LayoutCache,
+    snapshot: Option<LayoutSnapshot>,
+    options: Option<LayoutOptions>,
+    generation: u64,
+    identity: Rc<()>,
+    notes: Vec<reprise_diag::Note>,
+}
+impl DocumentSession {
+    fn new(
+        doc: Document,
+        package: reprise_format::Package,
+        document_id: String,
+        peer_id: String,
+        engine: Engine,
+        notes: Vec<reprise_diag::Note>,
+    ) -> Self {
+        Self {
+            editor: Box::new(reprise_edit::Editor::new(doc, engine.schemas.clone())),
+            engine,
+            package,
+            document_id,
+            peer_id,
+            cache: LayoutCache::default(),
+            snapshot: None,
+            options: None,
+            generation: 0,
+            identity: Rc::new(()),
+            notes,
+        }
+    }
+    fn doc(&self) -> &Document {
+        self.editor.document()
+    }
+    fn bump(&mut self) -> Result<()> {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| Error::Limit("session generations".into()))?;
+        self.snapshot = None;
+        Ok(())
+    }
+    fn reconfigure(&mut self) -> Result<()> {
+        self.bump()?;
+        self.cache = LayoutCache::default();
+        Ok(())
+    }
+    pub fn state(&self) -> Result<Payload<State>> {
+        let mut todo: Vec<_> = self
+            .doc()
+            .blocks()
+            .into_iter()
+            .rev()
+            .map(|n| (n, 0u32))
+            .collect();
+        let mut blocks = Vec::new();
+        while let Some((node, depth)) = todo.pop() {
+            if blocks.len() >= 100_000 || depth > 1024 {
+                return Err(Error::Limit("document tree".into()));
+            }
+            let block = self.doc().block(node)?;
+            blocks.push(Block {
+                id: node.to_string(),
+                parent: self.doc().parent_of(node).flatten().map(|n| n.to_string()),
+                kind: match block.kind {
+                    reprise_doc::BlockKind::Paragraph => BlockKind::Paragraph,
+                    reprise_doc::BlockKind::Annotation => BlockKind::Annotation,
+                },
+                text: block.text.to_string(),
+            });
+            todo.extend(
+                self.doc()
+                    .children(Some(node))
+                    .into_iter()
+                    .rev()
+                    .map(|n| (n, depth.saturating_add(1))),
+            );
+        }
+        Ok(Payload::new(State {
+            document_id: self.document_id.clone(),
+            peer_id: self.peer_id.clone(),
+            revision: cv::revision(&self.doc().revision()),
+            can_undo: self.editor.can_undo(),
+            can_redo: self.editor.can_redo(),
+            blocks,
+            diagnostics: self.diagnostics().data,
+        }))
+    }
+    pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>> {
+        let r = validate(request)?;
+        if r.commands.len() > reprise_edit::MAX_COMMANDS {
+            return Err(Error::Limit("transaction commands".into()));
+        }
+        let mut bytes = 0usize;
+        for command in &r.commands {
+            if let Command::InsertText { text, .. } | Command::InsertBlock { text, .. } = command {
+                bytes = bytes.saturating_add(text.len());
+            }
+        }
+        if bytes > reprise_edit::MAX_TRANSACTION_BYTES {
+            return Err(Error::Limit("transaction text".into()));
+        }
+        let commands = r
+            .commands
+            .iter()
+            .map(cv::command)
+            .collect::<Result<Vec<_>>>()?;
+        let applied = self.editor.apply(&commands.into())?;
+        self.snapshot = None;
+        Ok(Payload::new(cv::applied(applied, Vec::new())))
+    }
+    pub fn undo(&mut self) -> Result<Payload<bool>> {
+        let changed = self.editor.undo()?;
+        if changed {
+            self.snapshot = None;
+        }
+        Ok(Payload::new(changed))
+    }
+    pub fn redo(&mut self) -> Result<Payload<bool>> {
+        let changed = self.editor.redo()?;
+        if changed {
+            self.snapshot = None;
+        }
+        Ok(Payload::new(changed))
+    }
+    pub fn declare_font(
+        &mut self,
+        request: &Payload<FontDeclaration>,
+        bytes: &[u8],
+    ) -> Result<Payload<Face>> {
+        let r = validate(request)?;
+        if bytes.len() > 32 * 1024 * 1024 {
+            return Err(Error::Limit("font bytes".into()));
+        }
+        let declaration = reprise_font::FontDeclaration {
+            family: r.family.clone(),
+            descriptors: reprise_font::Descriptors {
+                weight: r.weight,
+                stretch: r.stretch,
+                style: match r.style {
+                    FontStyle::Normal => reprise_font::FontStyle::Normal,
+                    FontStyle::Italic => reprise_font::FontStyle::Italic,
+                    FontStyle::Oblique => reprise_font::FontStyle::Oblique,
+                },
+            },
+            face_index: r.face_index,
+        };
+        let id = self
+            .engine
+            .fonts
+            .register(bytes.to_vec(), declaration)
+            .map_err(|e| Error::note(e.note()))?;
+        self.reconfigure()?;
+        Ok(Payload::new(Face {
+            family: id.family,
+            hash: id.hash,
+        }))
+    }
+    /// Bundles immutable resources; image placement is reserved for the image workstream.
+    pub fn register_asset(
+        &mut self,
+        request: &Payload<AssetDeclaration>,
+        bytes: &[u8],
+    ) -> Result<Payload<String>> {
+        let r = validate(request)?;
+        if bytes.len() > MAX_ASSET_BYTES {
+            return Err(Error::Limit("asset bytes".into()));
+        }
+        if r.id.is_empty() || r.id.len() > 1024 {
+            return Err(Error::InvalidId(r.id.clone()));
+        }
+        use reprise_format::{Asset, AssetSource, ids};
+        let raw = self
+            .package
+            .container()
+            .sections
+            .get(&ids::ASSETS)
+            .ok_or_else(|| Error::Invalid("missing asset manifest".into()))?;
+        let mut assets: Vec<Asset> =
+            serde_json::from_slice(&raw.bytes).map_err(|e| Error::Invalid(e.to_string()))?;
+        if assets.iter().any(|a| a.id == r.id) {
+            return Err(Error::InvalidId(r.id.clone()));
+        }
+        let mut bundles: BTreeMap<_, _> = self
+            .package
+            .container()
+            .sections
+            .iter()
+            .filter(|(id, _)| (ids::FIRST_ASSET..=ids::LAST_ASSET).contains(id))
+            .map(|(id, s)| (*id, s.bytes.clone()))
+            .collect();
+        let section = (ids::FIRST_ASSET..=ids::LAST_ASSET)
+            .find(|id| !bundles.contains_key(id))
+            .ok_or_else(|| Error::Limit("asset sections".into()))?;
+        let hash = reprise_format::content_hash(bytes);
+        assets.push(Asset {
+            id: r.id.clone(),
+            kind: match r.kind {
+                AssetKind::Image => reprise_format::AssetKind::Image,
+                AssetKind::Other => reprise_format::AssetKind::Other,
+            },
+            hash: hash.clone(),
+            source: AssetSource::Bundled { section },
+            extra: BTreeMap::new(),
+        });
+        bundles.insert(section, bytes.to_vec());
+        self.package.set_assets(assets, bundles)?;
+        self.reconfigure()?;
+        Ok(Payload::new(hash))
+    }
+    pub fn start_layout(&mut self, request: &Payload<LayoutOptions>) -> Result<LayoutJob> {
+        let r = validate(request)?;
+        if r.max_pages > 10_000 || r.viewport_start > r.viewport_end || r.viewport_end > 10_000 {
+            return Err(Error::Limit("layout pages/viewport".into()));
+        }
+        if self.options.as_ref().is_none_or(|old| {
+            old.width != r.width || old.height != r.height || old.max_pages != r.max_pages
+        }) {
+            self.reconfigure()?;
+            self.engine.medium =
+                reprise_doc::Medium::new(cv::length(r.width), cv::length(r.height));
+            self.engine.flow.max_pages = r.max_pages;
+        }
+        self.options = Some(r.clone());
+        self.bump()?;
+        let cache = std::mem::take(&mut self.cache);
+        let mut session = LayoutSession::from_cache(&self.engine, cache);
+        let job = session.start(
+            self.doc(),
+            reprise_layout::incremental::Viewport::Pages(
+                r.viewport_start as usize..r.viewport_end as usize,
+            ),
+        );
+        let continuation = job.suspend();
+        self.cache = session.into_cache();
+        Ok(LayoutJob {
+            continuation: Some(continuation),
+            owner: Rc::downgrade(&self.identity),
+            token: self.token(),
+            snapshot: None,
+            progress: None,
+            cancelled: false,
+        })
+    }
+    fn token(&self) -> LayoutToken {
+        LayoutToken {
+            document_id: self.document_id.clone(),
+            revision: cv::revision(&self.doc().revision()),
+            generation: self.generation.to_string(),
+        }
+    }
+    fn current(&self) -> Result<&LayoutSnapshot> {
+        let snapshot = self.snapshot.as_ref().ok_or(Error::NoLayout)?;
+        if snapshot.revision != self.doc().revision() {
+            return Err(Error::Stale);
+        }
+        Ok(snapshot)
+    }
+    fn navigator(&self) -> Result<reprise_edit::Navigator<'_>> {
+        Ok(reprise_edit::Navigator::semantic(
+            self.current()?,
+            self.doc(),
+        ))
+    }
+    fn checked_caret(&self, c: &Caret) -> Result<reprise_edit::Caret> {
+        let c = cv::caret(c)?;
+        self.navigator()?
+            .normalize(c)
+            .filter(|normalized| normalized.offset == c.offset)
+            .ok_or_else(|| Error::InvalidId(c.node.to_string()))
+    }
+    pub fn move_cursor(&self, request: &Payload<Move>) -> Result<Payload<Cursor>> {
+        let r = validate(request)?;
+        let caret = self.checked_caret(&r.cursor.caret)?;
+        let cursor = self
+            .navigator()?
+            .move_cursor(
+                &reprise_edit::Cursor {
+                    caret,
+                    goal_x: r.cursor.goal_x.map(cv::length),
+                },
+                cv::movement(r.movement),
+            )
+            .ok_or_else(|| Error::InvalidId(r.cursor.caret.node.clone()))?;
+        Ok(Payload::new(Cursor {
+            caret: cv::caret_out(cursor.caret),
+            goal_x: cursor.goal_x.map(|x| x.0),
+        }))
+    }
+    pub fn caret_rect(&self, request: &Payload<Caret>) -> Result<Payload<PageRect>> {
+        let c = self.checked_caret(validate(request)?)?;
+        let r = self.navigator()?.caret_rect(c).ok_or(Error::NoLayout)?;
+        Ok(Payload::new(PageRect {
+            page: r.page as u32,
+            rect: cv::rect(r.rect),
+        }))
+    }
+    pub fn hit_test(&self, request: &Payload<HitTest>) -> Result<Payload<Hit>> {
+        let r = validate(request)?;
+        let hit = self
+            .navigator()?
+            .hit(
+                r.page as usize,
+                reprise_geom::Point::new(cv::length(r.x), cv::length(r.y)),
+            )
+            .ok_or_else(|| Error::Invalid("hit page has no caret".into()))?;
+        Ok(Payload::new(Hit {
+            caret: cv::caret_out(hit.caret),
+            page: hit.page as u32,
+            inside: hit.inside,
+        }))
+    }
+    fn selection(&self, r: &Selection) -> Result<reprise_edit::Selection> {
+        Ok(reprise_edit::Selection {
+            anchor: self.checked_caret(&r.anchor)?,
+            focus: self.checked_caret(&r.focus)?,
+        })
+    }
+    pub fn selection_rects(&self, request: &Payload<Selection>) -> Result<Payload<Vec<PageRect>>> {
+        let selection = self.selection(validate(request)?)?;
+        Ok(Payload::new(
+            self.navigator()?
+                .selection_rects(&selection)
+                .into_iter()
+                .map(|r| PageRect {
+                    page: r.page as u32,
+                    rect: cv::rect(r.rect),
+                })
+                .collect(),
+        ))
+    }
+    pub fn copy(&self, request: &Payload<Selection>) -> Result<Payload<Bytes>> {
+        let selection = self.selection(validate(request)?)?;
+        let fragment = reprise_clipboard::copy_selection(
+            self.doc(),
+            &self.document_id,
+            &selection,
+            self.current()?,
+            &self.engine.schemas,
+            Some(&self.engine.fonts),
+        )?;
+        Ok(Payload::new(Bytes {
+            bytes: fragment.encode()?,
+        }))
+    }
+    /// Project a copied selection into plain text/HTML/native bytes with losses.
+    pub fn copy_as(&self, request: &Payload<CopyAs>) -> Result<Payload<Exported>> {
+        let r = validate(request)?;
+        let selection = self.selection(&r.selection)?;
+        let fragment = reprise_clipboard::copy_selection(
+            self.doc(),
+            &self.document_id,
+            &selection,
+            self.current()?,
+            &self.engine.schemas,
+            Some(&self.engine.fonts),
+        )?;
+        let doc = Document::new(1)?;
+        let mut editor = reprise_edit::Editor::new(doc, self.engine.schemas.clone());
+        let projected = fragment.paste(
+            &mut editor,
+            None,
+            &format!("clipboard-projection:{}", self.document_id),
+        )?;
+        let mut layout = LayoutSession::new(&self.engine);
+        let snapshot = layout.layout(editor.document())?;
+        use reprise_clipboard::Exporter;
+        let exporter: &dyn Exporter = match r.format {
+            CopyFormat::PlainText => &reprise_clipboard::PlainText,
+            CopyFormat::Html => &reprise_clipboard::Html,
+        };
+        let mut result = exporter.export(
+            editor.document(),
+            Some(&snapshot),
+            &reprise_clipboard::ExportOptions {
+                source_namespace: &self.document_id,
+                schemas: &self.engine.schemas,
+                fonts: Some(&self.engine.fonts),
+            },
+        )?;
+        result.losses.notes.extend(projected.notes);
+        Ok(Payload::new(cv::exported(result)))
+    }
+    pub fn resources(&self) -> Result<Payload<Vec<Resource>>> {
+        let assets = self.package.assets()?;
+        Ok(Payload::new(
+            assets
+                .needed
+                .into_iter()
+                .map(|a| Resource {
+                    available: assets.bundled.contains_key(&a.id),
+                    id: a.id,
+                    kind: match a.kind {
+                        reprise_format::AssetKind::Font => ResourceKind::Font,
+                        reprise_format::AssetKind::Image => ResourceKind::Image,
+                        reprise_format::AssetKind::Other => ResourceKind::Other,
+                    },
+                    hash: a.hash,
+                    font: a.font.map(|f| Face {
+                        family: f.face.family,
+                        hash: f.face.hash,
+                    }),
+                    location: a.location.map(|l| match l {
+                        reprise_format::ExternalLocation::Path(p) => ResourceLocation::Path(p),
+                        reprise_format::ExternalLocation::Url(p) => ResourceLocation::Url(p),
+                    }),
+                })
+                .collect(),
+        ))
+    }
+    pub fn resource_bytes(&self, request: &Payload<String>) -> Result<Payload<Bytes>> {
+        let id = validate(request)?;
+        if id.len() > 1024 {
+            return Err(Error::Limit("asset ID".into()));
+        }
+        let assets = self.package.assets()?;
+        let bytes = assets
+            .bundled
+            .get(id)
+            .ok_or_else(|| Error::InvalidId(id.clone()))?;
+        Ok(Payload::new(Bytes {
+            bytes: bytes.clone(),
+        }))
+    }
+
+    fn paste_fragment(
+        &mut self,
+        fragment: reprise_clipboard::NativeFragment,
+        at: Option<&Caret>,
+    ) -> Result<Payload<Applied>> {
+        // Validate the caret against authored bytes; paste is also legal without layout.
+        let at = at
+            .map(|c| cv::caret(c).map(|c| (c.node, c.offset)))
+            .transpose()?;
+        fragment.validate()?;
+        let result = fragment.paste(&mut self.editor, at, &self.document_id)?;
+        fragment.install_fonts(&mut self.engine.fonts)?;
+        self.reconfigure()?;
+        Ok(Payload::new(cv::applied(result.applied, result.notes)))
+    }
+    pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>> {
+        let r = validate(request)?;
+        if bytes.len() > 96 * 1024 * 1024 {
+            return Err(Error::Limit("clipboard bytes".into()));
+        }
+        self.paste_fragment(
+            reprise_clipboard::NativeFragment::decode(bytes)?,
+            r.at.as_ref(),
+        )
+    }
+    pub fn import_text(&mut self, request: &Payload<TextImport>) -> Result<Payload<Applied>> {
+        let r = validate(request)?;
+        let imported = if r.html {
+            reprise_clipboard::import_html(&r.text, reprise_clipboard::ImportLimits::default())?
+        } else {
+            reprise_clipboard::import_plain(&r.text)?
+        };
+        self.paste_fragment(imported.fragment, r.at.as_ref())
+    }
+    pub fn save(&mut self) -> Result<Payload<Bytes>> {
+        // Embedding all used fonts requires current complete layout. Saving always
+        // finishes the incremental coordinator, rather than dropping resources.
+        if self.snapshot.is_none() {
+            let opts = self.options.clone().unwrap_or_default();
+            let mut job = self.start_layout(&Payload::new(opts))?;
+            while !job.step(self, 100_000)?.data.complete {}
+        }
+        let mut package = self
+            .package
+            .with_document(self.doc(), PersistenceMode::History)?;
+        package.embed_layout_fonts(self.current()?, &self.engine.fonts)?;
+        let bytes = package.save()?;
+        self.package = package;
+        Ok(Payload::new(Bytes { bytes }))
+    }
+    pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>> {
+        let format = validate(request)?;
+        use reprise_clipboard::Exporter;
+        let exporter: &dyn Exporter = match format {
+            ExportFormat::PlainText => &reprise_clipboard::PlainText,
+            ExportFormat::Html => &reprise_clipboard::Html,
+            ExportFormat::Native => &reprise_clipboard::Native,
+            ExportFormat::Pdf => &reprise_clipboard::Pdf,
+        };
+        let snapshot = if *format == ExportFormat::Pdf {
+            Some(self.current()?)
+        } else {
+            self.snapshot.as_ref()
+        };
+        let result = exporter.export(
+            self.doc(),
+            snapshot,
+            &reprise_clipboard::ExportOptions {
+                source_namespace: &self.document_id,
+                schemas: &self.engine.schemas,
+                fonts: Some(&self.engine.fonts),
+            },
+        )?;
+        Ok(Payload::new(Exported {
+            content: Bytes {
+                bytes: result.bytes,
+            },
+            losses: result
+                .losses
+                .features
+                .into_iter()
+                .map(|loss| Loss {
+                    code: loss.code.to_string(),
+                    disposition: match loss.disposition {
+                        reprise_clipboard::Disposition::Preserved => Disposition::Preserved,
+                        reprise_clipboard::Disposition::Approximated => Disposition::Approximated,
+                        reprise_clipboard::Disposition::Dropped => Disposition::Dropped,
+                    },
+                    detail: loss.detail,
+                })
+                .collect(),
+            diagnostics: result
+                .losses
+                .notes
+                .into_iter()
+                .map(crate::error::diagnostic)
+                .collect(),
+        }))
+    }
+    pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>> {
+        let s = self.current()?;
+        if page as usize >= s.pages.len() {
+            return Err(Error::Invalid("page out of bounds".into()));
+        }
+        Ok(Payload::new(DisplayPage {
+            token: self.token(),
+            page,
+            settled: true,
+            complete: true,
+            display: cv::display(
+                s.to_display_list(page as usize, reprise_layout::DisplayOptions::default())
+                    .content_only(),
+            )?,
+        }))
+    }
+    /// Canonical compact JSON, shared byte for byte with WASM.
+    pub fn display_json(&self, page: u32) -> Result<Payload<String>> {
+        Ok(Payload::new(
+            serde_json::to_string(&self.display_page(page)?.data.display)
+                .map_err(|e| Error::Invalid(e.to_string()))?,
+        ))
+    }
+    fn display_core(&self, page: u32) -> Result<reprise_display::DisplayList> {
+        let s = self.current()?;
+        if page as usize >= s.pages.len() {
+            return Err(Error::Invalid("page out of bounds".into()));
+        }
+        Ok(
+            s.to_display_list(page as usize, reprise_layout::DisplayOptions::default())
+                .content_only(),
+        )
+    }
+    pub fn svg(&self, page: u32) -> Result<Payload<String>> {
+        let list = self.display_core(page)?;
+        Ok(Payload::new(
+            reprise_display::svg::render(&list, &self.engine.fonts).map_err(|e| Error::Core {
+                code: "bindings.render".into(),
+                severity: Severity::Error,
+                message: e.to_string(),
+                command: None,
+            })?,
+        ))
+    }
+    /// Scale is integer permille pixels/point and affects rendering only.
+    pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>> {
+        let list = self.display_core(page)?;
+        let scale = u64::from(scale_permille);
+        let w = (i64::from(list.width.0).max(0) as u64)
+            .saturating_mul(scale)
+            .div_ceil(1_024_000);
+        let h = (i64::from(list.height.0).max(0) as u64)
+            .saturating_mul(scale)
+            .div_ceil(1_024_000);
+        if scale == 0 || scale > 16_000 || w.saturating_mul(h) > 16_000_000 {
+            return Err(Error::Limit("raster pixels/scale".into()));
+        }
+        let bytes =
+            reprise_display::png::render(&list, &self.engine.fonts, scale_permille as f32 / 1000.0)
+                .map_err(|e| Error::Core {
+                    code: "bindings.render".into(),
+                    severity: Severity::Error,
+                    message: e.to_string(),
+                    command: None,
+                })?;
+        Ok(Payload::new(Bytes { bytes }))
+    }
+    pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>> {
+        Ok(Payload::new(
+            self.current()?
+                .reading_order(self.doc())
+                .into_iter()
+                .map(|s| ReadingStep {
+                    node: s.line.node.to_string(),
+                    line: s.line.line as u32,
+                    page: s.page as u32,
+                })
+                .collect(),
+        ))
+    }
+    pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>> {
+        let mut notes: Vec<_> = self
+            .notes
+            .iter()
+            .cloned()
+            .map(crate::error::diagnostic)
+            .collect();
+        if let Some(s) = &self.snapshot {
+            notes.extend(s.diagnostics.iter().map(cv::layout_diagnostic));
+        }
+        Payload::new(notes)
+    }
+    pub fn sync_info(&self) -> Payload<SyncInfo> {
+        Payload::new(SyncInfo {
+            document_id: self.document_id.clone(),
+            peer_id: self.peer_id.clone(),
+            vector: self
+                .doc()
+                .version_vector()
+                .into_iter()
+                .map(|(p, c)| Clock {
+                    peer: p.to_string(),
+                    counter: c,
+                })
+                .collect(),
+        })
+    }
+    /// v1 uses bounded self-contained history snapshots as update packets.
+    /// A version vector is still exchanged; transport can suppress equal vectors.
+    pub fn export_updates(&self) -> Result<Payload<SyncUpdate>> {
+        let info = self.sync_info().data;
+        Ok(Payload::new(SyncUpdate {
+            document_id: info.document_id,
+            from_peer: info.peer_id,
+            vector: info.vector,
+            content: Bytes {
+                bytes: self.doc().try_export(PersistenceMode::History)?,
+            },
+        }))
+    }
+    pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>> {
+        let r = validate(request)?;
+        if r.document_id != self.document_id {
+            return Err(Error::InvalidId(r.document_id.clone()));
+        }
+        if r.from_peer == self.peer_id {
+            return Err(Error::Invalid(
+                "concurrent replicas must have distinct peers".into(),
+            ));
+        }
+        cv::peer(&r.from_peer)?;
+        if r.content.bytes.len() > 64 * 1024 * 1024 || r.vector.len() > 4096 {
+            return Err(Error::Limit("sync bytes/vector".into()));
+        }
+        for clock in &r.vector {
+            cv::peer(&clock.peer)?;
+            if clock.counter < 0 {
+                return Err(Error::Invalid("negative vector counter".into()));
+            }
+        }
+        let doc = Document::import(&r.content.bytes, cv::peer(&self.peer_id)?)?;
+        let actual: Vec<_> = doc
+            .version_vector()
+            .into_iter()
+            .map(|(p, c)| Clock {
+                peer: p.to_string(),
+                counter: c,
+            })
+            .collect();
+        if actual != r.vector {
+            return Err(Error::Invalid(
+                "update vector does not describe bytes".into(),
+            ));
+        }
+        self.editor.merge(&doc)?;
+        self.snapshot = None;
+        Ok(self.sync_info())
+    }
+    pub fn awareness(&self, bytes: &[u8]) -> Result<Payload<Awareness>> {
+        if bytes.len() > MAX_AWARENESS_BYTES {
+            return Err(Error::Limit("awareness bytes".into()));
+        }
+        Ok(Payload::new(Awareness {
+            document_id: self.document_id.clone(),
+            peer_id: self.peer_id.clone(),
+            content: Bytes {
+                bytes: bytes.to_vec(),
+            },
+        }))
+    }
+    pub fn validate_awareness(&self, request: &Payload<Awareness>) -> Result<Payload<Bytes>> {
+        let r = validate(request)?;
+        if r.document_id != self.document_id {
+            return Err(Error::InvalidId(r.document_id.clone()));
+        }
+        cv::peer(&r.peer_id)?;
+        if r.content.bytes.len() > MAX_AWARENESS_BYTES {
+            return Err(Error::Limit("awareness bytes".into()));
+        }
+        Ok(Payload::new(r.content.clone()))
+    }
+    pub fn load_plugin(&self, request: &Payload<PluginSpec>, bytes: &[u8]) -> Result<Plugin> {
+        let r = validate(request)?;
+        if bytes.len() > 1_048_576
+            || r.functions.len() > 256
+            || r.imports.len() > 2
+            || r.grants.len() > 2
+        {
+            return Err(Error::Limit("plugin bytes/declarations".into()));
+        }
+        let mut manifest = reprise_plugin::Manifest::new(&r.name, &r.plugin_version, bytes);
+        let hash: String = manifest
+            .identity
+            .sha256
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if hash != r.sha256 {
+            return Err(Error::Core {
+                code: "plugin.hash".into(),
+                severity: Severity::Warning,
+                message: "plugin pin does not match bytes".into(),
+                command: None,
+            });
+        }
+        manifest.imports = r.imports.iter().copied().map(cv::capability).collect();
+        for f in &r.functions {
+            if f.params.len() > 256 || manifest.functions.contains_key(&f.name) {
+                return Err(Error::Invalid("plugin function declarations".into()));
+            }
+            manifest.functions.insert(
+                f.name.clone(),
+                reprise_plugin::FunctionDeclaration {
+                    operation: f.operation,
+                    signature: reprise_doc::function::Signature {
+                        params: f.params.iter().copied().map(cv::dimension).collect(),
+                        variadic: f.variadic.map(cv::dimension),
+                        returns: cv::dimension(f.returns),
+                    },
+                },
+            );
+        }
+        let plugin = reprise_plugin::Plugin::load(
+            bytes,
+            manifest,
+            match r.phase {
+                PluginPhase::Layout => reprise_plugin::Phase::Layout,
+                PluginPhase::Editing => reprise_plugin::Phase::Editing,
+            },
+            r.grants.iter().copied().map(cv::capability).collect(),
+            reprise_plugin::Limits {
+                fuel: u64::from(r.fuel),
+                memory_pages: r.memory_pages,
+                table_elements: r.table_elements,
+                buffer_bytes: r.buffer_bytes,
+            },
+        )
+        .map_err(Error::note)?;
+        Ok(Plugin { inner: plugin })
+    }
+    pub fn install_plugin(
+        &mut self,
+        plugin: &Plugin,
+        request: &Payload<PluginInstall>,
+    ) -> Result<Payload<bool>> {
+        match validate(request)? {
+            PluginInstall::Relation { schema, operation } => {
+                let schema = cv::schema(schema)?;
+                // Validate both registries before updating either.
+                let mut registry = self.editor.schemas().clone();
+                registry
+                    .register(schema.clone())
+                    .map_err(|e| Error::Invalid(e.to_string()))?;
+                self.engine
+                    .install_plugin_relation(
+                        schema.clone(),
+                        reprise_layout::plugins::RelationBinding {
+                            plugin: Some(plugin.inner.clone()),
+                            operation: *operation,
+                        },
+                    )
+                    .map_err(|e| Error::Invalid(e.to_string()))?;
+                self.editor
+                    .register_schema(schema)
+                    .map_err(|e| Error::Invalid(e.to_string()))?;
+            }
+
+            PluginInstall::Functions => self
+                .engine
+                .install_plugin_functions(&plugin.inner)
+                .map_err(|e| Error::Invalid(e.to_string()))?,
+            PluginInstall::Geometry { operation } => self
+                .engine
+                .install_plugin_geometry(
+                    plugin.inner.clone(),
+                    *operation,
+                    Box::new(reprise_compose::Greedy),
+                )
+                .map_err(Error::note)?,
+        };
+        self.reconfigure()?;
+        Ok(Payload::new(true))
+    }
+    /// Explicit node handles only; one staged plugin call becomes one transaction.
+    pub fn run_plugin_edit(
+        &mut self,
+        plugin: &Plugin,
+        request: &Payload<PluginEdit>,
+        bytes: &[u8],
+    ) -> Result<Payload<Applied>> {
+        let r = validate(request)?;
+        if r.nodes.len() > 256 || bytes.len() > 1_048_576 {
+            return Err(Error::Limit("plugin edit input".into()));
+        }
+        let mut context = reprise_plugin::CallContext::default();
+        let mut nodes = Vec::new();
+        for (handle, node) in r.nodes.iter().enumerate() {
+            let node = cv::id(node)?;
+            context
+                .texts
+                .insert(handle as u32, self.doc().block(node)?.text.to_string());
+            context.editable.insert(handle as u32);
+            nodes.push(node);
+        }
+        struct Kernel<'a> {
+            editor: &'a mut reprise_edit::Editor,
+            nodes: Vec<reprise_doc::NodeId>,
+            applied: Option<reprise_edit::Applied>,
+        }
+        impl reprise_plugin::EditKernel for Kernel<'_> {
+            fn apply(
+                &mut self,
+                ins: &[reprise_plugin::TextInsertion],
+            ) -> std::result::Result<(), reprise_diag::Note> {
+                let mut commands = Vec::new();
+                for i in ins {
+                    let node = self.nodes.get(i.handle as usize).copied().ok_or_else(|| {
+                        reprise_diag::Note::error(
+                            reprise_diag::Code::new("bindings.id"),
+                            "invalid plugin node handle",
+                        )
+                    })?;
+                    commands.push(reprise_edit::Command::InsertText {
+                        node,
+                        at: i.at as usize,
+                        text: i.text.clone(),
+                    });
+                }
+                self.applied = Some(self.editor.apply(&commands.into()).map_err(|e| e.note())?);
+                Ok(())
+            }
+        }
+        let mut kernel = Kernel {
+            editor: &mut self.editor,
+            nodes,
+            applied: None,
+        };
+        plugin
+            .inner
+            .edit(r.operation, bytes, &context, &mut kernel)
+            .map_err(Error::note)?;
+        let applied = kernel.applied.take().unwrap_or_default();
+        self.snapshot = None;
+        Ok(Payload::new(cv::applied(applied, Vec::new())))
+    }
+}
+/// Loaded, independently granted plugin; its core runtime remains private.
+pub struct Plugin {
+    inner: reprise_plugin::Plugin,
+}
+/// An owned continuation. Its gate includes object identity, revision and generation.
+pub struct LayoutJob {
+    continuation: Option<LayoutContinuation>,
+    owner: Weak<()>,
+    token: LayoutToken,
+    snapshot: Option<LayoutSnapshot>,
+    progress: Option<LayoutProgress>,
+    cancelled: bool,
+}
+impl LayoutJob {
+    fn check(&self, session: &DocumentSession) -> Result<()> {
+        if self.cancelled {
+            return Err(Error::Cancelled);
+        }
+        if !self.owner.ptr_eq(&Rc::downgrade(&session.identity)) || self.token != session.token() {
+            return Err(Error::Stale);
+        }
+        Ok(())
+    }
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+        self.continuation = None;
+        self.snapshot = None;
+    }
+    pub fn step(
+        &mut self,
+        session: &mut DocumentSession,
+        budget: u32,
+    ) -> Result<Payload<LayoutProgress>> {
+        self.check(session)?;
+        if budget > 100_000 {
+            return Err(Error::Limit("job step budget".into()));
+        }
+        let continuation = self.continuation.take().ok_or(Error::Cancelled)?;
+        let mut layout =
+            LayoutSession::from_cache(&session.engine, std::mem::take(&mut session.cache));
+        let mut job = layout.resume(session.doc(), continuation)?;
+        let step = job.step(budget as usize)?;
+        let view = job.partial()?;
+        view.publish(session.doc())?;
+        let coverage = view.coverage();
+        let counters = job.counters();
+        let progress = LayoutProgress {
+            token: self.token.clone(),
+            used: step.used as u32,
+            pass: cv::pass(step.pass),
+            viewport_ready: step.viewport_ready,
+            complete: step.complete,
+            settled: coverage.settled,
+            outside_document: coverage.outside_document,
+            pages: coverage.pages.iter().map(|p| *p as u32).collect(),
+            counters: Counters {
+                units: counters.units as u32,
+                shapes: counters.shapes as u32,
+                compositions: counters.compositions as u32,
+                reused_compositions: counters.reused_compositions as u32,
+            },
+        };
+        self.snapshot = Some(view.snapshot().clone());
+        let complete = job.complete()?;
+        self.continuation = Some(job.suspend());
+        session.cache = layout.into_cache();
+        if let Some(s) = complete {
+            session.snapshot = Some(s);
+        }
+        self.progress = Some(progress.clone());
+        Ok(Payload::new(progress))
+    }
+    pub fn display_page(
+        &self,
+        session: &DocumentSession,
+        page: u32,
+    ) -> Result<Payload<DisplayPage>> {
+        self.check(session)?;
+        let progress = self.progress.as_ref().ok_or(Error::NoLayout)?;
+        let snapshot = self.snapshot.as_ref().ok_or(Error::NoLayout)?;
+        if !progress.pages.contains(&page) {
+            return Err(Error::Invalid("page outside partial coverage".into()));
+        }
+        Ok(Payload::new(DisplayPage {
+            token: self.token.clone(),
+            page,
+            settled: progress.settled,
+            complete: progress.complete,
+            display: cv::display(
+                snapshot
+                    .to_display_list(page as usize, reprise_layout::DisplayOptions::default())
+                    .content_only(),
+            )?,
+        }))
+    }
+}
