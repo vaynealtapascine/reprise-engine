@@ -65,9 +65,9 @@ interfaces.
 |  | `tests/geometry.rs` | Transform/caret round trips, bounds, rotated follow, spiral reflow, semantic and overridden reading order; SVG/PNG visual exports | 20, 33, 39 |
 |  | `tests/regions_geometry.rs` | Floats and nested notes inside rotated, mirrored and vertical frames: determinism, roles, backends, reading order | 20, 24, 33 |
 | `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties | 07, 29 |
+|  | `tests/undo_merge_fuzz.rs` | Undo, redo and merges interleaved on two peers: replicas and layout converge, new IDs never repeat | 07, 29 |
 |  | `src/lib.rs`, `src/command.rs`, `src/editor.rs`, `src/plan.rs` | Validated typed commands, staged activation, atomic commit/undo, bounded transaction models and position effects | 02, 05, 07, 12, 29, 37 |
 |  | `src/error.rs`, `src/codes.rs` | Typed refusals and stable Error diagnostics for validation, resource bounds and store failures | 37 |
-|  | `CONTRACT-PROPOSALS.md` | Accepted paragraph base-level proposal and its editing integration; no outstanding snapshot mapping request | 22, 30 |
 |  | `tests/document_edits.rs` | General structural edit primitives, table/row/cell subtree deletion with identity-preserving undo, and collaborative text undo | 07, 12, 24, 29 |
 |  | `src/caret.rs`, `src/model.rs`, `src/navigator.rs` | Byte/affinity carets, cached cluster/grapheme cells, integer page geometry, overlapping-strip hit testing and snapshot reading-order integration | 09, 20, 22, 30, 33 |
 |  | `src/movement.rs`, `src/select.rs` | Logical/page-direction navigation through frame transforms, goal-x line movement, reading order, logical selection ranges, bidi geometry and gesture operations | 20, 30, 31, 33 |

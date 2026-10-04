@@ -431,8 +431,8 @@ partial semantics and conservative memo boundaries. No diagnostic codes are adde
 
 ## Editing kernel: `reprise-edit`
 
-This section is the new workstream 7 contract, submitted for orchestrator review
-before freezing. Existing contracts above are unchanged.
+Frozen on 2026-10-04, after orchestrator review. It changes like every other contract
+here: through a dedicated `feat(contracts)` commit.
 
 - **Authored operations (02, 05, 07, 09, 29):** `Command` is a pure typed description
   of insert/delete text, split/join blocks, insert/delete/move blocks, replacement
