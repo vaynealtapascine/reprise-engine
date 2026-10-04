@@ -181,6 +181,7 @@ Clipboard fixture coverage: `fixtures/src/hostile.rs` appends `clipboard_unicode
 (expanding/fixed/point ranges across ligatures, combining text and RTL, plus note/reference
 edges); `fixtures/tests/hostile.rs` registers it and its paired layout/content snapshots.
 `clipboard/tests/roundtrip.rs` compares every hostile fixture's live topology, range
+|  | `tests/paste_undo_walk.rs` | Twenty pastes (end and mid-paragraph) of an encoded and decoded fragment, then each undone and redone exactly, with the same IDs | 07, 29, 35 |
 policies and rendered page/frame/block/glyph geometry after native copy/paste and undo/redo.
 `clipboard/tests/import_export.rs` attacks parser caps and malformed tag soup, verifies
 resource hashes, reading order and every exporter's House-of-Leaves loss reports.
