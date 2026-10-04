@@ -370,7 +370,8 @@ Codes in use:
     PNG/PDF pixel decoding is capped at 16,777,216 pixels and 64 MiB source bytes.
     Layout scans at most 1 MiB and 512 header parts, stopping at IDAT/SOS.
     PNG pHYs and JPEG JFIF/primary-IFD EXIF densities set physical size; absence uses 96 DPI.
-    Width-only/height-only sizes preserve physical aspect; excess inline size
+    Width-only/height-only sizes preserve the unrounded physical aspect even
+    when intrinsic lengths saturate or round to zero; excess inline size
     scales both dimensions. A tall image advances before overflowing an empty
     frame with `layout.frame-overflow`; page limits still bound placement.
     Image ActualText follows ordered PDF run addresses, including placeholders.

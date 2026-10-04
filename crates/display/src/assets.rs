@@ -60,6 +60,25 @@ pub struct ImageHeader {
     /// Without absolute density, one pixel is 3/4 point (96 DPI).
     pub physical_width: Length,
     pub physical_height: Length,
+    // Keep the density-adjusted ratio before Length rounding or saturation.
+    aspect: (u128, u128),
+}
+
+impl ImageHeader {
+    /// Preserve the physical aspect even when intrinsic Lengths round to zero
+    /// or saturate. Header dimensions and densities keep this ratio bounded.
+    pub fn height_for_width(self, width: Length) -> Length {
+        proportion(width, self.aspect.1, self.aspect.0)
+    }
+
+    pub fn width_for_height(self, height: Length) -> Length {
+        proportion(height, self.aspect.0, self.aspect.1)
+    }
+}
+
+fn proportion(size: Length, numerator: u128, denominator: u128) -> Length {
+    let n = (size.0.max(0) as u128).saturating_mul(numerator);
+    Length((n.saturating_add(denominator / 2) / denominator.max(1)).min(i32::MAX as u128) as i32)
 }
 
 fn length(pixels: u32, numerator: u32, denominator: u64) -> Length {
@@ -115,6 +134,13 @@ fn png(bytes: &[u8]) -> Result<ImageHeader, HeaderError> {
                 height,
                 physical_width,
                 physical_height,
+                aspect: match density {
+                    Some((x, y)) => (
+                        u128::from(width).saturating_mul(u128::from(y)),
+                        u128::from(height).saturating_mul(u128::from(x)),
+                    ),
+                    None => (u128::from(width), u128::from(height)),
+                },
             });
         }
         let end = pos
@@ -264,6 +290,23 @@ fn jpeg(bytes: &[u8]) -> Result<ImageHeader, HeaderError> {
                 height,
                 physical_width,
                 physical_height,
+                aspect: match density {
+                    Some((_, x, y)) => (
+                        u128::from(width).saturating_mul(u128::from(y)),
+                        u128::from(height).saturating_mul(u128::from(x)),
+                    ),
+                    None => match exif {
+                        Some((_, (xn, xd), (yn, yd))) => (
+                            u128::from(width)
+                                .saturating_mul(u128::from(xd))
+                                .saturating_mul(u128::from(yn)),
+                            u128::from(height)
+                                .saturating_mul(u128::from(yd))
+                                .saturating_mul(u128::from(xn)),
+                        ),
+                        None => (u128::from(width), u128::from(height)),
+                    },
+                },
             });
         }
         pos = end;

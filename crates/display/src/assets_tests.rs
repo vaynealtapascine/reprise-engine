@@ -55,6 +55,56 @@ fn scans_have_explicit_limits_and_extreme_sizes_saturate() {
 }
 
 #[test]
+fn authored_sizes_use_unrounded_aspect_at_density_and_length_extremes() {
+    let mut encoded = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut encoded, 1, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_pixel_dims(Some(png::PixelDimensions {
+            xppu: u32::MAX,
+            yppu: u32::MAX,
+            unit: png::Unit::Meter,
+        }));
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[255, 0, 0, 255])
+            .unwrap();
+    }
+    let header = image_header(&encoded).unwrap();
+    assert_eq!(
+        (header.physical_width, header.physical_height),
+        (Length::ZERO, Length::ZERO)
+    );
+    assert_eq!(
+        header.height_for_width(Length::from_pt(20)),
+        Length::from_pt(20)
+    );
+    assert_eq!(
+        header.width_for_height(Length::from_pt(20)),
+        Length::from_pt(20)
+    );
+    assert_eq!(header.height_for_width(Length::MAX), Length::MAX);
+    assert_eq!(header.width_for_height(Length::MIN), Length::ZERO);
+
+    let mut jpeg = include_bytes!("../../../fixtures/images/red-2x1.jpg").to_vec();
+    jpeg[14..18].copy_from_slice(&[0, 1, 0, 1]); // One dot per inch.
+    let sof = jpeg.windows(2).position(|w| w == [255, 192]).unwrap();
+    jpeg[sof + 7..sof + 9].copy_from_slice(&u16::MAX.to_be_bytes());
+    let header = image_header(&jpeg).unwrap();
+    assert_eq!(header.physical_width, Length::MAX);
+    assert_eq!(
+        header.height_for_width(Length::from_pt(65535)),
+        Length::from_pt(1)
+    );
+    assert_eq!(
+        header.width_for_height(Length::from_pt(1)),
+        Length::from_pt(65535)
+    );
+}
+
+#[test]
 fn store_hashes_verify_content_and_bytes_stay_host_owned() {
     let mut store = AssetStore::default();
     let hash = store.insert(RED).unwrap();
@@ -114,6 +164,14 @@ fn exif_rational_resolution_handles_both_byte_orders_and_hostile_offsets() {
         let header = image_header(&jpeg).unwrap();
         assert_eq!(header.physical_width, Length(983));
         assert_eq!(header.physical_height, Length(492));
+        assert_eq!(
+            header.height_for_width(Length::from_pt(40)),
+            Length::from_pt(20)
+        );
+        assert_eq!(
+            header.width_for_height(Length::from_pt(20)),
+            Length::from_pt(40)
+        );
         for end in 0..tiff.len() {
             let _ = exif_density(&tiff[..end]);
         }

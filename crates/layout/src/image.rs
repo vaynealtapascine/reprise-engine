@@ -35,7 +35,7 @@ pub(crate) fn prepare(
         None
     } else if let Some(bytes) = engine.assets.get(&asset) {
         match image_header(bytes) {
-            Ok(header) => Some((header.physical_width, header.physical_height)),
+            Ok(header) => Some(header),
             Err(error) => {
                 report(
                     if error == HeaderError::Limit {
@@ -55,7 +55,10 @@ pub(crate) fn prepare(
         );
         None
     };
-    let (natural_w, natural_h) = intrinsic.unwrap_or((Length::from_pt(96), Length::from_pt(72)));
+    let (natural_w, natural_h) = intrinsic
+        .map_or((Length::from_pt(96), Length::from_pt(72)), |h| {
+            (h.physical_width, h.physical_height)
+        });
     let authored_w = image.as_ref().and_then(|i| i.width).map(|v| v.resolve(em));
     let authored_h = image.as_ref().and_then(|i| i.height).map(|v| v.resolve(em));
     if authored_w.is_some_and(|w| w < Length::ZERO) || authored_h.is_some_and(|h| h < Length::ZERO)
@@ -69,11 +72,23 @@ pub(crate) fn prepare(
         (Some(w), Some(h)) => (w.max(Length::ZERO), h.max(Length::ZERO)),
         (Some(w), None) => {
             let w = w.max(Length::ZERO);
-            (w, w.mul_ratio(natural_h.0, natural_w.0.max(1)))
+            (
+                w,
+                intrinsic.map_or_else(
+                    || w.mul_ratio(natural_h.0, natural_w.0.max(1)),
+                    |h| h.height_for_width(w),
+                ),
+            )
         }
         (None, Some(h)) => {
             let h = h.max(Length::ZERO);
-            (h.mul_ratio(natural_w.0, natural_h.0.max(1)), h)
+            (
+                intrinsic.map_or_else(
+                    || h.mul_ratio(natural_w.0, natural_h.0.max(1)),
+                    |header| header.width_for_height(h),
+                ),
+                h,
+            )
         }
         _ => (natural_w, natural_h),
     };
@@ -100,6 +115,33 @@ mod tests {
     use super::*;
     use reprise_doc::image::ImageData;
     use reprise_font::FontStore;
+
+    #[test]
+    fn authored_width_preserves_aspect_when_intrinsic_lengths_saturate() {
+        let mut bytes = include_bytes!("../../../fixtures/images/red-2x1.jpg").to_vec();
+        bytes[14..18].copy_from_slice(&[0, 1, 0, 1]);
+        let sof = bytes.windows(2).position(|w| w == [255, 192]).unwrap();
+        bytes[sof + 7..sof + 9].copy_from_slice(&u16::MAX.to_be_bytes());
+        let mut engine = Engine::new(FontStore::default());
+        let mut authored = ImageData::new(engine.assets.insert(bytes).unwrap());
+        authored.width = Some(reprise_doc::LengthExpr::Pt(Length::from_pt(65535)));
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_image("", &authored, "alt").unwrap();
+        let mut notes = Vec::new();
+        let image = prepare(
+            &engine,
+            &doc,
+            node,
+            Length::from_pt(12),
+            Length::MAX,
+            &mut notes,
+        );
+        assert_eq!(
+            (image.rect.width, image.rect.height),
+            (Length::from_pt(65535), Length::from_pt(1))
+        );
+        assert!(notes.is_empty());
+    }
 
     #[test]
     fn bounded_header_failures_are_warnings_and_missing_assets_keep_authored_sizes() {
