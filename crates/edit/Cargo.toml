@@ -1,5 +1,5 @@
 [package]
-name = "reprise-fixtures"
+name = "reprise-edit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,14 +8,12 @@ publish.workspace = true
 
 [dependencies]
 reprise-geom.workspace = true
-reprise-compose.workspace = true
 reprise-doc.workspace = true
-reprise-font.workspace = true
 reprise-layout.workspace = true
+reprise-diag.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-reprise-edit.workspace = true
-reprise-diag.workspace = true
-reprise-display.workspace = true
-insta.workspace = true
-serde_json.workspace = true
+reprise-fixtures.workspace = true
+reprise-font.workspace = true
+reprise-shape.workspace = true

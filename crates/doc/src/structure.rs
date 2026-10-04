@@ -1,10 +1,9 @@
 //! The content tree as relations see it (13, 15): navigation, structural
 //! queries and succession links.
 //!
-//! Everything here is a pure function of the document. The tree is flat
-//! today, but nothing here assumes it: parents, siblings and children are
-//! read from the tree, so nested blocks (stanzas holding lines, notes holding
-//! notes) work with the same queries once something creates them.
+//! Everything here is a pure function of the document. Parents, siblings and
+//! children are read from the live tree, including table/row/cell nesting.
+//! A flagged ancestor hides its whole subtree from these queries.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -205,13 +204,12 @@ impl Document {
     /// -   when a block is **replaced, split or merged**: once for each
     ///     successor. Halves of a split block are equally good successors, so
     ///     relations on it become `Ambiguous`.
-    /// -   when an **undo brings a deleted block back**. Loro restores it as a
-    ///     new node with a new ID, so the editing kernel must record the new
-    ///     node as the old one's successor, or relations to the old ID stay
-    ///     orphaned.
+    /// -   when a legacy **physical tree-delete undo** creates a replacement
+    ///     node with a new ID. The kernel's flag-based undo restores the original
+    ///     node and needs no succession link.
     ///
     /// The link is one metadata key, on `old` while it is alive and on `new`
-    /// once `old` is deleted (a deleted block can't be written to), so it
+    /// once `old` is deleted, so it
     /// merges like any other edit and two peers' successors are both kept.
     pub fn supersede(&self, old: NodeId, new: NodeId) -> Result<(), DocError> {
         if old == new {

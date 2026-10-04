@@ -23,9 +23,11 @@ use serde::{Deserialize, Serialize};
 
 pub mod codes;
 pub mod context;
+mod edit;
 pub mod expr;
 pub mod function;
 mod history;
+mod lifecycle;
 mod page;
 mod persist;
 pub mod reading;
@@ -39,6 +41,7 @@ mod style;
 mod table;
 
 pub use context::ResolutionContext;
+pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
 pub use expr::{ComputedLength, Dependency, Expr};
 pub use function::FunctionRegistry;
 pub use history::{
@@ -176,6 +179,8 @@ pub enum DocError {
     Text(#[from] reprise_text::TextError),
     #[error("the document store refused the change: {0}")]
     Store(String),
+    #[error("index {index} is past the end of {len} children")]
+    BadIndex { index: usize, len: usize },
 }
 
 impl From<loro::LoroError> for DocError {
@@ -245,8 +250,12 @@ impl Document {
         self.doc.get_tree(name)
     }
 
+    /// Whether a node of `tree` is alive: not tombstoned, and not in the
+    /// soft-deleted subtree (see [`lifecycle`]).
     fn live(&self, tree: &LoroTree, id: TreeID) -> bool {
-        tree.contains(id) && !tree.is_node_deleted(&id).unwrap_or(true)
+        tree.contains(id)
+            && !tree.is_node_deleted(&id).unwrap_or(true)
+            && !self.deleted_in_tree(tree, id)
     }
 
     pub fn define_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
@@ -284,11 +293,7 @@ impl Document {
 
     /// Top-level blocks in document order.
     pub fn blocks(&self) -> Vec<NodeId> {
-        self.tree("content")
-            .roots()
-            .into_iter()
-            .map(NodeId)
-            .collect()
+        self.children(None)
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
@@ -324,12 +329,12 @@ impl Document {
         Ok(())
     }
 
-    /// Deletes a block, leaving a tombstone. Relations that involve it are not
-    /// touched: each schema's `OnTargetDeleted` policy is applied when the
-    /// relation is resolved, from the tombstone (see [`relation::OnTargetDeleted`]).
-    /// To say what replaced the block, call [`Document::supersede`] first.
+    /// Flags a block as deleted in place, including its subtree (07). Undo
+    /// restores the previous flag without changing identity or position.
+    /// Relation deletion policies are evaluated from this tombstone at query
+    /// time. Does not commit; deletion belongs to the caller's atomic step.
     pub fn delete_block(&self, id: NodeId) -> Result<(), DocError> {
-        Ok(self.tree("content").delete(id.0)?)
+        self.soft_delete_block(id)
     }
 
     /// Resolves a block's style in the default context: defaults, then its
@@ -455,9 +460,9 @@ impl Document {
         Ok(RelationId(id))
     }
 
-    /// Deletes a relation, leaving a tombstone.
+    /// Soft-deletes a relation by flag, retaining its ID through undo (07).
     pub fn delete_relation(&self, id: RelationId) -> Result<(), DocError> {
-        Ok(self.tree("relations").delete(id.0)?)
+        self.soft_delete_relation(id)
     }
 
     /// Live relations in ID order. Each is `Err` with its stored text when it

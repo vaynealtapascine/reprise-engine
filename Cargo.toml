@@ -21,6 +21,7 @@ reprise-compose = { path = "crates/compose" }
 reprise-layout = { path = "crates/layout" }
 reprise-display = { path = "crates/display" }
 reprise-fixtures = { path = "crates/fixtures" }
+reprise-edit = { path = "crates/edit" }
 
 loro = "1.16"
 thiserror = "2"
