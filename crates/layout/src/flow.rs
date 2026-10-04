@@ -513,7 +513,18 @@ pub(crate) fn prepare(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Prepared> {
     let subject = Subject::Node(node);
-    let block = doc.block(node).ok()?;
+    let block = match doc.block(node) {
+        Ok(block) => block,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                Severity::Error,
+                codes::MALFORMED_BLOCK,
+                subject,
+                error.to_string(),
+            ));
+            return None;
+        }
+    };
     let style = match doc.computed_style_with(node, ctx, &engine.functions) {
         Ok(s) => s,
         Err(e) => {
@@ -1089,5 +1100,27 @@ mod tests {
             .unwrap();
         assert_eq!(note.severity, Severity::Warning);
         assert_eq!(note.subject, Subject::Node(node));
+    }
+
+    #[test]
+    fn missing_cell_content_preparation_reports_instead_of_disappearing() {
+        let engine = Engine::new(FontStore::default());
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "cell").unwrap();
+        doc.delete_block(node).unwrap();
+        let mut diagnostics = Vec::new();
+        assert!(
+            prepare(
+                &engine,
+                &doc,
+                node,
+                &ResolutionContext::default(),
+                &mut diagnostics
+            )
+            .is_none()
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, codes::MALFORMED_BLOCK);
+        assert_eq!(diagnostics[0].severity, Severity::Error);
     }
 }
