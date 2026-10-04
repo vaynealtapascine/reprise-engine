@@ -779,3 +779,56 @@ fn computed_dependencies_are_what_remains() {
         "the em and the percentage are bound; only the frame is left"
     );
 }
+
+#[test]
+fn random_text_never_panics_and_what_parses_round_trips() {
+    let pieces = [
+        "(",
+        ")",
+        "1",
+        "2.5",
+        ".",
+        "pt",
+        "em",
+        "lh",
+        "%",
+        "é",
+        "\"",
+        "\\",
+        "-",
+        "+",
+        "*",
+        "/",
+        ",",
+        " ",
+        "min",
+        "max",
+        "clamp",
+        "calc",
+        "frame-width",
+        "nearest-height",
+        "ratio",
+        "💥",
+        "e",
+        "0",
+    ];
+    let mut rng = Rng(99);
+    let mut parsed = 0;
+    for _ in 0..20_000 {
+        let text: String = (0..rng.below(14))
+            .map(|_| pieces[rng.below(pieces.len() as u64) as usize])
+            .collect();
+        if let Ok(e) = Expr::parse(&text) {
+            parsed += 1;
+            assert_eq!(parse(&e.to_string()), e, "{text:?}");
+            // Checking and evaluating whatever parsed must not panic either.
+            let _ = e.check(&reg());
+            let _ = e.dependencies(&reg());
+            let _ = e.compute(&Scope::known(pt(10), pt(12), Some(pt(100))), &reg());
+        }
+    }
+    assert!(
+        parsed > 100,
+        "the generator should hit valid text sometimes: {parsed}"
+    );
+}

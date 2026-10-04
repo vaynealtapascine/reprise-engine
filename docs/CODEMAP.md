@@ -12,7 +12,11 @@ interfaces.
 |  | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
 | `doc` | `src/lib.rs` | `Document`: content tree, ranges, styles, relations, revisions, fork and merge | 05–07, 15, 29 |
 |  | `src/relation.rs` | `Relation`, `Target`, `LayoutQuery`, `RelationSchema`, `SchemaRegistry`, the built-in schemas | 13, 14, 15 |
-|  | `src/style.rs` | `Style`, `LengthExpr`, `ComputedStyle`, defaults | 08, 17, 18 |
+|  | `src/style.rs` | `Style`, `LengthExpr`, `Authored` (stored forms), the four stages (`Specified`, `Computed`, used via `StyleResolution`), `ComputedStyle`, defaults | 08, 17, 18, 39 |
+|  | `src/expr.rs` (`src/expr/tests.rs`) | `Expr`: bounded typed expressions with a canonical text form, type check, folding, saturating evaluation and dependency sets | 17, 19, 27 |
+|  | `src/function.rs` | `FunctionRegistry`, `PureFunction`, `Signature` and the built-in functions | 17, 36 |
+|  | `src/context.rs` | `ResolutionContext`, `Level`, `Basis`, definite, indefinite and unresolved bases | 18 |
+|  | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
 | `font` | `src/lib.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines; `FontStore` | 21 |
 | `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust`, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22 |
 |  | `src/paragraph.rs` | `itemize` (fallback chains), `Shaper` (shaping and reshaping a paragraph) | 21, 22 |
@@ -29,7 +33,7 @@ interfaces.
 |  | `src/display.rs` | `to_display_list(s)` and the debug overlay | 32, 39 |
 | `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing | 37, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing, including style expressions, cycles and bases | 17, 18, 37, 39 |
 |  | `tests/hostile.rs`, `tests/snapshots/` | The invariant checks and their JSON snapshots | 38, 39 |
 | `cli` | `src/lib.rs` | `write_outputs`: every output format for a snapshot | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
@@ -63,7 +67,7 @@ Other files:
     3.  Emit it from `layout/src/display.rs`.
 -   **Add a style property:**
     1.  Add the field to `Style` and `ComputedStyle` in `doc/src/style.rs`.
-    2.  Resolve it in `Document::computed_style`, recording its source in `explain` and
+    2.  Add it to `Property` and resolve it in `Computed` (`style.rs`), recording its source in `explain` and
         clamping it if negative values make no sense.
 -   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module
     (`layout/src/codes.rs` for layout) and to the table in `contracts.md`.

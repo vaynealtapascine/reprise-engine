@@ -2,8 +2,11 @@
 //! the invariants that no workstream may break.
 
 use reprise_diag::Severity;
+use reprise_doc::context::{Extent, ResolutionContext};
 use reprise_doc::text::segment;
+use reprise_doc::{Document, NodeId};
 use reprise_fixtures::hostile::{self, Fixture};
+use reprise_geom::Length;
 use reprise_layout::{DisplayOptions, LayoutSnapshot, LineRef};
 
 fn check(fixture: Fixture) {
@@ -161,9 +164,148 @@ hostile_tests!(
     deleted_targets,
     concurrent_edits,
     extreme_lengths,
+    style_expressions,
+    style_cycles,
+    style_bases,
 );
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 9);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 12);
+}
+
+// --- style notes (17, 18) ---------------------------------------------------
+//
+// `Document::computed_style` reports what it could not honour as `style.*`
+// notes. Layout doesn't publish them yet (the orchestrator wires that into
+// `flow.rs`), so these tests check the notes where they are made, and that
+// layout still lays out every block.
+
+/// The `style.*` codes of every block, in document order, in a context.
+fn style_codes(doc: &Document, context: &ResolutionContext) -> Vec<Vec<String>> {
+    doc.blocks()
+        .into_iter()
+        .map(|node| {
+            doc.computed_style_in(node, context)
+                .expect("the block exists")
+                .notes
+                .iter()
+                .map(|n| n.code.as_str().to_string())
+                .collect()
+        })
+        .collect()
+}
+
+fn size_of(doc: &Document, node: NodeId, context: &ResolutionContext) -> Length {
+    doc.computed_style_in(node, context)
+        .expect("the block exists")
+        .size
+}
+
+fn every_block_is_laid_out(fixture: &Fixture) {
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    assert_eq!(
+        snapshot.blocks.len(),
+        fixture.doc.blocks().len(),
+        "{}: every block is laid out",
+        fixture.name
+    );
+}
+
+fn per_block(expected: &[&[&str]]) -> Vec<Vec<String>> {
+    expected
+        .iter()
+        .map(|codes| codes.iter().map(|c| c.to_string()).collect())
+        .collect()
+}
+
+#[test]
+fn style_expressions_report_and_fall_back() {
+    let fixture = hostile::style_expressions().expect("the fixture builds");
+    let default = ResolutionContext::default();
+    assert_eq!(
+        style_codes(&fixture.doc, &default),
+        per_block(&[
+            &["style.expr-limit"],
+            &["style.expr-limit"],
+            &["style.type-error"],
+            &["style.type-error"],
+            &["style.unknown-function"],
+            &["style.function-failed"],
+            &["style.unparsed"],
+            &["style.unparsed"],
+        ])
+    );
+    for node in fixture.doc.blocks() {
+        assert_eq!(
+            size_of(&fixture.doc, node, &default),
+            Length::from_pt(10),
+            "a value that can't be used leaves the default size"
+        );
+    }
+    every_block_is_laid_out(&fixture);
+}
+
+#[test]
+fn style_cycles_are_cut_and_reported() {
+    let fixture = hostile::style_cycles().expect("the fixture builds");
+    assert_eq!(
+        style_codes(&fixture.doc, &ResolutionContext::default()),
+        per_block(&[
+            &["style.cycle"],
+            &["style.cycle"],
+            &["style.parent-cycle"],
+            &["style.parent-cycle"],
+            &["style.parent-missing"],
+            &["style.parent-missing"],
+        ])
+    );
+    every_block_is_laid_out(&fixture);
+}
+
+#[test]
+fn style_bases_that_are_missing_or_indefinite_are_reported() {
+    let fixture = hostile::style_bases().expect("the fixture builds");
+    // Nothing is known in the default context.
+    assert_eq!(
+        style_codes(&fixture.doc, &ResolutionContext::default()),
+        per_block(&[
+            &["style.basis-unresolved"],
+            &["style.basis-unresolved"],
+            &["style.basis-unresolved"],
+            &[],
+            &[],
+        ])
+    );
+    // In a frame whose height depends on its content, a percentage of that
+    // height is indefinite; a named frame that exists is fine.
+    let context = ResolutionContext::default()
+        .with_current_frame("main", Extent::auto_height(Length::from_pt(220)))
+        .with_named_frame(
+            "margin",
+            Extent::definite(Length::from_pt(110), Length::from_pt(228)),
+        );
+    assert_eq!(
+        style_codes(&fixture.doc, &context),
+        per_block(&[
+            &["style.basis-indefinite"],
+            &[],
+            &["style.basis-unresolved"],
+            &[],
+            &[],
+        ])
+    );
+    let blocks = fixture.doc.blocks();
+    assert_eq!(
+        size_of(&fixture.doc, blocks[1], &context),
+        Length::from_pt(11)
+    );
+    // The percentage that needs no frame resolves the same everywhere.
+    for context in [&context, &ResolutionContext::default()] {
+        assert_eq!(
+            size_of(&fixture.doc, blocks[3], context),
+            Length::from_pt(12)
+        );
+    }
+    every_block_is_laid_out(&fixture);
 }
