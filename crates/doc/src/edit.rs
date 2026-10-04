@@ -11,13 +11,12 @@
 //! # Identity under undo
 //!
 //! A block that undo might remove is **staged** first ([`Document::stage_block`]):
-//! created inside the trash, outside the undo history. The undoable step is the
-//! move that puts it in place, so undoing it moves the same node back into the
-//! trash and redoing it moves it out again. See `trash.rs`.
+//! created with a deletion flag outside the undo history. The undoable step
+//! places it and clears that flag. Undo and redo retain its ID. See `lifecycle.rs`.
 
 use loro::UndoManager;
 
-use crate::trash::STAGE_ORIGIN;
+use crate::lifecycle::STAGE_ORIGIN;
 use crate::{BlockKind, DocError, Document, NodeId, Style};
 
 /// The commit origin of a finished editing step.
@@ -84,7 +83,7 @@ impl Document {
     ) -> Result<NodeId, DocError> {
         self.check_insertion(parent, index)?;
         let id = self.stage_block(block)?;
-        self.restore_block(id, parent, index)?;
+        self.activate_block_at(id, parent, index)?;
         Ok(id)
     }
 
@@ -151,7 +150,7 @@ impl Document {
     /// text between blocks doesn't carry ranges with it yet (12).
     pub fn split_block_into(&self, id: NodeId, at: usize, new: NodeId) -> Result<(), DocError> {
         let block = self.block(id)?;
-        if !self.is_trashed(new) {
+        if !self.is_soft_deleted(new) {
             return Err(DocError::NoNode(new));
         }
         let end = block.text.len();
@@ -165,7 +164,7 @@ impl Document {
             .position(|&c| c == id)
             .ok_or(DocError::NoNode(id))?;
         block.text.delete(at..end)?;
-        self.restore_block(new, parent, index + 1)
+        self.activate_block_at(new, parent, index + 1)
     }
 
     /// Joins `second` onto the end of `first`: its text is appended, and it
@@ -191,7 +190,7 @@ impl Document {
         }
         a.text.insert(a.text.len(), &b.text.to_string())?;
         self.supersede(second, first)?;
-        self.trash_block(second)
+        self.soft_delete_block(second)
     }
 }
 
@@ -199,8 +198,8 @@ impl Document {
 ///
 /// It undoes only what this peer committed, by applying inverse operations on
 /// top of the current state. Everything collaborators did meanwhile stays, and
-/// text edits are transformed around it. Because deletion is a move into the
-/// trash, undoing a deleted block puts the **same node** back, so its
+/// text edits are transformed around it. Because deletion changes a flag,
+/// undoing a deleted block reveals the **same node** again, so its
 /// relations, ranges and anchors work again.
 pub struct UndoStack {
     inner: UndoManager,

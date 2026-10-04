@@ -96,9 +96,9 @@ impl Applied {
                     at.1 = if at.1 < start {
                         at.1
                     } else if at.1 > end {
-                        at.1 - removed + inserted
+                        (at.1 - removed).saturating_add(inserted)
                     } else if bias == Bias::After {
-                        start + inserted
+                        start.saturating_add(inserted)
                     } else {
                         start
                     };
@@ -252,7 +252,7 @@ impl Editor {
             Step::Join { first, second } => self.doc.join_blocks(*first, *second)?,
             Step::Place { new, parent, index } => {
                 let new = blocks.get(*new).copied().ok_or_else(missing)?;
-                self.doc.restore_block(new, *parent, *index)?;
+                self.doc.activate_block_at(new, *parent, *index)?;
             }
             Step::Trash { node } => self.doc.delete_block(*node)?,
             Step::Move {

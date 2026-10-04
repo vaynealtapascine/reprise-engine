@@ -15,6 +15,8 @@ interfaces.
 |  | `src/structure.rs` | Tree navigation, structural queries (`evaluate`), succession links (`supersede`, `succession`) | 06, 13, 15 |
 |  | `src/history.rs` | `DocumentAt` (a past version), `HistoryCache`, snapshot resolution, `compact_history` | 07, 13 |
 |  | `src/resolve.rs` | `resolve_target` / `resolve_relation`: any non-layout target, with `OnTargetDeleted` applied from tombstones; `dead_relations` | 13, 14, 15 |
+|  | `src/lifecycle.rs`, `tests/lifecycle.rs` | Metadata deletion flags, inherited subtree liveness, restoration and invisible staging; identity and concurrency regressions | 07, 29 |
+|  | `src/edit.rs` | General insertion, moving, splitting and joining plus per-peer commit-based undo | 07, 12, 29 |
 |  | `src/relation_tests.rs` | Tests for the three files above and for relation.rs | 13, 14, 15, 35 |
 |  | `tests/history_hostile.rs` | Forged revisions resolve or report, never panic | 07, 13, 37 |
 |  | `src/style.rs` | `Style`, `LengthExpr`, `Authored` (stored forms), the four stages (`Specified`, `Computed`, used via `StyleResolution`), `ComputedStyle`, defaults | 08, 17, 18, 39 |
@@ -60,7 +62,8 @@ interfaces.
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
-| `edit` | `tests/audit.rs` | Takeover blocker regressions: concurrent real-peer/trash identity collision, first-delete transaction undo and preservation of earlier undo history | 07, 29 |
+| `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties | 07, 29 |
+|  | `tests/document_edits.rs` | General structural edit primitives and collaborative text undo | 07, 12, 29 |
 | `cli` | `src/lib.rs` | `write_outputs`: layout JSON, and display list JSON, SVG and PNG for every page, plus a PDF | 32 |
 |  | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 |  | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |

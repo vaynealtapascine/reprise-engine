@@ -773,13 +773,12 @@ fn a_delete_merged_from_another_peer_deletes_without_any_edit() {
 }
 
 /// What undo does to a deleted block (07): Loro alone would restore it as a
-/// new node with a new ID, so deletion is a move into the trash (`trash.rs`)
-/// and undo moves the same node back. Relations to the block need no
+/// new node with a new ID, so deletion changes a metadata flag (`lifecycle.rs`)
+/// and undo reveals the same node. Relations to the block need no
 /// succession link: they are simply valid again, under every policy.
 ///
 /// This replaces the test that recorded Loro's behaviour, a new node that
-/// succession had to connect to the old one; that behaviour is what the trash
-/// exists to avoid.
+/// succession had to connect to the old one; the flag avoids that loss of ID.
 #[test]
 fn an_undone_deletion_is_the_same_node() {
     let p = policies();
@@ -808,6 +807,23 @@ fn an_undone_deletion_is_the_same_node() {
     }
     assert!(undo.redo().unwrap());
     assert!(!p.doc.is_live(p.target));
+}
+
+#[test]
+fn legacy_physical_tree_tombstones_stay_deleted() {
+    let p = policies();
+    p.doc.doc.get_tree("content").delete(p.target.0).unwrap();
+    p.doc.commit();
+    assert!(!p.doc.is_live(p.target));
+    assert!(p.doc.block(p.target).is_err());
+    assert!(p.doc.restore_block(p.target).is_err());
+    for policy in [
+        OnTargetDeleted::Rebind,
+        OnTargetDeleted::KeepMissing,
+        OnTargetDeleted::Delete,
+    ] {
+        assert!(resolve(&p.doc, &Target::Node(p.target), policy).is_deleted());
+    }
 }
 
 /// A link recorded on the new node and one recorded on the old are the same

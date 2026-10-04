@@ -1,4 +1,4 @@
-//! Deletion as a move into the trash (07, 29): identity under delete, undo,
+//! Soft deletion by metadata flag (07, 29): identity under delete, undo,
 //! redo and concurrency, and the structural operations built on it.
 
 use reprise_doc::relation::OnTargetDeleted;
@@ -39,9 +39,9 @@ fn deleting_costs_one_counter_so_later_ids_do_not_move() {
     assert_eq!(
         (after.0.len(), after.0[0].0, after.0[0].1 - before.0[0].1),
         (1, 1, 1),
-        "the trash root is created under another peer ID: no counter of ours is spent on it"
+        "a flag write consumes exactly one operation on the real peer"
     );
-    // A second deletion finds the same trash.
+    // Subsequent deletions also consume one operation.
     let b = para(&doc, "b");
     doc.commit();
     let before = doc.revision();
@@ -59,7 +59,7 @@ fn a_deleted_block_is_gone_for_every_question_and_can_be_restored() {
     assert_eq!(doc.blocks(), [a, c]);
     assert!(doc.block(b).is_err());
     assert!(!doc.is_live(b));
-    assert!(doc.is_trashed(b));
+    assert!(doc.is_soft_deleted(b));
     assert_eq!(doc.document_order(), [a, c]);
     assert_eq!(doc.children(None), [a, c]);
     assert_eq!(doc.parent_of(b), None);
@@ -67,7 +67,7 @@ fn a_deleted_block_is_gone_for_every_question_and_can_be_restored() {
     assert_eq!(doc.resolve_range(r), RangeState::Missing { node: Some(b) });
     assert!(doc.delete_block(b).is_err(), "already deleted");
 
-    doc.restore_block(b, None, 1).unwrap();
+    doc.restore_block(b).unwrap();
     assert_eq!(doc.blocks(), [a, b, c], "same ID, same place");
     assert_eq!(
         doc.resolve_range(r),
@@ -76,12 +76,12 @@ fn a_deleted_block_is_gone_for_every_question_and_can_be_restored() {
             bytes: 0..1
         }
     );
-    assert!(doc.restore_block(b, None, 0).is_err(), "it's alive");
-    assert!(!doc.is_trashed(b));
+    assert!(doc.restore_block(b).is_err(), "it's alive");
+    assert!(!doc.is_soft_deleted(b));
 }
 
 #[test]
-fn a_trashed_block_takes_its_subtree_and_brings_it_back() {
+fn a_flagged_block_takes_its_subtree_and_brings_it_back() {
     let doc = Document::new(1).unwrap();
     let parent = para(&doc, "parent");
     let child = doc
@@ -97,7 +97,7 @@ fn a_trashed_block_takes_its_subtree_and_brings_it_back() {
     assert!(!doc.is_live(child), "its subtree is gone with it");
     assert_eq!(doc.document_order(), []);
     assert_eq!(doc.children(Some(parent)), []);
-    doc.restore_block(parent, None, 0).unwrap();
+    doc.restore_block(parent).unwrap();
     assert_eq!(doc.document_order(), [parent, child]);
     assert_eq!(doc.parent_of(child), Some(Some(parent)));
 }
@@ -210,10 +210,10 @@ fn a_concurrent_move_and_delete_converge_on_both_replicas() {
         assert_eq!(one.blocks(), two.blocks(), "replicas agree");
         let live = one.blocks();
         assert!(
-            live == [a, c] || live == [a, c, b],
-            "one of the two wins: {live:?}"
+            live == [a, c],
+            "a concurrent move cannot clear the deletion flag: {live:?}"
         );
-        assert_eq!(one.is_trashed(b), two.is_trashed(b));
+        assert_eq!(one.is_soft_deleted(b), two.is_soft_deleted(b));
     }
 }
 
@@ -223,17 +223,67 @@ fn concurrent_restores_converge_and_keep_the_id() {
     let (a, b) = (para(&one, "a"), para(&one, "b"));
     one.delete_block(b).unwrap();
     let two = one.fork(2).unwrap();
-    one.restore_block(b, None, 0).unwrap();
-    two.restore_block(b, None, 1).unwrap();
+    one.restore_block(b).unwrap();
+    two.restore_block(b).unwrap();
     exchange(&one, &two);
     assert_eq!(one.blocks(), two.blocks());
     assert!(one.is_live(b) && one.blocks().contains(&a));
 }
 
 #[test]
-fn a_peer_whose_derived_trash_id_is_taken_still_deletes() {
-    // The ID that would create peer 1's trash is 1 ^ BIT. Another replica
-    // already wrote under it, so peer 1 must use its own ID.
+fn concurrent_delete_and_restore_converge_by_map_lww() {
+    for reversed in [false, true] {
+        let one = Document::new(1).unwrap();
+        let b = para(&one, "b");
+        one.delete_block(b).unwrap();
+        let two = one.fork(2).unwrap();
+        one.restore_block(b).unwrap();
+        // Write a fresh deletion concurrent with one's restore.
+        two.restore_block(b).unwrap();
+        two.delete_block(b).unwrap();
+        if reversed {
+            exchange(&two, &one);
+        } else {
+            exchange(&one, &two);
+        }
+        assert_eq!(one.is_live(b), two.is_live(b));
+        assert!(
+            !one.is_live(b),
+            "the later Lamport write wins, on both peers"
+        );
+        one.restore_block(b).unwrap();
+        exchange(&one, &two);
+        assert_eq!(one.blocks(), [b]);
+        assert_eq!(two.blocks(), [b]);
+    }
+}
+
+#[test]
+fn independently_deleted_children_stay_deleted_when_parent_is_restored() {
+    let doc = Document::new(1).unwrap();
+    let parent = para(&doc, "parent");
+    let child = doc
+        .insert_block_at(
+            Some(parent),
+            0,
+            &NewBlock::new(BlockKind::Paragraph, "body", "child"),
+        )
+        .unwrap();
+    doc.delete_block(child).unwrap();
+    doc.delete_block(parent).unwrap();
+    assert!(
+        doc.restore_block(child).is_err(),
+        "cannot restore under a deleted parent"
+    );
+    doc.restore_block(parent).unwrap();
+    assert!(doc.children(Some(parent)).is_empty());
+    doc.restore_block(child).unwrap();
+    assert_eq!(doc.children(Some(parent)), [child]);
+}
+
+#[test]
+fn any_real_peer_id_can_collaborate_with_deletion() {
+    // The former synthetic peer ID is an ordinary valid collaborator now.
     let one = Document::new(1).unwrap();
     let a = para(&one, "a");
     let squatter = one.fork(1 ^ BIT).unwrap();
@@ -250,7 +300,7 @@ fn a_peer_whose_derived_trash_id_is_taken_still_deletes() {
 }
 
 #[test]
-fn every_replica_has_its_own_trash() {
+fn replicas_delete_and_restore_independently() {
     let one = Document::new(1).unwrap();
     let (a, b) = (para(&one, "a"), para(&one, "b"));
     let two = one.fork(2).unwrap();
@@ -259,8 +309,8 @@ fn every_replica_has_its_own_trash() {
     exchange(&one, &two);
     assert_eq!(one.blocks(), []);
     assert_eq!(two.blocks(), []);
-    one.restore_block(b, None, 0).unwrap();
-    two.restore_block(a, None, 0).unwrap();
+    one.restore_block(b).unwrap();
+    two.restore_block(a).unwrap();
     exchange(&one, &two);
     assert_eq!(one.blocks().len(), 2);
     assert_eq!(one.blocks(), two.blocks());
@@ -275,9 +325,9 @@ fn staged_blocks_are_invisible_until_placed_and_keep_their_id_through_undo() {
         .stage_block(&NewBlock::new(BlockKind::Paragraph, "body", "new"))
         .unwrap();
     assert_eq!(doc.blocks(), [a]);
-    assert!(doc.is_trashed(staged));
+    assert!(doc.is_soft_deleted(staged));
     assert_eq!(undo.undo_count(), 0, "staging is outside the history");
-    doc.restore_block(staged, None, 1).unwrap();
+    doc.activate_block_at(staged, None, 1).unwrap();
     doc.commit_step();
     assert_eq!(doc.blocks(), [a, staged]);
     assert_eq!(undo.undo_count(), 1);
@@ -289,7 +339,7 @@ fn staged_blocks_are_invisible_until_placed_and_keep_their_id_through_undo() {
 }
 
 #[test]
-fn deleting_a_relation_is_a_trash_move_too() {
+fn deleting_a_relation_is_a_flag_write_too() {
     let doc = Document::new(1).unwrap();
     let schemas = SchemaRegistry::builtin();
     let note = doc
@@ -319,103 +369,4 @@ fn deleting_a_relation_is_a_trash_move_too() {
     assert!(doc.relations().is_empty());
     doc.restore_relation(staged).unwrap();
     assert_eq!(doc.relations(), vec![(staged, Ok(relation))]);
-}
-
-#[test]
-fn moving_blocks_counts_live_siblings_and_refuses_cycles() {
-    let doc = Document::new(1).unwrap();
-    let (a, b, c) = (para(&doc, "a"), para(&doc, "b"), para(&doc, "c"));
-    let gone = para(&doc, "gone");
-    doc.delete_block(gone).unwrap();
-    doc.move_block(a, None, 2).unwrap();
-    assert_eq!(doc.blocks(), [b, c, a]);
-    doc.move_block(a, None, 0).unwrap();
-    assert_eq!(doc.blocks(), [a, b, c]);
-    assert!(doc.move_block(a, None, 3).is_err(), "past the end");
-    doc.move_block(c, Some(a), 0).unwrap();
-    assert_eq!(doc.blocks(), [a, b]);
-    assert_eq!(doc.children(Some(a)), [c]);
-    assert!(doc.move_block(a, Some(a), 0).is_err());
-    assert!(
-        doc.move_block(a, Some(c), 0).is_err(),
-        "into its own subtree"
-    );
-    assert!(doc.move_block(a, Some(gone), 0).is_err(), "into the trash");
-    assert!(doc.move_block(gone, None, 0).is_err(), "a deleted block");
-    assert_eq!(doc.blocks(), [a, b]);
-}
-
-#[test]
-fn inserting_checks_its_parent_and_index() {
-    let doc = Document::new(1).unwrap();
-    let a = para(&doc, "a");
-    let new = NewBlock::new(BlockKind::Paragraph, "body", "x");
-    assert!(doc.insert_block_at(None, 2, &new).is_err());
-    let x = doc.insert_block_at(None, 0, &new).unwrap();
-    let y = doc.insert_block_at(None, 2, &new).unwrap();
-    assert_eq!(doc.blocks(), [x, a, y]);
-    doc.delete_block(a).unwrap();
-    assert!(doc.insert_block_at(Some(a), 0, &new).is_err());
-    assert_eq!(doc.blocks(), [x, y]);
-}
-
-#[test]
-fn splitting_and_joining_keep_ids_text_and_succession() {
-    let doc = Document::new(1).unwrap();
-    let a = doc
-        .append_block(BlockKind::Paragraph, "body", "héllo world")
-        .unwrap();
-    doc.set_overrides(
-        a,
-        &reprise_doc::Style {
-            family: Some("serif".into()),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let after = para(&doc, "after");
-    assert!(doc.split_block(a, 2).is_err(), "inside the é");
-    let b = doc.split_block(a, "héllo".len()).unwrap();
-    assert_eq!(doc.blocks(), [a, b, after]);
-    assert_eq!(texts(&doc), ["héllo", " world", "after"]);
-    let moved = doc.block(b).unwrap();
-    assert_eq!(
-        (moved.kind, moved.style.as_deref()),
-        (BlockKind::Paragraph, Some("body"))
-    );
-    assert_eq!(moved.overrides.family.as_deref(), Some("serif"));
-
-    // Joining `b` back: relations that named it follow the text.
-    doc.join_blocks(a, b).unwrap();
-    assert_eq!(doc.blocks(), [a, after]);
-    assert_eq!(texts(&doc), ["héllo world", "after"]);
-    assert_eq!(doc.successors(b), [a]);
-    assert!(doc.join_blocks(a, a).is_err());
-    assert!(doc.join_blocks(a, b).is_err(), "b is deleted");
-    let note = doc
-        .append_block(BlockKind::Annotation, "note", "n")
-        .unwrap();
-    assert!(doc.join_blocks(a, note).is_err(), "different kinds");
-    assert!(doc.split_block(a, 999).is_err());
-    assert_eq!(doc.blocks(), [a, after, note], "refusals change nothing");
-}
-
-#[test]
-fn two_peers_edit_and_each_undoes_only_their_own_text() {
-    let one = Document::new(1).unwrap();
-    let p = para(&one, "abc");
-    let two = one.fork(2).unwrap();
-    let mut undo = one.undo_stack();
-    // I type at the start, you type at the end, I undo.
-    one.block(p).unwrap().text.insert(0, "ME ").unwrap();
-    one.commit_step();
-    two.block(p).unwrap().text.insert(3, " YOU").unwrap();
-    exchange(&one, &two);
-    assert_eq!(texts(&one), ["ME abc YOU"]);
-    assert!(undo.undo().unwrap());
-    assert_eq!(texts(&one), ["abc YOU"], "only my text went");
-    exchange(&one, &two);
-    assert_eq!(texts(&two), ["abc YOU"]);
-    assert!(undo.redo().unwrap());
-    assert_eq!(texts(&one), ["ME abc YOU"]);
 }

@@ -141,9 +141,10 @@ fn every_command_does_what_it_says() {
 
 #[test]
 fn a_transaction_is_one_undo_step() {
-    let mut e = editor(Document::new(1).unwrap());
-    let a = para(e.document(), "one");
-    let b = para(e.document(), "two");
+    let doc = Document::new(1).unwrap();
+    let a = para(&doc, "one");
+    let b = para(&doc, "two");
+    let mut e = editor(doc);
     let before = dump(e.document());
     let tx = Transaction::new()
         .with(Command::InsertText {

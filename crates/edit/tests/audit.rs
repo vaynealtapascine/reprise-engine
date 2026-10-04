@@ -1,5 +1,5 @@
 //! Takeover blockers: these regressions intentionally fail on the inherited
-//! implementation. Keep their assertions when repairing the trash scheme.
+//! implementation. Soft deletion must keep all three assertions passing.
 
 use reprise_doc::{BlockKind, Document, SchemaRegistry};
 use reprise_edit::{Command, Editor, Transaction};
@@ -28,12 +28,12 @@ fn first_delete_after_text_is_one_step() {
 }
 
 #[test]
-fn trash_identity_does_not_collide_with_a_concurrent_real_peer() {
+fn deletion_identity_does_not_collide_with_a_concurrent_real_peer() {
     let a = Document::new(1).unwrap();
     let block = a.append_block(BlockKind::Paragraph, "body", "a").unwrap();
     let b = a.fork(1 ^ (1 << 62)).unwrap();
-    // Neither peer has seen the other's edits. An oplog check cannot reserve
-    // a synthetic peer ID against a real concurrent collaborator.
+    // This formerly synthetic ID remains a valid real collaborator.
+    // Neither peer has seen the other's edits. Deletion must use only peer 1.
     a.delete_block(block).unwrap();
     a.commit();
     let other = b
@@ -53,7 +53,7 @@ fn trash_identity_does_not_collide_with_a_concurrent_real_peer() {
 }
 
 #[test]
-fn first_trash_creation_keeps_previous_transactions_undoable() {
+fn first_deletion_keeps_previous_transactions_undoable() {
     let doc = Document::new(1).unwrap();
     let a = doc.append_block(BlockKind::Paragraph, "body", "a").unwrap();
     let b = doc.append_block(BlockKind::Paragraph, "body", "b").unwrap();
@@ -69,8 +69,8 @@ fn first_trash_creation_keeps_previous_transactions_undoable() {
     editor
         .apply_command(Command::DeleteBlock { node: b })
         .unwrap();
-    // Loro clears its undo history on every peer-ID switch. Creating the
-    // trash by temporarily changing peer IDs silently forgets the text edit.
+    // The former trash helper switched peers and cleared this history.
+    // A metadata flag uses the real peer and must preserve previous steps.
     assert_eq!(editor.undo_count(), 2);
     editor.undo().unwrap();
     assert!(editor.document().is_live(b));

@@ -5,7 +5,7 @@
 //!     step. An invalid transaction is refused whole with a typed [`EditError`].
 //! -   **Per-user undo:** [`Editor::undo`] undoes this replica's transactions only,
 //!     keeping collaborators' concurrent edits. A deleted block comes back with the
-//!     same ID, because deletion moves it into a trash (see `reprise-doc`).
+//!     same ID, because deletion changes its metadata flag (see `reprise-doc`).
 //!
 //! -   **Carets, selection and navigation** ([`Navigator`]): hit testing, caret
 //!     geometry, logical and visual movement and selection geometry over a

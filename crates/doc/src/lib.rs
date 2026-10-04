@@ -27,6 +27,7 @@ mod edit;
 pub mod expr;
 pub mod function;
 mod history;
+mod lifecycle;
 mod page;
 pub mod relation;
 #[cfg(test)]
@@ -34,7 +35,6 @@ mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
-mod trash;
 
 pub use context::ResolutionContext;
 pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
@@ -242,9 +242,11 @@ impl Document {
     }
 
     /// Whether a node of `tree` is alive: not tombstoned, and not in the
-    /// trash (see [`trash`]), where deletion puts it.
+    /// soft-deleted subtree (see [`lifecycle`]).
     fn live(&self, tree: &LoroTree, id: TreeID) -> bool {
-        tree.contains(id) && !tree.is_node_deleted(&id).unwrap_or(true) && !self.in_trash(tree, id)
+        tree.contains(id)
+            && !tree.is_node_deleted(&id).unwrap_or(true)
+            && !self.deleted_in_tree(tree, id)
     }
 
     pub fn define_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
@@ -318,15 +320,12 @@ impl Document {
         Ok(())
     }
 
-    /// Deletes a block and its subtree by moving them into the trash (07), so
-    /// they leave a tombstone that is still a node: [`Document::restore_block`]
-    /// or an undo brings the block back with the same ID. Relations that
-    /// involve it are not touched: each schema's `OnTargetDeleted` policy is
-    /// applied when the relation is resolved, from the tombstone (see
-    /// [`relation::OnTargetDeleted`]). To say what replaced the block, call
-    /// [`Document::supersede`] first.
+    /// Flags a block as deleted in place, including its subtree (07). Undo
+    /// restores the previous flag without changing identity or position.
+    /// Relation deletion policies are evaluated from this tombstone at query
+    /// time. Does not commit; deletion belongs to the caller's atomic step.
     pub fn delete_block(&self, id: NodeId) -> Result<(), DocError> {
-        self.trash_block(id)
+        self.soft_delete_block(id)
     }
 
     /// Resolves a block's style in the default context: defaults, then its
@@ -452,9 +451,9 @@ impl Document {
         Ok(RelationId(id))
     }
 
-    /// Deletes a relation by moving it into the trash, like a block (07).
+    /// Soft-deletes a relation by flag, retaining its ID through undo (07).
     pub fn delete_relation(&self, id: RelationId) -> Result<(), DocError> {
-        self.trash_relation(id)
+        self.soft_delete_relation(id)
     }
 
     /// Live relations in ID order. Each is `Err` with its stored text when it

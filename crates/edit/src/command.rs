@@ -41,7 +41,7 @@ pub enum Command {
         index: usize,
         block: NewBlock,
     },
-    /// Moves the block, with its subtree, into the trash.
+    /// Flags the block as deleted; its descendants inherit deletion.
     DeleteBlock {
         node: NodeId,
     },
