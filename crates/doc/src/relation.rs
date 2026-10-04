@@ -1050,7 +1050,9 @@ pub mod builtin {
         }
     }
 
+    pub use crate::region_schema::{FLOAT, NOTE, float, note};
+
     pub fn all() -> Vec<RelationSchema> {
-        vec![follow(), reference()]
+        vec![follow(), reference(), float(), note()]
     }
 }

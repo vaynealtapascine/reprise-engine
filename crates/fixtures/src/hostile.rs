@@ -186,7 +186,7 @@ pub fn zero_width_measure() -> Result<Fixture, DocError> {
     let mut template = PageTemplate::new("narrow", builtin.width, builtin.height);
     for mut frame in builtin.frames {
         match frame.role {
-            FrameRole::Margin => {
+            FrameRole::Margin | FrameRole::Notes => {
                 // Where a margin column after a zero-wide main column starts.
                 frame.x = Dim::pt(36 + 18);
                 frame.width = Dim::Pt(Length::from_pt(-10));
@@ -740,7 +740,7 @@ pub fn verse_turnover() -> Result<Fixture, DocError> {
     let mut template = PageTemplate::new("narrow-verse", builtin.width, builtin.height);
     for mut frame in builtin.frames {
         match frame.role {
-            FrameRole::Margin => frame.x = Dim::pt(36 + 110 + 18),
+            FrameRole::Margin | FrameRole::Notes => frame.x = Dim::pt(36 + 110 + 18),
             FrameRole::Flow(_) => frame.width = Dim::pt(110),
         }
         template.frames.push(frame);
