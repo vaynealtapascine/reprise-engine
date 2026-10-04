@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      119
+      70
     ]
   ],
   "adapter": {
@@ -82,7 +82,7 @@ expression: snapshot.to_json()
   ],
   "blocks": [
     {
-      "node": "6@1",
+      "node": "8@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -99,9 +99,9 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 47
+            "end": 41
           },
-          "preview": "English, then עברית עם 123 ו-456, then",
+          "preview": "Text with no frame of its own to flow in.",
           "rect": {
             "origin": {
               "x": 0,
@@ -111,93 +111,7 @@ expression: snapshot.to_json()
             "height": 13517
           },
           "baseline": 10707,
-          "width": 201090,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 0,
-                "end": 47
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 203715
-            }
-          ]
-        },
-        {
-          "frame": 0,
-          "text": {
-            "start": 47,
-            "end": 96
-          },
-          "preview": "العربية with English inside it, then back",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 13517
-            },
-            "width": 225280,
-            "height": 13517
-          },
-          "baseline": 24224,
-          "width": 213933,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 47,
-                "end": 96
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 216558
-            }
-          ]
-        },
-        {
-          "frame": 0,
-          "text": {
-            "start": 96,
-            "end": 107
-          },
-          "preview": "to English.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 27034
-            },
-            "width": 225280,
-            "height": 13517
-          },
-          "baseline": 37741,
-          "width": 53449,
+          "width": 199359,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -210,8 +124,8 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 96,
-                "end": 107
+                "start": 0,
+                "end": 41
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -220,14 +134,14 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 53449
+              "width": 199359
             }
           ]
         }
       ]
     },
     {
-      "node": "102@1",
+      "node": "53@1",
       "kind": "annotation",
       "style": {
         "family": "Source Serif Pro",
@@ -288,9 +202,9 @@ expression: snapshot.to_json()
   ],
   "relations": [
     {
-      "id": "118@1",
+      "id": "69@1",
       "schema": "reprise.follow",
-      "owner": "102@1",
+      "owner": "53@1",
       "status": "valid",
       "applied": true,
       "targets": [
@@ -299,7 +213,7 @@ expression: snapshot.to_json()
           "status": "valid",
           "resolved": {
             "line": {
-              "node": "6@1",
+              "node": "8@1",
               "line": 0
             }
           }
@@ -307,5 +221,15 @@ expression: snapshot.to_json()
       ]
     }
   ],
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "layout.template-unusable",
+      "subject": {
+        "kind": "document"
+      },
+      "message": "page template `sidebar-only` can't be used: it has no frame with room for the main flow; the built-in one is used",
+      "bytes": null
+    }
+  ]
 }

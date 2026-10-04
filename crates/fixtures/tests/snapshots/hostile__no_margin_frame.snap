@@ -1,0 +1,166 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      66
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "text-only",
+    "source": "document"
+  },
+  "pages": [
+    {
+      "width": 307200,
+      "height": 204800
+    }
+  ],
+  "frames": [
+    {
+      "name": "column",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 20480,
+        "ty": 20480
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 204800,
+        "height": 163840
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "8@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 37
+          },
+          "preview": "A paragraph whose note has no margin.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 204800,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 199491,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 37
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 199491
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "65@1",
+      "schema": "reprise.follow",
+      "owner": "49@1",
+      "status": "valid",
+      "applied": false,
+      "targets": [
+        {
+          "role": "line",
+          "status": "valid",
+          "resolved": {
+            "line": {
+              "node": "8@1",
+              "line": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "relation.no-frame",
+      "subject": {
+        "kind": "relation",
+        "id": "65@1"
+      },
+      "message": "the target line's page has no margin frame; owner not placed",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.unplaced",
+      "subject": {
+        "kind": "node",
+        "id": "49@1"
+      },
+      "message": "no relation places this block; not drawn",
+      "bytes": null
+    }
+  ]
+}

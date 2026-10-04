@@ -1,8 +1,10 @@
 //! Layout: from an authored [`Document`] to a derived [`LayoutSnapshot`] and
 //! [`DisplayList`]s (decisions 05, 24, 26, 28 and 37).
 //!
-//! The spike lays out one page in two passes:
-//! 1. Flow ([`flow`]): paragraphs stack down the main frame.
+//! Layout runs in two passes:
+//! 1. Flow ([`flow`]): the page template is resolved against the medium
+//!    ([`template`]), and paragraphs thread down its frames, page after page.
+//!    A paragraph that doesn't fit the rest of a frame continues in the next.
 //! 2. Relations ([`relations`]): blocks placed by relations, such as notes
 //!    beside the line they follow, which is only known after pass 1. That
 //!    ordering is the staged-pass rule (26).
@@ -16,11 +18,13 @@
 pub mod codes;
 mod display;
 mod flow;
+mod region;
 mod relations;
 mod snapshot;
+mod template;
 
 use reprise_compose::{Composer, Greedy};
-use reprise_doc::{Document, SchemaRegistry};
+use reprise_doc::{Document, Medium, SchemaRegistry};
 use reprise_font::FontStore;
 use reprise_geom::Length;
 use reprise_shape::{HarfRust, ShapingAdapter};
@@ -30,47 +34,52 @@ pub use display::DisplayOptions;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, LayoutSnapshot, LineLayout, LineRef, PageLayout,
     PositionedRun, RelationLayout, RelationStatus, Resolution, Subject, TargetLayout,
+    TemplateSource, TemplateUsed,
 };
 
-/// Page geometry for the spike: one page, a main column and a margin column.
-/// Replaced by page templates and frames in the flow workstream.
+/// Engine settings for the flow. Like the rest of the engine configuration
+/// they are an input to the determinism guarantee, so the snapshot records them (38).
+///
+/// Spacing lives here, as engine defaults, until styles can carry it (08):
+/// paragraph spacing is a property of a block's style (space before and
+/// after), and the annotation gap belongs to the frame or relation that stacks
+/// annotations. When those exist these values become the lowest layer, like
+/// `default_style()`, and nothing that reads them changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PageSettings {
-    pub width: Length,
-    pub height: Length,
-    pub margin_top: Length,
-    pub margin_left: Length,
-    pub column_width: Length,
-    pub gutter: Length,
-    pub margin_column_width: Length,
+pub struct FlowSettings {
+    /// The most pages layout makes. Text that needs more is left out and
+    /// reported with `layout.page-limit`; it never loops. At least one page is
+    /// always made, so 0 means 1.
+    pub max_pages: u32,
+    /// The gap between consecutive paragraphs in a frame.
     pub paragraph_spacing: Length,
+    /// The gap between annotations stacked in one frame.
     pub annotation_spacing: Length,
 }
 
-impl Default for PageSettings {
+impl Default for FlowSettings {
     fn default() -> Self {
-        PageSettings {
-            width: Length::from_pt(420),
-            height: Length::from_pt(300),
-            margin_top: Length::from_pt(36),
-            margin_left: Length::from_pt(36),
-            column_width: Length::from_pt(220),
-            gutter: Length::from_pt(18),
-            margin_column_width: Length::from_pt(110),
+        FlowSettings {
+            max_pages: 1000,
             paragraph_spacing: Length::from_pt(8),
             annotation_spacing: Length::from_pt(4),
         }
     }
 }
 
-/// The engine configuration: fonts, the shaping adapter, the composer and the
-/// relation schemas. All of it is an input to the determinism guarantee (38).
+/// The engine configuration: fonts, the shaping adapter, the composer, the
+/// relation schemas, the medium and the flow settings. All of it is an input
+/// to the determinism guarantee (38).
 pub struct Engine {
     pub fonts: FontStore,
     pub shaper: Box<dyn ShapingAdapter>,
     pub composer: Box<dyn Composer>,
     pub schemas: SchemaRegistry,
-    pub page: PageSettings,
+    /// What the document is laid out for. Page templates may size themselves
+    /// from it. Not authored state: the same document lays out differently on
+    /// a different medium.
+    pub medium: Medium,
+    pub flow: FlowSettings,
 }
 
 impl Engine {
@@ -80,7 +89,8 @@ impl Engine {
             shaper: Box::new(HarfRust),
             composer: Box::new(Greedy),
             schemas: SchemaRegistry::builtin(),
-            page: PageSettings::default(),
+            medium: Medium::new(Length::from_pt(420), Length::from_pt(300)),
+            flow: FlowSettings::default(),
         }
     }
 
@@ -89,14 +99,24 @@ impl Engine {
             revision: doc.revision(),
             adapter: self.shaper.info(),
             composer: self.composer.name().into(),
-            page: self.page,
+            medium: self.medium,
+            settings: self.flow,
+            template: TemplateUsed {
+                name: String::new(),
+                source: TemplateSource::Builtin,
+            },
             pages: Vec::new(),
             frames: Vec::new(),
             blocks: Vec::new(),
             relations: Vec::new(),
             diagnostics: Vec::new(),
         };
-        let pending = flow::run(self, doc, &mut snapshot);
+        let template = template::resolve(self, doc, &mut snapshot.diagnostics);
+        snapshot.template = TemplateUsed {
+            name: template.name.clone(),
+            source: template.source,
+        };
+        let pending = flow::run(self, doc, &template, &mut snapshot);
         relations::run(self, doc, &mut snapshot, pending);
         snapshot
     }

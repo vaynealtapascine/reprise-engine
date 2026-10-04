@@ -50,8 +50,8 @@ Codes in use:
 | --- | --- |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled` |
-| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced` |
-| relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed` |
+| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit` |
+| relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.no-frame` |
 
 ## Text store: `reprise-text`
 
@@ -172,7 +172,9 @@ Codes in use:
 ## Layout snapshot: `reprise-layout::snapshot`
 
 -   **Structure:** a `LayoutSnapshot` has `pages`, `frames` and `blocks`, plus `relations`
-    and `diagnostics`.
+    and `diagnostics`. It also records the `medium`, the flow `settings` and the page
+    `template` it was made from (38). Pages are made from the template as the flow needs
+    them, up to the engine's page limit; every frame has a `role` (a flow, or margin).
     -   Each frame has a page and a `to_page` transform.
     -   Line geometry is in its frame's logical `FrameSpace`.
     -   Use `line_to_page` or `line_bounds` to get page coordinates.
@@ -227,7 +229,7 @@ Codes in use:
 -   **Pinned inputs:** `fonts()` and `engine()` use only the bundled font. Peer IDs are 1,
     and 2 for second replicas.
 -   **`spike`:** the end-to-end spike document.
--   **`hostile`:** nine documents built to break things:
+-   **`hostile`:** eighteen documents built to break things:
     -   `empty_text`
     -   `combining_marks`
     -   `emoji_zwj`
@@ -237,10 +239,21 @@ Codes in use:
     -   `deleted_targets`
     -   `concurrent_edits`
     -   `extreme_lengths`
+    -   `frame_shorter_than_a_line`
+    -   `no_main_flow`
+    -   `negative_page_size`
+    -   `zero_sized_frames`
+    -   `page_limit`
+    -   `unreadable_template`
+    -   `column_storm`
+    -   `concurrent_templates`
+    -   `no_margin_frame`
 -   **`tests/hostile.rs`** runs every hostile fixture and checks:
     -   determinism, and that replicas converge to the same layout
     -   the expected diagnostic codes, and no unexpected Warning or Error
     -   the line and query invariants above
+    -   that every frame is on a page that exists, every line is inside its frame unless
+        its block carries `layout.frame-overflow`, and text follows the order frames thread in
     -   every backend
     -   a JSON snapshot
 -   **Rules for workstreams:**

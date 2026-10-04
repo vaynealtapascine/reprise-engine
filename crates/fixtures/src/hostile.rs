@@ -14,13 +14,14 @@ use reprise_doc::relation::{
 };
 use reprise_doc::text::RangePolicy;
 use reprise_doc::{
-    BlockKind, DocError, Document, LengthExpr, Relation, RelationSchema, SchemaId, SchemaRegistry,
-    Style, Target, TargetClass,
+    BlockKind, Dim, DocError, Document, FrameRole, FrameTemplate, LengthExpr, PageTemplate,
+    Relation, RelationSchema, SchemaId, SchemaRegistry, Style, Target, TargetClass,
 };
 use reprise_geom::Length;
-use reprise_layout::{Engine, PageSettings};
+use reprise_layout::Engine;
 
 use crate::spike::{define_styles, find, follow};
+use crate::templates::{flow_frame, long_text, margin_frame, two_columns};
 use crate::{OTHER_PEER, PEER, engine};
 
 pub struct Fixture {
@@ -59,6 +60,15 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         deleted_targets()?,
         concurrent_edits()?,
         extreme_lengths()?,
+        frame_shorter_than_a_line()?,
+        no_main_flow()?,
+        negative_page_size()?,
+        zero_sized_frames()?,
+        page_limit()?,
+        unreadable_template()?,
+        column_storm()?,
+        concurrent_templates()?,
+        no_margin_frame()?,
     ])
 }
 
@@ -147,14 +157,28 @@ pub fn overlong_word() -> Result<Fixture, DocError> {
 pub fn zero_width_measure() -> Result<Fixture, DocError> {
     let doc = document()?;
     paragraph_with_note(&doc, "a few short words", "short")?;
+    // The built-in template's geometry, with a main column of zero width and a
+    // margin column of negative width.
+    let builtin = PageTemplate::builtin();
+    let mut template = PageTemplate::new("narrow", builtin.width, builtin.height);
+    for mut frame in builtin.frames {
+        match frame.role {
+            FrameRole::Margin => {
+                // Where a margin column after a zero-wide main column starts.
+                frame.x = Dim::pt(36 + 18);
+                frame.width = Dim::Pt(Length::from_pt(-10));
+            }
+            FrameRole::Flow(_) => frame.width = Dim::Pt(Length::ZERO),
+        }
+        template.frames.push(frame);
+    }
+    doc.set_page_template(&template)?;
     doc.commit();
-    let mut fixture = Fixture::new("zero_width_measure", doc, &["compose.overflow"]);
-    fixture.engine.page = PageSettings {
-        column_width: Length::ZERO,
-        margin_column_width: Length::from_pt(-10),
-        ..PageSettings::default()
-    };
-    Ok(fixture)
+    Ok(Fixture::new(
+        "zero_width_measure",
+        doc,
+        &["compose.overflow", "layout.degenerate-frame"],
+    ))
 }
 
 /// Every way a relation can lose what it points at.
@@ -319,5 +343,257 @@ pub fn extreme_lengths() -> Result<Fixture, DocError> {
             "layout.frame-overflow",
             "layout.style-clamped",
         ],
+    ))
+}
+
+/// Every frame of the main flow is shorter than one line, so no line fits any
+/// of them. The text must still be placed (overflowing, and reported), not
+/// looked for in more and more pages. A note lands in a margin frame that is
+/// shorter than a line too.
+pub fn frame_shorter_than_a_line() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let template = PageTemplate::new("sliver", Dim::pt(300), Dim::pt(200))
+        .with_frame(flow_frame(
+            "sliver",
+            Dim::pt(20),
+            Dim::pt(20),
+            Dim::pt(150),
+            Dim::pt(4),
+        ))
+        .with_frame(margin_frame(
+            "margin",
+            Dim::pt(190),
+            Dim::pt(20),
+            Dim::pt(90),
+            Dim::pt(4),
+        ));
+    doc.set_page_template(&template)?;
+    paragraph_with_note(
+        &doc,
+        "Two lines at least, in a frame that holds none.",
+        "least",
+    )?;
+    doc.append_block(BlockKind::Paragraph, "body", "And a second paragraph.")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "frame_shorter_than_a_line",
+        doc,
+        &["layout.frame-overflow"],
+    ))
+}
+
+/// A template whose only text frame belongs to a flow no paragraph is in:
+/// there is nowhere for the main flow to go, so the built-in template stands in.
+pub fn no_main_flow() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let template = PageTemplate::new("sidebar-only", Dim::pt(300), Dim::pt(200))
+        .with_frame(FrameTemplate::new(
+            "sidebar",
+            FrameRole::Flow("sidebar".into()),
+            (Dim::pt(10), Dim::pt(10)),
+            (Dim::pt(100), Dim::pt(180)),
+        ))
+        .with_frame(margin_frame(
+            "margin",
+            Dim::pt(150),
+            Dim::pt(10),
+            Dim::pt(100),
+            Dim::pt(180),
+        ));
+    doc.set_page_template(&template)?;
+    paragraph_with_note(&doc, "Text with no frame of its own to flow in.", "own")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "no_main_flow",
+        doc,
+        &["layout.template-unusable"],
+    ))
+}
+
+/// A page of negative width: the template can't be used, so the built-in one
+/// stands in.
+pub fn negative_page_size() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut template = two_columns();
+    template.width = Dim::pt(-100);
+    doc.set_page_template(&template)?;
+    paragraph_with_note(&doc, "A page that is less than nothing wide.", "nothing")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "negative_page_size",
+        doc,
+        &["layout.template-unusable"],
+    ))
+}
+
+/// Frames of zero and negative size. Ones with no depth are passed over, and
+/// the text flows into the first frame that has some. The margin frame is
+/// zero wide, so its notes overflow it.
+pub fn zero_sized_frames() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let template = PageTemplate::new("degenerate", Dim::pt(300), Dim::pt(200))
+        .with_frame(flow_frame(
+            "no-depth",
+            Dim::pt(10),
+            Dim::pt(10),
+            Dim::pt(100),
+            Dim::pt(0),
+        ))
+        .with_frame(flow_frame(
+            "negative-depth",
+            Dim::pt(10),
+            Dim::pt(10),
+            Dim::pt(100),
+            Dim::pt(-50),
+        ))
+        .with_frame(flow_frame(
+            "negative-width",
+            Dim::pt(10),
+            Dim::pt(10),
+            Dim::pt(-100),
+            Dim::pt(0),
+        ))
+        .with_frame(flow_frame(
+            "column",
+            Dim::pt(10),
+            Dim::pt(10),
+            Dim::pt(120),
+            Dim::pt(60),
+        ))
+        .with_frame(margin_frame(
+            "margin",
+            Dim::pt(150),
+            Dim::pt(10),
+            Dim::pt(0),
+            Dim::pt(180),
+        ));
+    doc.set_page_template(&template)?;
+    let text = long_text(1);
+    paragraph_with_note(&doc, &text, "corridor")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "zero_sized_frames",
+        doc,
+        &["layout.degenerate-frame", "compose.overflow"],
+    ))
+}
+
+/// A document that needs more pages than the engine allows. The text beyond
+/// the limit is left out and reported; notes on text that was placed still
+/// follow it, and a note on text that was left out is reported too.
+pub fn page_limit() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let text = long_text(6);
+    let first = doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    let second = doc.append_block(BlockKind::Paragraph, "body", "Beyond the limit: a target.")?;
+    let schemas = SchemaRegistry::builtin();
+    let early = doc.append_block(BlockKind::Annotation, "note", "On the first page.")?;
+    let r = doc.add_range(first, 0..3, RangePolicy::FIXED)?;
+    doc.add_relation(&schemas, &follow(early, r))?;
+    let lost = doc.append_block(BlockKind::Annotation, "note", "On text that is gone.")?;
+    let r = doc.add_range(second, 0..6, RangePolicy::FIXED)?;
+    doc.add_relation(&schemas, &follow(lost, r))?;
+    doc.commit();
+    let mut fixture = Fixture::new(
+        "page_limit",
+        doc,
+        &[
+            "layout.page-limit",
+            "layout.text-unplaced",
+            "relation.no-match",
+            "layout.unplaced",
+        ],
+    );
+    fixture.engine.flow.max_pages = 2;
+    Ok(fixture)
+}
+
+/// The template in use is stored by a newer engine, in a form this one can't
+/// read. It stays in the document untouched, and the built-in template stands in.
+pub fn unreadable_template() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.store_raw_page_template(
+        "future",
+        r#"{"version":9,"template":{"name":"future","columns":"as many as fit"}}"#,
+    )?;
+    doc.store_raw_page_template("also-future", "{ not even json")?;
+    doc.use_page_template("future")?;
+    paragraph_with_note(&doc, "Laid out on the built-in template.", "built-in")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "unreadable_template",
+        doc,
+        &["layout.template-unreadable"],
+    ))
+}
+
+/// Forty frames, each holding exactly one line, so a paragraph is cut into a
+/// fragment per frame across several pages.
+pub fn column_storm() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut template = PageTemplate::new("storm", Dim::pt(420), Dim::pt(300));
+    for i in 0..40 {
+        template.frames.push(flow_frame(
+            &format!("cell-{i}"),
+            Dim::pt(10 + (i % 4) * 100),
+            Dim::pt(10 + (i / 4) * 16),
+            Dim::pt(90),
+            Dim::pt(14),
+        ));
+    }
+    doc.set_page_template(&template)?;
+    doc.append_block(BlockKind::Paragraph, "body", &long_text(6))?;
+    doc.append_block(BlockKind::Paragraph, "body", "")?;
+    doc.append_block(BlockKind::Paragraph, "body", &long_text(1))?;
+    doc.commit();
+    Ok(Fixture::new("column_storm", doc, &[]))
+}
+
+/// Two peers redefine the same template at once, and one of them also edits
+/// the text. Both replicas must converge on one template and one layout.
+pub fn concurrent_templates() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    doc.append_block(BlockKind::Paragraph, "body", &long_text(2))?;
+    doc.commit();
+    let other = doc.fork(OTHER_PEER)?;
+
+    let mut wider = two_columns();
+    wider.frames[0].width = Dim::pt(100);
+    doc.define_page_template(&wider)?;
+    let mut taller = two_columns();
+    taller.frames[0].height = Dim::pt(40);
+    other.define_page_template(&taller)?;
+    other.define_page_template(&PageTemplate::new("extra", Dim::pt(200), Dim::pt(200)))?;
+    let first = doc.blocks()[0];
+    other.block(first)?.text.insert(0, "Edited. ")?;
+
+    doc.merge(&other)?;
+    other.merge(&doc)?;
+    let mut fixture = Fixture::new("concurrent_templates", doc, &[]);
+    fixture.replica = Some(other);
+    Ok(fixture)
+}
+
+/// A relation whose target line is on a page that has no margin frame to
+/// place its owner in.
+pub fn no_margin_frame() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let template =
+        PageTemplate::new("text-only", Dim::pt(300), Dim::pt(200)).with_frame(flow_frame(
+            "column",
+            Dim::pt(20),
+            Dim::pt(20),
+            Dim::pt(200),
+            Dim::pt(160),
+        ));
+    doc.set_page_template(&template)?;
+    paragraph_with_note(&doc, "A paragraph whose note has no margin.", "note")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "no_margin_frame",
+        doc,
+        &["relation.no-frame", "layout.unplaced"],
     ))
 }

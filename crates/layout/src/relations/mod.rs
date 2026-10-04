@@ -8,7 +8,6 @@
 use reprise_diag::Severity;
 use reprise_doc::Document;
 use reprise_doc::relation::{Ownership, builtin};
-use reprise_geom::Length;
 
 use crate::flow::Pending;
 use crate::{Diagnostic, Engine, LayoutSnapshot, RelationLayout, RelationStatus, Subject, codes};
@@ -23,9 +22,7 @@ pub(crate) fn run(
     snapshot: &mut LayoutSnapshot,
     mut pending: Vec<Pending>,
 ) {
-    let mut follow = Follow {
-        next_free: Length::MIN,
-    };
+    let mut follow = Follow::default();
     for (id, relation) in doc.relations() {
         let relation = match relation {
             Ok(r) => r,

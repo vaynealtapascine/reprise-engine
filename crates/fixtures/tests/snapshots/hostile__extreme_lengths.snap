@@ -15,18 +15,24 @@ expression: snapshot.to_json()
     "platform_independent": true
   },
   "composer": "greedy",
-  "page": {
+  "medium": {
     "width": 430080,
-    "height": 307200,
-    "margin_top": 36864,
-    "margin_left": 36864,
-    "column_width": 225280,
-    "gutter": 18432,
-    "margin_column_width": 112640,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
     "paragraph_spacing": 8192,
     "annotation_spacing": 4096
   },
+  "template": {
+    "name": "default",
+    "source": "builtin"
+  },
   "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    },
     {
       "width": 430080,
       "height": 307200
@@ -35,6 +41,9 @@ expression: snapshot.to_json()
   "frames": [
     {
       "name": "main",
+      "role": {
+        "flow": "main"
+      },
       "page": 0,
       "to_page": {
         "xx": 65536,
@@ -55,7 +64,52 @@ expression: snapshot.to_json()
     },
     {
       "name": "margin",
+      "role": "margin",
       "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 1,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 1,
       "to_page": {
         "xx": 65536,
         "yx": 0,
@@ -591,7 +645,7 @@ expression: snapshot.to_json()
       },
       "lines": [
         {
-          "frame": 0,
+          "frame": 2,
           "text": {
             "start": 0,
             "end": 30
@@ -600,12 +654,12 @@ expression: snapshot.to_json()
           "rect": {
             "origin": {
               "x": 0,
-              "y": 2147483647
+              "y": 0
             },
             "width": 225280,
             "height": 13517
           },
-          "baseline": 2147483647,
+          "baseline": 10707,
           "width": 159908,
           "explanation": {
             "reason": "end",
@@ -766,17 +820,7 @@ expression: snapshot.to_json()
         "kind": "node",
         "id": "120@1"
       },
-      "message": "runs past the bottom of the main frame",
-      "bytes": null
-    },
-    {
-      "severity": "warning",
-      "code": "layout.frame-overflow",
-      "subject": {
-        "kind": "node",
-        "id": "154@1"
-      },
-      "message": "runs past the bottom of the main frame",
+      "message": "a line is taller than every frame of the main flow; placed overflowing",
       "bytes": null
     }
   ]

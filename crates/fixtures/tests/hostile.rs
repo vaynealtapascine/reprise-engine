@@ -3,8 +3,9 @@
 
 use reprise_diag::Severity;
 use reprise_doc::text::segment;
+use reprise_doc::{BlockKind, FrameRole, MAIN_FLOW};
 use reprise_fixtures::hostile::{self, Fixture};
-use reprise_layout::{DisplayOptions, LayoutSnapshot, LineRef};
+use reprise_layout::{DisplayOptions, LayoutSnapshot, LineRef, Subject};
 
 fn check(fixture: Fixture) {
     let name = fixture.name;
@@ -25,6 +26,7 @@ fn check(fixture: Fixture) {
 
     check_diagnostics(name, &fixture, &snapshot);
     check_lines(name, &snapshot);
+    check_flow(name, &snapshot);
     check_queries(name, &snapshot);
     check_backends(name, &fixture, &snapshot);
 
@@ -94,11 +96,69 @@ fn check_lines(name: &str, snapshot: &LayoutSnapshot) {
     }
 }
 
+/// Frames, pages and flow order (24): every frame is on a page that exists,
+/// every line is inside its frame unless it carries a diagnostic, and text
+/// follows the order frames thread in.
+fn check_flow(name: &str, snapshot: &LayoutSnapshot) {
+    assert!(!snapshot.pages.is_empty(), "{name}: at least one page");
+    let mut page = 0;
+    for (i, frame) in snapshot.frames.iter().enumerate() {
+        assert!(
+            frame.page < snapshot.pages.len(),
+            "{name}: frame {i} is on page {}, which doesn't exist",
+            frame.page
+        );
+        assert!(frame.page >= page, "{name}: frames are listed page by page");
+        page = frame.page;
+        assert!(frame.rect.width.0 >= 0 && frame.rect.height.0 >= 0);
+    }
+
+    let mut previous = 0;
+    for block in &snapshot.blocks {
+        let node = block.node;
+        // Lines that overflow their frame say so with a frame-overflow
+        // diagnostic on their block.
+        let overflows = snapshot
+            .diagnostics_with("layout.frame-overflow")
+            .any(|d| d.subject == Subject::Node(node));
+        for line in &block.lines {
+            let frame = snapshot.frame(line.frame).expect("the frame exists");
+            if !overflows {
+                let bottom = line.rect.origin.y.0.saturating_add(line.rect.height.0);
+                assert!(
+                    bottom <= frame.rect.height.0,
+                    "{name}: {node} has a line ending at {bottom}, below its frame's {}",
+                    frame.rect.height.0
+                );
+            }
+            match block.kind {
+                BlockKind::Annotation => assert_eq!(
+                    frame.role,
+                    FrameRole::Margin,
+                    "{name}: {node} is placed by a relation, in a margin frame"
+                ),
+                BlockKind::Paragraph => {
+                    assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into()));
+                    assert!(
+                        line.frame >= previous,
+                        "{name}: {node} goes back to frame {} after frame {previous}",
+                        line.frame
+                    );
+                    previous = line.frame;
+                }
+            }
+        }
+    }
+}
+
 /// The query API answers for every position and agrees with itself.
 fn check_queries(name: &str, snapshot: &LayoutSnapshot) {
     for block in &snapshot.blocks {
         let node = block.node;
-        for at in (0..=block.text.len()).filter(|&i| block.text.is_char_boundary(i)) {
+        // Text that was left out (reported with `layout.text-unplaced`) has
+        // no line, so no query can find it.
+        let placed = block.lines.last().map_or(0, |l| l.text.end);
+        for at in (0..=placed).filter(|&i| block.text.is_char_boundary(i)) {
             let line = snapshot
                 .line_containing(node, at)
                 .unwrap_or_else(|| panic!("{name}: no line contains byte {at} of {node}"));
@@ -118,7 +178,7 @@ fn check_queries(name: &str, snapshot: &LayoutSnapshot) {
             }
         }
         assert_eq!(
-            snapshot.lines_in(node, 0..block.text.len()).len(),
+            snapshot.lines_in(node, 0..placed).len(),
             if block.text.is_empty() {
                 1
             } else {
@@ -161,9 +221,18 @@ hostile_tests!(
     deleted_targets,
     concurrent_edits,
     extreme_lengths,
+    frame_shorter_than_a_line,
+    no_main_flow,
+    negative_page_size,
+    zero_sized_frames,
+    page_limit,
+    unreadable_template,
+    column_storm,
+    concurrent_templates,
+    no_margin_frame,
 );
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 9);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 18);
 }

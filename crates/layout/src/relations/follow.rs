@@ -1,21 +1,27 @@
 //! `reprise.follow`: a block placed in the margin beside the line it follows.
+//! The margin is the margin frame of the target line's page, and each margin
+//! frame keeps its own track of how far it is filled.
+
+use std::collections::BTreeMap;
 
 use reprise_diag::Severity;
 use reprise_doc::{Document, LayoutQuery, Param, RangeState, Relation, RelationId, Target};
 use reprise_geom::{FrameSpace, Length, PageSpace, Point, Transform};
 
-use crate::flow::{MARGIN, Pending, shift};
+use crate::flow::{Pending, place};
 use crate::{
     Diagnostic, Engine, LayoutSnapshot, LineRef, RelationLayout, RelationStatus, Resolution,
     Subject, TargetLayout, codes,
 };
 
-/// `reprise.follow`: the owner sits in the margin frame, level with the top
-/// of its target line. A block that would overlap the previous one is pushed
-/// down below it.
+/// `reprise.follow`: the owner sits in the margin frame of its target line's
+/// page, level with the top of that line. A block that would overlap the
+/// previous one in the same frame is pushed down below it.
+#[derive(Default)]
 pub(super) struct Follow {
-    /// The first free position in the margin frame.
-    pub(super) next_free: Length,
+    /// The first free position in each margin frame, by frame index. A frame
+    /// with no entry is free from its top.
+    next_free: BTreeMap<usize, Length>,
 }
 
 impl Follow {
@@ -97,7 +103,25 @@ impl Follow {
             );
             return;
         };
-        let Some(want) = line_top_in(snapshot, line, MARGIN) else {
+        let Some(frame) = snapshot
+            .page_of(line)
+            .and_then(|page| snapshot.margin_frame_on(page))
+        else {
+            report(
+                snapshot,
+                Severity::Error,
+                codes::RELATION_NO_FRAME,
+                "the target line's page has no margin frame; owner not placed".into(),
+            );
+            return;
+        };
+        let Some(want) = line_top_in(snapshot, line, frame) else {
+            report(
+                snapshot,
+                Severity::Error,
+                codes::RELATION_NO_FRAME,
+                "the margin frame's transform can't be inverted; owner not placed".into(),
+            );
             return;
         };
         let offset = match relation.params.get("offset") {
@@ -105,20 +129,33 @@ impl Follow {
             _ => Length::ZERO,
         };
         let want = want + offset;
-        let at = if want < self.next_free {
+        let free = self.next_free.get(&frame).copied().unwrap_or(Length::MIN);
+        let at = if want < free {
             report(
                 snapshot,
                 Severity::Warning,
                 codes::RELATION_PUSHED,
                 "pushed down to avoid the previous block".into(),
             );
-            self.next_free
+            free
         } else {
             want
         };
         let placed = pending.remove(pos);
-        self.next_free = at + placed.extent + engine.page.annotation_spacing;
-        snapshot.blocks.push(shift(placed.block, at));
+        let depth = snapshot
+            .frame(frame)
+            .map_or(Length::ZERO, |f| f.rect.height);
+        if at + placed.extent > depth {
+            snapshot.diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                codes::FRAME_OVERFLOW,
+                Subject::Node(placed.block.node),
+                "runs past the bottom of the margin frame",
+            ));
+        }
+        self.next_free
+            .insert(frame, at + placed.extent + engine.flow.annotation_spacing);
+        snapshot.blocks.push(place(placed.block, frame, at));
         result.applied = true;
     }
 }

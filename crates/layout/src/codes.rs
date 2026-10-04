@@ -35,3 +35,20 @@ pub const RELATION_OWNER_DELETED: Code = Code::new("relation.owner-deleted");
 pub const RELATION_NO_MATCH: Code = Code::new("relation.no-match");
 /// A placed block was moved to avoid overlapping an earlier one.
 pub const RELATION_PUSHED: Code = Code::new("relation.pushed");
+/// A stored page template can't be read by this engine; it is kept in the
+/// document. A warning when it is the template in use, so the built-in one
+/// stood in; otherwise info.
+pub const TEMPLATE_UNREADABLE: Code = Code::new("layout.template-unreadable");
+/// The page template can't be laid out (its page size isn't positive or
+/// can't be resolved, or it has no usable frame for the main flow), so the
+/// built-in template stood in.
+pub const TEMPLATE_UNUSABLE: Code = Code::new("layout.template-unusable");
+/// A template frame has a zero or negative size. A negative size is clamped
+/// to zero (warning). A frame with no depth takes no text; one with no width
+/// takes text only as overflow (info).
+pub const DEGENERATE_FRAME: Code = Code::new("layout.degenerate-frame");
+/// The text needs more pages than the engine's page limit; the rest of it was
+/// left out.
+pub const PAGE_LIMIT: Code = Code::new("layout.page-limit");
+/// The page of the line a relation targets has no frame to place the owner in.
+pub const RELATION_NO_FRAME: Code = Code::new("relation.no-frame");

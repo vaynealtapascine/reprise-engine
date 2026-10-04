@@ -6,7 +6,7 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      246
+      103
     ]
   ],
   "adapter": {
@@ -25,18 +25,18 @@ expression: snapshot.to_json()
     "annotation_spacing": 4096
   },
   "template": {
-    "name": "default",
-    "source": "builtin"
+    "name": "sliver",
+    "source": "document"
   },
   "pages": [
     {
-      "width": 430080,
-      "height": 307200
+      "width": 307200,
+      "height": 204800
     }
   ],
   "frames": [
     {
-      "name": "main",
+      "name": "sliver",
       "role": {
         "flow": "main"
       },
@@ -46,16 +46,16 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 36864,
-        "ty": 36864
+        "tx": 20480,
+        "ty": 20480
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 225280,
-        "height": 233472
+        "width": 153600,
+        "height": 4096
       }
     },
     {
@@ -67,22 +67,22 @@ expression: snapshot.to_json()
         "yx": 0,
         "xy": 0,
         "yy": 65536,
-        "tx": 280576,
-        "ty": 36864
+        "tx": 194560,
+        "ty": 20480
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 112640,
-        "height": 233472
+        "width": 92160,
+        "height": 4096
       }
     }
   ],
   "blocks": [
     {
-      "node": "6@1",
+      "node": "8@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -99,19 +99,62 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 33
+            "end": 31
           },
-          "preview": "The first paragraph has a  in it.",
+          "preview": "Two lines at least, in a frame",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 225280,
+            "width": 153600,
             "height": 13517
           },
           "baseline": 10707,
-          "width": 153264,
+          "width": 143001,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 31
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 145626
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 31,
+            "end": 47
+          },
+          "preview": "that holds none.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 13517
+            },
+            "width": 153600,
+            "height": 13517
+          },
+          "baseline": 24224,
+          "width": 81182,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -124,8 +167,8 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 0,
-                "end": 33
+                "start": 31,
+                "end": 47
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -134,14 +177,14 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 153264
+              "width": 81182
             }
           ]
         }
       ]
     },
     {
-      "node": "81@1",
+      "node": "77@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -158,19 +201,19 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 35
+            "end": 23
           },
-          "preview": "The second paragraph loses a lette.",
+          "preview": "And a second paragraph.",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 21709
+              "y": 35226
             },
-            "width": 225280,
+            "width": 153600,
             "height": 13517
           },
-          "baseline": 32416,
-          "width": 175804,
+          "baseline": 45933,
+          "width": 124921,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -184,7 +227,7 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 35
+                "end": 23
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -193,14 +236,14 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 175804
+              "width": 124921
             }
           ]
         }
       ]
     },
     {
-      "node": "121@1",
+      "node": "59@1",
       "kind": "annotation",
       "style": {
         "family": "Source Serif Pro",
@@ -217,19 +260,19 @@ expression: snapshot.to_json()
           "frame": 1,
           "text": {
             "start": 0,
-            "end": 8
+            "end": 7
           },
-          "preview": "Rebound.",
+          "preview": "A note.",
           "rect": {
             "origin": {
               "x": 0,
-              "y": 21709
+              "y": 0
             },
-            "width": 112640,
+            "width": 92160,
             "height": 10560
           },
-          "baseline": 29950,
-          "width": 36434,
+          "baseline": 8241,
+          "width": 26592,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -243,7 +286,7 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 8
+                "end": 7
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -252,7 +295,7 @@ expression: snapshot.to_json()
               "size": 8448,
               "level": 0,
               "x": 0,
-              "width": 36434
+              "width": 26592
             }
           ]
         }
@@ -261,81 +304,18 @@ expression: snapshot.to_json()
   ],
   "relations": [
     {
-      "id": "79@1",
+      "id": "75@1",
       "schema": "reprise.follow",
-      "owner": "56@1",
-      "status": "missing",
-      "applied": false,
-      "targets": [
-        {
-          "role": "line",
-          "status": "missing",
-          "resolved": null
-        }
-      ]
-    },
-    {
-      "id": "138@1",
-      "schema": "reprise.follow",
-      "owner": "121@1",
-      "status": "rebound",
+      "owner": "59@1",
+      "status": "valid",
       "applied": true,
-      "targets": [
-        {
-          "role": "line",
-          "status": "rebound",
-          "resolved": {
-            "line": {
-              "node": "81@1",
-              "line": 0
-            }
-          }
-        }
-      ]
-    },
-    {
-      "id": "185@1",
-      "schema": "reprise.follow",
-      "owner": "161@1",
-      "status": "missing",
-      "applied": false,
-      "targets": [
-        {
-          "role": "line",
-          "status": "missing",
-          "resolved": null
-        }
-      ]
-    },
-    {
-      "id": "209@1",
-      "schema": "reprise.follow",
-      "owner": "187@1",
-      "status": "owner-deleted",
-      "applied": false,
-      "targets": []
-    },
-    {
-      "id": "211@1",
-      "schema": "elsewhere.unknown",
-      "owner": null,
-      "status": "valid",
-      "applied": false,
-      "targets": []
-    },
-    {
-      "id": "218@1",
-      "schema": "reprise.follow",
-      "owner": "81@1",
-      "status": "valid",
-      "applied": false,
       "targets": [
         {
           "role": "line",
           "status": "valid",
           "resolved": {
             "line": {
-              "node": "81@1",
+              "node": "8@1",
               "line": 0
             }
           }
@@ -345,93 +325,33 @@ expression: snapshot.to_json()
   ],
   "diagnostics": [
     {
-      "severity": "error",
-      "code": "relation.missing-target",
-      "subject": {
-        "kind": "relation",
-        "id": "79@1"
-      },
-      "message": "target range 74@1 is gone; owner not placed",
-      "bytes": null
-    },
-    {
-      "severity": "info",
-      "code": "relation.rebound",
-      "subject": {
-        "kind": "relation",
-        "id": "138@1"
-      },
-      "message": "target range 133@1 lost part of its text; rebound",
-      "bytes": null
-    },
-    {
-      "severity": "error",
-      "code": "relation.missing-target",
-      "subject": {
-        "kind": "relation",
-        "id": "185@1"
-      },
-      "message": "target range 180@1 is gone; owner not placed",
-      "bytes": null
-    },
-    {
-      "severity": "info",
-      "code": "relation.owner-deleted",
-      "subject": {
-        "kind": "relation",
-        "id": "209@1"
-      },
-      "message": "owner 187@1 was deleted; the relation went with it",
-      "bytes": null
-    },
-    {
       "severity": "warning",
-      "code": "relation.unknown-schema",
-      "subject": {
-        "kind": "relation",
-        "id": "211@1"
-      },
-      "message": "schema elsewhere.unknown is not registered; not applied",
-      "bytes": null
-    },
-    {
-      "severity": "error",
-      "code": "relation.owner-not-placeable",
-      "subject": {
-        "kind": "relation",
-        "id": "218@1"
-      },
-      "message": "owner is not a block a relation can place, or is already placed",
-      "bytes": null
-    },
-    {
-      "severity": "warning",
-      "code": "layout.unplaced",
+      "code": "layout.frame-overflow",
       "subject": {
         "kind": "node",
-        "id": "56@1"
+        "id": "8@1"
       },
-      "message": "no relation places this block; not drawn",
+      "message": "a line is taller than every frame of the main flow; placed overflowing",
       "bytes": null
     },
     {
       "severity": "warning",
-      "code": "layout.unplaced",
+      "code": "layout.frame-overflow",
       "subject": {
         "kind": "node",
-        "id": "161@1"
+        "id": "77@1"
       },
-      "message": "no relation places this block; not drawn",
+      "message": "a line is taller than every frame of the main flow; placed overflowing",
       "bytes": null
     },
     {
       "severity": "warning",
-      "code": "layout.unplaced",
+      "code": "layout.frame-overflow",
       "subject": {
         "kind": "node",
-        "id": "220@1"
+        "id": "59@1"
       },
-      "message": "no relation places this block; not drawn",
+      "message": "runs past the bottom of the margin frame",
       "bytes": null
     }
   ]
