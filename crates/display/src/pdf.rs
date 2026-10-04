@@ -256,7 +256,10 @@ impl Pdf<'_> {
         let font = match self.krilla_fonts.get(&run.face) {
             Some(f) => f.clone(),
             None => {
-                let font = Font::new(self.fonts.get(&run.face)?.data().to_vec().into(), 0)
+                // A face from a collection (TTC/OTC) is one of several in the
+                // same bytes; krilla must open the same one shaping used.
+                let face = self.fonts.get(&run.face)?;
+                let font = Font::new(face.data().to_vec().into(), face.declaration().face_index)
                     .ok_or_else(|| RenderError::Pdf("krilla could not read the font".into()))?;
                 self.krilla_fonts.insert(run.face.clone(), font.clone());
                 font
