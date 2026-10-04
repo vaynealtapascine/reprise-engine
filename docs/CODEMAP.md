@@ -141,3 +141,10 @@ Other files:
 | --- | --- | --- | --- |
 | `layout` | `src/regions/tests.rs` | Adversarial mixed-region, cycles, dependency depth, fanout, pagination and table cursor unit tests | 24–26, 37 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/hostile__*.snap` | Ten hostile region fixtures, original invariant checks retained, region-role checks and paired layout/content goldens | 24–26, 37–39 |
+
+## Incremental evaluation
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Session API beside the full-layout reference | 16, 26-28, 39 |
+| `fixtures` | `tests/incremental.rs` | Seeded edits of every hostile fixture and spike, exact snapshot and diagnostic equivalence | 27, 38, 39 |
