@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 58);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 59);
 }
 
 hostile_tests!(
@@ -1007,6 +1007,11 @@ region_hostile_tests!(
     table_row_taller_than_page,
     infeasible_solver_domain,
 );
+
+#[test]
+fn incremental_page_seam() {
+    check(hostile::incremental_page_seam().unwrap());
+}
 
 #[test]
 fn editing_concurrent_delete_undo() {

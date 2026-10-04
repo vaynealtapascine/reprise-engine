@@ -2,6 +2,36 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-04: workstream 6, incremental layout and scheduling, merged
+
+**Done** (Sol). The design and its verification are described in `docs/incremental.md`.
+
+-   **`LayoutSession`** re-lays out only what changed. It sits beside the frozen
+    `Engine::layout`, which stays the reference.
+    -   Its caches are keyed on complete typed inputs: text, fonts, adapter, composer settings,
+        schemas, functions, medium and flow settings.
+    -   An edit to one paragraph of 1,000 recomputes that paragraph and touches one page.
+-   **`LayoutJob`:** budgeted, resumable and cancellable, viewport-first. It returns a
+    `PartialLayout` that states what it covers. Results are rejected when they are stale (an
+    older revision, or another document). It is single-threaded, so it works on WASM.
+-   **`DependencyGraph`:** one dependency vocabulary over styles and relations, with
+    forward and reverse inspection and the reason each unit was recomputed (39).
+-   **Explicit passes:** flow, region feedback, relations and reading order, each with its
+    existing cycle bound.
+-   **No dependencies added.** Salsa was evaluated and rejected: its fixed-point recovery
+    assumes monotone computations, and region feedback can oscillate.
+-   **Verification:** every hostile fixture and the spike take 32 seeded edits, each checked
+    against `Engine::layout`. The orchestrator added seeded random walks: 600 edits over ten
+    documents, including deleting blocks that others point at, frame-relative styles before
+    a template change, and a concurrent peer's delete.
+
+**Gaps:**
+
+-   Work units are whole paragraphs, tables or passes.
+-   Region and relation views are provisional until settled.
+-   Native worker threads aren't used yet.
+-   The debug overlay doesn't show dependencies yet.
+
 ## 2026-10-04: geometry, regions and base direction merged; kernel in progress
 
 **Done:**

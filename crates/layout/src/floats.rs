@@ -25,6 +25,7 @@ impl Floats {
         id: RelationId,
         relation: &Relation,
         anchor: LineRef,
+        evaluation: Option<&crate::incremental::Evaluation>,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(line) = scratch.line(anchor).cloned() else {
@@ -103,6 +104,7 @@ impl Floats {
                     ti,
                     width,
                     &mut candidate_diagnostics,
+                    evaluation,
                 ) else {
                     out.diagnostics.extend(candidate_diagnostics);
                     return;
@@ -115,6 +117,7 @@ impl Floats {
                     Length::ZERO,
                     &Subject::Node(owner),
                     &mut candidate_diagnostics,
+                    evaluation,
                 );
                 let height = composed.block_end;
                 let free = self.next.get(&index).copied().unwrap_or_default();

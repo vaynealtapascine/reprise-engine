@@ -21,6 +21,7 @@ mod display;
 mod floats;
 mod flow;
 pub mod geometry;
+pub mod incremental;
 mod notes;
 mod query;
 pub mod reading;

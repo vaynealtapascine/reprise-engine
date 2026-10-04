@@ -108,6 +108,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         table_conflicting_widths()?,
         table_row_taller_than_page()?,
         infeasible_solver_domain()?,
+        incremental_page_seam()?,
         editing_concurrent_delete_undo()?,
         editing_half_invalid()?,
         editing_empty_document()?,
@@ -1697,6 +1698,35 @@ pub fn infeasible_solver_domain() -> Result<Fixture, DocError> {
         doc,
         &["layout.solver-infeasible"],
     ))
+}
+
+/// A following note anchored beside a UTF-8 edit at a pagination seam.
+pub fn incremental_page_seam() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.set_page_template(&two_columns())?;
+    let first = doc.append_block(BlockKind::Paragraph, "body", &long_text(2))?;
+    let seam = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "seam e\u{301} \u{5d0} needle and more text ",
+    )?;
+    let range = doc.add_range(
+        seam,
+        find(&doc.block(seam)?.text.to_string(), "needle"),
+        RangePolicy::FIXED,
+    )?;
+    let owner = doc.append_block(
+        BlockKind::Annotation,
+        "note",
+        "a note across the edit boundary",
+    )?;
+    doc.add_relation(&SchemaRegistry::builtin(), &follow(owner, range))?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &reprise_doc::reading::before(first, seam),
+    )?;
+    doc.commit();
+    Ok(Fixture::new("incremental_page_seam", doc, &[]))
 }
 
 /// Delete while a collaborator types, then undo: the same node, range and note

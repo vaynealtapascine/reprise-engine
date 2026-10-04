@@ -26,6 +26,7 @@ impl Notes {
         id: RelationId,
         relation: &Relation,
         anchor: LineRef,
+        evaluation: Option<&crate::incremental::Evaluation>,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(anchor_line) = scratch.line(anchor).cloned() else {
@@ -85,6 +86,7 @@ impl Notes {
             ti,
             area.width,
             &mut out.diagnostics,
+            evaluation,
         ) else {
             return;
         };
@@ -166,6 +168,7 @@ impl Notes {
                 used,
                 &Subject::Node(owner),
                 &mut out.diagnostics,
+                evaluation,
             );
             if !composed.lines.is_empty() {
                 if overflow {

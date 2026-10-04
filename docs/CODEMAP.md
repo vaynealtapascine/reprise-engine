@@ -149,3 +149,19 @@ Other files:
 | --- | --- | --- | --- |
 | `layout` | `src/regions/tests.rs` | Adversarial mixed-region, cycles, dependency depth, fanout, pagination and table cursor unit tests | 24–26, 37 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/hostile__*.snap` | Ten hostile region fixtures, original invariant checks retained, region-role checks and paired layout/content goldens | 24–26, 37–39 |
+
+## Incremental evaluation
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Exact-input preparation/shaping/flow/region/final-pass caches, computed dependency and reverse-inspection graph, revision-gated viewport jobs beside the full-layout reference | 16, 26-28, 39 |
+| `fixtures` | `tests/incremental.rs` | Seeded text/style/template/relation/split/join/concurrent edits of every hostile fixture and spike; exact equivalence, counters, budgets, cancellation, revision/identity rejection, identical-byte anchor changes, line-height-only shaping reuse, affected-page counters and 100,000-paragraph viewport test | 27, 38, 39 |
+|  | `tests/incremental_fuzz.rs` | Seeded random edit walks (deleting pointed-at blocks, owner edits, frame-relative styles then template changes, concurrent deletes, new notes, floats and follows); every step equals `Engine::layout` | 16, 27, 38 |
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/incremental/tests.rs` | Cyclic/missing/deep computed graphs, unified inputs, extreme and reversed viewports | 16, 28, 37, 39 |
+| `layout` | `src/flow.rs`, `src/table.rs`, `src/notes.rs`, `src/floats.rs` | Owned resumable flow cursor, optional exact-input memo hooks and actual work counters; reference disables reuse | 26-28 |
+| `layout` | `src/regions.rs`, `src/regions/tests.rs`, `src/relations/mod.rs`, `src/template.rs` | Shared bounded-feedback outcome/freeze helpers, exact comparable templates, explicit relation/reading stages; unchanged reference output | 26, 37, 38 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, paired `incremental_page_seam` snapshots | UTF-8 pagination seam with a following annotation and explicit reading precedence | 27, 38, 39 |
+| - | `docs/incremental.md`, additive section in `docs/contracts.md` | Exact memo keys and reuse argument, scheduling/partial semantics, limits and Salsa evaluation | 16, 26-28, 39, 41 |

@@ -485,7 +485,7 @@ fn extreme_float_padding_keeps_the_entire_frame_excluded() {
     let mut base = engine.layout(&doc);
     let template = crate::template::resolve(&engine, &doc, &mut Vec::new());
     base.blocks.retain(|b| b.node == body);
-    let plan = super::allocate(&engine, &doc, &template, &base);
+    let plan = super::allocate(&engine, &doc, &template, &base, None);
     let excluded = plan.exclusions.values().next().unwrap().first().unwrap();
     assert_eq!(excluded.origin, reprise_geom::Point::origin());
     assert_eq!(excluded.width, Length::from_pt(100));

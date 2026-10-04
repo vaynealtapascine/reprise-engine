@@ -405,6 +405,30 @@ Codes in use:
   pairs `DocumentId` with `SnapshotRef`. Existing in-document references are
   scoped by their containing document. A Revision alone identifies no document.
 
+## Incremental layout (additive API)
+
+`reprise_layout::incremental` adds `LayoutSession`, `LayoutJob`, `Viewport`,
+`PartialLayout`, `Coverage`, `Pass`, `Step`, `JobError`, `WorkCounters`,
+`Computation`, `Dependency` and `DependencyGraph`. The frozen `Engine::layout`,
+`LayoutSnapshot` structure and existing queries are unchanged.
+
+- A session borrows one immutable engine configuration; reconfiguration requires
+  a new session. Cached computation output is reusable only for equal complete
+  input keys. Completed evaluation equals the uncached reference, including
+  diagnostic order.
+- Jobs use explicit count budgets and can resume or be cancelled without threads.
+  Results are tagged and checked against the originating document revision.
+  Publication rejects stale or cancelled partial wrappers.
+- `PartialLayout` is explicitly wrapped with producing pass, covered pages,
+  completion and settled geometry flags. Provisional region/relation views may
+  still move or gain content. Only completed jobs return a complete snapshot.
+- Computed dependencies stay derived. Ordered forward/reverse inspection and
+  recomputation reasons are separate from authored relations and identities.
+- Existing feedback bounds and fallback diagnostics are identical on both paths.
+
+See [incremental.md](incremental.md) for exact keys, reuse proof, counter meanings,
+partial semantics and conservative memo boundaries. No diagnostic codes are added.
+
 ## Editing kernel: `reprise-edit`
 
 This section is the new workstream 7 contract, submitted for orchestrator review
