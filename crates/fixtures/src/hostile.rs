@@ -87,6 +87,10 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         column_storm()?,
         concurrent_templates()?,
         no_margin_frame()?,
+        editing_concurrent_delete_undo()?,
+        editing_half_invalid()?,
+        editing_empty_document()?,
+        editing_empty_block()?,
     ])
 }
 
@@ -1109,4 +1113,71 @@ pub fn no_margin_frame() -> Result<Fixture, DocError> {
         doc,
         &["relation.no-frame", "layout.unplaced"],
     ))
+}
+
+/// Delete while a collaborator types, then undo: the same node, range and note
+/// must return with the merged text.
+pub fn editing_concurrent_delete_undo() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let node = doc.append_block(BlockKind::Paragraph, "body", "anchor")?;
+    let range = doc.add_range(node, 0..6, RangePolicy::FIXED)?;
+    let note = doc.append_block(BlockKind::Annotation, "note", "Restored identity.")?;
+    doc.add_relation(&SchemaRegistry::builtin(), &follow(note, range))?;
+    let replica = doc.fork(OTHER_PEER)?;
+    let mut undo = doc.undo_stack();
+    doc.delete_block(node)?;
+    doc.commit_step();
+    replica
+        .block(node)?
+        .text
+        .insert(6, " office e\u{301} \u{5D0}\u{5D1}")?;
+    doc.merge(&replica)?;
+    replica.merge(&doc)?;
+    if doc.is_live(node) || !undo.undo()? {
+        return Err(DocError::Store("delete/undo lifecycle failed".into()));
+    }
+    doc.merge(&replica)?;
+    replica.merge(&doc)?;
+    let mut fixture = Fixture::new("editing_concurrent_delete_undo", doc, &[]);
+    fixture.replica = Some(replica);
+    Ok(fixture)
+}
+
+/// Baseline for a good first command followed by an invalid UTF-8 offset.
+pub fn editing_half_invalid() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(BlockKind::Paragraph, "body", "h\u{e9}llo")?;
+    doc.append_block(BlockKind::Paragraph, "body", "Keep this block.")?;
+    doc.commit();
+    Ok(Fixture::new("editing_half_invalid", doc, &[]))
+}
+
+/// A document with no blocks has a page but no hittable caret.
+pub fn editing_empty_document() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.commit();
+    Ok(Fixture::new("editing_empty_document", doc, &[]))
+}
+
+/// Empty, zero-width and bidi clusters exercise coincident carets, ligatures,
+/// combining marks and extreme page-space hit points.
+pub fn editing_empty_block() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(BlockKind::Paragraph, "body", "")?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "office e\u{301} \u{200b} \u{5D0}\u{5D1}\u{5D2} xyz",
+    )?;
+    let zero = doc.append_block(BlockKind::Paragraph, "body", "zero")?;
+    doc.set_overrides(
+        zero,
+        &Style {
+            size: Some(LengthExpr::Pt(Length::ZERO)),
+            line_height: Some(LengthExpr::Pt(Length::ZERO)),
+            ..Default::default()
+        },
+    )?;
+    doc.commit();
+    Ok(Fixture::new("editing_empty_block", doc, &[]))
 }

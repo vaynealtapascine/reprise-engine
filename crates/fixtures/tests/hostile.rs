@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 33);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 37);
 }
 
 hostile_tests!(
@@ -650,4 +650,88 @@ fn style_bases_that_are_missing_or_indefinite_are_reported() {
         );
     }
     every_block_is_laid_out(&fixture);
+}
+
+#[test]
+fn editing_concurrent_delete_undo() {
+    let fixture = hostile::editing_concurrent_delete_undo().unwrap();
+    let node = fixture.doc.blocks()[0];
+    assert_eq!(
+        fixture.doc.block(node).unwrap().text.to_string(),
+        "anchor office e\u{301} \u{5D0}\u{5D1}"
+    );
+    assert_eq!(
+        fixture.doc.blocks(),
+        fixture.replica.as_ref().unwrap().blocks()
+    );
+    check(fixture);
+}
+
+#[test]
+fn editing_half_invalid() {
+    use reprise_edit::{Command, Editor, Reason, Transaction};
+    let fixture = hostile::editing_half_invalid().unwrap();
+    let node = fixture.doc.blocks()[0];
+    let keep = fixture.doc.blocks()[1];
+    let before = fixture.doc.revision();
+    let mut editor = Editor::new(fixture.doc, reprise_doc::SchemaRegistry::builtin());
+    let error = editor
+        .apply(
+            &Transaction::new()
+                .with(Command::DeleteBlock { node: keep })
+                .with(Command::InsertText {
+                    node,
+                    at: 2,
+                    text: "invalid".into(),
+                }),
+        )
+        .unwrap_err();
+    assert_eq!(error.command, Some(1));
+    assert_eq!(error.reason, Reason::BadOffset { node, offset: 2 });
+    assert_eq!(before, editor.document().revision());
+    assert!(editor.document().is_live(keep));
+    assert!(!editor.can_undo());
+    check(Fixture {
+        doc: editor.into_document(),
+        ..fixture
+    });
+}
+
+#[test]
+fn editing_empty_document() {
+    let fixture = hostile::editing_empty_document().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let nav = reprise_edit::Navigator::semantic(&snapshot, &fixture.doc);
+    assert!(
+        nav.hit(0, reprise_geom::Point::new(Length::MIN, Length::MAX))
+            .is_none()
+    );
+    assert!(nav.select_all().is_none());
+    check(fixture);
+}
+
+#[test]
+fn editing_empty_block() {
+    use reprise_edit::{Caret, Movement, Navigator};
+    let fixture = hostile::editing_empty_block().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let nav = Navigator::semantic(&snapshot, &fixture.doc);
+    let caret = Caret::new(fixture.doc.blocks()[0], 0);
+    for movement in [
+        Movement::VisualLeft,
+        Movement::VisualRight,
+        Movement::NextGrapheme,
+        Movement::PreviousGrapheme,
+        Movement::LineUp,
+        Movement::LineDown,
+    ] {
+        assert!(nav.move_caret(caret, movement).is_some());
+    }
+    for x in [Length::MIN, Length::ZERO, Length::MAX] {
+        for y in [Length::MIN, Length::ZERO, Length::MAX] {
+            let hit = nav.hit(0, reprise_geom::Point::new(x, y)).unwrap();
+            assert!(nav.caret_rect(hit.caret).is_some());
+        }
+    }
+    check(fixture);
 }
