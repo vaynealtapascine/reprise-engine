@@ -1,0 +1,224 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: "serde_json::to_string_pretty(&content).unwrap()"
+---
+[
+  {
+    "width": 102400,
+    "height": 61440,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 65536,
+          "yx": 0,
+          "xy": 0,
+          "yy": 65536,
+          "tx": 0,
+          "ty": 0
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 10240,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "The rest still flows.",
+            "glyphs": [
+              {
+                "id": 21,
+                "x": 0,
+                "y": 9733,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 35,
+                "x": 6185,
+                "y": 9733,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "id": 32,
+                "x": 12339,
+                "y": 9733,
+                "text": {
+                  "start": 2,
+                  "end": 3
+                }
+              },
+              {
+                "id": 1,
+                "x": 17561,
+                "y": 9733,
+                "text": {
+                  "start": 3,
+                  "end": 4
+                }
+              },
+              {
+                "id": 45,
+                "x": 19947,
+                "y": 9733,
+                "text": {
+                  "start": 4,
+                  "end": 5
+                }
+              },
+              {
+                "id": 32,
+                "x": 24176,
+                "y": 9733,
+                "text": {
+                  "start": 5,
+                  "end": 6
+                }
+              },
+              {
+                "id": 46,
+                "x": 29398,
+                "y": 9733,
+                "text": {
+                  "start": 6,
+                  "end": 7
+                }
+              },
+              {
+                "id": 47,
+                "x": 33842,
+                "y": 9733,
+                "text": {
+                  "start": 7,
+                  "end": 8
+                }
+              },
+              {
+                "id": 1,
+                "x": 37170,
+                "y": 9733,
+                "text": {
+                  "start": 8,
+                  "end": 9
+                }
+              },
+              {
+                "id": 46,
+                "x": 39556,
+                "y": 9733,
+                "text": {
+                  "start": 9,
+                  "end": 10
+                }
+              },
+              {
+                "id": 47,
+                "x": 44000,
+                "y": 9733,
+                "text": {
+                  "start": 10,
+                  "end": 11
+                }
+              },
+              {
+                "id": 36,
+                "x": 47328,
+                "y": 9733,
+                "text": {
+                  "start": 11,
+                  "end": 12
+                }
+              },
+              {
+                "id": 39,
+                "x": 50380,
+                "y": 9733,
+                "text": {
+                  "start": 12,
+                  "end": 13
+                }
+              },
+              {
+                "id": 39,
+                "x": 53432,
+                "y": 9733,
+                "text": {
+                  "start": 13,
+                  "end": 14
+                }
+              },
+              {
+                "id": 1,
+                "x": 56484,
+                "y": 9733,
+                "text": {
+                  "start": 14,
+                  "end": 15
+                }
+              },
+              {
+                "id": 415,
+                "x": 58870,
+                "y": 9733,
+                "text": {
+                  "start": 15,
+                  "end": 17
+                }
+              },
+              {
+                "id": 42,
+                "x": 65137,
+                "y": 9733,
+                "text": {
+                  "start": 17,
+                  "end": 18
+                }
+              },
+              {
+                "id": 50,
+                "x": 70759,
+                "y": 9733,
+                "text": {
+                  "start": 18,
+                  "end": 19
+                }
+              },
+              {
+                "id": 46,
+                "x": 78480,
+                "y": 9733,
+                "text": {
+                  "start": 19,
+                  "end": 20
+                }
+              },
+              {
+                "id": 473,
+                "x": 82719,
+                "y": 9733,
+                "text": {
+                  "start": 20,
+                  "end": 21
+                }
+              }
+            ],
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -130,4 +130,9 @@ Other files:
 | `layout` | `src/notes.rs` | Anchor-preserving note allocation, continuation, nesting, endnotes and full-page reservations | 11, 24, 26 |
 | `layout` | `src/table.rs`, hooks in `flow.rs` | Content measurements, declared column allocation and synchronous row fragmentation | 24, 25 |
 | `layout` | `src/relations/mod.rs` | Final region relation reporting and references to note lines | 13, 26 |
-| - | `docs/regions.md` | Allocation, fragmentation, cycle and fallback design | 24�26 |
+| - | `docs/regions.md` | Allocation, fragmentation, cycle and fallback design | 24–26 |
+
+| Crate | Files | What it does | Decisions |
+| --- | --- | --- | --- |
+| `layout` | `src/regions/tests.rs` | Adversarial mixed-region, cycles, dependency depth, fanout, pagination and table cursor unit tests | 24–26, 37 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/hostile__*.snap` | Ten hostile region fixtures, original invariant checks retained, region-role checks and paired layout/content goldens | 24–26, 37–39 |
