@@ -660,6 +660,7 @@ impl Prepared {
             style: self.style,
             text: self.text,
             lines,
+            base_level: self.base_level,
         }
     }
 }

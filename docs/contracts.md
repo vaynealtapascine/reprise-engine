@@ -272,6 +272,9 @@ Codes in use:
     -   `diagnostics_with(code)`
 
     These queries are the API that relations and the editing kernel use.
+-   **Base direction:** each `BlockLayout` records its paragraph's resolved bidi
+    `base_level` (0 left to right, 1 right to left; left out of JSON when 0). Carets,
+    visual movement and alignment use it instead of re-deriving it.
 -   **Relation results:** every relation gets a `RelationLayout`, with its overall status,
     whether it was `applied`, and each target's status and `Resolution`.
     -   `RelationStatus` is `Valid`, `Rebound`, `Ambiguous`, `Missing`, `OwnerDeleted` or
