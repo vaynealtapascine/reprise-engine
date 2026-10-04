@@ -239,3 +239,13 @@ MIT alternatives are selected where offered. No incompatible license is added.
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | wasm-encoder, wasmparser (WAT transitive) | 0.261.0 each | MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception |
 | wast | 261.0.0 | MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception |
+
+## Host stack
+
+wasmi runs plugin code on its own value and call stacks. Recursion inside a
+plugin ends in `plugin.limit` however deep it goes, and never consumes the
+host's stack. Loading and calling a plugin has a fixed host-stack cost:
+measured under 384 KiB in an unoptimised debug build, and within 256 KiB in a
+release build. Hosts that run plugins on small threads (for example browser
+workers) should keep at least 512 KiB. `crates/plugin/tests/stack.rs` checks
+fat and indirect recursion on a 512 KiB thread.

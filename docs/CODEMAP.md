@@ -94,6 +94,7 @@ Other files:
 | | `src/function.rs` | Atomic FunctionRegistry registration and typed PureFunction adapter; frozen style failure diagnostic | 17, 36, 37 |
 | | `src/geometry.rs` | Shape provider with containment/order/progress validation and exact frame-room fallback; wrapper over conforming composers | 20, 23, 36, 37 |
 | | `tests/common/mod.rs`, `tests/sandbox.rs`, `tests/capabilities.rs`, `tests/geometry.rs` | Runtime/ABI/capability/state/fuel/NaN/adversarial geometry conformance, staged editing and exact WAT/WASM equality | 36–39 |
+|  | `tests/stack.rs` | Fat and indirect recursion under maximum fuel trap on wasmi's own stack, on a 512 KiB host thread | 36, 37 |
 | | `test-plugins/demo.wat`, `test-plugins/loop.wat`, matching `.wasm`, `examples/compile_test_plugins.rs` | Checked-in test sources and deterministic explicit fixture compiler, no build-time toolchain requirement | 36, 38, 39 |
 | `fixtures` | `tests/snapshots/hostile__plugin_*.snap`, `tests/snapshots/hostile__content_plugin_*.snap` | Paired geometry/content goldens for successful extensions and fuel fallbacks | 36–39 |
 
