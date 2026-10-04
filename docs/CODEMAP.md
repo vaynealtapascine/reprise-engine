@@ -117,4 +117,5 @@ Other files:
 | | `src/package.rs` | Package save/open, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
 | | `src/tests.rs`, `tests/roundtrip.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
 | | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
+| | `REPORT.md` | Workstream 9a hand-off, contract text, dependencies, verification and follow-ups | 34, 39 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/` | Added persistence_tombstones: Unicode anchors, tombstones and retained historical references | 07, 09, 29, 34 |
