@@ -772,45 +772,42 @@ fn a_delete_merged_from_another_peer_deletes_without_any_edit() {
     assert!(dead.iter().all(|d| !keep.contains(d)));
 }
 
-/// What undo does to a deleted block in Loro: it restores it as a new node
-/// with a new ID. Relations to the old ID are not magically the same target;
-/// the kernel records the restored node as the old one's successor, and then
-/// the `Rebind` relations follow it and the others still don't.
+/// What undo does to a deleted block (07): Loro alone would restore it as a
+/// new node with a new ID, so deletion is a move into the trash (`trash.rs`)
+/// and undo moves the same node back. Relations to the block need no
+/// succession link: they are simply valid again, under every policy.
+///
+/// This replaces the test that recorded Loro's behaviour, a new node that
+/// succession had to connect to the old one; that behaviour is what the trash
+/// exists to avoid.
 #[test]
-fn an_undone_deletion_is_a_new_node_that_succession_connects() {
+fn an_undone_deletion_is_the_same_node() {
     let p = policies();
     let mut undo = loro::UndoManager::new(&p.doc.doc);
     p.doc.delete_block(p.target).unwrap();
     p.doc.commit();
-    assert!(undo.undo().unwrap());
-    let restored = p
-        .doc
-        .blocks()
-        .into_iter()
-        .find(|n| *n != p.owner && *n != p.heir)
-        .expect("undo restored a block");
-    assert_ne!(restored, p.target, "Loro restores under a new ID");
-    assert_eq!(p.doc.block(restored).unwrap().text.to_string(), "target");
     assert!(!p.doc.is_live(p.target));
-
-    // Without the link nothing connects them.
     let node = Target::Node(p.target);
     assert_eq!(
         resolve(&p.doc, &node, OnTargetDeleted::Rebind).binding,
         Binding::Missing
     );
-    // The old node is deleted, so the link is written on the new one.
-    p.doc.supersede(p.target, restored).unwrap();
-    assert_eq!(p.doc.successors(p.target), vec![restored]);
-    let o = resolve(&p.doc, &node, OnTargetDeleted::Rebind);
-    assert_eq!(
-        (o.binding, o.found),
-        (Binding::Rebound, Found::Node(restored))
-    );
-    assert_eq!(
-        resolve(&p.doc, &node, OnTargetDeleted::KeepMissing).binding,
-        Binding::Missing
-    );
+    assert!(undo.undo().unwrap());
+    assert!(p.doc.is_live(p.target), "undo restores the same ID");
+    assert_eq!(p.doc.block(p.target).unwrap().text.to_string(), "target");
+    for policy in [
+        OnTargetDeleted::Rebind,
+        OnTargetDeleted::KeepMissing,
+        OnTargetDeleted::Delete,
+    ] {
+        let o = resolve(&p.doc, &node, policy);
+        assert_eq!(
+            (o.binding, o.found),
+            (Binding::Valid, Found::Node(p.target))
+        );
+    }
+    assert!(undo.redo().unwrap());
+    assert!(!p.doc.is_live(p.target));
 }
 
 /// A link recorded on the new node and one recorded on the old are the same

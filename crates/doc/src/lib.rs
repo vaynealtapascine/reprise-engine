@@ -33,6 +33,7 @@ mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
+mod trash;
 
 pub use context::ResolutionContext;
 pub use expr::{ComputedLength, Dependency, Expr};
@@ -236,8 +237,10 @@ impl Document {
         self.doc.get_tree(name)
     }
 
+    /// Whether a node of `tree` is alive: not tombstoned, and not in the
+    /// trash (see [`trash`]), where deletion puts it.
     fn live(&self, tree: &LoroTree, id: TreeID) -> bool {
-        tree.contains(id) && !tree.is_node_deleted(&id).unwrap_or(true)
+        tree.contains(id) && !tree.is_node_deleted(&id).unwrap_or(true) && !self.in_trash(tree, id)
     }
 
     pub fn define_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
@@ -275,11 +278,7 @@ impl Document {
 
     /// Top-level blocks in document order.
     pub fn blocks(&self) -> Vec<NodeId> {
-        self.tree("content")
-            .roots()
-            .into_iter()
-            .map(NodeId)
-            .collect()
+        self.children(None)
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
@@ -315,12 +314,15 @@ impl Document {
         Ok(())
     }
 
-    /// Deletes a block, leaving a tombstone. Relations that involve it are not
-    /// touched: each schema's `OnTargetDeleted` policy is applied when the
-    /// relation is resolved, from the tombstone (see [`relation::OnTargetDeleted`]).
-    /// To say what replaced the block, call [`Document::supersede`] first.
+    /// Deletes a block and its subtree by moving them into the trash (07), so
+    /// they leave a tombstone that is still a node: [`Document::restore_block`]
+    /// or an undo brings the block back with the same ID. Relations that
+    /// involve it are not touched: each schema's `OnTargetDeleted` policy is
+    /// applied when the relation is resolved, from the tombstone (see
+    /// [`relation::OnTargetDeleted`]). To say what replaced the block, call
+    /// [`Document::supersede`] first.
     pub fn delete_block(&self, id: NodeId) -> Result<(), DocError> {
-        Ok(self.tree("content").delete(id.0)?)
+        self.trash_block(id)
     }
 
     /// Resolves a block's style in the default context: defaults, then its
@@ -446,9 +448,9 @@ impl Document {
         Ok(RelationId(id))
     }
 
-    /// Deletes a relation, leaving a tombstone.
+    /// Deletes a relation by moving it into the trash, like a block (07).
     pub fn delete_relation(&self, id: RelationId) -> Result<(), DocError> {
-        Ok(self.tree("relations").delete(id.0)?)
+        self.trash_relation(id)
     }
 
     /// Live relations in ID order. Each is `Err` with its stored text when it
