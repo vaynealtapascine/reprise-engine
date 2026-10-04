@@ -1,0 +1,577 @@
+//! A conservative clipboard reader, not a browser. It never fetches or executes anything.
+use std::collections::BTreeMap;
+
+use reprise_diag::Note;
+use reprise_doc::{BlockKind, Document, LengthExpr, NodeId, SchemaRegistry, Style, TableColumns};
+use reprise_geom::Length;
+
+use crate::{ClipboardError, NativeFragment, codes};
+
+#[derive(Clone, Copy, Debug)]
+pub struct ImportLimits {
+    pub bytes: usize,
+    pub tokens: usize,
+    pub depth: usize,
+    pub blocks: usize,
+}
+impl Default for ImportLimits {
+    fn default() -> Self {
+        Self {
+            bytes: 8 << 20,
+            tokens: 100_000,
+            depth: 64,
+            blocks: 4096,
+        }
+    }
+}
+pub struct Import {
+    pub fragment: NativeFragment,
+    pub notes: Vec<Note>,
+}
+
+fn fragment(doc: Document, notes: Vec<Note>) -> Result<Import, ClipboardError> {
+    let fragment = NativeFragment {
+        fragment: doc.copy_all_fragment("clipboard-import", &SchemaRegistry::builtin())?,
+        resources: BTreeMap::new(),
+        notes: notes.clone(),
+    };
+    Ok(Import { fragment, notes })
+}
+fn store(error: reprise_doc::DocError) -> ClipboardError {
+    ClipboardError::Invalid(error.to_string())
+}
+
+/// CRLF/CR become LF. Two LFs split paragraphs; individual LFs stay authored line breaks.
+pub fn import_plain(text: &str) -> Result<Import, ClipboardError> {
+    if text.len() > ImportLimits::default().bytes {
+        return Err(ClipboardError::Limit("plain text bytes"));
+    }
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let doc = Document::new(1).map_err(store)?;
+    for (i, part) in text.split("\n\n").enumerate() {
+        if i >= ImportLimits::default().blocks {
+            return Err(ClipboardError::Limit("plain paragraphs"));
+        }
+        doc.append_block(BlockKind::Paragraph, "", part)
+            .map_err(store)?;
+    }
+    fragment(doc, Vec::new())
+}
+
+fn entities(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(rest.get(..pos).unwrap_or_default());
+        rest = rest.get(pos..).unwrap_or_default();
+        let end = rest.bytes().take(18).position(|b| b == b';');
+        let decoded = end
+            .and_then(|end| rest.get(1..end))
+            .and_then(|entity| match entity {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" | "#39" => Some('\''),
+                "nbsp" => Some('\u{a0}'),
+                _ => entity
+                    .strip_prefix("#x")
+                    .or_else(|| entity.strip_prefix("#X"))
+                    .and_then(|n| u32::from_str_radix(n, 16).ok())
+                    .or_else(|| entity.strip_prefix('#').and_then(|n| n.parse().ok()))
+                    .and_then(char::from_u32),
+            });
+        if let (Some(end), Some(c)) = (end, decoded) {
+            out.push(c);
+            rest = rest.get(end.saturating_add(1)..).unwrap_or_default();
+        } else {
+            out.push('&');
+            rest = rest.get(1..).unwrap_or_default();
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+// ASCII HTML names and quotes, with no slices at unverified Unicode boundaries.
+fn attributes(raw: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut rest = raw;
+    for _ in 0..128 {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '=' || c == '/')
+            .unwrap_or(rest.len());
+        if end == 0 {
+            rest = rest.get(1..).unwrap_or_default();
+            continue;
+        }
+        let name = rest.get(..end).unwrap_or_default().to_ascii_lowercase();
+        rest = rest.get(end..).unwrap_or_default().trim_start();
+        if !rest.starts_with('=') {
+            continue;
+        }
+        rest = rest.get(1..).unwrap_or_default().trim_start();
+        let (value, consumed) = if let Some(quote @ ('"' | '\'')) = rest.chars().next() {
+            let tail = rest.get(1..).unwrap_or_default();
+            let end = tail.find(quote).unwrap_or(tail.len());
+            (
+                tail.get(..end).unwrap_or_default(),
+                1usize
+                    .saturating_add(end)
+                    .saturating_add(usize::from(end < tail.len())),
+            )
+        } else {
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            (rest.get(..end).unwrap_or_default(), end)
+        };
+        out.entry(name).or_insert_with(|| entities(value));
+        rest = rest.get(consumed..).unwrap_or_default();
+    }
+    out
+}
+
+fn css_length(text: &str) -> Option<Length> {
+    let text = text.trim().strip_suffix("pt")?.trim();
+    let negative = text.starts_with('-');
+    let text = text.strip_prefix(['-', '+']).unwrap_or(text);
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    if whole.len() > 10
+        || fraction.len() > 10
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+        || (whole.is_empty() && fraction.is_empty())
+    {
+        return None;
+    }
+    let denominator = 10i128.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+    let whole = if whole.is_empty() {
+        0
+    } else {
+        whole.parse::<i128>().ok()?
+    };
+    let fraction = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<i128>().ok()?
+    };
+    let units = whole
+        .checked_mul(denominator)?
+        .checked_add(fraction)?
+        .checked_mul(1024)?;
+    let units = units.checked_add(denominator / 2)? / denominator;
+    let signed = if negative {
+        units.checked_neg()?
+    } else {
+        units
+    };
+    Some(Length(i32::try_from(signed).ok()?))
+}
+fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Style {
+    let mut style = Style::default();
+    if let Some(raw) = attrs.get("style") {
+        for declaration in raw.split(';').take(128) {
+            let Some((key, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let key = key.trim().to_ascii_lowercase();
+            let value = value.trim();
+            match key.as_str() {
+                "font-family" => {
+                    let value = value.trim_matches(['\'', '"']);
+                    if !value.contains(['\\', ',']) {
+                        style.family = Some(value.into());
+                    } else {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "complex CSS font lists/escapes omitted",
+                            false,
+                        );
+                    }
+                }
+                "font-size" | "line-height" => {
+                    if let Some(length) = css_length(value) {
+                        if key == "font-size" {
+                            style.size = Some(LengthExpr::Pt(length));
+                        } else {
+                            style.line_height = Some(LengthExpr::Pt(length));
+                        }
+                    } else {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported CSS length omitted",
+                            false,
+                        );
+                    }
+                }
+                _ => once(
+                    notes,
+                    codes::HTML_APPROXIMATED,
+                    "unsupported CSS declarations omitted",
+                    false,
+                ),
+            }
+        }
+    }
+    style
+}
+fn once(notes: &mut Vec<Note>, code: reprise_diag::Code, message: &str, omitted: bool) {
+    if !notes.iter().any(|n| n.code == code) {
+        notes.push(if omitted {
+            Note::error(code, message)
+        } else {
+            Note::warning(code, message)
+        });
+    }
+}
+
+struct Reader {
+    doc: Document,
+    notes: Vec<Note>,
+    text: String,
+    style: Style,
+    cell: Option<NodeId>,
+    table: Option<NodeId>,
+    row: Option<NodeId>,
+    column: u32,
+    count: usize,
+    limits: ImportLimits,
+}
+impl Reader {
+    fn count(&mut self) -> Result<(), ClipboardError> {
+        self.count = self.count.saturating_add(1);
+        if self.count > self.limits.blocks.min(4096) {
+            return Err(ClipboardError::Limit("HTML blocks"));
+        }
+        Ok(())
+    }
+    fn flush(&mut self, force: bool) -> Result<(), ClipboardError> {
+        if self.text.is_empty() && !force {
+            return Ok(());
+        }
+        self.count()?;
+        let node = if let Some(cell) = self.cell {
+            self.doc
+                .append_cell_block(cell, BlockKind::Paragraph, "", &self.text)
+        } else {
+            self.doc.append_block(BlockKind::Paragraph, "", &self.text)
+        }
+        .map_err(store)?;
+        self.doc.set_overrides(node, &self.style).map_err(store)?;
+        self.text.clear();
+        Ok(())
+    }
+    fn text(&mut self, raw: &str) -> Result<(), ClipboardError> {
+        // HTML whitespace collapses. A single pending space survives token seams.
+        for c in entities(raw).chars() {
+            if c.is_ascii_whitespace() {
+                if !self.text.is_empty() && !self.text.ends_with([' ', '\n']) {
+                    self.text.push(' ');
+                }
+            } else {
+                self.text.push(c);
+            }
+        }
+        if self.text.len() > self.limits.bytes.min(8 << 20) {
+            return Err(ClipboardError::Limit("HTML text"));
+        }
+        Ok(())
+    }
+    fn tag(
+        &mut self,
+        name: &str,
+        closing: bool,
+        attrs: &BTreeMap<String, String>,
+    ) -> Result<(), ClipboardError> {
+        if attrs.keys().any(|k| k != "dir" && k != "style") {
+            once(
+                &mut self.notes,
+                codes::HTML_APPROXIMATED,
+                "HTML attributes omitted",
+                false,
+            );
+        }
+        match (name, closing) {
+            ("br", false) => self.text.push('\n'),
+            ("p" | "div" | "li" | "h1" | "h2" | "h3" | "blockquote", false) => {
+                self.flush(false)?;
+                self.style = css(attrs, &mut self.notes);
+            }
+            ("p", true) => {
+                self.flush(true)?;
+                self.style = Style::default();
+            }
+            ("div" | "li" | "h1" | "h2" | "h3" | "blockquote", true) => {
+                self.flush(false)?;
+                self.style = Style::default();
+            }
+            ("table", false) => {
+                self.flush(false)?;
+                if self.table.is_some() {
+                    return Err(ClipboardError::Invalid(
+                        "nested tables are unsupported".into(),
+                    ));
+                }
+                self.count()?;
+                self.table = Some(
+                    self.doc
+                        .append_table(TableColumns {
+                            columns: Vec::new(),
+                        })
+                        .map_err(store)?,
+                );
+            }
+            ("tr", false) => {
+                self.flush(false)?;
+                self.cell = None;
+                if let Some(table) = self.table {
+                    self.count()?;
+                    self.row = Some(self.doc.append_table_row(table, false).map_err(store)?);
+                    self.column = 0;
+                } else {
+                    once(
+                        &mut self.notes,
+                        codes::HTML_APPROXIMATED,
+                        "unbalanced table tags flattened",
+                        false,
+                    );
+                }
+            }
+            ("td" | "th", false) => {
+                self.flush(false)?;
+                if let Some(row) = self.row {
+                    self.count()?;
+                    self.cell = Some(
+                        self.doc
+                            .append_table_cell(row, self.column)
+                            .map_err(store)?,
+                    );
+                    self.column = self.column.saturating_add(1);
+                } else {
+                    once(
+                        &mut self.notes,
+                        codes::HTML_APPROXIMATED,
+                        "unbalanced table tags flattened",
+                        false,
+                    );
+                }
+            }
+            ("td" | "th", true) => {
+                self.flush(false)?;
+                self.cell = None;
+            }
+            ("tr", true) => {
+                self.flush(false)?;
+                self.cell = None;
+                self.row = None;
+            }
+            ("table", true) => {
+                self.flush(false)?;
+                self.cell = None;
+                self.row = None;
+                self.table = None;
+            }
+            ("html" | "body" | "tbody" | "thead" | "tfoot", _) => {}
+            _ => once(
+                &mut self.notes,
+                codes::HTML_APPROXIMATED,
+                "unsupported HTML tags flattened to text",
+                false,
+            ),
+        }
+        Ok(())
+    }
+}
+
+/// Supported: paragraphs, line breaks, basic point CSS and nonnested tables.
+/// Unknown markup retains text; script/style/head/template/iframe/object content is omitted.
+/// Limits reject the entire import with an Error diagnostic, never a partial silent parse.
+pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, ClipboardError> {
+    if html.len() > limits.bytes.min(8 << 20) {
+        return Err(ClipboardError::Limit("HTML input bytes"));
+    }
+    let mut reader = Reader {
+        doc: Document::new(1).map_err(store)?,
+        notes: Vec::new(),
+        text: String::new(),
+        style: Style::default(),
+        cell: None,
+        table: None,
+        row: None,
+        column: 0,
+        count: 0,
+        limits,
+    };
+    let mut rest = html;
+    let mut stack = Vec::<String>::new();
+    let mut skipped: Option<String> = None;
+    let mut tokens = 0usize;
+    while !rest.is_empty() {
+        tokens = tokens.saturating_add(1);
+        if tokens > limits.tokens.min(100_000) {
+            return Err(ClipboardError::Limit("HTML tokens"));
+        }
+        if !rest.starts_with('<') {
+            let end = rest.find('<').unwrap_or(rest.len());
+            if skipped.is_none() {
+                reader.text(rest.get(..end).unwrap_or_default())?;
+            }
+            rest = rest.get(end..).unwrap_or_default();
+            continue;
+        }
+        if rest.starts_with("<!--") {
+            if let Some(end) = rest.find("-->") {
+                rest = rest.get(end.saturating_add(3)..).unwrap_or_default();
+                continue;
+            }
+            once(
+                &mut reader.notes,
+                codes::HTML_DROPPED,
+                "unclosed comment omitted",
+                true,
+            );
+            break;
+        }
+        let mut quote = None;
+        let mut end = None;
+        for (i, c) in rest.char_indices().skip(1) {
+            if let Some(q) = quote {
+                if c == q {
+                    quote = None;
+                }
+            } else if c == '\'' || c == '"' {
+                quote = Some(c);
+            } else if c == '>' {
+                end = Some(i);
+                break;
+            }
+        }
+        let Some(end) = end else {
+            if skipped.is_none() {
+                reader.text(rest)?;
+            }
+            once(
+                &mut reader.notes,
+                codes::HTML_APPROXIMATED,
+                "unclosed tag retained as text",
+                false,
+            );
+            break;
+        };
+        let raw = rest.get(1..end).unwrap_or_default().trim();
+        rest = rest.get(end.saturating_add(1)..).unwrap_or_default();
+        if raw.starts_with('!') || raw.starts_with('?') {
+            continue;
+        }
+        let closing = raw.starts_with('/');
+        let raw = raw.strip_prefix('/').unwrap_or(raw).trim_start();
+        let name_end = raw
+            .find(|c: char| c.is_whitespace() || c == '/')
+            .unwrap_or(raw.len());
+        let name = raw.get(..name_end).unwrap_or_default().to_ascii_lowercase();
+        if let Some(tag) = &skipped {
+            if closing && *tag == name {
+                skipped = None;
+            }
+            continue;
+        }
+        if !closing
+            && matches!(
+                name.as_str(),
+                "script" | "style" | "head" | "template" | "iframe" | "object"
+            )
+        {
+            skipped = Some(name);
+            once(
+                &mut reader.notes,
+                codes::HTML_DROPPED,
+                "active or non-content HTML omitted",
+                true,
+            );
+            continue;
+        }
+        let void = matches!(
+            name.as_str(),
+            "br" | "img" | "hr" | "meta" | "link" | "input" | "wbr"
+        ) || raw.ends_with('/');
+        if closing {
+            if let Some(at) = stack.iter().rposition(|n| n == &name) {
+                if at.saturating_add(1) != stack.len() {
+                    once(
+                        &mut reader.notes,
+                        codes::HTML_APPROXIMATED,
+                        "unbalanced tags repaired",
+                        false,
+                    );
+                }
+                stack.truncate(at);
+            } else {
+                once(
+                    &mut reader.notes,
+                    codes::HTML_APPROXIMATED,
+                    "unmatched closing tag ignored",
+                    false,
+                );
+                continue;
+            }
+        } else if !void {
+            if stack.len() >= limits.depth.min(64) {
+                return Err(ClipboardError::Limit("HTML nesting"));
+            }
+            stack.push(name.clone());
+        }
+        reader.tag(
+            &name,
+            closing,
+            &attributes(raw.get(name_end..).unwrap_or_default()),
+        )?;
+    }
+    if !stack.is_empty() {
+        once(
+            &mut reader.notes,
+            codes::HTML_APPROXIMATED,
+            "unclosed HTML tags repaired at end of input",
+            false,
+        );
+    }
+    if skipped.is_some() {
+        once(
+            &mut reader.notes,
+            codes::HTML_DROPPED,
+            "unclosed active HTML content omitted",
+            true,
+        );
+    }
+    reader.flush(false)?;
+    fragment(reader.doc, reader.notes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn integer_css_and_unicode_entities_are_total() {
+        for length in [
+            Length::MIN,
+            Length::ZERO,
+            Length::MAX,
+            Length(-1),
+            Length(1),
+        ] {
+            assert_eq!(
+                css_length(&format!("{}pt", crate::export::points(length))),
+                Some(length)
+            );
+        }
+        assert_eq!(
+            entities("&#x5d0; &amp; &#x110000; &oops; café"),
+            "א & &#x110000; &oops; café"
+        );
+        assert!(css_length("9999999999.9999999999pt").is_none());
+    }
+}

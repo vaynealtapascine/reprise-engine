@@ -15,6 +15,12 @@ use reprise_doc::{NewBlock, NodeId, Relation, RelationId, Style};
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Command {
+    /// A complete paste transaction. Must be the only command in its transaction.
+    Paste {
+        fragment: Box<reprise_doc::fragment::Fragment>,
+        at: Option<(NodeId, usize)>,
+        target_namespace: String,
+    },
     InsertText {
         node: NodeId,
         at: usize,

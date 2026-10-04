@@ -83,6 +83,7 @@ pub(crate) enum Step {
 
 #[derive(Debug, Default)]
 pub(crate) struct Plan {
+    pub paste: Option<crate::paste::Prepared>,
     /// Blocks to stage first, in order.
     pub blocks: Vec<NewBlock>,
     pub relations: Vec<Relation>,
@@ -143,6 +144,31 @@ pub(crate) fn plan(
     schemas: &SchemaRegistry,
     commands: &[Command],
 ) -> Result<Plan, EditError> {
+    if commands.iter().any(|c| matches!(c, Command::Paste { .. })) {
+        let [
+            Command::Paste {
+                fragment,
+                at,
+                target_namespace,
+            },
+        ] = commands
+        else {
+            return Err(EditError {
+                command: None,
+                reason: Reason::MixedPaste,
+            });
+        };
+        return Ok(Plan {
+            paste: Some(crate::paste::prepare(
+                doc,
+                schemas,
+                fragment,
+                *at,
+                target_namespace,
+            )?),
+            ..Plan::default()
+        });
+    }
     if commands.len() > MAX_COMMANDS {
         return Err(EditError {
             command: None,
@@ -275,6 +301,7 @@ impl Model<'_> {
 
     fn run(&mut self, command: &Command) -> Result<(), Reason> {
         match command {
+            Command::Paste { .. } => Err(Reason::MixedPaste),
             Command::InsertText { node, at, text } => self.insert_text(*node, *at, text),
             Command::DeleteText { node, range } => self.delete_text(*node, range),
             Command::SplitBlock { node, at } => self.split(*node, *at),

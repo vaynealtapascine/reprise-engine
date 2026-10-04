@@ -1769,6 +1769,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reprise-clipboard"
+version = "0.0.0"
+dependencies = [
+ "reprise-diag",
+ "reprise-display",
+ "reprise-doc",
+ "reprise-edit",
+ "reprise-fixtures",
+ "reprise-font",
+ "reprise-format",
+ "reprise-geom",
+ "reprise-layout",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-bidi",
+]
+
+[[package]]
 name = "reprise-compose"
 version = "0.0.0"
 dependencies = [

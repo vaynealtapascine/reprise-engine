@@ -83,6 +83,17 @@ Other files:
 
 ## Recipes
 
+Clipboard and exporters (35): `crates/clipboard/src/native.rs` provides deterministic
+versioned fragments and content-addressed font/asset bundles; `html.rs` provides bounded
+plain/HTML import; `export.rs` provides the extensible exporter trait, per-feature loss
+reports and plain, HTML, native and PDF exporters; `codes.rs` owns clipboard codes.
+`crates/doc/src/fragment.rs` extracts authored subtrees, styles and range policies and
+provides invisible range/table staging. `crates/edit/src/paste.rs` validates and stages
+paste with fresh identities, style collision handling, undo and relation remapping;
+`command.rs`, `editor.rs`, `plan.rs`, `error.rs` and `lib.rs` wire the standalone command.
+`crates/clipboard/tests/native.rs` attacks Unicode cuts, policies, identity collisions,
+undo, concurrent merging and input bounds. Clipboard is included in CI/WASM checks.
+
 -   **Add a relation type:**
     1.  Define its `RelationSchema` in `doc/src/relation.rs`. Add it to `builtin::all()`
         if it is built in.
