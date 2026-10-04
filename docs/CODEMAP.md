@@ -148,6 +148,7 @@ Other files:
 | --- | --- | --- | --- |
 | `layout` | `src/incremental.rs`, entry in `src/lib.rs` | Exact-input preparation/shaping/flow/region/final-pass caches, computed dependency and reverse-inspection graph, revision-gated viewport jobs beside the full-layout reference | 16, 26-28, 39 |
 | `fixtures` | `tests/incremental.rs` | Seeded text/style/template/relation/split/join/concurrent edits of every hostile fixture and spike; exact equivalence, counters, budgets, cancellation, revision/identity rejection, identical-byte anchor changes, line-height-only shaping reuse, affected-page counters and 100,000-paragraph viewport test | 27, 38, 39 |
+|  | `tests/incremental_fuzz.rs` | Seeded random edit walks (deleting pointed-at blocks, owner edits, frame-relative styles then template changes, concurrent deletes, new notes, floats and follows); every step equals `Engine::layout` | 16, 27, 38 |
 
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
