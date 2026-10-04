@@ -51,7 +51,7 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
-| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit` |
+| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.asset-missing`, `format.migrated`, `format.read-only` |
@@ -311,8 +311,7 @@ Codes in use:
 -   **Source text in PDF:** the PDF backend maps glyphs to their source text with ToUnicode,
     and uses ActualText where one glyph can't carry it: shared clusters, right-to-left runs
     and malformed ranges. Text extracts in logical order within each run.
--   **Open:** image items come with document assets (34). A reading order across runs
-    (33) needs the reading-order workstream.
+-   **Open:** image items come with document assets (34). Full PDF/UA structure tagging and cross-page reading overrides remain follow-ups; ordered extraction is available through the new `pdf::render_ordered` function.
 
 ## Fixtures: `reprise-fixtures`
 

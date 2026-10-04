@@ -24,6 +24,7 @@ pub(crate) struct ResolvedFrame {
     pub width: Length,
     /// Never negative.
     pub depth: Length,
+    pub transform: reprise_geom::Matrix,
 }
 
 impl ResolvedFrame {
@@ -32,10 +33,12 @@ impl ResolvedFrame {
         Rect::new(Point::origin(), self.width, self.depth)
     }
 
-    /// Where the frame's space sits on the page. A translation today. Rotated
-    /// and mirrored frames and writing modes (20) change only this function.
+    /// Logical axes mapped through writing mode and authored transforms.
     pub fn to_page(&self) -> Transform<FrameSpace, PageSpace> {
-        Transform::translate(self.x, self.y)
+        Transform::new(
+            self.transform
+                .then(&reprise_geom::Matrix::translate(self.x, self.y)),
+        )
     }
 
     /// Whether lines can be put in it: a frame with no depth is full already.
@@ -206,14 +209,13 @@ fn resolve_template(
         };
         let frame_width = size("width", &frame.width);
         let depth = size("height", &frame.height);
-        frames.push(ResolvedFrame {
-            name: frame.name.clone(),
-            role: frame.role.clone(),
-            x: at(&frame.x),
-            y: at(&frame.y),
-            width: frame_width,
+        frames.extend(crate::geometry::resolve_frames(
+            frame,
+            frame_width,
             depth,
-        });
+            &at,
+            &mut notes,
+        ));
     }
     let resolved = ResolvedTemplate {
         name: template.name.clone(),

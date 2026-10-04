@@ -28,6 +28,7 @@ pub mod function;
 mod history;
 mod page;
 mod persist;
+pub mod reading;
 pub mod relation;
 #[cfg(test)]
 mod relation_tests;
@@ -42,8 +43,8 @@ pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
 };
 pub use page::{
-    Basis, Dim, FrameRole, FrameTemplate, MAIN_FLOW, Medium, PageTemplate, StoredTemplate,
-    TemplateChoice,
+    Basis, Dim, FrameRole, FrameTemplate, FrameTransform, MAIN_FLOW, Medium, PageTemplate,
+    Rotation, Spiral, StoredTemplate, TemplateChoice, WritingMode,
 };
 pub use persist::{
     MAX_PERSIST_BYTES, MAX_PERSIST_EXPANDED_BYTES, MAX_PERSIST_OPS, PersistenceMode,

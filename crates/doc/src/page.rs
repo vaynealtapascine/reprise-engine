@@ -25,13 +25,13 @@
 //! differ from what the author asked.
 
 use loro::{LoroMap, ValueOrContainer};
-use reprise_geom::Length;
+use reprise_geom::{Fixed, Length};
 use serde::{Deserialize, Serialize};
 
 use crate::{DocError, Document, get_str};
 
 /// The version of the stored template envelope.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// What the document is being laid out for: the viewport, or the paper. A
 /// layout input, not authored state (05, 38).
@@ -134,6 +134,87 @@ pub enum FrameRole {
 /// The name of the flow paragraphs belong to.
 pub const MAIN_FLOW: &str = "main";
 
+/// Authored clockwise rotation. Directions are normalised with exact integer
+/// arithmetic; matrix coefficients are authored 16.16 rationals, never floats.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Rotation {
+    #[default]
+    None,
+    Quarter(i32),
+    Direction {
+        dx: i32,
+        dy: i32,
+    },
+    Matrix {
+        xx: Fixed,
+        yx: Fixed,
+        xy: Fixed,
+        yy: Fixed,
+    },
+}
+
+/// Physical writing axes. Latin glyphs are sideways in vertical modes.
+/// Vertical-rl reads downwards with columns to the left. Vertical-lr uses
+/// the sideways-lr convention: upwards with columns to the right. Upright
+/// CJK and downward vertical-lr need vertical shaping and glyph orientation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WritingMode {
+    #[default]
+    HorizontalTb,
+    VerticalRl,
+    VerticalLr,
+}
+
+/// A transform in physical frame coordinates, before placement at (x,y).
+/// Apply mirrors, then rotation, about origin. Defaults preserve v1 layout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrameTransform {
+    #[serde(default)]
+    pub rotation: Rotation,
+    #[serde(default)]
+    pub mirror_x: bool,
+    #[serde(default)]
+    pub mirror_y: bool,
+    #[serde(default = "zero_dim")]
+    pub origin_x: Dim,
+    #[serde(default = "zero_dim")]
+    pub origin_y: Dim,
+}
+
+fn zero_dim() -> Dim {
+    Dim::pt(0)
+}
+
+impl Default for FrameTransform {
+    fn default() -> Self {
+        Self {
+            rotation: Rotation::None,
+            mirror_x: false,
+            mirror_y: false,
+            origin_x: zero_dim(),
+            origin_y: zero_dim(),
+        }
+    }
+}
+
+/// Archimedean spiral, expanded into bounded, threaded tangent frames.
+/// The parent (x,y) is the centre; radius grows by `growth` per full turn.
+/// `width` is ignored: each inline measure is the chord between two samples.
+/// `height` is the physical strip depth. Text wraps through the strips and
+/// onto the next page; path geometry never depends on text or font metrics.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Spiral {
+    pub radius: Dim,
+    pub growth: Dim,
+    pub start_millidegrees: i64,
+    pub sweep_millidegrees: i64,
+    pub segments: u32,
+}
+
 /// A region of the page. Its position and size are relative to the page's
 /// top-left corner.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +226,19 @@ pub struct FrameTemplate {
     pub y: Dim,
     pub width: Dim,
     pub height: Dim,
+    #[serde(default, skip_serializing_if = "is_default_transform")]
+    pub transform: FrameTransform,
+    #[serde(default, skip_serializing_if = "is_horizontal")]
+    pub writing_mode: WritingMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<Spiral>,
+}
+
+fn is_default_transform(t: &FrameTransform) -> bool {
+    *t == FrameTransform::default()
+}
+fn is_horizontal(m: &WritingMode) -> bool {
+    *m == WritingMode::HorizontalTb
 }
 
 impl FrameTemplate {
@@ -161,6 +255,9 @@ impl FrameTemplate {
             y,
             width,
             height,
+            transform: FrameTransform::default(),
+            writing_mode: WritingMode::HorizontalTb,
+            path: None,
         }
     }
 }
@@ -216,6 +313,7 @@ impl PageTemplate {
 
 /// What is stored in the document for one template name.
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Envelope {
     version: u32,
     template: PageTemplate,
@@ -309,7 +407,7 @@ impl Document {
                     other => format!("{:?}", other.get_deep_value()),
                 };
                 let template = match serde_json::from_str::<Envelope>(&raw) {
-                    Ok(e) if e.version == VERSION => Ok(e.template),
+                    Ok(e) if (1..=VERSION).contains(&e.version) => Ok(e.template),
                     _ => Err(raw),
                 };
                 Some(StoredTemplate { name, template })
@@ -479,5 +577,56 @@ mod tests {
         let all = doc.page_templates();
         assert_eq!(all.len(), 1);
         assert!(all[0].template.is_err());
+    }
+}
+
+#[cfg(test)]
+mod geometry_storage_tests {
+    use super::*;
+    #[test]
+    fn transforms_paths_and_modes_round_trip_and_v1_reads() {
+        let doc = Document::new(1).unwrap();
+        let mut t = PageTemplate::builtin();
+        t.frames[0].transform.rotation = Rotation::Direction {
+            dx: i32::MIN,
+            dy: i32::MAX,
+        };
+        t.frames[0].transform.mirror_y = true;
+        t.frames[0].transform.origin_x = Dim::fraction(Basis::PageWidth, 500);
+        t.frames[0].writing_mode = WritingMode::VerticalRl;
+        t.frames[0].path = Some(Spiral {
+            radius: Dim::pt(10),
+            growth: Dim::pt(5),
+            start_millidegrees: i64::MIN,
+            sweep_millidegrees: i64::MAX,
+            segments: u32::MAX,
+        });
+        doc.set_page_template(&t).unwrap();
+        doc.commit();
+        assert_eq!(doc.page_template(), TemplateChoice::Template(t.clone()));
+        let raw = get_str(&doc.templates_map(), &t.name).unwrap();
+        assert_eq!(serde_json::from_str::<Envelope>(&raw).unwrap().version, 2);
+        let replica = doc.fork(2).unwrap();
+        assert_eq!(replica.page_template(), doc.page_template());
+        let mut legacy = serde_json::to_value(Envelope {
+            version: 1,
+            template: PageTemplate::builtin(),
+        })
+        .unwrap();
+        doc.store_raw_page_template("legacy", &legacy.to_string())
+            .unwrap();
+        assert!(
+            doc.page_templates()
+                .iter()
+                .any(|s| s.name == "legacy" && s.template.is_ok())
+        );
+        legacy["template"]["frames"][0]["future-transform"] = serde_json::json!(true);
+        let raw = legacy.to_string();
+        doc.store_raw_page_template("unknown", &raw).unwrap();
+        assert!(
+            doc.page_templates()
+                .iter()
+                .any(|s| s.name == "unknown" && s.template == Err(raw.clone()))
+        );
     }
 }

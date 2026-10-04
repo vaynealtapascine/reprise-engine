@@ -351,3 +351,118 @@ fn transformed_groups_and_tiny_sizes_keep_their_text() {
     let (text, _) = extract(&bytes);
     assert_eq!(text, "officefar away");
 }
+
+#[test]
+fn ordered_layout_extracts_rotated_mirrored_vertical_and_spiral_text() {
+    use reprise_layout::DisplayOptions;
+    for fixture in [
+        reprise_fixtures::hostile::transformed_rtl().unwrap(),
+        reprise_fixtures::hostile::vertical_rl().unwrap(),
+        reprise_fixtures::hostile::spiral_text().unwrap(),
+        reprise_fixtures::hostile::rational_rotation_extreme().unwrap(),
+    ] {
+        let snapshot = fixture.engine.layout(&fixture.doc);
+        let lists = snapshot.to_display_lists(DisplayOptions::default());
+        let order = snapshot.pdf_reading_order(&fixture.doc);
+        let bytes = pdf::render_ordered(&lists, &fixture.engine.fonts, &order).unwrap();
+        let expected: String = snapshot
+            .reading_order(&fixture.doc)
+            .into_iter()
+            .flat_map(|step| {
+                let line = snapshot.line(step.line).unwrap();
+                let block = snapshot.block(step.line.node).unwrap();
+                let mut runs: Vec<_> = line.runs.iter().collect();
+                runs.sort_by_key(|r| r.range.start);
+                runs.into_iter()
+                    .map(|r| block.text[r.range.clone()].to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let (text, spans) = extract(&bytes);
+        assert_eq!(text, expected, "{}", fixture.name);
+        assert!(spans > 0);
+    }
+}
+
+#[test]
+fn ordered_layout_override_changes_extraction_without_moving_glyphs() {
+    use reprise_doc::{BlockKind, Document, SchemaRegistry};
+    use reprise_layout::DisplayOptions;
+    let doc = Document::new(reprise_fixtures::PEER).unwrap();
+    let a = doc
+        .append_block(BlockKind::Paragraph, "", "A room.")
+        .unwrap();
+    let b = doc
+        .append_block(BlockKind::Paragraph, "", "B room.")
+        .unwrap();
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &reprise_doc::reading::before(b, a),
+    )
+    .unwrap();
+    doc.commit();
+    let engine = reprise_fixtures::engine();
+    let snapshot = engine.layout(&doc);
+    let lists = snapshot.to_display_lists(DisplayOptions::default());
+    let order = snapshot.pdf_reading_order(&doc);
+    assert_eq!(
+        extract(&pdf::render_ordered(&lists, &engine.fonts, &order).unwrap()).0,
+        "B room.A room."
+    );
+    assert!(pdf::render_ordered(&lists, &engine.fonts, &order[..1]).is_err());
+    let mut duplicate = order.clone();
+    duplicate.push(order[0].clone());
+    assert!(pdf::render_ordered(&lists, &engine.fonts, &duplicate).is_err());
+    let mut invalid = order;
+    invalid[0].path = vec![usize::MAX];
+    assert!(pdf::render_ordered(&lists, &engine.fonts, &invalid).is_err());
+}
+
+#[test]
+fn ordered_pdf_preserves_nested_transforms_clips_and_rejects_deep_groups() {
+    use reprise_geom::{Matrix, Point, Rect};
+    let (run, fonts) = run("clipped sideways", InlineDirection::Ltr);
+    let mut item = Item::Glyphs(run);
+    for turns in [1, 2, 3] {
+        item = Item::Group {
+            transform: Matrix::rotate_quarter(turns),
+            clip: Some(Path::rect(Rect::new(
+                Point::origin(),
+                Length::from_pt(150),
+                Length::from_pt(100),
+            ))),
+            items: vec![item],
+        };
+    }
+    let list = DisplayList {
+        width: Length::from_pt(420),
+        height: Length::from_pt(300),
+        items: vec![item],
+    };
+    let order = [pdf::ReadingRun {
+        page: 0,
+        path: vec![0, 0, 0, 0],
+    }];
+    assert!(pdf::render_ordered(&[], &fonts, &[]).is_ok());
+    let bytes = pdf::render_ordered(std::slice::from_ref(&list), &fonts, &order).unwrap();
+    assert_eq!(extract(&bytes).0, "clipped sideways");
+    let mut item = list.items[0].clone();
+    for _ in 0..257 {
+        item = Item::Group {
+            transform: Matrix::IDENTITY,
+            clip: None,
+            items: vec![item],
+        };
+    }
+    assert!(
+        pdf::render_ordered(
+            &[DisplayList {
+                items: vec![item],
+                ..list
+            }],
+            &fonts,
+            &[]
+        )
+        .is_err()
+    );
+}
