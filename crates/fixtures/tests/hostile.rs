@@ -903,3 +903,43 @@ fn justified_bidi_fills_intervals_and_adjusts_only_content_word_spaces() {
     assert!(adjusted_lines > 10);
     assert!(rtl_hanging, "RTL trailing spaces hang to the visual left");
 }
+
+/// Orchestrator review: after line reordering (L1/L2) and justification
+/// rewrite a line's runs, every line of every fixture still has runs that
+/// cover disjoint bytes inside the line, sit edge to edge along the inline
+/// axis in visual order, and whose glyph advances add up to their width.
+#[test]
+fn positioned_runs_tile_their_lines() {
+    for fixture in hostile::all().expect("fixtures build") {
+        let name = fixture.name;
+        let snapshot = fixture.engine.layout(&fixture.doc);
+        for block in &snapshot.blocks {
+            for (i, line) in block.lines.iter().enumerate() {
+                let at = format!("{name}: {} line {i}", block.node);
+                let mut ranges: Vec<_> = line.runs.iter().map(|r| r.range.clone()).collect();
+                ranges.sort_by_key(|r| r.start);
+                for r in &ranges {
+                    assert!(
+                        line.text.start <= r.start && r.end <= line.text.end,
+                        "{at}: run {r:?} outside line {:?}",
+                        line.text
+                    );
+                }
+                for pair in ranges.windows(2) {
+                    assert!(pair[0].end <= pair[1].start, "{at}: runs overlap");
+                }
+                for pair in line.runs.windows(2) {
+                    assert_eq!(
+                        pair[0].x + pair[0].width,
+                        pair[1].x,
+                        "{at}: runs are not edge to edge"
+                    );
+                }
+                for run in &line.runs {
+                    let sum: Length = run.glyphs.iter().map(|g| g.advance).sum();
+                    assert_eq!(sum, run.width, "{at}: glyph advances vs run width");
+                }
+            }
+        }
+    }
+}
