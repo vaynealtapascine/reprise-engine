@@ -39,12 +39,16 @@ impl Plan {
     }
 }
 
-pub(crate) fn owned(engine: &Engine, doc: &Document, node: NodeId) -> bool {
-    doc.relations().into_iter().any(|(_, r)| {
-        r.is_ok_and(|r| {
-            r.owner == Some(node) && is_region(&r) && engine.schemas.get(&r.schema).is_some()
+pub(crate) fn owners(engine: &Engine, doc: &Document) -> BTreeSet<NodeId> {
+    doc.relations()
+        .into_iter()
+        .filter_map(|(_, r)| {
+            let r = r.ok()?;
+            (is_region(&r) && engine.schemas.get(&r.schema).is_some())
+                .then_some(r.owner)
+                .flatten()
         })
-    })
+        .collect()
 }
 
 fn is_region(r: &Relation) -> bool {

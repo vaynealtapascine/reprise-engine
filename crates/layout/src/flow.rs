@@ -71,6 +71,7 @@ pub(crate) fn run(
         // No frame to flow through: unreachable, but nothing may panic.
         limit_hit: thread_is_empty,
         pending: Vec::new(),
+        region_owners: crate::regions::owners(engine, doc),
     };
     // Even an empty document gets a page.
     flow.new_page();
@@ -107,7 +108,7 @@ pub(crate) fn run(
         match kind {
             BlockKind::Paragraph => flow.paragraph(doc, node),
             BlockKind::Annotation => {
-                if !crate::regions::owned(engine, doc, node)
+                if !flow.region_owners.contains(&node)
                     && let Some(annotation) = flow.annotation(doc, node)
                 {
                     flow.pending.push(annotation);
@@ -134,6 +135,7 @@ struct Fill {
 
 pub(crate) struct Flow<'a> {
     pub(crate) pending: Vec<Pending>,
+    pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
     pub(crate) engine: &'a Engine,
     pub(crate) template: &'a ResolvedTemplate,
     pub(crate) snapshot: &'a mut LayoutSnapshot,

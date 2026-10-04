@@ -1,13 +1,14 @@
 //! Layout: from an authored [`Document`] to a derived [`LayoutSnapshot`] and
 //! [`DisplayList`]s (decisions 05, 24, 26, 28 and 37).
 //!
-//! Layout runs in two passes:
+//! Layout runs in staged passes, with bounded region feedback (26):
 //! 1. Flow ([`flow`]): the page template is resolved against the medium
 //!    ([`template`]), and paragraphs thread down its frames, page after page.
 //!    A paragraph that doesn't fit the rest of a frame continues in the next.
 //! 2. Relations ([`relations`]): blocks placed by relations, such as notes
 //!    beside the line they follow, which is only known after pass 1. That
-//!    ordering is the staged-pass rule (26).
+//!    ordering is the staged-pass rule (26). Floats and notes feed exclusions
+//!    and depth reservations back into flow for at most 16 complete passes.
 //!
 //! Layout never fails as a whole. Whatever can't be laid out is left out and
 //! reported in `diagnostics` (37).

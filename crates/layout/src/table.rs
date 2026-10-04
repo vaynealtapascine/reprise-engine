@@ -83,7 +83,7 @@ impl Flow<'_> {
                         continue;
                     }
                     if doc.kind_of(block) == Some(reprise_doc::BlockKind::Annotation) {
-                        if !crate::regions::owned(self.engine, doc, block)
+                        if !self.region_owners.contains(&block)
                             && let Some(annotation) = self.annotation(doc, block)
                         {
                             self.pending.push(annotation);

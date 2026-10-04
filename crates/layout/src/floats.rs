@@ -72,20 +72,21 @@ impl Floats {
             let index = page
                 .saturating_mul(template.frames.len())
                 .saturating_add(ti);
+            let context =
+                crate::flow::resolution_context(engine, template, Some(frame), frame.width);
+            let size = doc
+                .computed_style_with(owner, &context, &engine.functions)
+                .map_or(Length::ZERO, |s| s.size);
             let width = if matches!(side, FloatSide::Top | FloatSide::Bottom) {
                 frame.width
             } else {
                 match relation.params.get("width") {
-                    Some(Param::Length(e)) => {
-                        e.resolve(doc.computed_style(owner).map_or(Length::ZERO, |s| s.size))
-                    }
+                    Some(Param::Length(e)) => e.resolve(size),
                     _ => frame.width.mul_ratio(1, 3),
                 }
             };
             let margin = match relation.params.get("margin") {
-                Some(Param::Length(e)) => {
-                    e.resolve(doc.computed_style(owner).map_or(Length::ZERO, |s| s.size))
-                }
+                Some(Param::Length(e)) => e.resolve(size),
                 _ => engine.flow.annotation_spacing,
             }
             .max(Length::ZERO);
@@ -93,6 +94,7 @@ impl Floats {
                 break;
             }
             if width <= frame.width {
+                let mut candidate_diagnostics = Vec::new();
                 let Some(prepared) = prepare(
                     engine,
                     doc,
@@ -100,8 +102,9 @@ impl Floats {
                     owner,
                     ti,
                     width,
-                    &mut out.diagnostics,
+                    &mut candidate_diagnostics,
                 ) else {
+                    out.diagnostics.extend(candidate_diagnostics);
                     return;
                 };
                 let composed = prepared.compose(
@@ -111,7 +114,7 @@ impl Floats {
                     0,
                     Length::ZERO,
                     &Subject::Node(owner),
-                    &mut out.diagnostics,
+                    &mut candidate_diagnostics,
                 );
                 let height = composed.block_end;
                 let free = self.next.get(&index).copied().unwrap_or_default();
@@ -145,11 +148,14 @@ impl Floats {
                             run.x += x;
                         }
                     }
-                    let exclusion = Rect::new(
-                        Point::new(x - margin, at - margin),
-                        width + margin + margin,
-                        height + margin + margin,
-                    );
+                    // Clip padded endpoints before subtracting: saturating a
+                    // doubled extreme margin must not shrink the blocked box.
+                    let left = (x - margin).max(Length::ZERO);
+                    let top = (at - margin).max(Length::ZERO);
+                    let right = (x + width + margin).min(frame.width);
+                    let bottom = (at + height + margin).min(frame.depth);
+                    let exclusion = Rect::new(Point::new(left, top), right - left, bottom - top);
+                    out.diagnostics.extend(candidate_diagnostics);
                     out.exclusions.entry(index).or_default().push(exclusion);
                     self.next.insert(index, at + height + margin);
                     scratch.blocks.push(block.clone());

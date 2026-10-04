@@ -383,3 +383,111 @@ fn table_notes_move_anchors_to_later_pages_and_zero_budget_terminates() {
     assert!(s.diagnostics_with("compose.overflow").next().is_some());
     assert!(s.pages.len() <= 5);
 }
+
+#[test]
+fn a_second_note_follows_its_reflowed_body_anchor() {
+    let (engine, doc) = setup(Length::from_pt(60));
+    let body = doc
+        .append_block(BlockKind::Paragraph, "s", "aa\nbb\ncc\ndd\nee")
+        .unwrap();
+    let first = doc
+        .append_block(BlockKind::Annotation, "s", "aa\nbb\ncc\ndd\nee\nff\ngg")
+        .unwrap();
+    doc.add_relation(&engine.schemas, &relation(&doc, first, body))
+        .unwrap();
+    let second = doc
+        .append_block(BlockKind::Annotation, "s", "second note")
+        .unwrap();
+    let range = doc.add_range(body, 10..11, RangePolicy::FIXED).unwrap();
+    doc.add_relation(
+        &engine.schemas,
+        &Relation::new(builtin::NOTE)
+            .owned_by(second)
+            .target("anchor", Target::Range(range)),
+    )
+    .unwrap();
+    let s = engine.layout(&doc);
+    let anchor = s.line_containing(body, 10).unwrap();
+    let anchor_page = s.page_of(anchor).unwrap();
+    assert!(anchor_page > 0);
+    let note_page = s
+        .frame(s.block(second).unwrap().lines[0].frame)
+        .unwrap()
+        .page;
+    assert!(note_page >= anchor_page);
+    assert!(s.diagnostics_with("layout.region-cycle").next().is_none());
+    assert!(s.diagnostics_with("layout.region-limit").next().is_none());
+}
+
+#[test]
+fn large_region_fanout_and_table_domains_have_explicit_limits() {
+    let (mut engine, doc) = setup(Length::from_pt(60));
+    engine.flow.max_pages = 1;
+    let body = doc
+        .append_block(BlockKind::Paragraph, "s", "anchor")
+        .unwrap();
+    let range = doc.add_range(body, 1..2, RangePolicy::FIXED).unwrap();
+    // Shared owner keeps this adversarial graph small; size is bounded before
+    // duplicate-owner validation, so the size diagnostic is still required.
+    let owner = doc
+        .append_block(BlockKind::Annotation, "s", "note")
+        .unwrap();
+    for _ in 0..MAX_REGION_RELATIONS + 1 {
+        doc.add_relation(
+            &engine.schemas,
+            &Relation::new(builtin::NOTE)
+                .owned_by(owner)
+                .target("anchor", Target::Range(range)),
+        )
+        .unwrap();
+    }
+    let s = engine.layout(&doc);
+    assert!(
+        s.diagnostics_with("layout.region-limit")
+            .any(|d| d.severity == Severity::Error)
+    );
+    assert!(s.pages.len() <= 1);
+    let (engine, doc) = setup(Length::from_pt(60));
+    doc.append_table(reprise_doc::TableColumns {
+        columns: vec![
+            reprise_doc::Column {
+                width: reprise_doc::ColumnWidth::Content
+            };
+            10000
+        ],
+    })
+    .unwrap();
+    let rest = doc.append_block(BlockKind::Paragraph, "s", "rest").unwrap();
+    let s = engine.layout(&doc);
+    assert!(s.diagnostics_with("layout.table-invalid").next().is_some());
+    assert!(s.block(rest).is_some());
+}
+
+#[test]
+fn extreme_float_padding_keeps_the_entire_frame_excluded() {
+    let (mut engine, doc) = setup(Length::from_pt(60));
+    engine.flow.max_pages = 3;
+    let body = doc
+        .append_block(BlockKind::Paragraph, "s", "anchor")
+        .unwrap();
+    let float = doc
+        .append_block(BlockKind::Annotation, "s", "float")
+        .unwrap();
+    let r = relation(&doc, float, body);
+    doc.add_relation(
+        &engine.schemas,
+        &Relation::new(builtin::FLOAT)
+            .owned_by(float)
+            .target("anchor", r.first("anchor").unwrap().clone())
+            .param("margin", Param::Length(LengthExpr::Pt(Length::MAX))),
+    )
+    .unwrap();
+    let mut base = engine.layout(&doc);
+    let template = crate::template::resolve(&engine, &doc, &mut Vec::new());
+    base.blocks.retain(|b| b.node == body);
+    let plan = super::allocate(&engine, &doc, &template, &base);
+    let excluded = plan.exclusions.values().next().unwrap().first().unwrap();
+    assert_eq!(excluded.origin, reprise_geom::Point::origin());
+    assert_eq!(excluded.width, Length::from_pt(100));
+    assert_eq!(excluded.height, Length::from_pt(60));
+}
