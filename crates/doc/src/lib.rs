@@ -25,6 +25,7 @@ pub mod codes;
 pub mod context;
 mod edit;
 pub mod expr;
+pub mod fragment;
 pub mod function;
 mod history;
 mod lifecycle;

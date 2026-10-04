@@ -23,6 +23,7 @@ reprise-display = { path = "crates/display" }
 reprise-fixtures = { path = "crates/fixtures" }
 reprise-edit = { path = "crates/edit" }
 reprise-plugin = { path = "crates/plugin" }
+reprise-clipboard = { path = "crates/clipboard" }
 
 loro = "1.16"
 thiserror = "2"

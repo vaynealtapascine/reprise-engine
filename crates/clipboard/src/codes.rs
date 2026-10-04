@@ -1,0 +1,13 @@
+use reprise_diag::Code;
+pub const INVALID: Code = Code::new("clipboard.invalid");
+pub const LIMIT: Code = Code::new("clipboard.limit");
+pub const VERSION: Code = Code::new("clipboard.version");
+pub const HTML_APPROXIMATED: Code = Code::new("clipboard.html-approximated");
+pub const HTML_DROPPED: Code = Code::new("clipboard.html-dropped");
+pub const RESOURCE_MISSING: Code = Code::new("clipboard.resource-missing");
+pub const RESOURCE_HASH: Code = Code::new("clipboard.resource-hash");
+pub const RELATION_DROPPED: Code = Code::new("clipboard.relation-dropped");
+pub const STYLE_CLASH: Code = Code::new("clipboard.style-clash");
+pub const RANGE_AFFINITY: Code = Code::new("clipboard.range-affinity");
+pub const SELECTION_TABLE: Code = Code::new("clipboard.selection-table");
+pub const HOST_RANGE_DROPPED: Code = Code::new("clipboard.host-range-dropped");

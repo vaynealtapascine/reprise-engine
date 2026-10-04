@@ -120,6 +120,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         font_collection_index()?,
         plugin_fuel()?,
         plugin_extensions()?,
+        clipboard_unicode_seams()?,
     ])
 }
 
@@ -1978,4 +1979,33 @@ pub fn plugin_extensions() -> Result<Fixture, DocError> {
     )?;
     fixture.doc.commit();
     Ok(fixture)
+}
+
+/// Clipboard seams cross a Latin ligature, a combining sequence and Hebrew;
+/// expanding/fixed/point ranges and a note must survive ID remapping together.
+pub fn clipboard_unicode_seams() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let schemas = SchemaRegistry::builtin();
+    let paragraph = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "office e\u{301} אבג\nA second authored line.",
+    )?;
+    let ligature = doc.add_range(paragraph, 1..5, RangePolicy::EXPANDING)?;
+    let _mark = doc.add_range(paragraph, 8..10, RangePolicy::FIXED)?;
+    let _point = doc.add_range(paragraph, 10..10, RangePolicy::POINT)?;
+    let note = doc.append_block(
+        BlockKind::Annotation,
+        "note",
+        "A copied note beside the ligature.",
+    )?;
+    doc.add_relation(&schemas, &follow(note, ligature))?;
+    let other = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Outside a partial copy; inside copy-all.",
+    )?;
+    doc.add_relation(&schemas, &reference(paragraph, Target::Node(other)))?;
+    doc.commit();
+    Ok(Fixture::new("clipboard_unicode_seams", doc, &[]))
 }

@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 66);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 67);
 }
 
 hostile_tests!(
@@ -1105,3 +1105,7 @@ hostile_tests!(
     font_collection_index
 );
 hostile_tests!(plugin_fuel, plugin_extensions);
+#[test]
+fn clipboard_unicode_seams() {
+    check(hostile::clipboard_unicode_seams().unwrap());
+}

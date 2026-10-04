@@ -57,6 +57,8 @@ Codes in use:
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 | edit | `edit.limit`, `edit.invalid-command`, `edit.store` |
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
+| clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped` |
+| export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure` |
 
 ## Text store: `reprise-text`
 
@@ -594,3 +596,59 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
   stages bounded UTF-8 commands; EditKernel commits one validated atomic kernel
   transaction after successful execution. Refusal/trap applies no commands.
   There are no time, randomness or I/O imports, including in Editing phase v1.
+
+## Clipboard and export: `reprise-clipboard` (35)
+
+- `Fragment` is authored data in `reprise-doc::fragment`, version 1. Source IDs are
+  labels. `copy_fragment` accepts whole subtrees or explicit UTF-8 byte ranges;
+  intersecting persistent ranges are clipped with their observable cursor policies.
+  Styles include inherited parents. Copy-all also carries raw authored page setup. Kernel selections promote fully selected tables to subtrees; partial table selections flatten cell text with `clipboard.selection-table` Warning. Collapsed selections copy nothing.
+- Hosts supply a nonempty source/target namespace (normally the package DocumentId).
+  Only equal namespaces authorize external relation targets. Peer equality does not.
+  `plan_copy` is authoritative at both copy and paste; cross-document crossing relations
+  are dropped with `clipboard.relation-dropped` (Error: the edge was omitted), even
+  when their numeric IDs exist in the target. Snapshots remain source history references.
+- `NativeFragment` wraps the fragment with SHA-256-addressed resources and copy notes.
+  Available layout-used fonts carry FaceId and verified bytes; without layout the
+  current computed family is used. Missing resources produce `clipboard.resource-missing`
+  (Warning: reproduction may differ). Hosts may attach assets explicitly until an image
+  usage graph exists. `install_fonts` installs verified bundles into the host FontStore;
+  resource bytes do not enter Loro. Encoding uses sorted maps and source-ID order.
+- `Command::Paste` is an additive standalone command, rejected if mixed with other
+  commands. `Editor::paste` returns `Pasted` with the frozen node/range `IdMap`, a separate
+  relation map, position effects and notes. The entire paste is validated before staging,
+  then activated in one commit/undo step. Invisible staged IDs survive undo and redo.
+  Matching source IDs in independent documents using the same peer are skipped.
+- At a paragraph caret the prefix/first pasted paragraph and last paragraph/suffix join.
+  The pasted blocks retain new identities; the original host is tombstoned with a
+  succession link. Tables and annotation boundaries keep separate prefix/suffix blocks.
+  Existing host ranges migrate with the prefix/suffix while retaining IDs. A range that would span several pasted blocks remains missing, reported with `clipboard.host-range-dropped` Error; undo restores it.
+  `at=None` appends; page setup is imported only into an empty document.
+- Missing styles are defined. If any named style clashes by content, the entire imported
+  style graph is renamed deterministically to available `name (paste N)` names, retaining
+  inheritance, and `clipboard.style-clash` reports Warning. Dangling source style references are also renamed when necessary to prevent accidental target binding. Original styles stay intact.
+- Native fragment limits: 4,096 blocks, 8,192 ranges/relations, 1,024 styles/templates,
+  depth 64, 16 MiB payload and resources each, 96 MiB JSON envelope. Future versions are
+  rejected with `clipboard.version` Error; malformed data with `clipboard.invalid` Error;
+  resource and parsing limits with `clipboard.limit` Error. Hash/identity mismatches use `clipboard.resource-hash` Error. `clipboard.range-affinity` is Warning when authored affinity cannot be recovered at a text boundary. No partial paste occurs on
+  validation failure. An unexpected store failure still uses the kernel's Store semantics.
+- Plain import normalizes CRLF/CR and splits paragraphs at two LFs; individual LF stays a
+  forced break. Plain export uses logical Unicode bytes, two LF between paragraphs, tab
+  between cells and LF between rows. Soft wraps do not add characters. With a current
+  layout it follows `reading_order`; unplaced text follows in semantic order.
+- HTML export emits semantic paragraphs, paragraph `dir`, computed CSS family/point size/
+  line height, whitespace preservation, `br`, and table/row/cell tags. Notes/floats become paragraphs; transforms,
+  symbolic styles, column constraints and relation graphs are reported as losses.
+- The handwritten HTML reader accepts paragraphs/divisions, breaks, nonnested tables,
+  basic point CSS, pre-wrap whitespace and common/numeric entities. Tables infer equal proportional columns (at most 128) from their rows. Direction inference uses shaping's pinned ICU Unicode 17 properties. Unsupported markup retains text with
+  `clipboard.html-approximated` Warning. Active/non-content HTML is omitted with
+  `clipboard.html-dropped` Error. It fetches nothing. Explicit caps: 8 MiB input,
+  100,000 tokens, depth 64, 4,096 blocks, 128 attributes/tag and CSS declarations/block; exceeding a cap rejects the whole import. Conflicting explicit HTML dir values are reported as approximated: the authored model infers direction from Unicode.
+- `Exporter::export(doc, layout?, options) -> Result<ExportResult, ClipboardError>` is the
+  extension point for DOCX/EPUB. Results contain bytes and `LossReport`: exactly one stable
+  feature code for relations, reading order, transforms, notes/floats, tables, styles,
+  bidi, fonts, assets and editing structure, with Preserved/Approximated/Dropped and detail.
+  Feature outcomes are not diagnostic severities; notes use the normal severity rules.
+  PlainText, Html, Native and Pdf implement it. PDF requires current layout/fonts, wraps
+  ordered rendering, and explicitly reports editable structure and relation graph loss,
+  lack of PDF/UA structure, viewer-dependent text extraction, and layout omissions.

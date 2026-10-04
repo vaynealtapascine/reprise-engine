@@ -20,6 +20,13 @@ impl EditError {
     /// requested edit was omitted; validation errors leave authored state intact.
     pub fn note(&self) -> Note {
         let code = match self.reason {
+            Reason::Fragment(reprise_doc::fragment::FragmentError::Version(_)) => {
+                reprise_diag::Code::new("clipboard.version")
+            }
+            Reason::Fragment(reprise_doc::fragment::FragmentError::Limit(_)) => {
+                reprise_diag::Code::new("clipboard.limit")
+            }
+            Reason::Fragment(_) => reprise_diag::Code::new("clipboard.invalid"),
             Reason::TooManyCommands { .. }
             | Reason::TextTooLong { .. }
             | Reason::TransactionTooLarge { .. }
@@ -42,6 +49,10 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error(transparent)]
+    Fragment(reprise_doc::fragment::FragmentError),
+    #[error("paste must be the only command in its transaction")]
+    MixedPaste,
     #[error("a transaction takes at most {max} commands, not {count}")]
     TooManyCommands { count: usize, max: usize },
     #[error("inserted text of {len} bytes is over the limit of {max}")]

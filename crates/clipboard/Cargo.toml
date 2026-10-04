@@ -1,0 +1,25 @@
+[package]
+name = "reprise-clipboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+reprise-doc.workspace = true
+reprise-edit.workspace = true
+reprise-diag.workspace = true
+reprise-font.workspace = true
+reprise-format.workspace = true
+reprise-geom.workspace = true
+reprise-layout.workspace = true
+reprise-display.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-bidi.workspace = true
+icu_properties.workspace = true
+
+[dev-dependencies]
+reprise-fixtures.workspace = true

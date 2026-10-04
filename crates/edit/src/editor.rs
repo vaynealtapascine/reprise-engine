@@ -130,8 +130,8 @@ impl Applied {
 /// A document, the relation schemas its transactions are validated against,
 /// and this replica's undo history. Every edit a UI makes goes through here.
 pub struct Editor {
-    doc: Document,
-    schemas: SchemaRegistry,
+    pub(crate) doc: Document,
+    pub(crate) schemas: SchemaRegistry,
     undo: UndoStack,
 }
 
@@ -169,7 +169,7 @@ impl Editor {
     /// while applying a prevalidated plan.
     pub fn apply(&mut self, transaction: &Transaction) -> Result<Applied, EditError> {
         let plan = plan::plan(&self.doc, &self.schemas, transaction.commands())?;
-        if plan.steps.is_empty() {
+        if plan.steps.is_empty() && plan.paste.is_none() {
             return Ok(Applied::default());
         }
         let applied = self.write(plan);
@@ -182,6 +182,9 @@ impl Editor {
     /// applies the steps the model applied, so a failure here would be a bug
     /// in this crate or the store; it is reported, never panicked on (37).
     fn write(&self, plan: Plan) -> Result<Applied, EditError> {
+        if let Some(paste) = plan.paste {
+            return crate::paste::write(&self.doc, &self.schemas, paste).map(|p| p.applied);
+        }
         // Staging commits, so all of it comes before the step's own changes.
         let blocks = plan
             .blocks

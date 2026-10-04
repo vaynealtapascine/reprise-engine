@@ -101,6 +101,17 @@ Other files:
 
 ## Recipes
 
+Clipboard and exporters (35): `crates/clipboard/src/native.rs` provides deterministic
+versioned fragments and content-addressed font/asset bundles; `html.rs` provides bounded
+plain/HTML import; `export.rs` provides the extensible exporter trait, per-feature loss
+reports and plain, HTML, native and PDF exporters; `codes.rs` owns clipboard codes.
+`crates/doc/src/fragment.rs` extracts authored subtrees, styles and range policies and
+provides invisible range/table staging. `crates/edit/src/paste.rs` validates and stages
+paste with fresh identities, style collision handling, undo and relation remapping;
+`command.rs`, `editor.rs`, `plan.rs`, `error.rs` and `lib.rs` wire the standalone command.
+`crates/clipboard/tests/native.rs` attacks Unicode cuts, policies, identity collisions,
+undo, concurrent merging and input bounds. Clipboard is included in CI/WASM checks.
+
 -   **Add a relation type:**
     1.  Define its `RelationSchema` in `doc/src/relation.rs`. Add it to `builtin::all()`
         if it is built in.
@@ -184,3 +195,27 @@ Other files:
 | `layout` | `src/regions.rs`, `src/regions/tests.rs`, `src/relations/mod.rs`, `src/template.rs` | Shared bounded-feedback outcome/freeze helpers, exact comparable templates, explicit relation/reading stages; unchanged reference output | 26, 37, 38 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, paired `incremental_page_seam` snapshots | UTF-8 pagination seam with a following annotation and explicit reading precedence | 27, 38, 39 |
 | - | `docs/incremental.md`, additive section in `docs/contracts.md` | Exact memo keys and reuse argument, scheduling/partial semantics, limits and Salsa evaluation | 16, 26-28, 39, 41 |
+
+Clipboard fixture coverage: `fixtures/src/hostile.rs` appends `clipboard_unicode_seams`
+(expanding/fixed/point ranges across ligatures, combining text and RTL, plus note/reference
+edges); `fixtures/tests/hostile.rs` registers it and its paired layout/content snapshots.
+`clipboard/tests/roundtrip.rs` compares every hostile fixture's live topology, range
+|  | `tests/paste_undo_walk.rs` | Twenty pastes (end and mid-paragraph) of an encoded and decoded fragment, then each undone and redone exactly, with the same IDs | 07, 29, 35 |
+|  | `tests/declared_fonts.rs` | Two collection faces declared under aliases travel in one fragment and reinstall as the same faces | 21, 35 |
+policies and rendered page/frame/block/glyph geometry after native copy/paste and undo/redo.
+`clipboard/tests/import_export.rs` attacks parser caps and malformed tag soup, verifies
+resource hashes, reading order and every exporter's House-of-Leaves loss reports.
+
+Clipboard refinements: native selection promotes full tables and reports partial-table
+flattening; paste preserves unresolved style references, reanchors existing host ranges
+without changing their IDs, reports cross-block ranges it cannot represent, and returns
+all activated prefix/suffix IDs. HTML import enforces attribute/CSS caps and honors
+pre-wrap whitespace; conflicting explicit direction is reported. Plain export retains
+page-limited tails. The native/import_export/roundtrip tests cover these cases plus
+concurrent caret pastes and cross-document graph remapping.
+
+HTML tables infer proportional column metadata through the additive
+`Document::set_fragment_table_columns`; without that metadata the table subsystem
+would omit imported cells. HTML direction inference shares shaping's pinned ICU
+Unicode 17 properties. Import/export tests verify actual cell rendering and direction
+agreement for isolates, controls, paragraph breaks and newly added RTL characters.
