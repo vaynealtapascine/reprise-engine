@@ -1,0 +1,206 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      14
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "default",
+    "source": "builtin"
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "One",
+        "families": [
+          "One",
+          "Two",
+          "sans-serif"
+        ],
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "direct",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 5
+          },
+          "preview": "aſƀ",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 15173,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 1
+              },
+              "face": {
+                "family": "One",
+                "hash": "21808625578fe8d8cd10cb684be546dc"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 4911
+            },
+            {
+              "range": {
+                "start": 1,
+                "end": 3
+              },
+              "face": {
+                "family": "Two",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 4911,
+              "width": 3875
+            },
+            {
+              "range": {
+                "start": 3,
+                "end": 5
+              },
+              "face": {
+                "family": "Source Sans 3",
+                "hash": "08df266400933d3178d081a45f94a088"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 8786,
+              "width": 6387
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "font.fallback",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "used \"Two\" from family chain",
+      "bytes": {
+        "start": 1,
+        "end": 3
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "font.fallback",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "used \"sans-serif\" from family chain",
+      "bytes": {
+        "start": 3,
+        "end": 5
+      }
+    }
+  ]
+}

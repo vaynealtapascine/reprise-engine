@@ -25,7 +25,7 @@ interfaces.
 |  | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), v2 authored transforms, writing modes and spiral paths, v1-compatible Loro storage and the built-in template | 05, 20, 24, 34 |
 |  | `src/reading.rs` | Independent `reprise.reading-order` block-precedence schema and authoring helper | 01, 14, 33 |
 | `font` | `src/lib.rs`, `src/supply.rs` | `Face` with a pinned `FaceId`, metrics, glyph outlines and one type-erased adapter-data cache slot; `FontStore`, frontend declarations, CSS-inspired matching and pinned generic defaults | 21, 22, 38 |
-| `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
+| `shape` | `src/lib.rs`, `src/fallback_tests.rs` | `ShapingAdapter` contract, `HarfRust` with per-face data caching, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22, 38 |
 |  | `src/paragraph.rs` | `itemize` / `itemize_families` (legacy and grapheme-preserving generic fallback chains, resolved bidi levels and contextual scripts), `Shaper` (shaping and reshaping a paragraph) | 09, 21, 22 |
 |  | `src/unicode.rs`, `src/bidi-character-subset.txt` | ICU4X property adapter for UAX #9 (including N0) and UAX #24 script resolution; pinned Unicode conformance subset | 09, 22, 38 |
 |  | `src/line.rs` | Pure L1/L2 line reordering, preserving bidi groups across missing-font gaps | 20, 22, 30 |
@@ -54,12 +54,13 @@ interfaces.
 |  | `src/relations/resolve.rs` | `Resolver`: any `Target` to a `TargetLayout`, status and diagnostics; shared by `follow` and other relation behaviours | 13, 14, 15 |
 |  | `src/query.rs` | Layout queries added by relations (`first_line`, `frame_of`, `answer`, ...) | 13, 16 |
 |  | `src/display.rs` | `to_display_list(s)`, ordered PDF run addresses and individually selectable debug boxes, baselines, available/used intervals, run boundaries, break symbols, reshaped lines, relation statuses and diagnostic cluster markers | 32, 39 |
-| `fixtures` | `src/lib.rs` | Pinned fonts, engine and peers for tests | 38, 39 |
+| `fixtures` | `src/lib.rs`, `src/fonts.rs` | Pinned fonts, engine and peers for tests, three-face fallback text and relocated OTC fixture | 38, 39 |
 |  | `src/spike.rs` | The spike document | 40 |
 |  | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
-|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases; transformed RTL, writing modes, spirals, reading cycles and degenerate/extreme transforms; editing lifecycle, transaction refusal and empty/zero-width carets | 17, 18, 20, 33, 37, 39 |
+|  | `src/hostile.rs` | Hostile fixtures every workstream must keep passing: text and bidi, display clusters, relation targets and policies, composers, style expressions, cycles and bases; transformed RTL, writing modes, spirals, reading cycles and degenerate/extreme transforms; editing lifecycle, transaction refusal and empty/zero-width carets; font chains, generic defaults, three-face fallback, corrupt declarations and out-of-range collection indices | 17, 18, 20, 33, 37, 39 |
 |  | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks, editing undo/refusal/extreme-hit tests, content-preservation goldens and debug explainability geometry snapshots | 38, 39 |
 |  | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13, 14, 15 |
+|  | `tests/fonts.rs` | Versioned font chain storage, legacy overrides, unknown versions, collection declarations and incremental parity | 21, 22, 34, 38 |
 |  | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 |  | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
 |  | `tests/geometry.rs` | Transform/caret round trips, bounds, rotated follow, spiral reflow, semantic and overridden reading order; SVG/PNG visual exports | 20, 33, 39 |
@@ -124,10 +125,10 @@ Other files:
 | `doc` | `src/persist.rs` | Opaque snapshot export/import, explicit peer/history mode, allocation-free Loro/LZ4 expansion preflight | 07, 09, 29, 34, 37 |
 | `format` | `src/lib.rs`, `src/container.rs` | Versioned checksummed container, document identity, feature masks, hard bounds, typed errors and codes | 34, 37, 38 |
 | | `src/json.rs` | Iterative manifest bounds and canonical metadata | 34, 37, 38 |
-| | `src/assets.rs` | Font pins, bundled/external assets, hash validation and host resolution needs | 21, 34 |
+| | `src/assets.rs` | Font pins (including versioned frontend declarations), bundled/external assets, hash validation, missing-font list and restore-to-store API | 21, 34 |
 | | `src/migration.rs` | Pure checked N -> N+1 migrations, synthetic v0 | 34 |
-| | `src/package.rs` | Package save/open, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
-| | `src/tests.rs`, `tests/roundtrip.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
+| | `src/package.rs` | Package save/open with additive used-layout-font embedding, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
+| | `src/tests.rs`, `tests/roundtrip.rs`, `tests/fonts.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence | 37, 38, 39 |
 | | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/snapshots/` | Added persistence_tombstones: Unicode anchors, tombstones and retained historical references | 07, 09, 29, 34 |
 

@@ -1869,6 +1869,7 @@ dependencies = [
  "reprise-doc",
  "reprise-fixtures",
  "reprise-font",
+ "reprise-layout",
  "reprise-shape",
  "serde",
  "serde_json",

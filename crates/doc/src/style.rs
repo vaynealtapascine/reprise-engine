@@ -259,6 +259,12 @@ impl Authored {
 pub struct Style {
     pub parent: Option<String>,
     pub family: Option<String>,
+    /// Explicit CSS-like chain. This replaces `family` in the same layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub families: Option<Vec<String>>,
+    /// Unknown versioned chain text is preserved and reported, never overwritten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unparsed_families: Option<String>,
     pub size: Option<LengthExpr>,
     pub line_height: Option<LengthExpr>,
     /// Values that are not a plain [`LengthExpr`]: expressions, and stored text
@@ -311,6 +317,14 @@ impl Style {
         if let Some(f) = &self.family {
             map.insert("family", f.as_str())?;
         }
+        if let Some(raw) = &self.unparsed_families {
+            map.insert("families", raw.as_str())?;
+        } else if let Some(chain) = &self.families {
+            // JSON encoding Vec<String> is infallible; no document-dependent unwrap.
+            if let Ok(encoded) = serde_json::to_string(chain) {
+                map.insert("families", format!("families1:{encoded}").as_str())?;
+            }
+        }
         for p in Property::ALL {
             if let Some(v) = self.get(p) {
                 map.insert(p.name(), v.to_stored().as_str())?;
@@ -325,6 +339,15 @@ impl Style {
             family: get_str(map, "family"),
             ..Style::default()
         };
+        if let Some(raw) = get_str(map, "families") {
+            match raw
+                .strip_prefix("families1:")
+                .and_then(|json| serde_json::from_str(json).ok())
+            {
+                Some(chain) => style.families = Some(chain),
+                None => style.unparsed_families = Some(raw),
+            }
+        }
         for p in Property::ALL {
             if let Some(text) = get_str(map, p.name()) {
                 style.set(p, Authored::from_stored(&text));
@@ -338,6 +361,9 @@ impl Style {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedStyle {
     pub family: String,
+    /// Empty for legacy single-family documents, preserving their stored/output form.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub families: Vec<String>,
     pub size: Length,
     pub line_height: Length,
     pub explain: BTreeMap<String, String>,
@@ -360,6 +386,8 @@ pub struct ComputedStyle {
 pub fn default_style() -> Style {
     Style {
         parent: None,
+        families: None,
+        unparsed_families: None,
         family: Some("Source Serif Pro".into()),
         size: Some(LengthExpr::Pt(Length::from_pt(10))),
         line_height: Some(LengthExpr::Em(1200)),
@@ -479,6 +507,7 @@ pub struct PropertyChain {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Computed {
     pub family: String,
+    pub families: Vec<String>,
     family_layer: Option<String>,
     pub size: PropertyChain,
     pub line_height: PropertyChain,
@@ -492,11 +521,29 @@ impl Specified {
     pub fn compute(&self, functions: &FunctionRegistry) -> Computed {
         let mut notes = self.notes.clone();
         let mut family = String::new();
+        let mut families = Vec::new();
         let mut family_layer = None;
         for layer in &self.layers {
             if let Some(f) = &layer.style.family {
                 family = f.clone();
+                families.clear();
                 family_layer = Some(layer.name.clone());
+            }
+            if let Some(raw) = &layer.style.unparsed_families {
+                notes.push(Note::warning(
+                    crate::codes::STYLE_UNPARSED,
+                    format!("unreadable font chain in {}: {raw}", layer.name),
+                ));
+            } else if let Some(chain) = &layer.style.families {
+                families = chain.clone();
+                if let Some(first) = chain.first() {
+                    family = first.clone();
+                }
+                family_layer = Some(layer.name.clone());
+                // Even an empty explicit chain opts into generic serif fallback.
+                if families.is_empty() {
+                    families.push("serif".into());
+                }
             }
         }
         let mut chain = |p: Property| compute_property(p, &self.layers, functions, &mut notes);
@@ -504,6 +551,7 @@ impl Specified {
         let line_height = chain(Property::LineHeight);
         Computed {
             family,
+            families,
             family_layer,
             size,
             line_height,
@@ -729,6 +777,7 @@ impl Computed {
         StyleResolution {
             style: ComputedStyle {
                 family: self.family.clone(),
+                families: self.families.clone(),
                 size: size_used,
                 line_height: line_used,
                 explain,

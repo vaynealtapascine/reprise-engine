@@ -242,7 +242,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 59);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 64);
 }
 
 hostile_tests!(
@@ -1096,3 +1096,11 @@ fn editing_empty_block() {
     }
     check(fixture);
 }
+
+hostile_tests!(
+    font_chain_missing,
+    font_generics,
+    font_three_faces,
+    font_corrupt_declaration,
+    font_collection_index
+);

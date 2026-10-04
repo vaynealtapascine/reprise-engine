@@ -24,12 +24,14 @@ use reprise_font::{Face, FaceId};
 use reprise_geom::{InlineDirection, Length};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod fallback_tests;
 mod line;
 mod paragraph;
 mod unicode;
 
 pub use line::reorder_line;
-pub use paragraph::{Itemized, ParagraphInput, Shaper, StyleRun, codes, itemize};
+pub use paragraph::{Itemized, ParagraphInput, Shaper, StyleRun, codes, itemize, itemize_families};
 pub use unicode::UNICODE_VERSION;
 
 /// Who shaped a run, recorded with the output.
