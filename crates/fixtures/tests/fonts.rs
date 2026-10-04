@@ -103,3 +103,49 @@ fn chain_storage_inheritance_legacy_override_and_unknown_versions() {
         engine.layout(&doc).to_json()
     );
 }
+
+#[test]
+fn switching_legacy_and_explicit_identical_names_invalidates_fallback_semantics() {
+    let doc = Document::new(1).unwrap();
+    doc.define_style("body", &Style::default()).unwrap();
+    let node = doc
+        .append_block(BlockKind::Paragraph, "body", "a\u{10ffff}")
+        .unwrap();
+    doc.set_overrides(
+        node,
+        &Style {
+            family: Some("Source Serif Pro".into()),
+            ..Style::default()
+        },
+    )
+    .unwrap();
+    doc.commit();
+    let engine = reprise_fixtures::engine();
+    let mut session = reprise_layout::incremental::LayoutSession::new(&engine);
+    let legacy = session.layout(&doc).unwrap();
+    assert!(legacy.diagnostics_with("font.missing").next().is_none());
+    doc.set_overrides(
+        node,
+        &Style {
+            families: Some(vec!["Source Serif Pro".into()]),
+            ..Style::default()
+        },
+    )
+    .unwrap();
+    doc.commit();
+    let reference = engine.layout(&doc);
+    assert!(reference.diagnostics_with("font.missing").next().is_some());
+    assert_eq!(session.layout(&doc).unwrap().to_json(), reference.to_json());
+    doc.set_overrides(
+        node,
+        &Style {
+            family: Some("Source Serif Pro".into()),
+            ..Style::default()
+        },
+    )
+    .unwrap();
+    doc.commit();
+    let reference = engine.layout(&doc);
+    assert!(reference.diagnostics_with("font.missing").next().is_none());
+    assert_eq!(session.layout(&doc).unwrap().to_json(), reference.to_json());
+}

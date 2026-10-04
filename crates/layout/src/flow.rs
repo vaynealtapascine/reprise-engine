@@ -879,8 +879,23 @@ pub(crate) fn prepare_with(
         styles: &styles,
         direction: None,
     };
-    let shape_key =
-        evaluation.map(|_| crate::incremental::ShapingKey::new(&input, fallback.clone()));
+    let shape_key = evaluation.map(|_| {
+        // The additive entry point changes fallback semantics even for the same
+        // list of names. Version only the owned cache representation; itemization
+        // and the adapter receive the original authored families unchanged.
+        let mut key_styles = styles.clone();
+        if !style.families.is_empty() {
+            for run in &mut key_styles {
+                run.families.insert(0, "\0reprise-font-chain1".into());
+            }
+        }
+        let key_input = ParagraphInput {
+            text: &text,
+            styles: &key_styles,
+            direction: input.direction,
+        };
+        crate::incremental::ShapingKey::new(&key_input, fallback.clone())
+    });
     let shape_notes = diagnostics.len();
     if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
         && let Some((value, notes)) = e.shaping_hit(node, key)
