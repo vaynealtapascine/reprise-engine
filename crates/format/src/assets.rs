@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use reprise_diag::Note;
-use reprise_font::{Face, FaceId};
+use reprise_font::{Face, FaceId, FontDeclaration, FontStore};
 use serde::{Deserialize, Serialize};
 
 use crate::{Container, FormatError, Limits, codes, ids};
@@ -70,6 +70,23 @@ pub struct AssetAvailability {
     /// Validated, pinned bundled fonts; callers may add these to FontStore.
     pub fonts: Vec<Face>,
     pub notes: Vec<Note>,
+}
+
+impl AssetAvailability {
+    /// Missing pins for the frontend's font-resolution prompt, in asset-ID order.
+    pub fn missing_fonts(&self) -> Vec<&FontPin> {
+        self.missing
+            .iter()
+            .filter_map(|need| need.font.as_ref())
+            .collect()
+    }
+    /// Move verified faces into the caller's store; never discovers or fetches fonts.
+    pub fn restore_fonts(&mut self, store: &mut FontStore) -> Vec<reprise_font::FaceId> {
+        std::mem::take(&mut self.fonts)
+            .into_iter()
+            .map(|face| store.add(face))
+            .collect()
+    }
 }
 
 pub fn content_hash(bytes: &[u8]) -> String {
@@ -199,9 +216,7 @@ pub(crate) fn inspect(
         let mut faces = Vec::new();
         let mut usable = true;
         for pin in matching {
-            let hash = crate::container::digest(bytes);
-            let face_hash: String = hash.iter().take(16).map(|b| format!("{b:02x}")).collect();
-            if asset.kind != AssetKind::Font || face_hash != pin.face.hash {
+            if asset.kind != AssetKind::Font {
                 result.notes.push(Note::error(
                     codes::FONT_HASH,
                     format!("rejected pin {}", asset.id),
@@ -209,8 +224,29 @@ pub(crate) fn inspect(
                 usable = false;
                 break;
             }
-            match Face::from_bytes(bytes) {
-                Ok(face) if face.id() == &pin.face => faces.push(face),
+            let declared = if let Some(value) = pin.extra.get("font-declaration1") {
+                serde_json::from_value::<FontDeclaration>(value.clone())
+                    .map_err(|error| reprise_font::FontError::Unreadable(error.to_string()))
+                    .and_then(|declaration| Face::declared(bytes, Some(declaration)))
+            } else {
+                Face::from_bytes(bytes)
+            };
+            match declared {
+                Ok(face)
+                    if face.id() == &pin.face
+                        && (!pin.extra.contains_key("font-declaration1")
+                            || face.version() == pin.version) =>
+                {
+                    faces.push(face)
+                }
+                Ok(face) if face.id().hash != pin.face.hash => {
+                    result.notes.push(Note::error(
+                        codes::FONT_HASH,
+                        format!("rejected pin {}", asset.id),
+                    ));
+                    usable = false;
+                    break;
+                }
                 _ => {
                     result.notes.push(Note::error(
                         codes::FONT_UNREADABLE,
@@ -242,6 +278,17 @@ pub(crate) fn inspect(
             result.notes.push(Note::info(
                 codes::ASSET_MISSING,
                 "pinned font has no asset entry",
+            ));
+        }
+    }
+    for need in &result.missing {
+        if let Some(pin) = &need.font {
+            result.notes.push(Note::warning(
+                codes::FONT_MISSING,
+                format!(
+                    "pinned font {:?} is unavailable; frontend resolution required",
+                    pin.face
+                ),
             ));
         }
     }

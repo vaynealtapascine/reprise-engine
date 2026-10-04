@@ -200,3 +200,26 @@ compression and inner LZ4 expansion limits, corrupt caches, migrations and font
 hash mismatches. Every hostile fixture and the spike round-trip with identical
 layout on peers 1 and 2; history merges converge and explicit shallow retention
 is tested separately.
+
+## Additive font supply metadata
+
+`FontPin.extra["font-declaration1"]` is the versioned frontend declaration
+(family, integer weight/style/stretch descriptors, and collection face index).
+When present, opening checks the font-derived version as well as the identity.
+Legacy pins without this field retain their original interpretation.
+Standalone fonts and collection face zero keep SHA-256(file)[0..16]; other
+collection faces hash file bytes followed by ASCII `reprise-face-index` and the
+u32 little-endian index. The asset hash always covers the original whole file.
+
+`Package::new_with_layout`, `embed_layout_fonts` and
+`OpenedFile::save_with_layout` embed all faces with glyphs in the supplied
+current layout, including glyph zero. Empty runs and unused style declarations
+are excluded; existing pins/assets are retained. The caller supplies a layout
+from this document and its engine configuration; the revision must match.
+Old metadata-only creation/saving APIs remain for opaque container workflows.
+Opening validates bundles; `open_with_fonts` opens and restores in one call,
+or `restore_fonts` moves verified faces into the supplied
+store. `missing_fonts` lists unavailable pins and `format.font-missing` warns
+that frontend resolution is required. Layout substitutes through explicit chains.
+Generic overrides are engine configuration; peers must use the same configuration
+(the package does not infer overrides from which defaults happened to be used).

@@ -27,6 +27,7 @@ pub mod codes {
     pub const CACHE_IGNORED: Code = Code::new("format.cache-ignored");
     pub const ASSET_HASH: Code = Code::new("format.asset-hash");
     pub const FONT_HASH: Code = Code::new("format.font-hash");
+    pub const FONT_MISSING: Code = Code::new("format.font-missing");
     pub const FONT_UNREADABLE: Code = Code::new("format.font-unreadable");
     pub const ASSET_MISSING: Code = Code::new("format.asset-missing");
     pub const MIGRATED: Code = Code::new("format.migrated");
