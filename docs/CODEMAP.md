@@ -17,7 +17,14 @@ interfaces.
 | `shape` | `src/lib.rs` | `ShapingAdapter` contract, `HarfRust`, `ShapedText`/`ShapedRun`, `Reshape`, `visual_order` | 22 |
 |  | `src/paragraph.rs` | `itemize` (fallback chains), `Shaper` (shaping and reshaping a paragraph) | 21, 22 |
 | `compose` | `src/lib.rs` | `Composer` and `GeometryProvider` contracts, `Measure`, break opportunities, `LineFragment`, `Explanation` | 23 |
-|  | `src/greedy.rs` | The greedy composer | 23 |
+|  | `src/greedy.rs` | The greedy composer, and the first-fit algorithm other composers fall back to | 23 |
+|  | `src/optimal.rs` | `Optimal`: Knuth–Plass total fit over variable geometry, ragged or justified; integer demerits, `Limits` | 19, 23, 39 |
+|  | `src/authored.rs` | `AuthoredBreak`: verse, lines end at forced breaks, turnovers with a hanging indent | 11, 23 |
+|  | `src/polygon.rs` | `Polygon` and `Runaround` geometry providers, integer ellipses | 20, 23, 24 |
+|  | `src/para.rs` | The paragraph as composers see it: normalised breaks, prefix widths, fragments | 23 |
+|  | `src/walk.rs` | Walking a geometry provider: skips, `End`, stalls | 23 |
+|  | `src/testing.rs` | Unit-test shaping with the bundled font | 39 |
+|  | `tests/conformance.rs` | Every composer against adversarial geometry and texts, checking every `Composer` guarantee | 23, 37, 39 |
 | `display` | `src/lib.rs` | `DisplayList`, `Item` (glyphs, paths, groups), `RenderError` | 32 |
 |  | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends | 32 |
 | `layout` | `src/lib.rs` | `Engine` (configuration, including `schemas`), `PageSettings`, `Engine::layout` | 24, 26 |

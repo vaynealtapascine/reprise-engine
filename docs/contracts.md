@@ -49,7 +49,7 @@ Codes in use:
 | Library | Codes |
 | --- | --- |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
-| compose | `compose.overflow`, `compose.geometry-stalled` |
+| compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` (Info: an optimising composer set some lines first-fit) |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed` |
 

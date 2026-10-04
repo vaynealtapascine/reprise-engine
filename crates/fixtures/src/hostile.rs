@@ -9,6 +9,7 @@
 //! font fallback so emoji stop being `.notdef`, it updates `expect` here and
 //! says why in its commit.
 
+use reprise_compose::{AuthoredBreak, Optimal, Turnover};
 use reprise_doc::relation::{
     CopyCrossing, CopyInside, CopyPolicy, OnTargetDeleted, Ownership, RoleSpec,
 };
@@ -59,6 +60,9 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         deleted_targets()?,
         concurrent_edits()?,
         extreme_lengths()?,
+        optimal_paragraph()?,
+        verse_turnover()?,
+        optimal_extreme_lengths()?,
     ])
 }
 
@@ -320,4 +324,56 @@ pub fn extreme_lengths() -> Result<Fixture, DocError> {
             "layout.style-clamped",
         ],
     ))
+}
+
+/// The optimal composer on a paragraph with an overlong word, a forced line
+/// break (U+2028) and a URL: the overlong word overflows once and is
+/// reported, the forced break ends its line, and every line is scored.
+pub fn optimal_paragraph() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let text = "The optimal composer weighs every line of a paragraph at once, so a \
+                Pneumonoultramicroscopicsilicovolcanoconiosis has to overflow on a line of \
+                its own while the lines around it stay even.\u{2028}After the forced break \
+                the paragraph goes on, past https://example.com/a/long/path/to/somewhere, \
+                to a short last line.";
+    paragraph_with_note(&doc, text, "forced break")?;
+    doc.commit();
+    let mut fixture = Fixture::new("optimal_paragraph", doc, &["compose.overflow"]);
+    fixture.engine.composer = Box::new(Optimal::default());
+    Ok(fixture)
+}
+
+/// Verse with the authored-break composer in a narrow column: each authored
+/// line ends at its forced break, and the long ones turn over with a hanging
+/// indent. The margin note is composed the same way.
+pub fn verse_turnover() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let text = "Whose woods these are I think I know.\u{2028}\
+                His house is in the village though;\u{2028}\
+                He will not see me stopping here\u{2028}\
+                To watch his woods fill up with snow.\u{2028}\
+                \u{2028}\
+                My little horse must think it queer";
+    paragraph_with_note(&doc, text, "village")?;
+    doc.commit();
+    let mut fixture = Fixture::new("verse_turnover", doc, &[]);
+    fixture.engine.composer = Box::new(AuthoredBreak {
+        turnover_indent: Length::from_pt(14),
+        turnover: Turnover::Optimal(Optimal::default()),
+    });
+    fixture.engine.page = PageSettings {
+        column_width: Length::from_pt(110),
+        ..PageSettings::default()
+    };
+    Ok(fixture)
+}
+
+/// [`extreme_lengths`] with the justified optimal composer: sizes and line
+/// heights at the limits of the fixed-point range must not overflow its
+/// demerits or its search.
+pub fn optimal_extreme_lengths() -> Result<Fixture, DocError> {
+    let mut fixture = extreme_lengths()?;
+    fixture.name = "optimal_extreme_lengths";
+    fixture.engine.composer = Box::new(Optimal::justified());
+    Ok(fixture)
 }

@@ -161,9 +161,12 @@ hostile_tests!(
     deleted_targets,
     concurrent_edits,
     extreme_lengths,
+    optimal_paragraph,
+    verse_turnover,
+    optimal_extreme_lengths,
 );
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 9);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 12);
 }

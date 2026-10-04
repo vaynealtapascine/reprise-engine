@@ -1566,6 +1566,7 @@ name = "reprise-fixtures"
 version = "0.0.0"
 dependencies = [
  "insta",
+ "reprise-compose",
  "reprise-diag",
  "reprise-display",
  "reprise-doc",
