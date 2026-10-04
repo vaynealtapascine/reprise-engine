@@ -162,6 +162,11 @@ pub enum Movement {
     /// transforms use the dominant inverse-mapped axis (inline on ties).
     VisualRight,
     VisualLeft,
+    /// One visual grapheme cell toward increasing/decreasing frame inline x.
+    /// Use these to traverse a turned line or follow successive path strips,
+    /// independently of the direction of page-horizontal arrows.
+    InlineForward,
+    InlineBackward,
     /// To the previous line, keeping the goal x. On the first line of the
     /// document, to the start of the line.
     LineUp,
@@ -177,6 +182,10 @@ pub enum Movement {
     /// page x (a quarter turn), use the frame's first/last inline edge.
     LineLeftmost,
     LineRightmost,
+    /// The first/last visual junction along increasing frame inline x,
+    /// irrespective of its page orientation or paragraph reading direction.
+    LineInlineStart,
+    LineInlineEnd,
     BlockStart,
     BlockEnd,
     DocumentStart,

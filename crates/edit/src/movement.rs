@@ -93,6 +93,13 @@ impl Navigator<'_> {
                     return self.vertical(from, line, model, stop, right != (axis.yx.0 > 0));
                 }
             }
+            Movement::InlineForward | Movement::InlineBackward => self.visual(
+                caret,
+                line,
+                model,
+                stop,
+                movement == Movement::InlineForward,
+            ),
             Movement::LineUp | Movement::LineDown => {
                 return self.vertical(from, line, model, stop, movement == Movement::LineUp);
             }
@@ -105,6 +112,10 @@ impl Navigator<'_> {
                 let last = (movement == Movement::LineRightmost) != reversed;
                 let junction = if last { model.cells.len() } else { 0 };
                 Some(self.caret_of(node, &model.arrive(junction, None)))
+            }
+            Movement::LineInlineStart => Some(self.caret_of(node, &model.arrive(0, None))),
+            Movement::LineInlineEnd => {
+                Some(self.caret_of(node, &model.arrive(model.cells.len(), None)))
             }
             Movement::BlockStart => self.place(node, 0),
             Movement::BlockEnd => self.place(node, len),

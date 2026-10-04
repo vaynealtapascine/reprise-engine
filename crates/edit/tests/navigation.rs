@@ -29,7 +29,10 @@ fn rect_then_hit_gives_the_caret_back_in_every_hostile_fixture() {
             assert_eq!(
                 (back.page, back.rect),
                 (rect.page, rect.rect),
-                "{name}: rect-hit-rect preserves the visual position"
+                "{name}: {caret:?} on {:?} -> {:?} on {:?}: rect-hit-rect preserves the visual position",
+                rect.line,
+                hit.caret,
+                hit.line
             );
             // Carets drawn in exactly the same place (zero-height lines
             // stacked on one another, a note over text) can't be told apart
@@ -346,4 +349,31 @@ fn cluster_subdivision_adds_in_wide_integer_space_before_saturating() {
     assert_eq!(cells[2].x1, Length::MAX);
     assert_eq!(cells[0].x1, cells[1].x0);
     assert_eq!(cells[1].x1, cells[2].x0);
+}
+
+#[test]
+fn spiral_strip_boundaries_hit_the_drawn_affinity_after_inverse_rounding() {
+    let fixture = hostile::spiral_text().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let nav = Navigator::semantic(&snapshot, &fixture.doc);
+    let node = nav.reading_order()[0];
+    let block = snapshot.block(node).unwrap();
+    let mut rounded_outside = 0;
+    for line in block.lines.iter().skip(1) {
+        let caret = Caret::new(node, line.text.start);
+        let drawn = nav.caret_rect(caret).unwrap();
+        let frame = snapshot.frame(line.frame).unwrap();
+        let local = frame.to_page.inverse().unwrap().apply(drawn.point());
+        rounded_outside += usize::from(local.x < line.rect.origin.x);
+        let hit = nav.hit(drawn.page, drawn.point()).unwrap();
+        assert_eq!(nav.caret_rect(hit.caret).unwrap().rect, drawn.rect);
+        assert_eq!(
+            hit.line, drawn.line,
+            "a wrapped boundary must keep its drawn strip"
+        );
+    }
+    assert!(
+        rounded_outside > 0,
+        "exercise rounded inverse points just outside their own strip"
+    );
 }

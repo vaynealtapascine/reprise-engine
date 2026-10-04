@@ -35,7 +35,7 @@ fn visual_movement_crosses_every_grapheme_of_every_line_once() {
                 mixed += 1;
             }
             // Right: one step per cell, each landing on the cell's right edge.
-            let right = walk(&nav, at, true);
+            let right = walk_inline(&nav, at, true);
             assert_eq!(right.len(), cells.len() + 1, "{name}: {at:?} steps right");
             assert_eq!(
                 x_of(&nav, &right[0]),
@@ -50,7 +50,7 @@ fn visual_movement_crosses_every_grapheme_of_every_line_once() {
                 );
             }
             // Left: the same, mirrored.
-            let left = walk(&nav, at, false);
+            let left = walk_inline(&nav, at, false);
             let n = cells.len();
             assert_eq!(left.len(), n + 1, "{name}: {at:?} steps left");
             assert_eq!(x_of(&nav, &left[0]), cells[n - 1].x1);
@@ -516,4 +516,132 @@ fn page_horizontal_movement_respects_mirrors_and_rotated_frames() {
             .offset,
         2
     );
+}
+
+#[test]
+fn document_navigation_uses_authored_reading_order_overrides() {
+    use reprise_doc::{SchemaRegistry, reading::before};
+    let (doc, ids) = doc_with(&["first", "second", "third"]);
+    for (a, b) in [(ids[2], ids[0]), (ids[0], ids[1])] {
+        doc.add_relation(&SchemaRegistry::builtin(), &before(a, b))
+            .unwrap();
+    }
+    doc.commit();
+    let snapshot = engine().layout(&doc);
+    let nav = Navigator::semantic(&snapshot, &doc);
+    assert_eq!(doc.blocks(), ids);
+    assert_eq!(nav.reading_order(), &[ids[2], ids[0], ids[1]]);
+    let start = nav
+        .move_caret(Caret::new(ids[0], 0), Movement::DocumentStart)
+        .unwrap();
+    assert_eq!(start.node, ids[2]);
+    let mut at = start;
+    let mut visited = vec![at.node];
+    let steps = snapshot
+        .blocks
+        .iter()
+        .map(|b| segment::grapheme_boundaries(&b.text).len())
+        .sum::<usize>();
+    for _ in 0..steps {
+        let next = nav.move_caret(at, Movement::NextGrapheme).unwrap();
+        if next == at {
+            break;
+        }
+        if next.node != at.node {
+            visited.push(next.node);
+        }
+        at = next;
+    }
+    assert_eq!(visited, [ids[2], ids[0], ids[1]]);
+    assert_eq!(
+        nav.move_caret(Caret::new(ids[0], 0), Movement::PreviousGrapheme)
+            .unwrap()
+            .node,
+        ids[2]
+    );
+    assert_eq!(
+        nav.move_caret(Caret::upstream(ids[2], 5), Movement::LineDown)
+            .unwrap()
+            .node,
+        ids[0]
+    );
+}
+
+#[test]
+fn inline_movement_follows_the_spiral_without_skipping_or_repeating_cells() {
+    let fixture = hostile::spiral_text().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let nav = Navigator::semantic(&snapshot, &fixture.doc);
+    let node = nav.reading_order()[0];
+    let block = snapshot.block(node).unwrap();
+    let frames = block
+        .lines
+        .iter()
+        .map(|line| line.frame)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(frames.len() > 20);
+    let at = LineRef { node, line: 0 };
+    let mut caret = nav
+        .move_caret(Caret::new(node, 0), Movement::LineInlineStart)
+        .unwrap();
+    let count = block
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(line, _)| nav.graphemes(LineRef { node, line }).len())
+        .sum::<usize>();
+    let mut cells = 0;
+    let mut transitions = 0;
+    let mut visited = std::collections::BTreeSet::new();
+    for _ in 0..count + block.lines.len() + 1 {
+        assert!(visited.insert(caret), "spiral traversal must not cycle");
+        let before = nav.caret_rect(caret).unwrap();
+        let next = nav.move_caret(caret, Movement::InlineForward).unwrap();
+        if next == caret {
+            break;
+        }
+        let after = nav.caret_rect(next).unwrap();
+        if before.line == after.line {
+            assert!(after.x >= before.x);
+            cells += 1;
+        } else {
+            assert_eq!(after.line.line, before.line.line + 1);
+            transitions += 1;
+        }
+        caret = next;
+    }
+    assert_eq!(cells, count);
+    assert_eq!(transitions, block.lines.len() - 1);
+    assert_eq!(caret.offset, block.text.len());
+    assert_eq!(
+        nav.caret_rect(caret).unwrap().line.line,
+        block.lines.len() - 1
+    );
+    visited.clear();
+    cells = 0;
+    transitions = 0;
+    for _ in 0..count + block.lines.len() + 1 {
+        assert!(
+            visited.insert(caret),
+            "reverse spiral traversal must not cycle"
+        );
+        let before = nav.caret_rect(caret).unwrap();
+        let next = nav.move_caret(caret, Movement::InlineBackward).unwrap();
+        if next == caret {
+            break;
+        }
+        let after = nav.caret_rect(next).unwrap();
+        if before.line == after.line {
+            assert!(after.x <= before.x);
+            cells += 1;
+        } else {
+            assert_eq!(after.line.line + 1, before.line.line);
+            transitions += 1;
+        }
+        caret = next;
+    }
+    assert_eq!(cells, count);
+    assert_eq!(transitions, block.lines.len() - 1);
+    assert_eq!(caret.offset, 0);
+    assert!(!nav.graphemes(at).is_empty());
 }

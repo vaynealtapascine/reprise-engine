@@ -429,6 +429,8 @@ before freezing. Existing contracts above are unchanged.
   node without moving or committing it. Undo restores its previous flag and
   position; `restore_block(id)` clears its flag in place. Ancestor flags hide the
   entire subtree. Restoring a parent does not clear independently deleted children.
+  This includes table, row and cell containers and their ordinary text descendants;
+  structural queries and layout see only the live portion of that topology.
   Loro physical tree tombstones also remain deleted. Relations and ranges observe
   both kinds of tombstone under their existing deletion policies.
 - **Collaboration and undo:** `Editor::merge` imports peer operations;
@@ -481,10 +483,16 @@ before freezing. Existing contracts above are unchanged.
   between logical lines. Singular transforms leave visual arrows unchanged.
   Line steps preserve `Cursor.goal_x` in frame space; inline and other movements
   clear it. Page-left/right line edges use the frame's first/last inline edge
-  when their page x coincides. Logical and visual line edges, block
+  when their page x coincides. `InlineForward`/`InlineBackward` traverse visual
+  cells toward increasing/decreasing frame inline x, independently of page
+  orientation; `LineInlineStart`/`LineInlineEnd` identify their end junctions.
+  These operations traverse turned lines and successive spiral strips.
+  Logical and visual line edges, block
   edges and document edges are explicit operations. Cross-block movement follows
-  `Document::document_order()` through `Navigator::semantic`; explicit reading
-  order plugs into `Navigator::new(snapshot, order)`. Repeated/unknown IDs are
+  `LayoutSnapshot::reading_order(&doc)` through `Navigator::semantic`, including
+  authored `reprise.reading-order` overrides. Pass the layout's document revision;
+  the snapshot query defines fallback for a mismatched revision.
+  A caller-supplied order uses `Navigator::new(snapshot, order)`. Repeated/unknown IDs are
   ignored; omitted laid-out blocks follow in snapshot order. At a document edge
   a valid caret remains unchanged. Unlaid-out content has no caret geometry.
 - **Selections and gestures (30, 31):** `Selection { anchor, focus }` produces

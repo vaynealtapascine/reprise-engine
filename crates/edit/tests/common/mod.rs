@@ -51,6 +51,15 @@ pub fn lines_of(snapshot: &LayoutSnapshot) -> Vec<LineRef> {
 
 /// Walks a line from one visual end to the other with visual steps.
 pub fn walk(nav: &Navigator, at: LineRef, right: bool) -> Vec<Caret> {
+    walk_with(nav, at, right, false)
+}
+
+/// Traverse frame-inline graphemes irrespective of page rotation/mirroring.
+pub fn walk_inline(nav: &Navigator, at: LineRef, forward: bool) -> Vec<Caret> {
+    walk_with(nav, at, forward, true)
+}
+
+fn walk_with(nav: &Navigator, at: LineRef, right: bool, inline: bool) -> Vec<Caret> {
     let edge = if right { Length::MIN } else { Length::MAX };
     let hit = nav.caret_at_x(at, edge).expect("a line has a caret");
     // A point cannot distinguish coincident zero-width cells. Explicit
@@ -58,7 +67,11 @@ pub fn walk(nav: &Navigator, at: LineRef, right: bool) -> Vec<Caret> {
     let mut caret = nav
         .move_caret(
             hit,
-            if right {
+            if inline && right {
+                Movement::LineInlineStart
+            } else if inline {
+                Movement::LineInlineEnd
+            } else if right {
                 Movement::LineLeftmost
             } else {
                 Movement::LineRightmost
@@ -66,7 +79,11 @@ pub fn walk(nav: &Navigator, at: LineRef, right: bool) -> Vec<Caret> {
         )
         .unwrap();
     let mut visited = vec![caret];
-    let movement = if right {
+    let movement = if inline && right {
+        Movement::InlineForward
+    } else if inline {
+        Movement::InlineBackward
+    } else if right {
         Movement::VisualRight
     } else {
         Movement::VisualLeft
@@ -86,19 +103,23 @@ pub fn x_of(nav: &Navigator, c: &Caret) -> Length {
     nav.caret_rect(*c).expect("a rect").x
 }
 
-pub const ALL_MOVEMENTS: [Movement; 16] = [
+pub const ALL_MOVEMENTS: [Movement; 20] = [
     Movement::NextGrapheme,
     Movement::PreviousGrapheme,
     Movement::NextWord,
     Movement::PreviousWord,
     Movement::VisualRight,
     Movement::VisualLeft,
+    Movement::InlineForward,
+    Movement::InlineBackward,
     Movement::LineUp,
     Movement::LineDown,
     Movement::LineStart,
     Movement::LineEnd,
     Movement::LineLeftmost,
     Movement::LineRightmost,
+    Movement::LineInlineStart,
+    Movement::LineInlineEnd,
     Movement::BlockStart,
     Movement::BlockEnd,
     Movement::DocumentStart,

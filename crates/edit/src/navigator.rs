@@ -10,10 +10,11 @@
 //! # Reading order (33)
 //!
 //! Movement from block to block follows a *reading order*, not the geometry:
-//! the semantic tree's document order by default ([`Navigator::semantic`]).
-//! An explicit override (the reading-order workstream's frame and block
-//! overrides) plugs in at [`Navigator::new`], which takes the order as a list
-//! of blocks. Nothing else in the navigator knows how the order was decided.
+//! the snapshot's document reading order by default ([`Navigator::semantic`]),
+//! including authored `reprise.reading-order` precedence.
+//! [`Navigator::semantic`] consumes [`LayoutSnapshot::reading_order`], so
+//! layout resolves document precedence before navigation. A caller-supplied
+//! order plugs in at [`Navigator::new`], as a list of blocks.
 //!
 //! # What a caret position is
 //!
@@ -35,7 +36,7 @@ use crate::caret::{Affinity, Caret, CaretRect, GraphemeCell, Hit};
 use crate::model::{BlockInfo, LineModel, Stop, gap};
 
 type InsideCandidate = (
-    (i64, (usize, usize)),
+    (i128, (usize, usize)),
     LineRef,
     Point<reprise_geom::FrameSpace>,
 );
@@ -98,9 +99,16 @@ impl<'a> Navigator<'a> {
         }
     }
 
-    /// A navigator that reads blocks in the semantic tree's order (33).
+    /// A navigator using the snapshot's semantic reading order and authored
+    /// precedence (33). Pass the same document revision used for layout.
     pub fn semantic(snapshot: &'a LayoutSnapshot, doc: &Document) -> Self {
-        Navigator::new(snapshot, doc.document_order())
+        Navigator::new(
+            snapshot,
+            snapshot
+                .reading_order(doc)
+                .into_iter()
+                .map(|step| step.line.node),
+        )
     }
 
     pub fn snapshot(&self) -> &'a LayoutSnapshot {
@@ -323,13 +331,26 @@ impl<'a> Navigator<'a> {
         let mut inside: Option<InsideCandidate> = None;
         for (frame, p) in &spaces {
             for r in &by_frame[frame] {
-                if extent(r, p) != Some((0, 0)) {
-                    continue;
-                }
                 let Some((model, _)) = self.line_model(r.node, r.line) else {
                     continue;
                 };
-                let distance = (i64::from(model.stop_at_x(p.x).x.0) - i64::from(p.x.0)).abs();
+                // Local distances from differently rotated/scaled strips are
+                // not comparable. The page-space caret centre also accounts
+                // for fixed-point inverse rounding at an overlapping strip.
+                let caret = self.caret_of(r.node, &model.stop_at_x(p.x));
+                let Some(rect) = self.caret_rect(caret) else {
+                    continue;
+                };
+                let centre = rect.point();
+                let dx = i128::from(centre.x.0) - i128::from(point.x.0);
+                let dy = i128::from(centre.y.0) - i128::from(point.y.0);
+                let distance = dx * dx + dy * dy;
+                // Inverting a rounded transform can put an exact drawn edge
+                // one unit outside its line. An exact page-space caret centre
+                // remains a candidate, even then.
+                if extent(r, p) != Some((0, 0)) && distance != 0 {
+                    continue;
+                }
                 let key = (distance, rank(r));
                 if inside.as_ref().is_none_or(|(k, ..)| key < *k) {
                     inside = Some((key, *r, *p));
