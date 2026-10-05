@@ -2,6 +2,27 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-05: hardening pass under way
+
+Five workstreams started at 08:00 UTC on Claude (Sonnet 5.5 and Opus 5.5). All stopped at
+08:14 on the account's usage limit, and Sol's usage is exhausted until 2026-10-10. Worktrees
+moved from D: to `F:/reprise-wt/<name>` (branches `hardening/<name>`), with uncommitted work
+carried over. Briefs are in `F:/reprise-wt/briefs/hardening-*.md`.
+
+| Workstream | State at the stop |
+| --- | --- |
+| **tables:** repeated header rows, row and column spans | `doc` commit: `CellInfo` spans, `set_table_row_header`, and a shared `resolve_grid` that clamps or drops malformed spans; uncommitted `layout/src/table_flow.rs` |
+| **pdfua:** tagged ordered PDF aiming at PDF/UA-1 | uncommitted, never compiled `pdf.rs` rewrite plus `pdf/tags.rs` |
+| **fuzz:** cross-crate scenario harness and oracles | uncommitted `crates/fuzz-harness` skeleton |
+| **incremental:** finer steps, native workers | research only |
+| **vertical:** `text-orientation`, vertical shaping, tate-chū-yoko | research only |
+
+**Review of the tables commit.** The design is sound: spans are interpreted in one pure
+function shared by layout, export and accessibility, and repeated headers stay derived.
+Spans live in the existing version-1 cell record, which has `deny_unknown_fields`, so an
+older reader drops a spanned cell instead of misreading it. The package feature declaration
+is therefore required, so older readers refuse the whole document instead.
+
 ## 2026-10-05: bindings merged
 
 **Done** (Sol): **bindings (11)**, the external contract the Reprise app is built on.
