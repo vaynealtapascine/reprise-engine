@@ -34,6 +34,8 @@ mod snapshot;
 pub mod solver;
 mod table;
 mod table_flow;
+#[cfg(test)]
+mod table_tests;
 mod template;
 
 use reprise_compose::{Composer, Greedy};
