@@ -11,3 +11,6 @@ loro.workspace = true
 icu_segmenter.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+icu_properties.workspace = true

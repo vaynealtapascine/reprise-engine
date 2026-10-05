@@ -24,6 +24,7 @@ use loro::cursor::{Cursor, PosType, Side};
 use loro::{ContainerTrait, LoroText};
 use serde::{Deserialize, Serialize};
 
+pub mod orientation;
 pub mod segment;
 
 /// What happens at an anchor's boundary when text is inserted exactly there.

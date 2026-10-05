@@ -103,7 +103,7 @@ horizontal frame they have no effect and nothing is reported, as in CSS. A
 the version ICU4X 2.3 pins elsewhere in the engine. It is generated from
 `VerticalOrientation-17.0.0.txt` by `crates/text/src/generate_orientation.py`,
 and a test checks every code point against ICU4X's compiled data, so the two
-can't drift apart. Lookup is a binary search over 600 ranges.
+can't drift apart. Lookup is a binary search over 181 merged ranges.
 
 Orientation is decided per grapheme cluster, from its first scalar, so a
 combining mark never gets a different orientation from its base.
