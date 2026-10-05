@@ -104,6 +104,21 @@ fn r(rect: Rect<FrameSpace>) -> Rect<reprise_geom::PageSpace> {
     Rect::new(p(rect.origin), rect.width, rect.height)
 }
 
+/// One glyph run or image of the default display lists, addressed for the PDF.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PdfReadingRun {
+    pub run: reprise_display::pdf::ReadingRun,
+    /// The bytes of the block's text the run draws; None for an image.
+    pub bytes: Option<std::ops::Range<usize>>,
+}
+
+/// The runs of one block in reading order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PdfReadingBlock {
+    pub node: reprise_doc::NodeId,
+    pub runs: Vec<PdfReadingRun>,
+}
+
 impl LayoutSnapshot {
     /// One display list per page.
     pub fn to_display_lists(&self, options: DisplayOptions) -> Vec<DisplayList> {
@@ -119,9 +134,18 @@ impl LayoutSnapshot {
         &self,
         doc: &reprise_doc::Document,
     ) -> Vec<reprise_display::pdf::ReadingRun> {
+        self.pdf_reading_blocks(doc)
+            .into_iter()
+            .flat_map(|block| block.runs.into_iter().map(|r| r.run))
+            .collect()
+    }
+
+    /// The same runs as [`Self::pdf_reading_order`], grouped by the block they
+    /// belong to, with the source bytes each draws. A read-only view for
+    /// exporters that build a structure tree over the reading order.
+    pub fn pdf_reading_blocks(&self, doc: &reprise_doc::Document) -> Vec<PdfReadingBlock> {
         use std::collections::BTreeMap;
-        let mut addresses =
-            BTreeMap::<crate::LineRef, Vec<(usize, reprise_display::pdf::ReadingRun)>>::new();
+        let mut addresses = BTreeMap::<crate::LineRef, Vec<PdfReadingRun>>::new();
         let mut groups = vec![0usize; self.pages.len()];
         for (frame_index, frame) in self.frames.iter().enumerate() {
             let Some(group) = groups.get_mut(frame.page) else {
@@ -140,39 +164,43 @@ impl LayoutSnapshot {
                         line: line_index,
                     };
                     if block.image.is_some() {
-                        addresses.entry(at).or_default().push((
-                            0,
-                            reprise_display::pdf::ReadingRun {
+                        addresses.entry(at).or_default().push(PdfReadingRun {
+                            run: reprise_display::pdf::ReadingRun {
                                 page: frame.page,
                                 path: vec![*group, child],
                             },
-                        ));
+                            bytes: None,
+                        });
                         child = child.saturating_add(1);
                     }
                     for run in &line.runs {
-                        addresses.entry(at).or_default().push((
-                            run.range.start,
-                            reprise_display::pdf::ReadingRun {
+                        addresses.entry(at).or_default().push(PdfReadingRun {
+                            run: reprise_display::pdf::ReadingRun {
                                 page: frame.page,
                                 path: vec![*group, child],
                             },
-                        ));
+                            bytes: Some(run.range.clone()),
+                        });
                         child = child.saturating_add(1);
                     }
                 }
             }
             *group = group.saturating_add(1);
         }
-        self.reading_order(doc)
-            .into_iter()
-            .flat_map(|step| {
-                let mut runs = addresses.remove(&step.line).unwrap_or_default();
-                runs.sort_by_key(|(start, _)| *start);
-                runs.into_iter().map(|(_, key)| key)
-            })
-            .collect()
+        let mut blocks: Vec<PdfReadingBlock> = Vec::new();
+        for step in self.reading_order(doc) {
+            let mut runs = addresses.remove(&step.line).unwrap_or_default();
+            runs.sort_by_key(|r| r.bytes.as_ref().map_or(0, |b| b.start));
+            match blocks.last_mut() {
+                Some(last) if last.node == step.line.node => last.runs.extend(runs),
+                _ => blocks.push(PdfReadingBlock {
+                    node: step.line.node,
+                    runs,
+                }),
+            }
+        }
+        blocks
     }
-
     /// The display list of one page; empty if there is no such page.
     pub fn to_display_list(&self, page: usize, options: DisplayOptions) -> DisplayList {
         let Some(size) = self.pages.get(page) else {

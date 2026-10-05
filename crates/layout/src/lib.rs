@@ -42,7 +42,7 @@ use reprise_geom::Length;
 use reprise_shape::{HarfRust, ShapingAdapter};
 use serde::{Deserialize, Serialize};
 
-pub use display::DisplayOptions;
+pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
     PageLayout, PositionedRun, RelationLayout, RelationStatus, Resolution, Subject, TargetLayout,
