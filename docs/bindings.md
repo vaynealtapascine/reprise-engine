@@ -123,7 +123,9 @@ Absent node IDs give `bindings.id`; valid unplaced blocks give
 `bindings.layout-required`. Invalid byte/cluster offsets give `bindings.invalid`.
 New sessions define the empty-name base style with `serif`, 10 pt size and 1.2 em
 line height. Opening a package adds it only if absent; authored definitions survive.
-Default-styled text needs no frontend font registration. Legacy named families
+Default-styled text needs no frontend font registration. The base intentionally
+selects the legacy `serif` generic, so it has no substitution warning; explicit
+family chains retain per-grapheme coverage diagnostics. Legacy named families
 that are unavailable use the serif generic default with `font.fallback` (Warning).
 
 Fonts use frontend family aliases, integer weight/style/stretch descriptors and

@@ -200,6 +200,10 @@ fn itemize_inner(
                                 matched.face
                             })
                     }
+                } else if let Some(generic) = GenericFamily::parse(family) {
+                    // An authored generic is an intentional engine default,
+                    // not a substitution for an unavailable named family.
+                    Some(fonts.generic(generic))
                 } else {
                     fonts.by_family(family)
                 };
@@ -475,6 +479,30 @@ mod tests {
         assert_eq!(out.items[1].range, 1..2);
         assert_eq!(codes_of(&out.notes), ["font.fallback"]);
         assert_eq!(out.notes[0].bytes, Some(0..1));
+    }
+
+    #[test]
+    fn legacy_generic_family_is_available_without_a_substitution() {
+        let fonts = FontStore::default();
+        let text = "office ffi אבג";
+        let styles = [run(0..text.len(), &["serif"])];
+        let out = itemize(
+            &ParagraphInput {
+                text,
+                styles: &styles,
+                direction: None,
+            },
+            &fonts,
+        );
+        assert!(!out.items.is_empty());
+        assert!(
+            out.items
+                .iter()
+                .all(|i| i.face == *fonts.generic(GenericFamily::Serif).id())
+        );
+        assert!(out.notes.is_empty());
+        assert_eq!(out.items.first().unwrap().range.start, 0);
+        assert_eq!(out.items.last().unwrap().range.end, text.len());
     }
 
     #[test]

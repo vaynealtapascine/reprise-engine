@@ -13,7 +13,7 @@ fn ensure_base_style(doc: &Document) -> Result<()> {
         doc.define_style(
             "",
             &reprise_doc::Style {
-                families: Some(vec!["serif".into()]),
+                family: Some("serif".into()),
                 ..reprise_doc::default_style()
             },
         )?;

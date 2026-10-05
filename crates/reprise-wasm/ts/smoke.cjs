@@ -52,7 +52,7 @@ finish(doc);
 assert.ok(!doc.diagnostics().data.some(note => note.code === "style.function-failed" || note.code === "plugin.trap"));
 // Default style needs neither a family chain nor host font registration.
 const defaultDoc = ws.create(p({ document_id: "10112233445566778899aabbccddeeff", peer_id: "21" }));
-const defaultNode = defaultDoc.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "office ffi café", style: { families: null, size: null, line_height: null } }] })).data.blocks[0];
+const defaultNode = defaultDoc.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "office ffi café אבג مرحبا é", style: { families: null, size: null, line_height: null } }] })).data.blocks[0];
 finish(defaultDoc);
 assert.ok(defaultDoc.diagnostics().data.every(note => note.severity === "info"));
 assert.ok(defaultDoc.copy(p({ anchor: { node: defaultNode, offset: 0, affinity: "downstream" }, focus: { node: defaultNode, offset: 6, affinity: "upstream" } })).data.bytes instanceof Uint8Array);

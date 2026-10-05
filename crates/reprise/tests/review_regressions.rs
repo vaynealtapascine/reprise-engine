@@ -50,7 +50,7 @@ fn selection(node: &str, len: u32) -> Payload<Selection> {
 #[test]
 fn default_text_works_without_font_registration_and_after_reopen() {
     let mut s = session("1");
-    let node = insert(&mut s, "office ffi café");
+    let node = insert(&mut s, "office ffi café אבג مرحبا e\u{301}");
     finish(&mut s, LayoutOptions::default());
     assert!(
         s.diagnostics()
@@ -127,15 +127,13 @@ fn open_supplies_missing_base_but_preserves_existing_authored_base() {
             &reprise_format::MigrationRegistry::builtin(),
         )
         .unwrap();
-        assert_eq!(
-            opened
-                .editable_document()
-                .unwrap()
-                .style("")
-                .unwrap()
-                .families,
-            Some(vec![if authored { "monospace" } else { "serif" }.into()])
-        );
+        let base = opened.editable_document().unwrap().style("").unwrap();
+        if authored {
+            assert_eq!(base.families, Some(vec!["monospace".into()]));
+        } else {
+            assert_eq!(base.family.as_deref(), Some("serif"));
+            assert_eq!(base.families, None);
+        }
     }
 }
 

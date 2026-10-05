@@ -222,7 +222,8 @@ Codes in use:
     family selection reports `font.fallback` (Warning). Legacy `itemize` and
     single-family documents keep availability-only selection when a named face
     exists; if none exists they use the serif generic default and report
-    `font.fallback` (Warning), retaining all text.
+    `font.fallback` (Warning), retaining all text. An authored legacy generic
+    selects its engine default directly without a substitution diagnostic.
     Explicit-chain runs use a grapheme's base scalar script/level even when
     a combining mark has its own script, preserving adapter cluster boundaries.
 
@@ -744,7 +745,8 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
   paste and plugin edits use the editing kernel, including atomic validation,
   position effects and per-peer undo/redo. Adding plugin schemas retains undo.
   Create/open define the empty-name base style (serif, 10 pt, 1.2 em) only when
-  absent; authored definitions are preserved. Default text needs no font import.
+  absent; authored definitions are preserved. The base directly selects the legacy
+  serif generic without substitution warnings. Default text needs no font import.
   Valid unplaced selection endpoints return `bindings.layout-required`, absent
   node IDs return `bindings.id`, and invalid offsets return `bindings.invalid`.
   Compatible newer packages return `bindings.read-only`; the facade currently
