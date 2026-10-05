@@ -22,3 +22,6 @@ reprise-clipboard.workspace = true
 reprise-plugin.workspace = true
 reprise-compose.workspace = true
 ts-rs.workspace = true
+
+[dev-dependencies]
+lopdf.workspace = true

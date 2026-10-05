@@ -2,12 +2,14 @@
 // Compile as ES modules and deploy beside wasm-bindgen's web output.
 import init, { Workspace, DocumentSession } from "./reprise_wasm.js";
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
-  DisplayPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration } from "./types.js";
+  DisplayPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
   | { kind: "open"; request: Payload<Open>; bytes: Uint8Array }
   | { kind: "font"; request: Payload<FontDeclaration>; bytes: Uint8Array }
+  | { kind: "asset"; request: Payload<AssetDeclaration>; bytes: Uint8Array }
+  | { kind: "image"; request: Payload<ImageInsert> }
   | { kind: "edit"; request: Payload<Transaction> }
   | { kind: "start"; request: Payload<LayoutOptions> }
   | { kind: "step"; job: number; budget: number }
@@ -57,6 +59,8 @@ scope.onmessage = (event: MessageEvent<Request>) => {
           release(); document?.free(); document = candidate;
           post({ id, kind: "state", state: document.state() }); break;
         case "font": current().declare_font(data.request, data.bytes); release(); post({ id, kind: "ack" }); break;
+        case "asset": current().register_asset(data.request, data.bytes); release(); post({ id, kind: "ack" }); break;
+        case "image": current().insert_image(data.request); release(); post({ id, kind: "state", state: current().state() }); break;
         case "edit": current().apply(data.request); release(); post({ id, kind: "state", state: current().state() }); break;
         case "start": release(); active = current().start_layout(data.request).data; post({ id, kind: "started", job: active }); break;
         case "step": {

@@ -743,6 +743,10 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
   persistent document identity and distinct peers. All editing transactions,
   paste and plugin edits use the editing kernel, including atomic validation,
   position effects and per-peer undo/redo. Adding plugin schemas retains undo.
+  Create/open define the empty-name base style (serif, 10 pt, 1.2 em) only when
+  absent; authored definitions are preserved. Default text needs no font import.
+  Valid unplaced selection endpoints return `bindings.layout-required`, absent
+  node IDs return `bindings.id`, and invalid offsets return `bindings.invalid`.
   Compatible newer packages return `bindings.read-only`; the facade currently
   cannot lay out the core's `DocumentAt` view and never exposes it as editable.
 - Layout jobs are owned, single-threaded continuations of the same incremental
@@ -763,8 +767,13 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
 - Clipboard supports versioned native fragments, plain/HTML selection projection
   with loss reports, and bounded plain/HTML/native paste. Export supports plain,
   HTML, native and PDF, always returning feature losses. Resources are declared,
-  enumerated and retrieved without I/O. Image bytes are opaque until the image
-  workstream's placement/display adapters are integrated.
+  enumerated and retrieved without I/O. Image registration installs bytes in
+  `Engine.assets`. `ImageInsert` and standalone `Command::InsertImage` insert a
+  content hash, alt text, optional physical dimensions and style through atomic
+  kernel paste. Image-kind `InsertBlock` without a record is refused. Display
+  image DTOs mirror the core's origin-based rectangles. Asset-aware SVG/PNG/PDF,
+  package save/open and native clipboard/export preserve available image bytes;
+  missing/corrupt references use the core's diagnosed placeholders.
 - Plugins are loaded against explicit content pins, manifests, grants and limits;
   functions, geometry and relation schemas can be installed. Editing plugins
   receive only explicit node handles and commit staged insertions atomically.

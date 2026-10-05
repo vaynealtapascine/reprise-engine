@@ -37,6 +37,9 @@ pub fn declarations() -> String {
     text.push_str(&Block::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
+    text.push_str(&ImageInsert::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
     text.push_str(&BlockKind::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
@@ -164,6 +167,9 @@ pub fn declarations() -> String {
     text.push('\n');
     text.push_str("export ");
     text.push_str(&PluginEdit::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&DisplayRect::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
     text.push_str(&Point::decl(&cfg));

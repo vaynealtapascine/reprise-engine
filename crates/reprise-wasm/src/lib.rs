@@ -75,6 +75,8 @@ extern "C" {
     pub type TextImportPayload;
     #[wasm_bindgen(typescript_type = "Payload<Transaction>")]
     pub type TransactionPayload;
+    #[wasm_bindgen(typescript_type = "Payload<ImageInsert>")]
+    pub type ImageInsertPayload;
     #[wasm_bindgen(typescript_type = "Payload<Array<Diagnostic>>")]
     pub type ListDiagnosticPayload;
     #[wasm_bindgen(typescript_type = "Payload<Array<PageRect>>")]
@@ -303,6 +305,12 @@ impl WasmDocument {
     }
     pub fn apply(&mut self, request: &TransactionPayload) -> Result<AppliedPayload, JsValue> {
         Ok(encode(self.inner.apply(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn insert_image(
+        &mut self,
+        request: &ImageInsertPayload,
+    ) -> Result<AppliedPayload, JsValue> {
+        Ok(encode(self.inner.insert_image(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn undo(&mut self) -> Result<BooleanPayload, JsValue> {
         Ok(encode(self.inner.undo())?.unchecked_into())

@@ -62,11 +62,25 @@ pub(crate) fn kind(k: BlockKind) -> reprise_doc::BlockKind {
     match k {
         BlockKind::Paragraph => reprise_doc::BlockKind::Paragraph,
         BlockKind::Annotation => reprise_doc::BlockKind::Annotation,
+        BlockKind::Image => reprise_doc::BlockKind::Image,
     }
 }
 pub(crate) fn command(c: &Command) -> Result<reprise_edit::Command> {
     use reprise_edit::Command as C;
     Ok(match c {
+        Command::InsertImage { .. } => {
+            return Err(Error::Invalid(
+                "image insertion must be its own transaction".into(),
+            ));
+        }
+        Command::InsertBlock {
+            block_kind: BlockKind::Image,
+            ..
+        } => {
+            return Err(Error::Invalid(
+                "use insert-image with an asset and alt text".into(),
+            ));
+        }
         Command::AddRelation { relation: r } => C::AddRelation {
             relation: relation(r)?,
         },

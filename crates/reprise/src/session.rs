@@ -6,6 +6,22 @@ use reprise_layout::{Engine, LayoutSnapshot};
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 
+// InsertBlock's empty named style is the session base. Preserve an existing
+// definition, including custom authored defaults in a package.
+fn ensure_base_style(doc: &Document) -> Result<()> {
+    if doc.style("").is_none() {
+        doc.define_style(
+            "",
+            &reprise_doc::Style {
+                families: Some(vec!["serif".into()]),
+                ..reprise_doc::default_style()
+            },
+        )?;
+        doc.commit();
+    }
+    Ok(())
+}
+
 /// Workspace factory. Each document owns isolated font/plugin configuration.
 #[derive(Default)]
 pub struct Workspace;
@@ -18,6 +34,7 @@ impl Workspace {
         let id = cv::document_id(&r.document_id)?;
         let peer = cv::peer(&r.peer_id)?;
         let doc = Document::new(peer)?;
+        ensure_base_style(&doc)?;
         let package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
         Ok(DocumentSession::new(
             doc,
@@ -46,6 +63,9 @@ impl Workspace {
         }
         let mut engine = Engine::new(reprise_font::FontStore::default());
         opened.restore_fonts(&mut engine.fonts);
+        opened
+            .notes
+            .extend(opened.assets.restore_images(&mut engine.assets));
         let package = opened.package().clone();
         let id = package
             .document_id()
@@ -55,6 +75,7 @@ impl Workspace {
             .collect();
         let notes = opened.notes.clone();
         let doc = opened.into_document()?;
+        ensure_base_style(&doc)?;
         Ok(DocumentSession::new(
             doc,
             package,
@@ -138,6 +159,7 @@ impl DocumentSession {
                 kind: match block.kind {
                     reprise_doc::BlockKind::Paragraph => BlockKind::Paragraph,
                     reprise_doc::BlockKind::Annotation => BlockKind::Annotation,
+                    reprise_doc::BlockKind::Image => BlockKind::Image,
                 },
                 text: block.text.to_string(),
             });
@@ -161,6 +183,9 @@ impl DocumentSession {
     }
     pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>> {
         let r = validate(request)?;
+        if let [Command::InsertImage { image }] = r.commands.as_slice() {
+            return self.insert_image(&Payload::new(image.clone()));
+        }
         if r.commands.len() > reprise_edit::MAX_COMMANDS {
             return Err(Error::Limit("transaction commands".into()));
         }
@@ -181,6 +206,40 @@ impl DocumentSession {
         let applied = self.editor.apply(&commands.into())?;
         self.snapshot = None;
         Ok(Payload::new(cv::applied(applied, Vec::new())))
+    }
+    /// Insert one image through the editing kernel's atomic fragment transaction.
+    pub fn insert_image(&mut self, request: &Payload<ImageInsert>) -> Result<Payload<Applied>> {
+        let r = validate(request)?;
+        if r.asset.len() != 64
+            || !r
+                .asset
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(Error::InvalidId(r.asset.clone()));
+        }
+        if r.alt.len() > reprise_edit::MAX_TRANSACTION_BYTES {
+            return Err(Error::Limit("image alt text".into()));
+        }
+        let style = cv::style(&r.style)?;
+        let doc = Document::new(1)?;
+        ensure_base_style(&doc)?;
+        let image = reprise_doc::image::ImageData {
+            asset: r.asset.clone(),
+            width: r.width.map(|x| reprise_doc::LengthExpr::Pt(cv::length(x))),
+            height: r.height.map(|x| reprise_doc::LengthExpr::Pt(cv::length(x))),
+        };
+        let node = doc.append_image("", &image, &r.alt)?;
+        doc.set_overrides(node, &style)?;
+        doc.commit();
+        let fragment = reprise_clipboard::copy_all(
+            &doc,
+            "bindings-image-insert",
+            &self.engine.schemas,
+            None,
+            None,
+        )?;
+        self.paste_fragment(fragment, r.at.as_ref())
     }
     pub fn undo(&mut self) -> Result<Payload<bool>> {
         let changed = self.editor.undo()?;
@@ -229,7 +288,7 @@ impl DocumentSession {
             hash: id.hash,
         }))
     }
-    /// Bundles immutable resources; image placement is reserved for the image workstream.
+    /// Bundle an immutable resource and install image bytes in the engine store.
     pub fn register_asset(
         &mut self,
         request: &Payload<AssetDeclaration>,
@@ -277,7 +336,13 @@ impl DocumentSession {
             extra: BTreeMap::new(),
         });
         bundles.insert(section, bytes.to_vec());
+        // Preflight all fallible resource work before publishing either store.
+        let mut store = self.engine.assets.clone();
+        if r.kind == AssetKind::Image {
+            store.insert(bytes).map_err(|e| Error::Limit(e.into()))?;
+        }
         self.package.set_assets(assets, bundles)?;
+        self.engine.assets = store;
         self.reconfigure()?;
         Ok(Payload::new(hash))
     }
@@ -337,10 +402,27 @@ impl DocumentSession {
     }
     fn checked_caret(&self, c: &Caret) -> Result<reprise_edit::Caret> {
         let c = cv::caret(c)?;
+        let block = self
+            .doc()
+            .block(c.node)
+            .map_err(|_| Error::InvalidId(c.node.to_string()))?;
+        let text = block.text.to_string();
+        if c.offset > text.len() || !text.is_char_boundary(c.offset) {
+            return Err(Error::Invalid(
+                "caret is not at a UTF-8 boundary in its block".into(),
+            ));
+        }
+        if self
+            .current()?
+            .block(c.node)
+            .is_none_or(|b| b.lines.is_empty())
+        {
+            return Err(Error::NoLayout);
+        }
         self.navigator()?
             .normalize(c)
             .filter(|normalized| normalized.offset == c.offset)
-            .ok_or_else(|| Error::InvalidId(c.node.to_string()))
+            .ok_or_else(|| Error::Invalid("caret is not at a laid-out cluster boundary".into()))
     }
     pub fn move_cursor(&self, request: &Payload<Move>) -> Result<Payload<Cursor>> {
         let r = validate(request)?;
@@ -404,7 +486,7 @@ impl DocumentSession {
     }
     pub fn copy(&self, request: &Payload<Selection>) -> Result<Payload<Bytes>> {
         let selection = self.selection(validate(request)?)?;
-        let fragment = reprise_clipboard::copy_selection(
+        let mut fragment = reprise_clipboard::copy_selection(
             self.doc(),
             &self.document_id,
             &selection,
@@ -412,6 +494,7 @@ impl DocumentSession {
             &self.engine.schemas,
             Some(&self.engine.fonts),
         )?;
+        fragment.attach_images(&self.engine.assets)?;
         Ok(Payload::new(Bytes {
             bytes: fragment.encode()?,
         }))
@@ -420,7 +503,7 @@ impl DocumentSession {
     pub fn copy_as(&self, request: &Payload<CopyAs>) -> Result<Payload<Exported>> {
         let r = validate(request)?;
         let selection = self.selection(&r.selection)?;
-        let fragment = reprise_clipboard::copy_selection(
+        let mut fragment = reprise_clipboard::copy_selection(
             self.doc(),
             &self.document_id,
             &selection,
@@ -428,7 +511,9 @@ impl DocumentSession {
             &self.engine.schemas,
             Some(&self.engine.fonts),
         )?;
+        fragment.attach_images(&self.engine.assets)?;
         let doc = Document::new(1)?;
+        ensure_base_style(&doc)?;
         let mut editor = reprise_edit::Editor::new(doc, self.engine.schemas.clone());
         let projected = fragment.paste(
             &mut editor,
@@ -506,8 +591,31 @@ impl DocumentSession {
             .map(|c| cv::caret(c).map(|c| (c.node, c.offset)))
             .transpose()?;
         fragment.validate()?;
+        // Resource installation must not fail after authored state has committed.
+        let fonts = fragment
+            .resources
+            .values()
+            .filter_map(|resource| {
+                if let reprise_clipboard::ResourceKind::Font { declaration, .. } = &resource.kind {
+                    Some(
+                        reprise_font::Face::declared(
+                            resource.bytes.clone(),
+                            Some(declaration.clone()),
+                        )
+                        .map_err(|e| Error::Invalid(e.to_string())),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut assets = self.engine.assets.clone();
+        fragment.install_assets(&mut assets)?;
         let result = fragment.paste(&mut self.editor, at, &self.document_id)?;
-        fragment.install_fonts(&mut self.engine.fonts)?;
+        for face in fonts {
+            self.engine.fonts.add(face);
+        }
+        self.engine.assets = assets;
         self.reconfigure()?;
         Ok(Payload::new(cv::applied(result.applied, result.notes)))
     }
@@ -542,6 +650,7 @@ impl DocumentSession {
             .package
             .with_document(self.doc(), PersistenceMode::History)?;
         package.embed_layout_fonts(self.current()?, &self.engine.fonts)?;
+        package.embed_document_images(self.doc(), &self.engine.assets)?;
         let bytes = package.save()?;
         self.package = package;
         Ok(Payload::new(Bytes { bytes }))
@@ -549,11 +658,17 @@ impl DocumentSession {
     pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>> {
         let format = validate(request)?;
         use reprise_clipboard::Exporter;
+        let native = reprise_clipboard::NativeWithAssets {
+            assets: &self.engine.assets,
+        };
+        let pdf = reprise_clipboard::PdfWithAssets {
+            assets: &self.engine.assets,
+        };
         let exporter: &dyn Exporter = match format {
             ExportFormat::PlainText => &reprise_clipboard::PlainText,
             ExportFormat::Html => &reprise_clipboard::Html,
-            ExportFormat::Native => &reprise_clipboard::Native,
-            ExportFormat::Pdf => &reprise_clipboard::Pdf,
+            ExportFormat::Native => &native,
+            ExportFormat::Pdf => &pdf,
         };
         let snapshot = if *format == ExportFormat::Pdf {
             Some(self.current()?)
@@ -631,7 +746,12 @@ impl DocumentSession {
     pub fn svg(&self, page: u32) -> Result<Payload<String>> {
         let list = self.display_core(page)?;
         Ok(Payload::new(
-            reprise_display::svg::render(&list, &self.engine.fonts).map_err(|e| Error::Core {
+            reprise_display::svg::render_with_assets(
+                &list,
+                &self.engine.fonts,
+                &self.engine.assets,
+            )
+            .map_err(|e| Error::Core {
                 code: "bindings.render".into(),
                 severity: Severity::Error,
                 message: e.to_string(),
@@ -652,14 +772,18 @@ impl DocumentSession {
         if scale == 0 || scale > 16_000 || w.saturating_mul(h) > 16_000_000 {
             return Err(Error::Limit("raster pixels/scale".into()));
         }
-        let bytes =
-            reprise_display::png::render(&list, &self.engine.fonts, scale_permille as f32 / 1000.0)
-                .map_err(|e| Error::Core {
-                    code: "bindings.render".into(),
-                    severity: Severity::Error,
-                    message: e.to_string(),
-                    command: None,
-                })?;
+        let bytes = reprise_display::png::render_with_assets(
+            &list,
+            &self.engine.fonts,
+            &self.engine.assets,
+            scale_permille as f32 / 1000.0,
+        )
+        .map_err(|e| Error::Core {
+            code: "bindings.render".into(),
+            severity: Severity::Error,
+            message: e.to_string(),
+            command: None,
+        })?;
         Ok(Payload::new(Bytes { bytes }))
     }
     pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>> {

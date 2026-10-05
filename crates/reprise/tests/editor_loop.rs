@@ -208,3 +208,149 @@ fn native_display_golden_is_shared_with_wasm_smoke() {
     let json = s.display_json(0).unwrap().data;
     assert_eq!(json, include_str!("display.json").trim_end());
 }
+
+#[test]
+fn image_editor_loop_only_through_the_facade() {
+    let mut s = session("11");
+    let bytes = include_bytes!("../../../fixtures/images/red-1x1.png");
+    let hash = s
+        .register_asset(
+            &Payload::new(AssetDeclaration {
+                id: "red".into(),
+                kind: AssetKind::Image,
+            }),
+            bytes,
+        )
+        .unwrap()
+        .data;
+    let alt = "A red café image";
+    let image = ImageInsert {
+        at: None,
+        asset: hash.clone(),
+        alt: alt.into(),
+        width: Some(20 * 1024),
+        height: Some(20 * 1024),
+        style: Style::default(),
+    };
+    let node = s
+        .apply(&Payload::new(Transaction {
+            commands: vec![Command::InsertImage {
+                image: image.clone(),
+            }],
+        }))
+        .unwrap()
+        .data
+        .blocks[0]
+        .clone();
+    layout(&mut s);
+    let before = s.display_json(0).unwrap().data;
+    assert!(before.contains("\"type\":\"image\""));
+    assert!(before.contains(&hash));
+    assert!(before.contains(alt));
+    assert!(
+        s.diagnostics()
+            .data
+            .iter()
+            .all(|d| d.severity == Severity::Info)
+    );
+    let svg = s.svg(0).unwrap().data;
+    assert!(svg.contains("data:image/png;base64,"));
+    let png = s.png(0, 1000).unwrap().data.bytes;
+    assert!(png.starts_with(b"\x89PNG"));
+    let pdf = s.export(&Payload::new(ExportFormat::Pdf)).unwrap().data;
+    let parsed = lopdf::Document::load_mem(&pdf.content.bytes).unwrap();
+    assert!(
+        parsed
+            .objects
+            .values()
+            .any(|object| object.as_stream().is_ok_and(|stream| stream
+                .dict
+                .get(b"Subtype")
+                .is_ok_and(|value| value.as_name().ok() == Some(b"Image"))))
+    );
+    assert_eq!(
+        pdf.losses
+            .iter()
+            .find(|l| l.code == "export.assets")
+            .unwrap()
+            .disposition,
+        Disposition::Preserved
+    );
+    let plain = s
+        .export(&Payload::new(ExportFormat::PlainText))
+        .unwrap()
+        .data;
+    assert_eq!(String::from_utf8(plain.content.bytes).unwrap(), alt);
+    let caret = |offset, affinity| Caret {
+        node: node.clone(),
+        offset,
+        affinity,
+    };
+    let clip = s
+        .copy(&Payload::new(Selection {
+            anchor: caret(0, Affinity::Downstream),
+            focus: caret(alt.len() as u32, Affinity::Upstream),
+        }))
+        .unwrap()
+        .data
+        .bytes;
+    let mut target = session("12");
+    target
+        .paste(&Payload::new(Paste { at: None }), &clip)
+        .unwrap();
+    layout(&mut target);
+    assert_eq!(target.svg(0).unwrap().data, svg);
+    assert_eq!(target.png(0, 1000).unwrap().data.bytes, png);
+    assert!(target.undo().unwrap().data);
+    assert!(target.state().unwrap().data.blocks.is_empty());
+    assert!(target.redo().unwrap().data);
+    layout(&mut target);
+    assert_eq!(target.display_json(0).unwrap().data, before);
+    let saved = target.save().unwrap().data.bytes;
+    let mut opened = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "13".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    layout(&mut opened);
+    assert_eq!(opened.display_json(0).unwrap().data, before);
+    assert_eq!(opened.svg(0).unwrap().data, svg);
+    assert_eq!(opened.png(0, 1000).unwrap().data.bytes, png);
+    let resources = opened.resources().unwrap().data;
+    let resource = resources.iter().find(|r| r.hash == hash).unwrap();
+    assert_eq!(
+        opened
+            .resource_bytes(&Payload::new(resource.id.clone()))
+            .unwrap()
+            .data
+            .bytes,
+        bytes
+    );
+    let native = opened
+        .export(&Payload::new(ExportFormat::Native))
+        .unwrap()
+        .data;
+    assert_eq!(
+        native
+            .losses
+            .iter()
+            .find(|l| l.code == "export.assets")
+            .unwrap()
+            .disposition,
+        Disposition::Preserved
+    );
+    let mut imported = session("14");
+    imported
+        .paste(&Payload::new(Paste { at: None }), &native.content.bytes)
+        .unwrap();
+    layout(&mut imported);
+    assert_eq!(imported.svg(0).unwrap().data, svg);
+    // Pixel output differs from the same authored image without its resource.
+    let mut missing = session("15");
+    missing.insert_image(&Payload::new(image)).unwrap();
+    layout(&mut missing);
+    assert_ne!(missing.png(0, 1000).unwrap().data.bytes, png);
+}

@@ -103,7 +103,7 @@ releases it; WASM clients call `release_job` after completion/cancellation.
 
 | Area | Native `DocumentSession` methods (WASM uses the same names) |
 | --- | --- |
-| Authored state | `state`, `apply`, `undo`, `redo` |
+| Authored state | `state`, `apply`, `insert_image`, `undo`, `redo` |
 | Resources | `declare_font`, `register_asset`, `resources`, `resource_bytes` |
 | Layout | `start_layout`; native job `step`, `cancel`, `display_page`; WASM `step`, `cancel`, `partial_page`, `release_job` |
 | Navigation | `move_cursor`, `caret_rect`, `hit_test`, `selection_rects` |
@@ -119,7 +119,12 @@ Copies/promotions of tables and relation edges keep the clipboard's policies and
 loss diagnostics. `copy_as` uses an isolated fragment projection, so it does not
 mutate the original document or pollute its undo history. `Cursor.goal_x` survives
 line movement; selections retain anchor/focus and upstream/downstream affinities.
-Invalid/unlaid-out caret endpoints are typed errors rather than empty success.
+Absent node IDs give `bindings.id`; valid unplaced blocks give
+`bindings.layout-required`. Invalid byte/cluster offsets give `bindings.invalid`.
+New sessions define the empty-name base style with `serif`, 10 pt size and 1.2 em
+line height. Opening a package adds it only if absent; authored definitions survive.
+Default-styled text needs no frontend font registration. Legacy named families
+that are unavailable use the serif generic default with `font.fallback` (Warning).
 
 Fonts use frontend family aliases, integer weight/style/stretch descriptors and
 collection indices. `save` finishes incremental layout if necessary and embeds
@@ -128,9 +133,18 @@ metadata, IDs, history and registered assets. Refreshed font/asset manifests are
 canonicalized with unknown fields retained. It never compacts automatically.
 `resources()` describes bundled/missing resources, hashes, font pins and optional
 external locations. `resource_bytes()` returns only verified bundles; the engine
-never resolves a path or URL. Generic defaults remain those of the core. Image
-registration is deliberately opaque; placement and image display variants must
-be connected after the parallel images workstream is integrated.
+never resolves a path or URL. Image registration installs immutable bytes in
+`Engine.assets`, keyed by the returned SHA-256. `insert_image(Payload<ImageInsert>)`
+and `Command::InsertImage { image }` accept that hash, collaborative alt text,
+optional integer physical width/height, style and insertion caret (`None` appends).
+The image command must be alone in its transaction, because it uses the kernel's
+atomic fragment paste; `InsertBlock` with image kind is refused without a record.
+Undo/redo covers the insertion. Missing/corrupt resources remain diagnosed
+placeholders. Display DTOs include image items with a renderer-shaped `DisplayRect`
+(`origin`, `width`, `height`), distinct from flat navigation rectangles. SVG/PNG/PDF
+use the engine asset store; package save embeds every live image reference and
+open restores verified bundles. Native copy/export attaches selected image bytes;
+paste preflights fonts/assets before committing and installs them atomically.
 
 Plugins require a SHA-256 pin plus declared imports, independent grants, phase,
 function signatures and explicit budgets. Installation supports functions,
@@ -163,7 +177,7 @@ The main thread drives explicit steps, leaving room for edits/cancellation betwe
 messages. There are no hidden threads, timers or unbounded pump loops.
 
 Every message is `{ version: 1, data: { id, kind, ... } }`. `id` is a caller
-correlation string. Request kinds are `create`, `open`, `font`, `edit`, `start`,
+correlation string. Request kinds are `create`, `open`, `font`, `asset`, `image`, `edit`, `start`,
 `step`, `cancel`, `save`, `sync-export`, `sync-import`, and `close`. Responses are
 `state`, `started`, `layout`, `saved`, `sync`, `ack`, or `error`.
 
@@ -177,7 +191,7 @@ correlation string. Request kinds are `create`, `open`, `font`, `edit`, `start`,
    and `sync` transfer owned output buffers; the sender no longer owns them.
 6. `cancel` acknowledges and releases the active job. `close` frees the session.
 
-Failed open/edit/font/sync requests preserve the existing valid session/job.
+Failed open/edit/font/asset/image/sync requests preserve the existing valid session/job.
 The example sends all covered pages on each step for clarity; a production host
 may choose dirty-page transport. It releases superseded/complete handles. The
 WASM class permits at most eight retained jobs and 64 loaded plugin handles;
@@ -196,9 +210,9 @@ codes; new capabilities can use new methods/types. Hosts pin crate/npm versions
 and exchange an agreed protocol version; v1 has no automatic negotiation.
 
 All boundary data is owned by the facade: **no internal types are re-exported**.
-The display DTO mirrors the frozen glyph/path/group wire schema, with an explicit
-conversion, and its native/WASM golden pins that conversion. New image display
-operations need an additive facade DTO/adapter when the image workstream lands.
+The display DTO mirrors the frozen glyph/path/group/image wire schema, with an
+explicit conversion. The native/WASM golden pins text conversion; image editor
+loops verify image DTOs, asset-aware rendering, clipboard and package round trips.
 Generated `types.d.ts` is checked against Rust DTOs by a native test. `API.txt`
 pins native public signatures; `reprise_wasm.d.ts` is generated by wasm-bindgen.
 Run the regeneration commands and inspect their diffs when making API changes.
@@ -302,13 +316,15 @@ node crates/reprise-wasm/ts/smoke.cjs <target_directory>/pkg-node
 
 Build that debug module with the same stack flag first. The smoke compares
 byte-identical display JSON with `crates/reprise/tests/display.json`, then tests
-copy/paste, undo, save/reopen, sync, typed Uint8Array channels, stale jobs, cyclic
+copy/paste, undo, save/reopen, sync, default text and images, typed Uint8Array
+channels, stale jobs, cyclic
 and throwing objects, getter snapshotting and plugins executing through wasmi
 inside WASM. The native facade-only editor test additionally covers RTL/ligature
 text, font declarations, visual movement, selections, PDF/plain loss reports and
-concurrent-peer convergence. Owned hostile fixtures live in the facade tests;
-the shared fixture list and every existing snapshot remain unchanged, respecting
-this workstream's file ownership.
+concurrent-peer convergence. Boundary hostile tests live in the facade. The review-authorized shared
+`font_legacy_missing` fixture adds layout/content goldens for serif substitution;
+every existing snapshot remains unchanged. The orchestrator's `boundary_fuzz.rs`
+is retained unchanged.
 
 New dependency licenses were checked in downloaded Cargo manifests: ts-rs and
 ts-rs-macros 12.0.1 and serde-wasm-bindgen 0.6.5 are MIT; termcolor 1.4.1 and

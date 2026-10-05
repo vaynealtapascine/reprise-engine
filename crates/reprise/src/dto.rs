@@ -94,6 +94,19 @@ pub struct Block {
 pub enum BlockKind {
     Paragraph,
     Annotation,
+    Image,
+}
+/// One transactional image insertion; `at: None` appends at document end.
+/// Physical dimensions use 1/1024 pt; absent dimensions use image metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ImageInsert {
+    pub at: Option<Caret>,
+    pub asset: String,
+    pub alt: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub style: Style,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
@@ -105,6 +118,10 @@ pub struct Style {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
+    /// Must be the only command, like native fragment paste in the kernel.
+    InsertImage {
+        image: ImageInsert,
+    },
     AddRelation {
         relation: Relation,
     },
@@ -484,6 +501,13 @@ pub struct Point {
     pub x: i32,
     pub y: i32,
 }
+/// Display geometry mirrors the frozen renderer JSON (navigation Rect is flat).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DisplayRect {
+    pub origin: Point,
+    pub width: i32,
+    pub height: i32,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Matrix {
     pub xx: i32,
@@ -538,6 +562,12 @@ pub struct Stroke {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum DisplayItem {
     Glyphs(GlyphRun),
+    Image {
+        asset: String,
+        rect: DisplayRect,
+        alt: String,
+        layer: Layer,
+    },
     Path {
         path: Vec<Segment>,
         fill: Option<[u8; 4]>,
