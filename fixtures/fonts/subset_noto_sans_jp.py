@@ -8,8 +8,8 @@ Requires fontTools 4.66.1 (`pip install fonttools==4.66.1`).
     python subset_noto_sans_jp.py NotoSansJP-Regular.otf NotoSansJP-VerticalSubset.otf
 
 The subset keeps the horizontal and vertical layout features listed below
-(including vert, vrt2, vkrn and vpal) and the vhea, vmtx and VORG tables, so tests exercise real vertical
-metrics. Noto Sans JP declares no Reserved Font Name, so the subset keeps its
+(including vert, vrt2, vkrn and vpal) and the vhea, vmtx and VORG tables, so
+tests exercise real vertical metrics. Noto Sans JP declares no Reserved Font Name, so the subset keeps its
 name under the SIL OFL 1.1.
 """
 
