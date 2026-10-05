@@ -704,3 +704,57 @@ fn concurrent_caret_pastes_with_host_ranges_converge() {
         engine.layout(b.document()).to_json()
     );
 }
+
+#[test]
+fn authored_endpoint_policies_survive_native_paste_host_reanchor_and_undo() {
+    use reprise_doc::text::{Affinity, Empty};
+    for text in ["", "\u{e9}\u{5d0}\u{5d1}"] {
+        for start in [Affinity::Before, Affinity::After] {
+            for end in [Affinity::Before, Affinity::After] {
+                for empty in [Empty::Keep, Empty::Missing] {
+                    let source = doc(1, text);
+                    let node = source.blocks()[0];
+                    let policy = RangePolicy { start, end, empty };
+                    let id = source.add_range(node, 0..text.len(), policy).unwrap();
+                    let copied = copy(&source);
+                    assert!(
+                        !copied
+                            .notes
+                            .iter()
+                            .any(|n| n.code == "clipboard.range-affinity")
+                    );
+                    if text.is_empty() && empty == Empty::Missing {
+                        assert!(copied.fragment.ranges.is_empty());
+                        continue;
+                    }
+                    assert_eq!(copied.fragment.ranges[0].policy, policy);
+                    let decoded = NativeFragment::decode(&copied.encode().unwrap()).unwrap();
+                    let target = doc(2, "host");
+                    let host = target.blocks()[0];
+                    let host_range = target.add_range(host, 0..4, policy).unwrap();
+                    let mut editor = Editor::new(target, SchemaRegistry::builtin());
+                    let pasted = editor
+                        .paste(&decoded.fragment, Some((host, 4)), "target")
+                        .unwrap();
+                    let new = pasted.ids.ranges[&id];
+                    assert_eq!(editor.document().range_policy(new).unwrap(), Some(policy));
+                    assert_eq!(
+                        editor.document().range_policy(host_range).unwrap(),
+                        Some(policy)
+                    );
+                    assert!(editor.undo().unwrap());
+                    assert_eq!(
+                        editor.document().range_policy(host_range).unwrap(),
+                        Some(policy)
+                    );
+                    assert!(editor.redo().unwrap());
+                    assert_eq!(editor.document().range_policy(new).unwrap(), Some(policy));
+                    assert_eq!(
+                        editor.document().range_policy(host_range).unwrap(),
+                        Some(policy)
+                    );
+                }
+            }
+        }
+    }
+}

@@ -31,6 +31,7 @@ mod history;
 mod lifecycle;
 mod page;
 mod persist;
+mod ranges;
 pub mod reading;
 mod region_schema;
 pub mod relation;
@@ -403,11 +404,7 @@ impl Document {
         meta.insert("node", node.to_string())?;
         meta.insert("start", start.encode())?;
         meta.insert("end", end.encode())?;
-        let empty = match policy.empty {
-            Empty::Missing => "missing",
-            Empty::Keep => "keep",
-        };
-        meta.insert("empty", empty)?;
+        ranges::write_policy(&meta, policy)?;
         Ok(RangeId(id))
     }
 
@@ -426,7 +423,11 @@ impl Document {
             Some(ValueOrContainer::Value(LoroValue::Binary(b))) => Anchor::decode(&b),
             _ => None,
         };
-        let keep_empty = get_str(&meta, "empty").as_deref() == Some("keep");
+        let keep_empty = match self.range_policy(id) {
+            Ok(Some(policy)) => policy.empty == Empty::Keep,
+            Ok(None) => get_str(&meta, "empty").as_deref() == Some("keep"),
+            Err(_) => return RangeState::Missing { node },
+        };
         let (Some(node), Some(start), Some(end)) = (node, anchor("start"), anchor("end")) else {
             return RangeState::Missing { node };
         };

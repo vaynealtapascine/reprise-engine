@@ -76,6 +76,18 @@ Codes in use:
         character was deleted.
 -   **`RangePolicy`:** start and end affinity, plus what an emptied range does
     (`Empty::Missing` or `Keep`). The presets are `EXPANDING`, `FIXED` and `POINT`.
+-   **Authored range policies (10, 12, 35):** Ranges persist authored start/end
+    affinities and empty policy alongside anchors. Clipboard preserves authored
+    policy at text endpoints. Legacy ranges without versioned policy use observable
+    cursor behavior and report `clipboard.range-affinity` Warning where the authored
+    affinity is ambiguous. `Document::add_range` keeps its signature;
+    `Document::range_policy(id) -> Result<Option<RangePolicy>, DocError>` returns
+    `None` only for a legacy range. New creation, staging and reanchoring write a
+    `policy1` JSON envelope with `version: 1`, `start`, `end` and `empty`. Unsupported
+    versions or malformed envelopes are refused and retained verbatim (34); range
+    resolution treats them as missing and copy refuses affected ranges. The legacy
+    `empty` field is read only when `policy1` is absent. Split/join retain their
+    existing anchor lifecycle semantics and preserve stored policies.
 -   **Loro stays inside.** `Text::from_loro` and `Text::loro` exist only for `reprise-doc`.
     No other crate touches Loro types.
 -   **Open:** words are derived at query time and never stored (10). Author-marked ranges
@@ -601,7 +613,7 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
 
 - `Fragment` is authored data in `reprise-doc::fragment`, version 1. Source IDs are
   labels. `copy_fragment` accepts whole subtrees or explicit UTF-8 byte ranges;
-  intersecting persistent ranges are clipped with their observable cursor policies.
+  intersecting persistent ranges are clipped with their authored policies (legacy ranges use observable cursor behavior).
   Styles include inherited parents. Copy-all also carries raw authored page setup. Kernel selections promote fully selected tables to subtrees; partial table selections flatten cell text with `clipboard.selection-table` Warning. Collapsed selections copy nothing.
 - Hosts supply a nonempty source/target namespace (normally the package DocumentId).
   Only equal namespaces authorize external relation targets. Peer equality does not.
@@ -630,7 +642,7 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
 - Native fragment limits: 4,096 blocks, 8,192 ranges/relations, 1,024 styles/templates,
   depth 64, 16 MiB payload and resources each, 96 MiB JSON envelope. Future versions are
   rejected with `clipboard.version` Error; malformed data with `clipboard.invalid` Error;
-  resource and parsing limits with `clipboard.limit` Error. Hash/identity mismatches use `clipboard.resource-hash` Error. `clipboard.range-affinity` is Warning when authored affinity cannot be recovered at a text boundary. No partial paste occurs on
+  resource and parsing limits with `clipboard.limit` Error. Hash/identity mismatches use `clipboard.resource-hash` Error. `clipboard.range-affinity` is Warning only for legacy ranges whose authored affinity cannot be recovered at a text boundary. No partial paste occurs on
   validation failure. An unexpected store failure still uses the kernel's Store semantics.
 - Plain import normalizes CRLF/CR and splits paragraphs at two LFs; individual LF stays a
   forced break. Plain export uses logical Unicode bytes, two LF between paragraphs, tab

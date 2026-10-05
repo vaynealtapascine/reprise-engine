@@ -269,6 +269,16 @@ impl Document {
                 continue;
             }
             let range_id = RangeId(id);
+            let meta = tree
+                .get_meta(id)
+                .map_err(|e| FragmentError::Invalid(e.to_string()))?;
+            let node = get_str(&meta, "node").and_then(|n| NodeId::parse(&n));
+            if !node.is_some_and(|n| cuts.contains_key(&n)) {
+                continue;
+            }
+            // Read before resolution: an unreadable policy must refuse the copy,
+            // rather than silently omit the range as missing.
+            let authored_policy = self.range_policy(range_id).map_err(bad)?;
             let (RangeState::Valid { node, bytes } | RangeState::Rebound { node, bytes }) =
                 self.resolve_range(range_id)
             else {
@@ -297,23 +307,29 @@ impl Document {
                     },
                 )
             };
-            let policy = RangePolicy {
-                start: affinity("start")
-                    .ok_or_else(|| FragmentError::Invalid("range start".into()))?,
-                end: affinity("end").ok_or_else(|| FragmentError::Invalid("range end".into()))?,
-                empty: if get_str(&meta, "empty").as_deref() == Some("keep") {
-                    Empty::Keep
-                } else {
-                    Empty::Missing
-                },
+            let policy = if let Some(policy) = authored_policy {
+                policy
+            } else {
+                RangePolicy {
+                    start: affinity("start")
+                        .ok_or_else(|| FragmentError::Invalid("range start".into()))?,
+                    end: affinity("end")
+                        .ok_or_else(|| FragmentError::Invalid("range end".into()))?,
+                    empty: if get_str(&meta, "empty").as_deref() == Some("keep") {
+                        Empty::Keep
+                    } else {
+                        Empty::Missing
+                    },
+                }
             };
-            if (bytes.start == 0 || bytes.end == self.block(node).map_err(bad)?.text.len())
+            if authored_policy.is_none()
+                && (bytes.start == 0 || bytes.end == self.block(node).map_err(bad)?.text.len())
                 && !fragment
                     .notes
                     .iter()
                     .any(|n| n.code == "clipboard.range-affinity")
             {
-                fragment.notes.push(reprise_diag::Note::warning(reprise_diag::Code::new("clipboard.range-affinity"), "the store records cursors, not authored endpoint affinities; fragment uses their observable boundary behavior"));
+                fragment.notes.push(reprise_diag::Note::warning(reprise_diag::Code::new("clipboard.range-affinity"), "the legacy range has no authored endpoint affinities; fragment uses observable cursor behavior"));
             }
             fragment.ranges.push(FragmentRange {
                 id: range_id,
@@ -405,14 +421,7 @@ impl Document {
         meta.insert("node", node.to_string())?;
         meta.insert("start", start.encode())?;
         meta.insert("end", end.encode())?;
-        meta.insert(
-            "empty",
-            if policy.empty == Empty::Keep {
-                "keep"
-            } else {
-                "missing"
-            },
-        )?;
+        crate::ranges::write_policy(&meta, policy)?;
         self.doc.commit();
         Ok(RangeId(id))
     }
@@ -440,6 +449,8 @@ impl Document {
         if !self.live(&tree, id.0) {
             return Err(DocError::Store(format!("no live range {id}")));
         }
+        // Never overwrite a policy this engine cannot understand (34).
+        self.range_policy(id)?;
         let text = self.block(node)?.text;
         let start = text.anchor(bytes.start, policy.start)?;
         let end = text.anchor(bytes.end, policy.end)?;
@@ -447,14 +458,7 @@ impl Document {
         meta.insert("node", node.to_string())?;
         meta.insert("start", start.encode())?;
         meta.insert("end", end.encode())?;
-        meta.insert(
-            "empty",
-            if policy.empty == Empty::Keep {
-                "keep"
-            } else {
-                "missing"
-            },
-        )?;
+        crate::ranges::write_policy(&meta, policy)?;
         Ok(())
     }
 }
