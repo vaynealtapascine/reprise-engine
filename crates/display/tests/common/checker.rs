@@ -193,19 +193,25 @@ pub fn check(bytes: &[u8]) -> Report {
     };
     let struct_root_id = struct_root.as_reference().unwrap();
     let struct_root = doc.get_dictionary(struct_root_id).unwrap();
-    let parent_tree = dict(&doc, struct_root.get(b"ParentTree").expect("ParentTree")).unwrap();
-    let nums = parent_tree.get(b"Nums").unwrap().as_array().unwrap();
+    let has_content = marks.values().any(|m| !m.mcids.is_empty());
     let mut parent_of: BTreeMap<i64, Vec<Object>> = BTreeMap::new();
-    for pair in nums.chunks(2) {
-        parent_of.insert(
-            pair[0].as_i64().unwrap(),
-            doc.dereference(&pair[1])
+    match struct_root.get(b"ParentTree") {
+        Ok(tree) => {
+            let nums = dict(&doc, tree)
                 .unwrap()
-                .1
+                .get(b"Nums")
+                .unwrap()
                 .as_array()
-                .unwrap()
-                .clone(),
-        );
+                .unwrap();
+            for pair in nums.chunks(2) {
+                // A page maps to an array indexed by MCID; an annotation to its
+                // parent element directly.
+                if let Object::Array(a) = doc.dereference(&pair[1]).unwrap().1 {
+                    parent_of.insert(pair[0].as_i64().unwrap(), a.clone());
+                }
+            }
+        }
+        Err(_) => assert!(!has_content, "content without a ParentTree"),
     }
 
     // (page, mcid, parent element)
@@ -280,6 +286,9 @@ pub fn check(bytes: &[u8]) -> Report {
                 }
             }
             Object::Dictionary(d) => {
+                if d.get(b"Type").ok().and_then(|t| t.as_name().ok()) == Some(b"OBJR") {
+                    continue; // an annotation, checked through its /StructParent
+                }
                 // An inline marked-content reference.
                 let page = d.get(b"Pg").unwrap().as_reference().unwrap();
                 reached.push((page, d.get(b"MCID").unwrap().as_i64().unwrap(), parent));
