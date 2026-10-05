@@ -2,7 +2,9 @@
 pub mod codes;
 mod export;
 mod html;
+mod image_export;
 mod native;
+pub use image_export::{NativeWithAssets, PdfWithAssets};
 
 pub use export::{
     Disposition, ExportOptions, ExportResult, Exporter, Feature, Html, Loss, LossReport, Native,

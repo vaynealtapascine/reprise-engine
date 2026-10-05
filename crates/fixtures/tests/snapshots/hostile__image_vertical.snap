@@ -1,0 +1,124 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      26
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "images",
+    "source": "document"
+  },
+  "pages": [
+    {
+      "width": 307200,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "image",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 0,
+        "yx": 65536,
+        "xy": -65536,
+        "yy": 0,
+        "tx": 204800,
+        "ty": 102400
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 102400,
+        "height": 102400
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "image",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 14
+          },
+          "preview": "Vertical image",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 2048,
+            "height": 1024
+          },
+          "baseline": 0,
+          "width": 2048,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": []
+        }
+      ],
+      "image": {
+        "asset": "c09761ac120fc25444687b1ab5e85cac0e3ad41391d8d68e5473fbe8d5bc07f9",
+        "alt": "Vertical image",
+        "frame": 0,
+        "rect": {
+          "origin": {
+            "x": 0,
+            "y": 0
+          },
+          "width": 2048,
+          "height": 1024
+        },
+        "placeholder": false
+      }
+    }
+  ],
+  "relations": [],
+  "diagnostics": []
+}

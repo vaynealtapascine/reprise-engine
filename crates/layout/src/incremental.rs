@@ -150,6 +150,7 @@ pub struct WorkCounters {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Inputs {
     kind: BlockKind,
+    image: Option<String>,
     text: String,
     overrides: Style,
     styles: Vec<(String, Option<Style>)>,
@@ -173,6 +174,7 @@ impl Inputs {
         }
         Some(Self {
             kind: block.kind,
+            image: doc.image_record(node).ok().flatten(),
             text: block.text.to_string(),
             overrides: block.overrides,
             styles,
@@ -210,7 +212,7 @@ impl Inputs {
         if self.text != old.text {
             out.insert(Dependency::Text(node));
         }
-        if self.kind != old.kind || self.overrides != old.overrides {
+        if self.kind != old.kind || self.overrides != old.overrides || self.image != old.image {
             out.insert(Dependency::Node(node));
         }
         for (name, value) in self.styles.iter().chain(&old.styles) {

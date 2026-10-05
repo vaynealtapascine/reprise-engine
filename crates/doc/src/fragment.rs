@@ -29,6 +29,9 @@ pub struct FragmentBlock {
     pub text: String,
     /// The versioned table metadata, including unsupported forms, kept verbatim.
     pub table: Option<String>,
+    /// Versioned image metadata, kept verbatim even when unreadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -250,6 +253,7 @@ impl Document {
                 overrides: block.overrides,
                 text,
                 table: get_str(&meta, "table1"),
+                image: get_str(&meta, "image1"),
             });
             cuts.insert(node, bytes);
             if cut.is_none() {

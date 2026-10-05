@@ -1,0 +1,40 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: "serde_json::to_string_pretty(&content).unwrap()"
+---
+[
+  {
+    "width": 307200,
+    "height": 307200,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 0,
+          "yx": 65536,
+          "xy": -65536,
+          "yy": 0,
+          "tx": 204800,
+          "ty": 102400
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "image",
+            "asset": "c09761ac120fc25444687b1ab5e85cac0e3ad41391d8d68e5473fbe8d5bc07f9",
+            "rect": {
+              "origin": {
+                "x": 0,
+                "y": 0
+              },
+              "width": 2048,
+              "height": 1024
+            },
+            "alt": "Vertical image",
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  }
+]

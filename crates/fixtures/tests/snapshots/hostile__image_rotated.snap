@@ -1,0 +1,124 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      38
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "images",
+    "source": "document"
+  },
+  "pages": [
+    {
+      "width": 307200,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "image",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 0,
+        "yx": -65536,
+        "xy": -65536,
+        "yy": 0,
+        "tx": 102400,
+        "ty": 102400
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 102400,
+        "height": 102400
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "image",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 26
+          },
+          "preview": "Rotated and mirrored image",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 768,
+            "height": 768
+          },
+          "baseline": 0,
+          "width": 768,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": []
+        }
+      ],
+      "image": {
+        "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+        "alt": "Rotated and mirrored image",
+        "frame": 0,
+        "rect": {
+          "origin": {
+            "x": 0,
+            "y": 0
+          },
+          "width": 768,
+          "height": 768
+        },
+        "placeholder": false
+      }
+    }
+  ],
+  "relations": [],
+  "diagnostics": []
+}

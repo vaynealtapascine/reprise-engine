@@ -28,6 +28,7 @@ pub mod expr;
 pub mod fragment;
 pub mod function;
 mod history;
+pub mod image;
 mod lifecycle;
 mod page;
 mod persist;
@@ -127,6 +128,8 @@ pub enum BlockKind {
     Paragraph,
     /// Out of the flow; placed by a relation.
     Annotation,
+    /// An unbreakable image box; its text container holds its alt text.
+    Image,
 }
 
 impl BlockKind {
@@ -134,6 +137,7 @@ impl BlockKind {
         match self {
             BlockKind::Paragraph => "paragraph",
             BlockKind::Annotation => "annotation",
+            BlockKind::Image => "image",
         }
     }
 
@@ -141,6 +145,7 @@ impl BlockKind {
         match s {
             "paragraph" => Some(BlockKind::Paragraph),
             "annotation" => Some(BlockKind::Annotation),
+            "image" => Some(BlockKind::Image),
             _ => None,
         }
     }

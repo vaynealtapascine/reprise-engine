@@ -122,6 +122,16 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         plugin_extensions()?,
         clipboard_unicode_seams()?,
         range_policy_endpoints()?,
+        image_missing()?,
+        image_corrupt()?,
+        image_pixels_extreme()?,
+        image_oversized()?,
+        image_float()?,
+        image_note()?,
+        image_rotated()?,
+        image_vertical()?,
+        image_empty_alt()?,
+        image_unreadable()?,
     ])
 }
 
@@ -2044,5 +2054,194 @@ pub fn range_policy_endpoints() -> Result<Fixture, DocError> {
     replica.merge(&doc)?;
     let mut fixture = Fixture::new("range_policy_endpoints", doc, &[]);
     fixture.replica = Some(replica);
+    Ok(fixture)
+}
+
+fn image_fixture(
+    name: &'static str,
+    bytes: &[u8],
+    alt: &str,
+    expect: &'static [&'static str],
+) -> Result<Fixture, DocError> {
+    let mut fixture = Fixture::new(name, document()?, expect);
+    let hash = fixture
+        .engine
+        .assets
+        .insert(bytes)
+        .map_err(|e| DocError::Store(e.into()))?;
+    fixture
+        .doc
+        .append_image("body", &reprise_doc::image::ImageData::new(hash), alt)?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+pub fn image_missing() -> Result<Fixture, DocError> {
+    let fixture = Fixture::new("image_missing", document()?, &["layout.image-missing"]);
+    fixture.doc.append_image(
+        "body",
+        &reprise_doc::image::ImageData::new("0".repeat(64)),
+        "A missing image",
+    )?;
+    fixture
+        .doc
+        .append_block(BlockKind::Paragraph, "body", "The following text remains.")?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+pub fn image_corrupt() -> Result<Fixture, DocError> {
+    image_fixture(
+        "image_corrupt",
+        b"\x89PNG\r\n\x1a\ncorrupt",
+        "Corrupt header",
+        &["layout.image-header"],
+    )
+}
+
+pub fn image_pixels_extreme() -> Result<Fixture, DocError> {
+    let mut fixture = image_fixture(
+        "image_pixels_extreme",
+        include_bytes!("../../../fixtures/images/red-1x1.png"),
+        "One pixel",
+        &["layout.image-size"],
+    )?;
+    let hash = fixture
+        .engine
+        .assets
+        .insert(include_bytes!("../../../fixtures/images/header-65535.png").as_slice())
+        .map_err(|e| DocError::Store(e.into()))?;
+    fixture.doc.append_image(
+        "body",
+        &reprise_doc::image::ImageData::new(hash),
+        "65535 square pixels; metadata only",
+    )?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+pub fn image_oversized() -> Result<Fixture, DocError> {
+    let fixture = image_fixture(
+        "image_oversized",
+        include_bytes!("../../../fixtures/images/red-1x1.png"),
+        "Oversized image",
+        &["layout.image-size", "layout.frame-overflow"],
+    )?;
+    let node = fixture
+        .doc
+        .blocks()
+        .into_iter()
+        .next()
+        .ok_or_else(|| DocError::Store("missing fixture image".into()))?;
+    let mut image = fixture.doc.image(node)?;
+    image.width = Some(LengthExpr::Pt(Length::from_pt(1000)));
+    image.height = Some(LengthExpr::Pt(Length::from_pt(2000)));
+    fixture.doc.set_image(node, &image)?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+fn region_image(name: &'static str, schema: SchemaId) -> Result<Fixture, DocError> {
+    let mut fixture = Fixture::new(name, region_document()?, &[]);
+    let anchor = fixture.doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Anchor text flows around the image. More words flow below the image in the same frame.",
+    )?;
+    let hash = fixture
+        .engine
+        .assets
+        .insert(include_bytes!("../../../fixtures/images/red-2x1.jpg").as_slice())
+        .map_err(|e| DocError::Store(e.into()))?;
+    let mut image = reprise_doc::image::ImageData::new(hash);
+    image.width = Some(LengthExpr::Pt(Length::from_pt(24)));
+    let owner = fixture
+        .doc
+        .append_image("note", &image, "An image in a region")?;
+    attach_region(&fixture.doc, schema, owner, anchor, 0)?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+pub fn image_float() -> Result<Fixture, DocError> {
+    region_image("image_float", reprise_doc::relation::builtin::FLOAT)
+}
+pub fn image_note() -> Result<Fixture, DocError> {
+    region_image("image_note", reprise_doc::relation::builtin::NOTE)
+}
+
+pub fn image_rotated() -> Result<Fixture, DocError> {
+    let fixture = image_fixture(
+        "image_rotated",
+        include_bytes!("../../../fixtures/images/red-1x1.png"),
+        "Rotated and mirrored image",
+        &[],
+    )?;
+    let mut frame = flow_frame(
+        "image",
+        Dim::pt(100),
+        Dim::pt(100),
+        Dim::pt(100),
+        Dim::pt(100),
+    );
+    frame.transform.rotation = reprise_doc::Rotation::Quarter(1);
+    frame.transform.mirror_x = true;
+    fixture.doc.define_page_template(
+        &PageTemplate::new("images", Dim::pt(300), Dim::pt(300)).with_frame(frame),
+    )?;
+    fixture.doc.use_page_template("images")?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+pub fn image_vertical() -> Result<Fixture, DocError> {
+    let fixture = image_fixture(
+        "image_vertical",
+        include_bytes!("../../../fixtures/images/red-2x1.jpg"),
+        "Vertical image",
+        &[],
+    )?;
+    let mut frame = flow_frame(
+        "image",
+        Dim::pt(100),
+        Dim::pt(100),
+        Dim::pt(100),
+        Dim::pt(100),
+    );
+    frame.writing_mode = reprise_doc::WritingMode::VerticalRl;
+    fixture.doc.define_page_template(
+        &PageTemplate::new("images", Dim::pt(300), Dim::pt(300)).with_frame(frame),
+    )?;
+    fixture.doc.use_page_template("images")?;
+    fixture.doc.commit();
+    Ok(fixture)
+}
+
+pub fn image_empty_alt() -> Result<Fixture, DocError> {
+    image_fixture(
+        "image_empty_alt",
+        include_bytes!("../../../fixtures/images/red-1x1.png"),
+        "",
+        &[],
+    )
+}
+
+pub fn image_unreadable() -> Result<Fixture, DocError> {
+    let fixture = image_fixture(
+        "image_unreadable",
+        include_bytes!("../../../fixtures/images/red-1x1.png"),
+        "Future image",
+        &["layout.image-record"],
+    )?;
+    let node = fixture
+        .doc
+        .blocks()
+        .into_iter()
+        .next()
+        .ok_or_else(|| DocError::Store("missing fixture image".into()))?;
+    fixture
+        .doc
+        .set_image_record(node, r#"{"version":999,"future":["kept"]}"#)?;
+    fixture.doc.commit();
     Ok(fixture)
 }

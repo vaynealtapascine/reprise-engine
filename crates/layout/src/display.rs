@@ -139,6 +139,16 @@ impl LayoutSnapshot {
                         node: block.node,
                         line: line_index,
                     };
+                    if block.image.is_some() {
+                        addresses.entry(at).or_default().push((
+                            0,
+                            reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path: vec![*group, child],
+                            },
+                        ));
+                        child = child.saturating_add(1);
+                    }
                     for run in &line.runs {
                         addresses.entry(at).or_default().push((
                             run.range.start,
@@ -191,6 +201,14 @@ impl LayoutSnapshot {
                     children.push(debug_path(Path::rect(r(bounds)), BLOCK));
                 }
                 for line in lines {
+                    if let Some(image) = &block.image {
+                        children.push(Item::Image {
+                            asset: image.asset.clone(),
+                            rect: r(line.rect),
+                            alt: image.alt.clone(),
+                            layer: Layer::Content,
+                        });
+                    }
                     if options.debug {
                         if options.boxes {
                             children.push(debug_path(Path::rect(r(line.rect)), LINE_BOX));

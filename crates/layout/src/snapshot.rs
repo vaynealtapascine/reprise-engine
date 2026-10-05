@@ -96,6 +96,29 @@ pub struct BlockLayout {
     /// it. Left out of JSON snapshots when 0.
     #[serde(skip_serializing_if = "is_zero")]
     pub base_level: u8,
+    /// Positioned image, absent for text blocks and omitted from their JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<ImageLayout>,
+}
+
+/// One indivisible image box in logical frame space, sharing a line-like
+/// geometry entry so reading order and layout queries also address images.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ImageLayout {
+    pub asset: String,
+    pub alt: String,
+    pub frame: usize,
+    pub rect: Rect<FrameSpace>,
+    pub placeholder: bool,
+}
+
+impl BlockLayout {
+    pub(crate) fn sync_image(&mut self) {
+        if let (Some(image), Some(line)) = (&mut self.image, self.lines.first()) {
+            image.frame = line.frame;
+            image.rect = line.rect;
+        }
+    }
 }
 
 fn is_zero(level: &u8) -> bool {
