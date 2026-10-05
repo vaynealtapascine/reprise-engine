@@ -49,9 +49,12 @@ pub struct GridRow {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GridIssueKind {
-    /// A table child that is not a row, or a row child that is not a cell.
-    Misplaced,
-    /// A cell beyond the number of columns the table declares.
+    /// A table child that is not a row.
+    MisplacedRow,
+    /// A row child that is not a cell.
+    MisplacedCell,
+    /// A row with more cells than the table has columns; the extra cells (the
+    /// issue's node is the row) were left out.
     TooManyCells,
     /// The declared column is outside the table.
     ColumnOutside,
@@ -74,7 +77,8 @@ impl GridIssueKind {
     pub fn omitted(self) -> bool {
         matches!(
             self,
-            Self::Misplaced
+            Self::MisplacedRow
+                | Self::MisplacedCell
                 | Self::TooManyCells
                 | Self::ColumnOutside
                 | Self::Overlap
@@ -256,20 +260,33 @@ impl Document {
         let mut issues = Vec::new();
         let mut inputs = Vec::new();
         let children = self.children(Some(table));
+        if children.len() > MAX_GRID_ROWS {
+            issues.push(GridIssue {
+                node: table,
+                kind: GridIssueKind::RowLimit,
+            });
+        }
         for &row in children.iter().take(MAX_GRID_ROWS) {
             let Ok(Some(TableRole::Row(info))) = self.table_role(row) else {
                 issues.push(GridIssue {
                     node: row,
-                    kind: GridIssueKind::Misplaced,
+                    kind: GridIssueKind::MisplacedRow,
                 });
                 continue;
             };
             let mut cells = Vec::new();
-            for cell in self.children(Some(row)) {
+            let row_children = self.children(Some(row));
+            if row_children.len() > columns {
+                issues.push(GridIssue {
+                    node: row,
+                    kind: GridIssueKind::TooManyCells,
+                });
+            }
+            for cell in row_children.into_iter().take(columns) {
                 let Ok(Some(TableRole::Cell(c))) = self.table_role(cell) else {
                     issues.push(GridIssue {
                         node: cell,
-                        kind: GridIssueKind::Misplaced,
+                        kind: GridIssueKind::MisplacedCell,
                     });
                     continue;
                 };
@@ -287,12 +304,6 @@ impl Document {
             });
         }
         let mut grid = resolve_grid(table, columns, &inputs);
-        if children.len() > MAX_GRID_ROWS {
-            issues.push(GridIssue {
-                node: table,
-                kind: GridIssueKind::RowLimit,
-            });
-        }
         issues.append(&mut grid.issues);
         grid.issues = issues;
         Ok(Some(grid))
