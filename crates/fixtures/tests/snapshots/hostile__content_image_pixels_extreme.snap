@@ -1,0 +1,74 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: "serde_json::to_string_pretty(&content).unwrap()"
+---
+[
+  {
+    "width": 430080,
+    "height": 307200,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 65536,
+          "yx": 0,
+          "xy": 0,
+          "yy": 65536,
+          "tx": 36864,
+          "ty": 36864
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "image",
+            "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+            "rect": {
+              "origin": {
+                "x": 0,
+                "y": 0
+              },
+              "width": 768,
+              "height": 768
+            },
+            "alt": "One pixel",
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "width": 430080,
+    "height": 307200,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 65536,
+          "yx": 0,
+          "xy": 0,
+          "yy": 65536,
+          "tx": 36864,
+          "ty": 36864
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "image",
+            "asset": "a7889659c2efc639c253bed57c125006a6efea080c0a558819d158a8dd467fc2",
+            "rect": {
+              "origin": {
+                "x": 0,
+                "y": 0
+              },
+              "width": 225280,
+              "height": 225280
+            },
+            "alt": "65535 square pixels; metadata only",
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  }
+]

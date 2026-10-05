@@ -124,9 +124,9 @@ fn overlay_declaration(stored: &mut serde_json::Value, incoming: serde_json::Val
 /// survive without being normalized. Setters replace only their own section.
 #[derive(Clone)]
 pub struct Package {
-    container: Container,
-    limits: Limits,
-    revision: Revision,
+    pub(crate) container: Container,
+    pub(crate) limits: Limits,
+    pub(crate) revision: Revision,
 }
 
 impl Package {
@@ -310,7 +310,7 @@ impl Package {
         self.container.header.document_id
     }
 
-    fn writable(&self) -> Result<(), FormatError> {
+    pub(crate) fn writable(&self) -> Result<(), FormatError> {
         if self.container.header.version > CURRENT_VERSION {
             Err(FormatError::ReadOnly)
         } else {
@@ -568,6 +568,27 @@ pub struct OpenedFile {
 }
 
 impl OpenedFile {
+    pub fn save_with_resources(
+        &self,
+        mode: PersistenceMode,
+        layout: &reprise_layout::LayoutSnapshot,
+        fonts: &reprise_font::FontStore,
+        assets: &reprise_display::AssetStore,
+    ) -> Result<Vec<u8>, FormatError> {
+        if self.read_only {
+            return Err(FormatError::ReadOnly);
+        }
+        let mut package = self.package.clone();
+        package.revision = self.document.revision();
+        package
+            .container
+            .sections
+            .insert(ids::DOCUMENT, Section::raw(self.document.try_export(mode)?));
+        package.container.sections.remove(&ids::CACHE);
+        package.embed_layout_fonts(layout, fonts)?;
+        package.embed_document_images(&self.document, assets)?;
+        package.save()
+    }
     pub fn missing_fonts(&self) -> Vec<&FontPin> {
         self.assets.missing_fonts()
     }

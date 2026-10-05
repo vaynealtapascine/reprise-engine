@@ -2,6 +2,43 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-05: range policies, consolidated CODEMAP and images merged; bindings under review
+
+**Done** (Sol):
+
+-   **Range policies (contract change).** Ranges persist their authored `RangePolicy` in a
+    versioned `policy1` envelope, read back with `Document::range_policy`. Clipboard copies
+    policies exactly; `clipboard.range-affinity` now applies only to legacy ranges.
+    Operation counts and every snapshot are unchanged. `docs/CODEMAP.md` is one table again.
+    **Orchestrator test:** a concurrent split and join keep authored policies on both
+    replicas.
+-   **Images (contract additions: `BlockKind::Image`, `BlockLayout.image`).**
+    -   Image blocks have collaborative alt text, and are sized from PNG and JPEG headers,
+        density-aware and integer-only. Layout never decodes pixels.
+    -   Images are placed in flow, floats, notes and tables, with placeholders and warnings
+        when an image is missing or corrupt.
+    -   `Item::Image` is drawn in SVG, PNG and PDF from a host `AssetStore`. Alt text goes
+        into ordered PDF and text export.
+    -   Packages and the clipboard carry images.
+    -   **Orchestrator test:** 256 damaged images never panic, from header to pixels.
+
+**Under review: bindings (11).** The facade (`crates/reprise`, versioned DTOs, a pinned API,
+typed errors) and the WASM/TypeScript layer (`crates/reprise-wasm`, a reference worker, and
+byte-identical display JSON from native and WASM) are strong. The orchestrator's boundary
+fuzz test found that **default-styled text in a new document is never laid out**:
+
+-   no base style is defined;
+-   a legacy single family missing from the store drops the text instead of falling back to
+    the serif default, as the font policy requires;
+-   `copy` then reports a misleading `InvalidId`.
+
+These went back to the agent with images wiring.
+
+**Gaps:**
+
+-   **Images:** EXIF orientation, colour profiles, rich-image HTML, DOCX and EPUB;
+    editor-level image split and join policies.
+
 ## 2026-10-05: font supply, plugins, and clipboard and exporters merged
 
 All three ran on Sol. They were cut off by Sol's usage limit and resumed after it reset.

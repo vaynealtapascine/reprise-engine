@@ -3,6 +3,12 @@
 
 use reprise_diag::Code;
 
+pub const IMAGE_RECORD: Code = Code::new("layout.image-record");
+pub const IMAGE_MISSING: Code = Code::new("layout.image-missing");
+pub const IMAGE_HEADER: Code = Code::new("layout.image-header");
+pub const IMAGE_LIMIT: Code = Code::new("layout.image-limit");
+pub const IMAGE_SIZE: Code = Code::new("layout.image-size");
+
 /// A block couldn't be read from the document.
 pub const MALFORMED_BLOCK: Code = Code::new("layout.malformed-block");
 /// A block's style couldn't be resolved.

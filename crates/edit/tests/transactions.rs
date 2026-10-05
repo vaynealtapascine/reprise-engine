@@ -1071,3 +1071,50 @@ fn every_command_round_trips_undo_redo_with_all_authored_fields() {
         assert!(editor.document().is_live(child));
     }
 }
+
+#[test]
+fn split_join_preserve_authored_range_policy_through_undo_redo() {
+    use reprise_doc::text::{Affinity, Empty};
+    let doc = Document::new(1).unwrap();
+    let node = para(&doc, "\u{e9}\u{5d0}\u{5d1}");
+    let policy = RangePolicy {
+        start: Affinity::Before,
+        end: Affinity::After,
+        empty: Empty::Keep,
+    };
+    let range = doc.add_range(node, 0..6, policy).unwrap();
+    let mut editor = editor(doc);
+    editor
+        .apply_command(Command::SplitBlock { node, at: 2 })
+        .unwrap();
+    assert_eq!(editor.document().range_policy(range).unwrap(), Some(policy));
+    assert!(editor.undo().unwrap());
+    assert_eq!(editor.document().range_policy(range).unwrap(), Some(policy));
+    assert!(editor.redo().unwrap());
+    let second = editor.document().blocks()[1];
+    let tail_range = editor
+        .document()
+        .add_range(second, 0..4, RangePolicy::FIXED)
+        .unwrap();
+    // Range creation is its own authored step, so undoing the following join
+    // must leave it in place rather than also undoing its creation.
+    editor.document().commit_step();
+    editor
+        .apply_command(Command::JoinBlocks {
+            first: node,
+            second,
+        })
+        .unwrap();
+    assert_eq!(editor.document().range_policy(range).unwrap(), Some(policy));
+    assert_eq!(
+        editor.document().range_policy(tail_range).unwrap(),
+        Some(RangePolicy::FIXED)
+    );
+    assert!(editor.undo().unwrap());
+    assert_eq!(
+        editor.document().range_policy(tail_range).unwrap(),
+        Some(RangePolicy::FIXED)
+    );
+    assert!(editor.redo().unwrap());
+    assert_eq!(editor.document().range_policy(range).unwrap(), Some(policy));
+}

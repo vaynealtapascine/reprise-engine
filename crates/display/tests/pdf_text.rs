@@ -466,3 +466,50 @@ fn ordered_pdf_preserves_nested_transforms_clips_and_rejects_deep_groups() {
         .is_err()
     );
 }
+
+#[test]
+fn images_extract_alt_text_in_order_even_when_missing_or_zero_size() {
+    use reprise_geom::{Point, Rect};
+    let fonts = FontStore::default();
+    let mut assets = reprise_display::AssetStore::default();
+    let hash = assets
+        .insert(include_bytes!("../../../fixtures/images/red-1x1.png").as_slice())
+        .unwrap();
+    let pt = Length::from_pt;
+    let list = DisplayList {
+        width: pt(100),
+        height: pt(100),
+        items: vec![
+            Item::Image {
+                asset: hash,
+                rect: Rect::new(Point::new(pt(0), pt(0)), pt(10), pt(10)),
+                alt: "First café image.".into(),
+                layer: Layer::Content,
+            },
+            Item::Image {
+                asset: "0".repeat(64),
+                rect: Rect::new(Point::new(pt(20), pt(0)), pt(10), pt(10)),
+                alt: "Second missing image.".into(),
+                layer: Layer::Content,
+            },
+            Item::Image {
+                asset: "0".repeat(64),
+                rect: Rect::new(Point::new(pt(40), pt(0)), Length::ZERO, Length::ZERO),
+                alt: "Third zero size.".into(),
+                layer: Layer::Content,
+            },
+        ],
+    };
+    let order = [2, 0, 1].map(|i| pdf::ReadingRun {
+        page: 0,
+        path: vec![i],
+    });
+    let bytes = pdf::render_ordered_with_assets(&[list], &fonts, &assets, &order).unwrap();
+    assert_eq!(
+        extract(&bytes),
+        (
+            "Third zero size.First café image.Second missing image.".into(),
+            3
+        )
+    );
+}

@@ -344,6 +344,9 @@ pub(crate) fn write(
         if let Some(raw) = &block.table {
             doc.stage_fragment_table(new, raw).map_err(store)?;
         }
+        if let Some(raw) = &block.image {
+            doc.stage_fragment_image(new, raw).map_err(store)?;
+        }
         result.ids.nodes.insert(block.id, new);
         result.applied.blocks.push(new);
     }

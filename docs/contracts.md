@@ -51,7 +51,7 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
-| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit` |
+| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
@@ -77,6 +77,18 @@ Codes in use:
         character was deleted.
 -   **`RangePolicy`:** start and end affinity, plus what an emptied range does
     (`Empty::Missing` or `Keep`). The presets are `EXPANDING`, `FIXED` and `POINT`.
+-   **Authored range policies (10, 12, 35):** Ranges persist authored start/end
+    affinities and empty policy alongside anchors. Clipboard preserves authored
+    policy at text endpoints. Legacy ranges without versioned policy use observable
+    cursor behavior and report `clipboard.range-affinity` Warning where the authored
+    affinity is ambiguous. `Document::add_range` keeps its signature;
+    `Document::range_policy(id) -> Result<Option<RangePolicy>, DocError>` returns
+    `None` only for a legacy range. New creation, staging and reanchoring write a
+    `policy1` JSON envelope with `version: 1`, `start`, `end` and `empty`. Unsupported
+    versions or malformed envelopes are refused and retained verbatim (34); range
+    resolution treats them as missing and copy refuses affected ranges. The legacy
+    `empty` field is read only when `policy1` is absent. Split/join retain their
+    existing anchor lifecycle semantics and preserve stored policies.
 -   **Loro stays inside.** `Text::from_loro` and `Text::loro` exist only for `reprise-doc`.
     No other crate touches Loro types.
 -   **Open:** words are derived at query time and never stored (10). Author-marked ranges
@@ -321,10 +333,27 @@ Codes in use:
     -   Every glyph belongs to its own run.
     -   Every query agrees with itself.
 
+## Authored and positioned images (05, 24, 33, 34)
+
+- `BlockKind::Image` is an additive, pre-approved block kind. The block's
+  collaborative text is its alt text; empty alt text denotes a decorative image.
+- `doc::image::ImageData` names a lowercase SHA-256 asset hash and optional
+  `LengthExpr` width and height. Its version-1 JSON lives in the existing block
+  envelope under `image1`. Unreadable records remain stored verbatim.
+- `FragmentBlock.image: Option<String>` carries that raw record on copy/paste,
+  defaults to absent on old fragments, and is omitted from JSON when absent.
+- `BlockLayout.image: Option<ImageLayout>` is the additive snapshot extension
+  approved in the images brief. It is omitted when absent, preserving all existing
+  text goldens. `ImageLayout` records asset, alt, frame, logical rectangle and
+  placeholder status. An image has one line-like entry for queries/reading order.
+- Images may own float and note relations. Host resources are derived engine
+  inputs; pixels and intrinsic size are never written into authored state.
+
 ## Display list: `reprise-display`
 
 -   **One `DisplayList` per page.** Items are:
     -   `Glyphs(GlyphRun)`
+    -   `Image`, with SHA-256 asset hash, destination rectangle, alt text and layer
     -   `Path`, with an optional fill and stroke
     -   `Group`, with a `Matrix` transform, an optional clip and children
 
@@ -347,7 +376,21 @@ Codes in use:
 -   **Source text in PDF:** the PDF backend maps glyphs to their source text with ToUnicode,
     and uses ActualText where one glyph can't carry it: shared clusters, right-to-left runs
     and malformed ranges. Text extracts in logical order within each run.
--   **Open:** image items come with document assets (34). Full PDF/UA structure tagging and cross-page reading overrides remain follow-ups; ordered extraction is available through the new `pdf::render_ordered` function.
+-   **Images:** `AssetStore` verifies SHA-256 bytes supplied by the host. Each backend
+    adds `render_with_assets`; PDF also adds `render_ordered_with_assets`. Original
+    signatures use an empty store. Missing/unreadable raster data draw a gray box;
+    SVG embeds header-readable bytes as data URIs, or draws the same missing box.
+    PNG/PDF pixel decoding is capped at 16,777,216 pixels and 64 MiB source bytes.
+    Layout scans at most 1 MiB and 512 header parts, stopping at IDAT/SOS.
+    PNG pHYs and JPEG JFIF/primary-IFD EXIF densities set physical size; absence uses 96 DPI.
+    Width-only/height-only sizes preserve the unrounded physical aspect even
+    when intrinsic lengths saturate or round to zero; excess inline size
+    scales both dimensions. A tall image advances before overflowing an empty
+    frame with `layout.frame-overflow`; page limits still bound placement.
+    Image ActualText follows ordered PDF run addresses, including placeholders.
+    The computed text style is retained; image box height does not overwrite
+    authored/computed line-height.
+-   **Open:** Full PDF/UA structure tagging and cross-page reading overrides remain follow-ups; ordered extraction is available through the new `pdf::render_ordered` function.
 
 ## Fixtures: `reprise-fixtures`
 
@@ -602,7 +645,7 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
 
 - `Fragment` is authored data in `reprise-doc::fragment`, version 1. Source IDs are
   labels. `copy_fragment` accepts whole subtrees or explicit UTF-8 byte ranges;
-  intersecting persistent ranges are clipped with their observable cursor policies.
+  intersecting persistent ranges are clipped with their authored policies (legacy ranges use observable cursor behavior).
   Styles include inherited parents. Copy-all also carries raw authored page setup. Kernel selections promote fully selected tables to subtrees; partial table selections flatten cell text with `clipboard.selection-table` Warning. Collapsed selections copy nothing.
 - Hosts supply a nonempty source/target namespace (normally the package DocumentId).
   Only equal namespaces authorize external relation targets. Peer equality does not.
@@ -631,7 +674,7 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
 - Native fragment limits: 4,096 blocks, 8,192 ranges/relations, 1,024 styles/templates,
   depth 64, 16 MiB payload and resources each, 96 MiB JSON envelope. Future versions are
   rejected with `clipboard.version` Error; malformed data with `clipboard.invalid` Error;
-  resource and parsing limits with `clipboard.limit` Error. Hash/identity mismatches use `clipboard.resource-hash` Error. `clipboard.range-affinity` is Warning when authored affinity cannot be recovered at a text boundary. No partial paste occurs on
+  resource and parsing limits with `clipboard.limit` Error. Hash/identity mismatches use `clipboard.resource-hash` Error. `clipboard.range-affinity` is Warning only for legacy ranges whose authored affinity cannot be recovered at a text boundary. No partial paste occurs on
   validation failure. An unexpected store failure still uses the kernel's Store semantics.
 - Plain import normalizes CRLF/CR and splits paragraphs at two LFs; individual LF stays a
   forced break. Plain export uses logical Unicode bytes, two LF between paragraphs, tab
@@ -653,6 +696,24 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
   PlainText, Html, Native and Pdf implement it. PDF requires current layout/fonts, wraps
   ordered rendering, and explicitly reports editable structure and relation graph loss,
   lack of PDF/UA structure, viewer-dependent text extraction, and layout omissions.
+
+## Image resource additions (34, 35)
+
+- `Package::new_with_resources`, `embed_document_images`,
+  `open_with_resources` and `OpenedFile::save_with_resources` add image resource
+  capture/restoration beside the existing font paths. All live authored image
+  references are captured, including images omitted by a page limit. Missing
+  bundles remain declared; unrelated/unknown assets survive.
+- `AssetAvailability::restore_images` installs only hash-verified bundled images.
+  External resources remain host needs; the library performs no I/O.
+- `NativeFragment::attach_images` finds selected image hashes and uses
+  `attach_asset`; `install_assets` verifies the fragment before modifying the
+  host store. Missing bytes retain their reference and report
+  `clipboard.resource-missing` (Warning).
+- `NativeWithAssets` and `PdfWithAssets` implement the existing `Exporter` trait
+  with a supplied `AssetStore`, leaving frozen `ExportOptions` unchanged.
+  `export.assets` reports actual image preservation; plain text preserves alt
+  text and reports pixel data dropped. Ordered PDF uses image ActualText.
 
 
 ## Bindings: external API v1 (`reprise`, `reprise-wasm`)

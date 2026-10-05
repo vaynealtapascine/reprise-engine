@@ -49,13 +49,71 @@ pub struct EmbeddedResource {
 #[serde(deny_unknown_fields)]
 pub struct NativeFragment {
     pub fragment: Fragment,
-    /// Sorted by SHA-256. Hosts attach content-addressed assets explicitly because
-    /// the authored engine currently has no image/asset usage graph.
+    /// Sorted resource keys. Hosts supply image bytes through `attach_images`
+    /// and font bytes through the copy helpers.
     pub resources: BTreeMap<String, EmbeddedResource>,
     pub notes: Vec<Note>,
 }
 
 impl NativeFragment {
+    /// Attach the selected image blocks' bytes through the native asset path.
+    /// Missing bytes produce a warning; their authored references remain intact.
+    pub fn attach_images(
+        &mut self,
+        store: &reprise_display::AssetStore,
+    ) -> Result<(), ClipboardError> {
+        let hashes: BTreeSet<_> = self
+            .fragment
+            .blocks
+            .iter()
+            .filter_map(|b| b.image.as_deref())
+            .filter_map(|raw| {
+                reprise_doc::image::ImageData::parse(raw)
+                    .ok()
+                    .map(|i| i.asset)
+            })
+            .collect();
+        let mut candidate = self.clone();
+        for hash in hashes {
+            if candidate.resources.values().any(|r| r.hash == hash) {
+                continue;
+            }
+            if let Some(bytes) = store.get(&hash) {
+                candidate.attach_asset(bytes.to_vec())?;
+            } else {
+                let message = format!("image asset {hash} is missing");
+                if !candidate
+                    .notes
+                    .iter()
+                    .any(|n| n.code == codes::RESOURCE_MISSING && n.message == message)
+                {
+                    candidate
+                        .notes
+                        .push(Note::warning(codes::RESOURCE_MISSING, message));
+                }
+            }
+        }
+        candidate.validate()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    pub fn install_assets(
+        &self,
+        store: &mut reprise_display::AssetStore,
+    ) -> Result<(), ClipboardError> {
+        self.validate()?;
+        let mut candidate = store.clone();
+        for resource in self.resources.values() {
+            if resource.kind == ResourceKind::Asset {
+                candidate
+                    .insert(resource.bytes.as_slice())
+                    .map_err(|e| ClipboardError::Invalid(e.into()))?;
+            }
+        }
+        *store = candidate;
+        Ok(())
+    }
     pub fn validate(&self) -> Result<(), ClipboardError> {
         self.fragment.validate()?;
         if self.resources.len() > 1024 {
@@ -193,6 +251,9 @@ fn bundle(
         }
     } else {
         for block in &fragment.blocks {
+            if block.kind == reprise_doc::BlockKind::Image {
+                continue;
+            }
             if let Ok(style) = doc.computed_style(block.id) {
                 families.insert(style.family);
             }

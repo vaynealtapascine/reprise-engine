@@ -302,3 +302,38 @@ fn caches_require_every_input_tag_and_are_dropped_after_document_edits() {
             .contains_key(&ids::CACHE)
     );
 }
+
+#[test]
+fn package_roundtrip_retains_all_authored_endpoint_policies() {
+    use reprise_doc::text::{Affinity, Empty, RangePolicy};
+    let doc = Document::new(1).unwrap();
+    let node = doc
+        .append_block(BlockKind::Paragraph, "", "\u{e9}\u{5d0}\u{5d1}")
+        .unwrap();
+    let mut ranges = Vec::new();
+    for start in [Affinity::Before, Affinity::After] {
+        for end in [Affinity::Before, Affinity::After] {
+            for empty in [Empty::Keep, Empty::Missing] {
+                let policy = RangePolicy { start, end, empty };
+                ranges.push((doc.add_range(node, 0..6, policy).unwrap(), policy));
+            }
+        }
+    }
+    for mode in [PersistenceMode::History, PersistenceMode::Shallow] {
+        let bytes = Package::new(&doc, DocumentId([55; 16]), mode)
+            .unwrap()
+            .save()
+            .unwrap();
+        let opened = open(&bytes, 2);
+        for &(id, policy) in &ranges {
+            assert_eq!(
+                opened
+                    .editable_document()
+                    .unwrap()
+                    .range_policy(id)
+                    .unwrap(),
+                Some(policy)
+            );
+        }
+    }
+}

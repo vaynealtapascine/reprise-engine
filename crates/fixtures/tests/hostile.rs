@@ -135,6 +135,10 @@ fn check_flow(name: &str, snapshot: &LayoutSnapshot) {
                 );
             }
             match block.kind {
+                BlockKind::Image => assert!(matches!(
+                    frame.role,
+                    FrameRole::Flow(_) | FrameRole::Notes | FrameRole::Margin
+                )),
                 BlockKind::Annotation => assert_eq!(
                     frame.role,
                     FrameRole::Margin,
@@ -200,12 +204,14 @@ fn check_backends(name: &str, fixture: &Fixture, snapshot: &LayoutSnapshot) {
     });
     assert_eq!(pages.len(), snapshot.pages.len());
     for page in &pages {
-        reprise_display::svg::render(page, fonts).unwrap_or_else(|e| panic!("{name}: svg: {e}"));
-        reprise_display::png::render(page, fonts, 1.0)
+        reprise_display::svg::render_with_assets(page, fonts, &fixture.engine.assets)
+            .unwrap_or_else(|e| panic!("{name}: svg: {e}"));
+        reprise_display::png::render_with_assets(page, fonts, &fixture.engine.assets, 1.0)
             .unwrap_or_else(|e| panic!("{name}: png: {e}"));
     }
     let content: Vec<_> = pages.iter().map(|p| p.content_only()).collect();
-    reprise_display::pdf::render(&content, fonts).unwrap_or_else(|e| panic!("{name}: pdf: {e}"));
+    reprise_display::pdf::render_with_assets(&content, fonts, &fixture.engine.assets)
+        .unwrap_or_else(|e| panic!("{name}: pdf: {e}"));
 }
 
 macro_rules! hostile_tests {
@@ -242,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 67);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 78);
 }
 
 hostile_tests!(
@@ -978,7 +984,13 @@ fn check_region(fixture: Fixture) {
                 fixture.name
             );
             match block.kind {
-                BlockKind::Paragraph => assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into())),
+                BlockKind::Image => assert!(matches!(
+                    frame.role,
+                    FrameRole::Flow(_) | FrameRole::Notes | FrameRole::Margin
+                )),
+                BlockKind::Paragraph => {
+                    assert_eq!(frame.role, FrameRole::Flow(MAIN_FLOW.into()))
+                }
                 BlockKind::Annotation => {
                     assert!(matches!(frame.role, FrameRole::Notes | FrameRole::Flow(_)))
                 }
@@ -1109,3 +1121,19 @@ hostile_tests!(plugin_fuel, plugin_extensions);
 fn clipboard_unicode_seams() {
     check(hostile::clipboard_unicode_seams().unwrap());
 }
+
+#[test]
+fn range_policy_endpoints() {
+    check(hostile::range_policy_endpoints().unwrap());
+}
+hostile_tests!(
+    image_missing,
+    image_corrupt,
+    image_pixels_extreme,
+    image_oversized,
+    image_rotated,
+    image_vertical,
+    image_empty_alt,
+    image_unreadable
+);
+region_hostile_tests!(image_float, image_note);
