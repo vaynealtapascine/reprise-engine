@@ -66,10 +66,9 @@ pub struct Itemized {
 
 /// Splits a paragraph into items with one face, size, bidi level and script.
 ///
-/// Every character inside a style run is in exactly one item, unless no face
-/// in its fallback chain is available; then it is in none and a
-/// [`codes::FONT_MISSING`] note says so. Each use of a fallback family is
-/// reported with [`codes::FONT_FALLBACK`] (21).
+/// Every character inside a valid style run is in exactly one item. If no
+/// named face is available, the engine's serif generic default is used.
+/// Each substitution is reported with [`codes::FONT_FALLBACK`] (21).
 ///
 /// Bidi resolves UAX #9 through I2 with ICU4X properties. Line owners apply
 /// L1/L2 with [`crate::reorder_line`] after composition. Scripts follow UAX #24
@@ -81,7 +80,8 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
 /// Explicit family chains ending in a generic default. Serif is appended if
 /// absent. At most 64 named families are searched. Fallback keeps each grapheme
 /// together: first face covering every visible scalar, or the terminal class
-/// default with .notdef and a diagnostic. Legacy itemize retains its contract.
+/// default with .notdef and a diagnostic. Legacy itemize uses one available
+/// face for the whole style run, falling back to serif when none is registered.
 pub fn itemize_families(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
     itemize_inner(input, fonts, true)
 }
@@ -185,7 +185,7 @@ fn itemize_inner(
         }
         let mut nearest = std::collections::BTreeMap::new();
         let mut reported_matches = std::collections::BTreeSet::new();
-        let candidates: Vec<_> = families
+        let mut candidates: Vec<_> = families
             .iter()
             .enumerate()
             .filter_map(|(index, family)| {
@@ -206,6 +206,21 @@ fn itemize_inner(
                 face.map(|face| (index, face))
             })
             .collect();
+        if !generic_defaults && candidates.is_empty() {
+            let index = families.len();
+            families.push(GenericFamily::Serif.name());
+            candidates.push((index, fonts.generic(GenericFamily::Serif)));
+            // Empty legacy chains also substitute the engine default.
+            if index == 0 {
+                out.notes.push(
+                    Note::warning(
+                        codes::FONT_FALLBACK,
+                        "empty family chain; used serif generic default",
+                    )
+                    .at(r.clone()),
+                );
+            }
+        }
         let Some((initial_index, initial_face)) = candidates.first().copied() else {
             out.notes.push(
                 Note::error(
@@ -223,7 +238,7 @@ fn itemize_inner(
                     format!(
                         "{:?} unavailable; used {:?}",
                         &run.families[..initial_index],
-                        run.families[initial_index]
+                        families.get(initial_index).copied().unwrap_or("serif")
                     ),
                 )
                 .at(r.clone()),
@@ -439,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn text_with_no_available_face_is_left_out_and_reported() {
+    fn legacy_missing_family_uses_serif_without_omitting_text() {
         let fonts = fonts();
         let text = "ab";
         let styles = [
@@ -454,9 +469,11 @@ mod tests {
             },
             &fonts,
         );
-        assert_eq!(out.items.len(), 1);
-        assert_eq!(out.items[0].range, 1..2);
-        assert_eq!(codes_of(&out.notes), ["font.missing"]);
+        assert_eq!(out.items.len(), 2);
+        assert_eq!(out.items[0].range, 0..1);
+        assert_eq!(out.items[0].face, *fonts.generic(GenericFamily::Serif).id());
+        assert_eq!(out.items[1].range, 1..2);
+        assert_eq!(codes_of(&out.notes), ["font.fallback"]);
         assert_eq!(out.notes[0].bytes, Some(0..1));
     }
 

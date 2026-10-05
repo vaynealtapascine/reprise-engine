@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 78);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 79);
 }
 
 hostile_tests!(
@@ -1137,3 +1137,5 @@ hostile_tests!(
     image_unreadable
 );
 region_hostile_tests!(image_float, image_note);
+
+hostile_tests!(font_legacy_missing);

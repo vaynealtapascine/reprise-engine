@@ -220,7 +220,9 @@ Codes in use:
     so per-character fallback never cuts a cluster. Uncovered graphemes remain
     in the generic default with `.notdef` (`font.missing`, Warning). Each later
     family selection reports `font.fallback` (Warning). Legacy `itemize` and
-    single-family documents retain the existing availability-only contract.
+    single-family documents keep availability-only selection when a named face
+    exists; if none exists they use the serif generic default and report
+    `font.fallback` (Warning), retaining all text.
     Explicit-chain runs use a grapheme's base scalar script/level even when
     a combining mark has its own script, preserving adapter cluster boundaries.
 
@@ -236,8 +238,8 @@ Codes in use:
 -   **Three steps:**
     1.  `itemize(ParagraphInput, &FontStore)` splits the paragraph into `Item`s. Each item
         has one face, size, bidi level and script. Fallback chains pick the first available
-        family and report `font.fallback`. Text with no available face is left out and
-        reported with `font.missing`.
+        family and report `font.fallback`. When no named face is available, the serif
+        generic default is used with `font.fallback` (Warning); text is not omitted.
     2.  `Shaper::shape()` shapes every item with the configured adapter.
     3.  `Reshape::reshape(range)` shapes part of the paragraph again as a line on its own.
 -   **`ShapingAdapter::shape(&ShapeRequest) -> Vec<ShapedGlyph>`:**
