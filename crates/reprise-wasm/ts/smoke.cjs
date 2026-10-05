@@ -63,6 +63,7 @@ const image = { at: null, asset, alt: "A red café image", width: 20 * 1024, hei
 const imageNode = imageDoc.apply(p({ commands: [{ kind: "insert-image", image }] })).data.blocks[0];
 finish(imageDoc);
 const drawing = imageDoc.display_json(0).data;
+assert.equal(drawing, fs.readFileSync(path.join(__dirname, "../../reprise/tests/images.json"), "utf8").trimEnd());
 assert.ok(drawing.includes('"type":"image"') && drawing.includes(asset));
 assert.ok(imageDoc.diagnostics().data.every(note => note.severity === "info"));
 const vector = imageDoc.svg(0).data;

@@ -247,6 +247,7 @@ fn image_editor_loop_only_through_the_facade() {
     assert!(before.contains("\"type\":\"image\""));
     assert!(before.contains(&hash));
     assert!(before.contains(alt));
+    assert_eq!(before, include_str!("images.json").trim_end());
     assert!(
         s.diagnostics()
             .data
