@@ -2,6 +2,41 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-05: bindings merged
+
+**Done** (Sol): **bindings (11)**, the external contract the Reprise app is built on.
+
+-   **`crates/reprise`:** the native facade for the Tauri backend. A `Workspace` opens and
+    creates `DocumentSession`s that cover editing, undo, navigation, clipboard, exports with
+    loss reports, budgeted viewport-first layout jobs, display lists, reading order, fonts,
+    image assets, plugins and sync primitives. Every payload is versioned, the public API is
+    pinned in `API.txt`, and errors are one typed enum with stable codes.
+-   **`crates/reprise-wasm`:** the same facade over `wasm-bindgen`, with generated TypeScript
+    declarations and a dependency-free reference worker in `ts/`. Native and WASM give
+    byte-identical display JSON for text and images.
+-   `docs/bindings.md` covers the editor loop, worker protocol, versioning, error codes and
+    the split between the Tauri backend and the engine.
+-   **Review fixes:**
+    -   Create and open define a base style when a document has none, so default-styled
+        text lays out without registering fonts.
+    -   A missing legacy family falls back to the serif default with `font.fallback`
+        instead of dropping the text (`font_legacy_missing` fixture). An authored generic
+        name resolves directly, with no warning.
+    -   Unplaced selections return `bindings.layout-required`, not `InvalidId`.
+-   **Orchestrator tests:** a boundary fuzz over every byte-taking entry point; two peers
+    opening the same legacy package write the base style concurrently and still converge.
+
+**Gaps:**
+
+-   **Sync:** v1 updates are bounded, self-contained history snapshots; compact deltas are a
+    follow-up.
+-   Packages from a newer version are refused rather than opened read-only.
+-   Rich-image HTML.
+
+**Next:** hardening (finer incremental steps, native workers, PDF/UA tags, table headers and
+spans, upright vertical text, cross-crate fuzzing, a performance pass), and the Reprise UI
+on top of the bindings.
+
 ## 2026-10-05: range policies, consolidated CODEMAP and images merged; bindings under review
 
 **Done** (Sol):
