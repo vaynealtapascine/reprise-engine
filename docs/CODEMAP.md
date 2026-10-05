@@ -88,6 +88,7 @@ start with `docs/`, which names repository-level documentation.
 | `edit` | `src/paste.rs` | Validated standalone paste, fresh staged IDs, style collision and dangling-reference handling, relation remapping, returned activated prefix/suffix IDs, identity-preserving host-range reanchoring with authored policy and diagnosed cross-block omissions; atomic commit/undo | 07, 12, 29, 35, 37 |
 | `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties; split/join preserve authored range policy through undo/redo | 07, 12, 29 |
 | `edit` | `tests/undo_merge_fuzz.rs` | Undo, redo and merges interleaved on two peers: replicas and layout converge, new IDs never repeat | 07, 29 |
+|  | `tests/range_policy_concurrent.rs` | A concurrent split and join over the same ranges converge with their authored policies | 12, 29 |
 | `edit` | `tests/document_edits.rs` | General structural edit primitives, table/row/cell subtree deletion with identity-preserving undo, and collaborative text undo | 07, 12, 24, 29 |
 | `edit` | `tests/common/mod.rs`, `tests/navigation.rs`, `tests/movement.rs`, `tests/selection.rs` | All-hostile geometric round trips, bidi/zero-width and spiral-strip traversal, authored reading overrides, empty input, transforms and selection coverage | 20, 30, 31, 33, 37 |
 | `format` | `src/lib.rs`, `src/container.rs` | Versioned checksummed container, document identity, feature masks, hard bounds, typed errors and codes | 34, 37, 38 |
