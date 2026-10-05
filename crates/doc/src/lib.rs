@@ -42,6 +42,7 @@ mod resolve;
 mod structure;
 mod style;
 mod table;
+mod table_grid;
 
 pub use context::ResolutionContext;
 pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
@@ -70,6 +71,10 @@ pub use style::{
     StyleResolution, default_style,
 };
 pub use table::{CellInfo, Column, ColumnWidth, RowInfo, TableColumns, TableRole};
+pub use table_grid::{
+    CellInput, GridCell, GridIssue, GridIssueKind, GridRow, MAX_GRID_COLUMNS, MAX_GRID_ROWS,
+    RowInput, TableGrid, resolve_grid,
+};
 
 macro_rules! tree_ids {
     ($($(#[$m:meta])* $name:ident),*) => {$(
