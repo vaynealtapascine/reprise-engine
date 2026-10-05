@@ -17,6 +17,21 @@ carried over. Briefs are in `F:/reprise-wt/briefs/hardening-*.md`.
 | **incremental:** finer steps, native workers | research only |
 | **vertical:** `text-orientation`, vertical shaping, tate-chū-yoko | research only |
 
+**Resumed at 12:50 UTC.** All five agents picked up again, now on the F: worktrees.
+
+**Added: collab** (Opus 5.5, `hardening/collab`). A review for multiplayer readiness found
+gaps that no other workstream covers:
+
+-   Every exchange sends a full history snapshot.
+-   Carets and selections are byte offsets, so they go stale when a remote merge lands.
+-   There is no remote presence.
+-   Peer updates bypass kernel validation, with no defined post-merge invariants.
+-   `import_updates` doesn't report what changed.
+
+The brief (`briefs/hardening-collab.md`) covers delta sync with negotiation, a trust boundary
+and a concurrency matrix, a raw-op hostile-peer fuzz, stable carets and presence, change
+reports, per-user undo proofs, and a three-peer soak test.
+
 **Review of the tables commit.** The design is sound: spans are interpreted in one pure
 function shared by layout, export and accessibility, and repeated headers stay derived.
 Spans live in the existing version-1 cell record, which has `deny_unknown_fields`, so an
