@@ -25,6 +25,7 @@ export type Response = Payload<{ id: string } & (
   | { kind: "layout"; job: number; progress: Payload<LayoutProgress>; pages: Payload<DisplayPage>[] }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
+  | { kind: "asset"; hash: Payload<string> }
   | { kind: "ack" }
   | { kind: "error"; error: Payload<ErrorPayload> }
 )>;
@@ -59,7 +60,10 @@ scope.onmessage = (event: MessageEvent<Request>) => {
           release(); document?.free(); document = candidate;
           post({ id, kind: "state", state: document.state() }); break;
         case "font": current().declare_font(data.request, data.bytes); release(); post({ id, kind: "ack" }); break;
-        case "asset": current().register_asset(data.request, data.bytes); release(); post({ id, kind: "ack" }); break;
+        case "asset": {
+          const hash = current().register_asset(data.request, data.bytes); release();
+          post({ id, kind: "asset", hash }); break;
+        }
         case "image": current().insert_image(data.request); release(); post({ id, kind: "state", state: current().state() }); break;
         case "edit": current().apply(data.request); release(); post({ id, kind: "state", state: current().state() }); break;
         case "start": release(); active = current().start_layout(data.request).data; post({ id, kind: "started", job: active }); break;

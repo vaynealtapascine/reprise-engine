@@ -179,7 +179,9 @@ messages. There are no hidden threads, timers or unbounded pump loops.
 Every message is `{ version: 1, data: { id, kind, ... } }`. `id` is a caller
 correlation string. Request kinds are `create`, `open`, `font`, `asset`, `image`, `edit`, `start`,
 `step`, `cancel`, `save`, `sync-export`, `sync-import`, and `close`. Responses are
-`state`, `started`, `layout`, `saved`, `sync`, `ack`, or `error`.
+`state`, `asset`, `started`, `layout`, `saved`, `sync`, `ack`, or `error`.
+An `asset` request carries declaration and bytes; its `asset` response returns
+the content hash for the following `image` insertion request.
 
 1. `open` carries `Payload<Open>` and package `Uint8Array` (or use `create`).
 2. `start` carries `Payload<LayoutOptions>` and returns a monotone `job` handle.
@@ -332,4 +334,6 @@ New dependency licenses were checked in downloaded Cargo manifests: ts-rs and
 ts-rs-macros 12.0.1 and serde-wasm-bindgen 0.6.5 are MIT; termcolor 1.4.1 and
 winapi-util 0.1.11 offer MIT (chosen over Unlicense). wasm-bindgen 0.2.129 and
 js-sys 0.3.106 are promoted existing dependencies under MIT OR Apache-2.0.
+The facade image tests also use the existing workspace lopdf 0.38.0 dependency
+(MIT) to verify embedded PDF image objects; no new package is added for it.
 All are GPLv3-compatible; the facade/package license is AGPL-3.0-or-later.
