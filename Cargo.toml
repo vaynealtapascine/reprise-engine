@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.0.0"
@@ -29,6 +30,7 @@ reprise-fixtures = { path = "crates/fixtures" }
 reprise-edit = { path = "crates/edit" }
 reprise-plugin = { path = "crates/plugin" }
 reprise-clipboard = { path = "crates/clipboard" }
+reprise-fuzz-harness = { path = "crates/fuzz-harness" }
 
 loro = "1.16"
 thiserror = "2"

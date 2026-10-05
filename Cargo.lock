@@ -1948,6 +1948,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "reprise-fuzz-harness"
+version = "0.0.0"
+dependencies = [
+ "reprise-clipboard",
+ "reprise-compose",
+ "reprise-diag",
+ "reprise-display",
+ "reprise-doc",
+ "reprise-edit",
+ "reprise-fixtures",
+ "reprise-font",
+ "reprise-format",
+ "reprise-geom",
+ "reprise-layout",
+]
+
+[[package]]
 name = "reprise-geom"
 version = "0.0.0"
 dependencies = [
