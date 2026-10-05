@@ -166,3 +166,20 @@ pub fn image_hash(index: usize) -> String {
         .insert(image(index))
         .unwrap_or_else(|_| "0".repeat(64))
 }
+
+/// HTML the clipboard reader may be handed: well-formed, tag soup, active
+/// content, deep nesting and nested tables.
+pub fn html(index: usize) -> String {
+    match index % 10 {
+        0 => "<p>one</p><p>two &amp; three</p>".into(),
+        1 => "<div>a<br>b<br/>c</div><pre>  keep   spaces </pre>".into(),
+        2 => "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>".into(),
+        3 => "<p>unclosed <b>bold <i>italic</p><p>next".into(),
+        4 => "<script>alert(1)</script><p>after</p><style>p{}</style>".into(),
+        5 => "<p style=\"font-size: 14pt; font-family: serif\">styled</p>".into(),
+        6 => "<table><tr><td><table><tr><td>nested</td></tr></table></td></tr></table>".into(),
+        7 => format!("{}deep{}", "<div>".repeat(80), "</div>".repeat(80)),
+        8 => "<p dir=\"rtl\">\u{5d0}\u{5d1}</p><p dir=\"ltr\">\u{5d0}</p>&#x1F600;&#0;&nbsp;".into(),
+        _ => "<<<>>>&&&;;; <p <b> </ ".into(),
+    }
+}
