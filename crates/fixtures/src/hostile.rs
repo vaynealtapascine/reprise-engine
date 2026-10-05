@@ -132,6 +132,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         image_vertical()?,
         image_empty_alt()?,
         image_unreadable()?,
+        font_legacy_missing()?,
     ])
 }
 
@@ -2244,4 +2245,23 @@ pub fn image_unreadable() -> Result<Fixture, DocError> {
         .set_image_record(node, r#"{"version":999,"future":["kept"]}"#)?;
     fixture.doc.commit();
     Ok(fixture)
+}
+
+/// Legacy single-family input must render through the terminal engine default.
+pub fn font_legacy_missing() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.define_style(
+        "missing-legacy",
+        &Style {
+            family: Some("Not Registered Legacy Serif".into()),
+            ..Style::default()
+        },
+    )?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "missing-legacy",
+        "office ffi e\u{301}",
+    )?;
+    doc.commit();
+    Ok(Fixture::new("font_legacy_missing", doc, &["font.fallback"]))
 }

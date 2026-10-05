@@ -304,6 +304,21 @@ fn lz4_block_size(bytes: &[u8], history: usize, max_block: usize) -> Result<usiz
     Ok(size)
 }
 
+impl Document {
+    /// Sorted version vector, opaque to transport implementations.
+    pub fn version_vector(&self) -> Vec<(u64, i32)> {
+        self.commit();
+        let mut vector: Vec<_> = self
+            .doc
+            .oplog_vv()
+            .iter()
+            .map(|(peer, counter)| (*peer, *counter))
+            .collect();
+        vector.sort_unstable();
+        vector
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

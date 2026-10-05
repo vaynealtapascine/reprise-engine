@@ -133,6 +133,8 @@ start with `docs/`, which names repository-level documentation.
 | `cli` | `src/lib.rs` | `write_outputs`: layout JSON, and display list JSON, SVG and PNG for every page, plus a PDF | 32 |
 | `cli` | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 | `cli` | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
+| `reprise` | `src/lib.rs`, `dto.rs`, `error.rs`, `convert.rs`, `session.rs`, `typescript.rs`; `API.txt`, `tests/`, `examples/` | Versioned session facade, owned jobs, editor lifecycle, boundary validation, TypeScript generation and native display golden | 02, 04, 28, 29, 38, 41 |
+| `reprise-wasm` | `src/lib.rs`, `ts/`, `package.json` | Typed JavaScript objects, Uint8Array resources and explicit worker job steps over the same facade | 04, 28, 36, 38, 41 |
 
 Other files:
 

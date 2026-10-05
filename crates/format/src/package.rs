@@ -154,6 +154,24 @@ impl Package {
         })
     }
 
+    /// Refresh authored bytes while preserving unknown sections and raw manifests.
+    /// Derived caches are discarded; used fonts can then be embedded explicitly.
+    pub fn with_document(
+        &self,
+        document: &Document,
+        mode: PersistenceMode,
+    ) -> Result<Self, FormatError> {
+        self.writable()?;
+        let mut package = self.clone();
+        package.revision = document.revision();
+        package
+            .container
+            .sections
+            .insert(ids::DOCUMENT, Section::raw(document.try_export(mode)?));
+        package.container.sections.remove(&ids::CACHE);
+        Ok(package)
+    }
+
     /// A save-ready package embedding precisely faces with at least one glyph
     /// in the supplied current layout, including glyph zero. Empty runs and
     /// style-only names are excluded. The old metadata-only constructor remains.

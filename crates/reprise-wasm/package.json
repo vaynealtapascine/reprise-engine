@@ -1,0 +1,13 @@
+{
+  "name": "@reprise/engine",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "pkg/reprise_wasm.js",
+  "types": "ts/reprise_wasm.d.ts",
+  "exports": {
+    ".": { "types": "./ts/reprise_wasm.d.ts", "import": "./pkg/reprise_wasm.js" },
+    "./worker": "./pkg/worker.js"
+  },
+  "files": ["pkg", "ts/types.d.ts", "ts/reprise_wasm.d.ts", "ts/worker.ts"]
+}

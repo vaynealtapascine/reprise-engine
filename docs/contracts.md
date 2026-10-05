@@ -59,6 +59,7 @@ Codes in use:
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
 | clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped` |
 | export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure` |
+| bindings | `bindings.version`, `bindings.invalid`, `bindings.limit`, `bindings.id`, `bindings.stale`, `bindings.cancelled`, `bindings.layout-required`, `bindings.read-only`, `bindings.store`, `bindings.render` |
 
 ## Text store: `reprise-text`
 
@@ -219,7 +220,10 @@ Codes in use:
     so per-character fallback never cuts a cluster. Uncovered graphemes remain
     in the generic default with `.notdef` (`font.missing`, Warning). Each later
     family selection reports `font.fallback` (Warning). Legacy `itemize` and
-    single-family documents retain the existing availability-only contract.
+    single-family documents keep availability-only selection when a named face
+    exists; if none exists they use the serif generic default and report
+    `font.fallback` (Warning), retaining all text. An authored legacy generic
+    selects its engine default directly without a substitution diagnostic.
     Explicit-chain runs use a grapheme's base scalar script/level even when
     a combining mark has its own script, preserving adapter cluster boundaries.
 
@@ -235,8 +239,8 @@ Codes in use:
 -   **Three steps:**
     1.  `itemize(ParagraphInput, &FontStore)` splits the paragraph into `Item`s. Each item
         has one face, size, bidi level and script. Fallback chains pick the first available
-        family and report `font.fallback`. Text with no available face is left out and
-        reported with `font.missing`.
+        family and report `font.fallback`. When no named face is available, the serif
+        generic default is used with `font.fallback` (Warning); text is not omitted.
     2.  `Shaper::shape()` shapes every item with the configured adapter.
     3.  `Reshape::reshape(range)` shapes part of the paragraph again as a line on its own.
 -   **`ShapingAdapter::shape(&ShapeRequest) -> Vec<ShapedGlyph>`:**
@@ -713,3 +717,80 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
   with a supplied `AssetStore`, leaving frozen `ExportOptions` unchanged.
   `export.assets` reports actual image preservation; plain text preserves alt
   text and reports pixel data dropped. Ordered PDF uses image ActualText.
+
+
+## Bindings: external API v1 (`reprise`, `reprise-wasm`)
+
+The facade crates are version 0.1.0 and are the external application contract
+(02, 04, 28, 29, 38, 41). Core types remain private: all crossing records, enums,
+IDs, diagnostics, display operations and errors are facade-owned. No core type is
+re-exported. `crates/reprise/API.txt` pins native signatures; generated
+`crates/reprise-wasm/ts/types.d.ts` pins wire shapes. Changes to either require
+explicit review. See [bindings.md](bindings.md) for the full method overview,
+worker protocol, bounds, error meanings, packaging and host responsibilities.
+
+- Every standalone object payload is `Payload<T> { version: 1, data: T }`.
+  Nested records inherit the envelope version. Raw resource bytes are opaque
+  byte channels paired with versioned metadata, never JSON number-array APIs in
+  JavaScript. Native callers receive owned `Vec<u8>`; WASM uses `Uint8Array`.
+  Opaque WASM objects are local handles and are not serializable payloads.
+- Unsupported versions are refused before interpreting data. Native `decode`
+  bounds JSON bytes/depth; WASM snapshots and bounds a plain JS object tree
+  before deserializing it, rejects cycles and catches throwing property reads.
+  Decimal strings carry peer IDs and other 64-bit counters. Node/range/relation
+  IDs are canonical opaque strings; document IDs are 32 lowercase hex digits.
+  Geometry is integer 1/1024 pt; matrix coefficients are integer 16.16.
+- `Workspace` creates/opens independent `DocumentSession` replicas. Hosts supply
+  persistent document identity and distinct peers. All editing transactions,
+  paste and plugin edits use the editing kernel, including atomic validation,
+  position effects and per-peer undo/redo. Adding plugin schemas retains undo.
+  Create/open define the empty-name base style (serif, 10 pt, 1.2 em) only when
+  absent; authored definitions are preserved. The base directly selects the legacy
+  serif generic without substitution warnings. Default text needs no font import.
+  Valid unplaced selection endpoints return `bindings.layout-required`, absent
+  node IDs return `bindings.id`, and invalid offsets return `bindings.invalid`.
+  Compatible newer packages return `bindings.read-only`; the facade currently
+  cannot lay out the core's `DocumentAt` view and never exposes it as editable.
+- Layout jobs are owned, single-threaded continuations of the same incremental
+  coordinator. Each `step(session, budget)` charges at most its explicit budget,
+  may stop early for the viewport and returns pass, coverage, completeness,
+  settled/outside-document flags and work counters. Zero is a checked no-op.
+  Partial pages are available only inside advertised coverage. Navigation,
+  reading order, PDF and convenience rendering require complete current layout.
+- Every job/result is bound to native session identity, revision and generation.
+  New jobs/configuration changes supersede earlier jobs. Edits and sync invalidate
+  revision-bound results; cancellation is terminal. A stale/cancelled job cannot
+  publish. Hosts also gate messages already queued outside the engine against
+  their currently accepted token. Caches are isolated per session/configuration.
+- Saving finishes layout when needed, embeds used fonts and preserves document
+  ID, unknown sections, raw untouched manifests, opaque extensions and assets.
+  Saving never compacts history implicitly. SVG/PNG/PDF render the same display
+  operations; display JSON uses one canonical serializer natively and in WASM.
+- Clipboard supports versioned native fragments, plain/HTML selection projection
+  with loss reports, and bounded plain/HTML/native paste. Export supports plain,
+  HTML, native and PDF, always returning feature losses. Resources are declared,
+  enumerated and retrieved without I/O. Image registration installs bytes in
+  `Engine.assets`. `ImageInsert` and standalone `Command::InsertImage` insert a
+  content hash, alt text, optional physical dimensions and style through atomic
+  kernel paste. Image-kind `InsertBlock` without a record is refused. Display
+  image DTOs mirror the core's origin-based rectangles. Asset-aware SVG/PNG/PDF,
+  package save/open and native clipboard/export preserve available image bytes;
+  missing/corrupt references use the core's diagnosed placeholders.
+- Plugins are loaded against explicit content pins, manifests, grants and limits;
+  functions, geometry and relation schemas can be installed. Editing plugins
+  receive only explicit node handles and commit staged insertions atomically.
+  Modules share the core's deterministic wasmi sandbox on both platforms.
+- Sync v1 exchanges sorted version vectors and self-contained retained-history
+  snapshots as update packets. Import verifies document scope, distinct declared
+  peers and agreement of vector with bytes before merging. Compact delta packets
+  are a future version; no transport/server/authentication is inferred. Fonts,
+  assets and engine configuration use separate host-owned resource channels.
+  Awareness is bounded opaque bytes with document/peer metadata and no persistence.
+- The typed `Error` enum maps core notes without changing stable codes/severities.
+  Boundary refusal codes above have Error severity because the requested result
+  or operation is omitted. Successful explicit cancellation itself returns an
+  acknowledgement. Messages are explanatory and are not matched as contracts.
+- Neither facade uses unsafe code, required threads, clocks, random identity,
+  filesystem or network I/O. Sessions retain the core's single-threaded caches;
+  native hosts create and drive them on a dedicated engine thread/actor rather
+  than moving live jobs between arbitrary Tauri command threads.
