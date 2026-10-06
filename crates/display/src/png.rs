@@ -14,6 +14,10 @@ fn paint(c: Color) -> Paint<'static> {
     p
 }
 
+/// The most pixels one rendered page may have (64 MiB of RGBA), the same cap
+/// the backends apply when decoding images.
+const MAX_PIXELS: f64 = 16_777_216.0;
+
 fn pt(l: Length) -> f32 {
     l.to_pt_f32()
 }
@@ -85,7 +89,10 @@ pub fn render_with_assets(
     let w = (pt(list.width) * pixels_per_pt).ceil();
     let h = (pt(list.height) * pixels_per_pt).ceil();
     let bad = || RenderError::BadSize(w, h);
-    if !(w >= 1.0 && h >= 1.0) {
+    // A page the size of the medium can be enormous (a saturated medium is
+    // about two million points square). The pixmap is allocated up front, so
+    // an unbounded size would abort the process instead of failing the render.
+    if !(w >= 1.0 && h >= 1.0 && f64::from(w) * f64::from(h) <= MAX_PIXELS) {
         return Err(bad());
     }
     let mut pixmap = Pixmap::new(w as u32, h as u32).ok_or_else(bad)?;
@@ -271,6 +278,28 @@ mod tests {
             render(&list, &fonts, 2.0).expect("renders"),
             render(&list, &fonts, 2.0).expect("renders")
         );
+    }
+
+    /// Found by the cross-crate fuzzer: a page the size of a saturated medium
+    /// asked tiny-skia for a terabyte and aborted the process.
+    #[test]
+    fn enormous_pages_are_refused_not_allocated() {
+        let (mut list, fonts) = sample::list();
+        list.width = Length::MAX;
+        list.height = Length::MAX;
+        assert!(matches!(
+            render(&list, &fonts, 0.25),
+            Err(RenderError::BadSize(..))
+        ));
+        // Just over the cap: 4097 x 4096 pixels at one pixel per point.
+        list.width = Length::from_pt(4097);
+        list.height = Length::from_pt(4096);
+        assert!(matches!(
+            render(&list, &fonts, 1.0),
+            Err(RenderError::BadSize(..))
+        ));
+        list.width = Length::from_pt(4096);
+        assert!(render(&list, &fonts, 1.0).is_ok());
     }
 
     #[test]
