@@ -304,3 +304,32 @@ fn layout_is_deterministic_and_repeats_are_derived_only() {
         "layout writes nothing to the document"
     );
 }
+
+#[test]
+fn extreme_widths_and_deep_spans_saturate_instead_of_panicking() {
+    let (engine, doc) = setup(60);
+    let t = doc
+        .append_table(TableColumns {
+            columns: vec![
+                Column {
+                    width: ColumnWidth::Fixed(Length::MAX),
+                },
+                Column {
+                    width: ColumnWidth::Fixed(Length::MIN),
+                },
+                Column {
+                    width: ColumnWidth::Content,
+                },
+            ],
+        })
+        .unwrap();
+    let r = doc.append_table_row(t, true).unwrap();
+    let (c, b) = cell(&doc, r, 0, "wide wide wide");
+    doc.set_table_cell_span(c, 3, 3).unwrap();
+    for i in 0..30 {
+        row(&doc, t, false, &[&format!("{i}")]);
+    }
+    let s = engine.layout(&doc);
+    assert!(s.block(b).is_some());
+    assert_eq!(s, engine.layout(&doc));
+}
