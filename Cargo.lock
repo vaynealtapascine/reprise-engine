@@ -2005,6 +2005,7 @@ dependencies = [
 name = "reprise-text"
 version = "0.0.0"
 dependencies = [
+ "icu_properties",
  "icu_segmenter",
  "loro",
  "serde",
