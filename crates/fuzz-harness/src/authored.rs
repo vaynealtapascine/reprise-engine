@@ -86,6 +86,27 @@ pub fn concat_text(doc: &Document) -> String {
         .collect()
 }
 
+/// The text a reader can see: like [`concat_text`], but without the text of
+/// table and row containers, or of any block that holds other blocks. Only cells and ordinary blocks are laid out and
+/// exported; a container's own text container is never shown, so exporters
+/// rightly leave it out.
+pub fn visible_text(doc: &Document) -> String {
+    live_blocks(doc)
+        .into_iter()
+        .filter(|&node| {
+            let container = matches!(
+                doc.table_role(node).ok().flatten(),
+                Some(reprise_doc::TableRole::Table(_) | reprise_doc::TableRole::Row(_))
+            );
+            // A cell that holds blocks shows those; its own text container is
+            // the (empty) text of the cell itself.
+            !container && doc.children(Some(node)).is_empty()
+        })
+        .filter_map(|node| doc.block(node).ok())
+        .map(|block| block.text.to_string())
+        .collect()
+}
+
 /// Human-readable difference, for violation messages.
 pub fn diff(left: &Authored, right: &Authored) -> String {
     let mut out = String::new();

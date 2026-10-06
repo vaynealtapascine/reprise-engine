@@ -1414,7 +1414,7 @@ impl Cx<'_, '_> {
                 .chain(result.losses.notes.iter().map(|n| n.code.as_str())),
         )?;
         self.w.report.transcript.push(fnv(&result.bytes));
-        let everything = concat_text(doc);
+        let everything = authored::visible_text(doc);
         match kind % 4 {
             0 | 1 => {
                 let text = String::from_utf8_lossy(&result.bytes).into_owned();
@@ -1442,8 +1442,12 @@ impl Cx<'_, '_> {
                 ensure!(
                     char_bag(&back) == char_bag(&everything),
                     "export-keeps-text",
-                    "{} export re-imports as {back:?}, document text is {everything:?}",
-                    ["plain", "HTML"][usize::from(kind % 4)]
+                    "{} export re-imports as {back:?}, document text is {everything:?}
+exported: {:?}
+blocks: {:#?}",
+                    ["plain", "HTML"][usize::from(kind % 4)],
+                    String::from_utf8_lossy(&result.bytes),
+                    authored(doc).blocks
                 );
             }
             2 => {
