@@ -2,6 +2,84 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-06: tables merged (hardening)
+
+**Done** (Sonnet 5.5): **header rows that repeat, and row and column spans** (06, 24, 26, 33,
+34, 35).
+
+-   `CellInfo` stores authored `colspan` and `rowspan`. `doc/src/table_grid.rs::resolve_grid`
+    is the one pure interpretation, shared by layout, export and accessibility:
+    -   cells resolve in document order, and the first claim wins;
+    -   a zero span counts as one;
+    -   spans are cut to the edge, to free cells, and to the header rows they start in;
+    -   a cell is dropped when its origin is taken or its column is outside the table.
+
+    Concurrent span edits from two peers therefore resolve identically on every replica.
+    The read-only API is `Document::table_structure` and `table_cell_structure`.
+-   Rows joined by a row span form a group. A group is kept together when a fresh frame fits
+    it; otherwise it splits with `layout.table-rowspan-split`.
+-   The leading header rows repeat on every continuation frame as derived copies in
+    `LayoutSnapshot.repeated_headers`, never in `blocks`. That makes them not navigable: a
+    hit resolves to the nearest authored line. When a copy can't fit, the warning is
+    `layout.table-header-unrepeated`.
+-   **Package features:** optional bit 8 marks header rows and required bit 8 marks spans,
+    so older readers refuse span documents instead of misreading them. Both bits are
+    recomputed on save.
+-   **HTML clipboard:** `th`, `thead`, `colspan` and `rowspan` are read and written, within
+    bounds.
+-   **Orchestrator:**
+    -   Approved the additive `repeated_headers` snapshot field and the feature bits.
+    -   Added `tables_orchestrator.rs`: 48 seeded hostile-span tables in tiny to roomy
+        frames, checked for determinism, incremental equality and no double-claimed grid
+        positions, with counters proving that repeats, issues and splits occur. Also 12
+        rounds of concurrent span and header edits that converge both ways.
+
+**Gaps:** borders; nested tables; a header that itself spans frames never repeats (it only
+warns).
+
+**Hand-offs:**
+
+-   **pdfua:** tag `THead`/`TH` (scope Column) and `RowSpan`/`ColSpan` from
+    `table_structure`, and mark `repeated_headers` copies as Artifacts.
+-   **incremental:** tables added two one-liners in `incremental.rs`: the snapshot field,
+    and `partial()` dropping header copies of a cut frame.
+
+## 2026-10-05: hardening pass under way
+
+Five workstreams started at 08:00 UTC on Claude (Sonnet 5.5 and Opus 5.5). All stopped at
+08:14 on the account's usage limit, and Sol's usage is exhausted until 2026-10-10. Worktrees
+moved from D: to `F:/reprise-wt/<name>` (branches `hardening/<name>`), with uncommitted work
+carried over. Briefs are in `F:/reprise-wt/briefs/hardening-*.md`.
+
+| Workstream | State at the stop |
+| --- | --- |
+| **tables:** repeated header rows, row and column spans | `doc` commit: `CellInfo` spans, `set_table_row_header`, and a shared `resolve_grid` that clamps or drops malformed spans; uncommitted `layout/src/table_flow.rs` |
+| **pdfua:** tagged ordered PDF aiming at PDF/UA-1 | uncommitted, never compiled `pdf.rs` rewrite plus `pdf/tags.rs` |
+| **fuzz:** cross-crate scenario harness and oracles | uncommitted `crates/fuzz-harness` skeleton |
+| **incremental:** finer steps, native workers | research only |
+| **vertical:** `text-orientation`, vertical shaping, tate-chū-yoko | research only |
+
+**Resumed at 12:50 UTC.** All five agents picked up again, now on the F: worktrees.
+
+**Added: collab** (Opus 5.5, `hardening/collab`). A review for multiplayer readiness found
+gaps that no other workstream covers:
+
+-   Every exchange sends a full history snapshot.
+-   Carets and selections are byte offsets, so they go stale when a remote merge lands.
+-   There is no remote presence.
+-   Peer updates bypass kernel validation, with no defined post-merge invariants.
+-   `import_updates` doesn't report what changed.
+
+The brief (`briefs/hardening-collab.md`) covers delta sync with negotiation, a trust boundary
+and a concurrency matrix, a raw-op hostile-peer fuzz, stable carets and presence, change
+reports, per-user undo proofs, and a three-peer soak test.
+
+**Review of the tables commit.** The design is sound: spans are interpreted in one pure
+function shared by layout, export and accessibility, and repeated headers stay derived.
+Spans live in the existing version-1 cell record, which has `deny_unknown_fields`, so an
+older reader drops a spanned cell instead of misreading it. The package feature declaration
+is therefore required, so older readers refuse the whole document instead.
+
 ## 2026-10-05: bindings merged
 
 **Done** (Sol): **bindings (11)**, the external contract the Reprise app is built on.

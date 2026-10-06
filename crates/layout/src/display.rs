@@ -223,7 +223,14 @@ impl LayoutSnapshot {
             if options.debug && options.boxes {
                 children.push(debug_path(Path::rect(r(frame.rect)), FRAME));
             }
-            for block in &self.blocks {
+            // Repeated table headers are drawn after the authored blocks, so the
+            // indices of authored items in this group do not move.
+            let copies = self
+                .repeated_headers
+                .iter()
+                .filter(|h| h.frame == index)
+                .flat_map(|h| h.blocks.iter());
+            for block in self.blocks.iter().chain(copies) {
                 let lines: Vec<&LineLayout> =
                     block.lines.iter().filter(|l| l.frame == index).collect();
                 if options.debug

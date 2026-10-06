@@ -271,7 +271,7 @@ impl Exporter for PlainText {
                 "layout reading order when supplied; semantic order otherwise; unplaced blocks appended",
                 "transforms and spirals are omitted",
                 "notes and floats become ordinary paragraphs",
-                "cells use tabs; rows use newlines; paragraphs use two newlines; authored breaks stay literal",
+                "cells use tabs; rows use newlines; paragraphs use two newlines; authored breaks stay literal; header rows and cell spans are flattened and repeated header copies are omitted",
                 "style metadata is omitted",
                 "logical Unicode text and bidi controls are retained",
                 "font bytes and identities are omitted",
@@ -368,6 +368,7 @@ fn html_node(
     layout: Option<&LayoutSnapshot>,
     out: &mut String,
     depth: usize,
+    grid: Option<&reprise_doc::TableGrid>,
 ) -> Result<(), ClipboardError> {
     if depth > reprise_doc::fragment::MAX_FRAGMENT_DEPTH {
         return Err(ClipboardError::Limit("HTML tree"));
@@ -375,22 +376,55 @@ fn html_node(
     let role = doc
         .table_role(node)
         .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
-    let tag = match role {
-        Some(TableRole::Table(_)) => Some("table"),
-        Some(TableRole::Row(_)) => Some("tr"),
-        Some(TableRole::Cell(_)) => Some("td"),
+    let own_grid;
+    let mut grid = grid;
+    if matches!(role, Some(TableRole::Table(_))) {
+        // The shared resolved grid: spans are exported as layout reads them.
+        own_grid = doc.table_structure(node).ok().flatten();
+        grid = own_grid.as_ref();
+    }
+    let open = match &role {
+        Some(TableRole::Table(_)) => Some("<table>".to_string()),
+        Some(TableRole::Row(_)) => Some("<tr>".to_string()),
+        Some(TableRole::Cell(_)) => {
+            let placed = grid.and_then(|g| g.cell(node));
+            let header = placed.is_some_and(|c| c.header);
+            let tag = if header { "th" } else { "td" };
+            let mut attrs = String::new();
+            if let Some(c) = placed {
+                if c.colspan > 1 {
+                    attrs.push_str(&format!(" colspan=\"{}\"", c.colspan));
+                }
+                if c.rowspan > 1 {
+                    attrs.push_str(&format!(" rowspan=\"{}\"", c.rowspan));
+                }
+            }
+            Some(format!("<{tag}{attrs}>"))
+        }
         None => None,
     };
-    if let Some(tag) = tag {
-        append(out, &format!("<{tag}>"))?;
+    let close = match &role {
+        Some(TableRole::Table(_)) => Some("</table>"),
+        Some(TableRole::Row(_)) => Some("</tr>"),
+        Some(TableRole::Cell(_)) => Some(
+            if grid.and_then(|g| g.cell(node)).is_some_and(|c| c.header) {
+                "</th>"
+            } else {
+                "</td>"
+            },
+        ),
+        None => None,
+    };
+    if let Some(open) = &open {
+        append(out, open)?;
     } else {
         paragraph(doc, node, layout, out)?;
     }
     for child in doc.children(Some(node)) {
-        html_node(doc, child, layout, out, depth + 1)?;
+        html_node(doc, child, layout, out, depth + 1, grid)?;
     }
-    if let Some(tag) = tag {
-        append(out, &format!("</{tag}>"))?;
+    if let Some(close) = close {
+        append(out, close)?;
     }
     Ok(())
 }
@@ -426,7 +460,7 @@ impl Exporter for Html {
         }
         let mut out = String::from("<!doctype html><html><body>");
         for node in roots {
-            html_node(doc, node, layout, &mut out, 0)?;
+            html_node(doc, node, layout, &mut out, 0, None)?;
         }
         append(&mut out, "</body></html>")?;
         use Disposition::*;
@@ -448,7 +482,7 @@ impl Exporter for Html {
                 "root paragraphs ordered from the layout; table/internal order remains semantic; no precedence graph",
                 "transforms and spirals are omitted",
                 "notes and floats become paragraphs",
-                "table/row/cell semantics retained; column constraints and headers are omitted",
+                "table/row/cell semantics retained; header rows (th) and spans (colspan/rowspan, as laid out) retained; column constraints and repeated header copies are omitted",
                 "computed family, size and line height retained; symbolic values and named inheritance omitted",
                 "logical Unicode plus paragraph dir retained",
                 "CSS family names retained; pinned identities and font bytes omitted",

@@ -84,3 +84,10 @@ pub const NOTE_CONTINUED: Code = Code::new("layout.note-continued");
 pub const NOTE_DEPTH: Code = Code::new("layout.note-depth");
 pub const TABLE_INVALID: Code = Code::new("layout.table-invalid");
 pub const TABLE_LIMIT: Code = Code::new("layout.table-limit");
+/// A cell span was clamped (zero, past the table edge, over an earlier cell
+/// or out of its header rows); the table is laid out with what remains.
+pub const TABLE_SPAN: Code = Code::new("layout.table-span");
+/// Rows joined by a row span do not fit one frame and were split across frames.
+pub const TABLE_ROWSPAN_SPLIT: Code = Code::new("layout.table-rowspan-split");
+/// Header rows are not repeated on a continuation frame.
+pub const TABLE_HEADER_UNREPEATED: Code = Code::new("layout.table-header-unrepeated");

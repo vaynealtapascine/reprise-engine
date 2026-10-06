@@ -113,8 +113,22 @@ their source block identity and inline column offset. A taller-than-any-frame
 line uses the established overflow fallback. Column widths are frozen for the
 table after its starting frame, like the starting-frame style rule for a
 paragraph. A narrower continuation frame is reported with `layout.frame-overflow`.
-Rectangular tables start below float exclusions. Repeated header rows, spanning cells, borders and nested tables are
-follow-ups; header authorship is retained but not repeated.
+Rectangular tables start below float exclusions. Borders and nested tables are
+follow-ups.
+
+Spans and header rows (see `doc/src/table_grid.rs`, `layout/src/table_flow.rs`).
+Authored spans are interpreted once, by `Document::table_structure`, first claim
+winning in document order; clamped spans report `layout.table-span` (Warning) and
+dropped cells `layout.table-invalid` (Error). A column span adds the solved widths of
+its columns and raises content min/max bounds equally over the spanned content columns.
+Rows joined by a row span form a group composed together: rows stack in a fragment, a
+spanning cell composes once at the first row it covers in that fragment, and its bottom
+stretches the last row it spans. A group that does not fit the rest of a frame but fits a
+fresh one starts on the fresh frame; one that fits neither splits with
+`layout.table-rowspan-split` (Warning). The leading header rows are composed again at the
+top of every continuation frame into `LayoutSnapshot::repeated_headers` (derived, outside
+`blocks`). A copy is skipped (`layout.table-header-unrepeated`, Warning, once per table)
+when the header does not fit one frame, or when the copy would leave the body no room.
 
 ## Bounded cycles and limits
 
@@ -125,7 +139,7 @@ follow-ups; header authorship is retained but not repeated.
 | Note -> dependent note | 32 dependency rounds and 32 actual levels | Resolve available anchors in stable order; no progress or depth exhaustion omits owners with `layout.note-depth` (Error). |
 | Domain water filling | 256 iterations, 256 variables | An incomplete allocation keeps unused width (`layout.solver-limit`, Warning). Extra variables are omitted (`layout.solver-limit`, Error). |
 | Region relation fanout | 4096 relations | Later region owners omitted with `layout.region-limit` (Error). |
-| Table fanout | 4096 rows, 256 columns, 65536 content blocks | Excess rows/blocks omitted with `layout.table-limit` (Error); invalid column count omits the table with `layout.table-invalid` (Error). |
+| Table fanout | 4096 rows, 256 columns, 65536 content blocks | Excess rows/blocks omitted with `layout.table-limit` (Error); invalid column count omits the table with `layout.table-invalid` (Error). Spans are cut to the grid; every group and header copy advances monotonically and is bounded by the page limit. |
 | Pagination | Existing `FlowSettings::max_pages` (0 means 1) | Unplaced bytes reported; no hunting for another page after the limit. |
 
 Backtracking is a complete reflow, bounded by the coordinator. Local text
