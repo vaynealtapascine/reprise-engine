@@ -3,6 +3,7 @@
 
 mod assets;
 mod container;
+pub mod features;
 mod image_assets;
 mod json;
 mod migration;

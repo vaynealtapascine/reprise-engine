@@ -140,7 +140,7 @@ impl Package {
         sections.insert(ids::SETTINGS, Section::raw(b"{}".to_vec()));
         sections.insert(ids::FONTS, Section::raw(b"[]".to_vec()));
         sections.insert(ids::ASSETS, Section::raw(b"[]".to_vec()));
-        Ok(Self {
+        let mut package = Self {
             container: Container {
                 header: Header {
                     version: CURRENT_VERSION,
@@ -151,7 +151,18 @@ impl Package {
             },
             limits: Limits::default(),
             revision: document.revision(),
-        })
+        };
+        package.declare_table_features(document);
+        Ok(package)
+    }
+
+    /// Declares the table features `document` needs, leaving every other
+    /// feature bit as it was (including unknown optional bits).
+    pub(crate) fn declare_table_features(&mut self, document: &Document) {
+        let needed = crate::features::table_features(document);
+        let flags = &mut self.container.header.features;
+        flags.required = (flags.required & !crate::features::KNOWN_REQUIRED) | needed.required;
+        flags.optional = (flags.optional & !crate::features::KNOWN_OPTIONAL) | needed.optional;
     }
 
     /// Refresh authored bytes while preserving unknown sections and raw manifests.
@@ -169,6 +180,7 @@ impl Package {
             .sections
             .insert(ids::DOCUMENT, Section::raw(document.try_export(mode)?));
         package.container.sections.remove(&ids::CACHE);
+        package.declare_table_features(document);
         Ok(package)
     }
 
@@ -580,6 +592,7 @@ impl OpenedFile {
         }
         let mut package = self.package.clone();
         package.revision = self.document.revision();
+        package.declare_table_features(&self.document);
         package
             .container
             .sections
@@ -634,6 +647,7 @@ impl OpenedFile {
         }
         let mut package = self.package.clone();
         package.revision = self.document.revision();
+        package.declare_table_features(&self.document);
         package
             .container
             .sections
@@ -649,6 +663,7 @@ impl OpenedFile {
         }
         let mut package = self.package.clone();
         package.revision = self.document.revision();
+        package.declare_table_features(&self.document);
         package
             .container
             .sections

@@ -40,7 +40,24 @@ pub struct LayoutSnapshot {
     /// then blocks placed by relations in relation order.
     pub blocks: Vec<BlockLayout>,
     pub relations: Vec<RelationLayout>,
+    /// Derived copies of repeating table header rows on continuation frames
+    /// (24, 33). They are not in `blocks`, so block queries, reading order and
+    /// the editing kernel never see them as authored text. Left out of JSON
+    /// when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub repeated_headers: Vec<RepeatedHeader>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// One repeated copy of a table's header rows on a continuation frame. The
+/// blocks carry the authored header blocks' node IDs and byte ranges, so a
+/// consumer can map any position in a copy to the authored header.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RepeatedHeader {
+    pub table: NodeId,
+    /// Index into [`LayoutSnapshot::frames`].
+    pub frame: usize,
+    pub blocks: Vec<BlockLayout>,
 }
 
 /// Which page template layout used, and where it came from.

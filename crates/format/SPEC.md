@@ -43,8 +43,14 @@ references already inside the Loro document are scoped by the containing
 document ID. Cross-document references must use the envelope. This does not
 change or migrate the frozen authored `SnapshotRef` type.
 
-Version 1 recognizes no feature bits. A nonzero required mask is
-`RequiredFeatures`; unknown optional bits are retained exactly. A version newer
+Version 1 defines two table feature bits (`features.rs`), both bit 8, declared on
+every save from the live content and recomputed (a removed span clears its bit):
+optional `TABLE_HEADERS` (a row is a header row; older readers lay out without
+repeating it, so it degrades) and required `TABLE_SPANS` (a cell spans rows or
+columns, or has table metadata this version cannot read; a reader without span
+support would drop those cells, so it refuses). Spanless, headerless tables set
+no bit and keep their bytes. Any other nonzero required bit is
+`RequiredFeatures` (carrying only the unknown bits); unknown optional bits are retained exactly. A version newer
 than 1 with no unknown required bits/sections and readable core sections opens
 read-only. Its document is exposed through `DocumentAt`; editable access and
 all save paths return `ReadOnly`. Compatibility assumes that core section

@@ -133,6 +133,12 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         image_empty_alt()?,
         image_unreadable()?,
         font_legacy_missing()?,
+        table_header_repeats()?,
+        table_header_taller_than_frame()?,
+        table_spans_whole_table()?,
+        table_thousand_columns()?,
+        table_rowspan_vertical_break()?,
+        table_concurrent_overlapping_spans()?,
     ])
 }
 
@@ -2264,4 +2270,157 @@ pub fn font_legacy_missing() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("font_legacy_missing", doc, &["font.fallback"]))
+}
+
+// ---- Tables: repeated headers and spans (24, 33, 37) ----
+
+fn header_table(doc: &Document, columns: usize) -> Result<NodeId, DocError> {
+    doc.append_table(reprise_doc::TableColumns {
+        columns: (0..columns)
+            .map(|_| reprise_doc::Column {
+                width: reprise_doc::ColumnWidth::Proportional(1),
+            })
+            .collect(),
+    })
+}
+
+fn table_row_of(
+    doc: &Document,
+    table: NodeId,
+    header: bool,
+    texts: &[&str],
+) -> Result<Vec<NodeId>, DocError> {
+    let row = doc.append_table_row(table, header)?;
+    let mut cells = Vec::new();
+    for (column, text) in texts.iter().enumerate() {
+        let cell = doc.append_table_cell(row, column as u32)?;
+        doc.append_cell_block(cell, BlockKind::Paragraph, "body", text)?;
+        cells.push(cell);
+    }
+    Ok(cells)
+}
+
+/// A two-row header repeats on every continuation frame of a long table.
+pub fn table_header_repeats() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let table = header_table(&doc, 2)?;
+    table_row_of(&doc, table, true, &["Room", "Measure"])?;
+    for i in 0..9 {
+        table_row_of(&doc, table, false, &[&format!("door {i}"), "inside"])?;
+    }
+    doc.commit();
+    Ok(Fixture::new("table_header_repeats", doc, &[]))
+}
+
+/// A header taller than the frame cannot repeat; nothing is lost or looped.
+pub fn table_header_taller_than_frame() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let table = header_table(&doc, 2)?;
+    table_row_of(&doc, table, true, &["a\nb\nc\nd\ne\nf\ng\nh", "title"])?;
+    for i in 0..4 {
+        table_row_of(&doc, table, false, &[&format!("row {i}"), "x"])?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "table_header_taller_than_frame",
+        doc,
+        &["layout.table-header-unrepeated"],
+    ))
+}
+
+/// A span over the whole table, zero spans, spans past the edge and a cell
+/// that collides with an earlier span.
+pub fn table_spans_whole_table() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let table = header_table(&doc, 3)?;
+    let title = table_row_of(&doc, table, true, &["The whole table"])?;
+    doc.set_table_cell_span(title[0], u32::MAX, u32::MAX)?;
+    let row = table_row_of(&doc, table, false, &["zero", "wide", "late"])?;
+    doc.set_table_cell_span(row[0], 0, 0)?;
+    doc.set_table_cell_span(row[1], 7, 1)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "table_spans_whole_table",
+        doc,
+        &["layout.table-span", "layout.table-invalid"],
+    ))
+}
+
+/// 1,000 declared columns: more than a solver domain takes, so the table is
+/// omitted and the paragraph after it still flows.
+pub fn table_thousand_columns() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let table = header_table(&doc, 1000)?;
+    table_row_of(&doc, table, false, &["x"])?;
+    doc.append_block(BlockKind::Paragraph, "body", "The rest still flows.")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "table_thousand_columns",
+        doc,
+        &["layout.table-invalid"],
+    ))
+}
+
+/// A row span longer than a rotated, mirrored vertical frame: it cannot be kept
+/// together, so it splits across pages with a warning and loses nothing.
+pub fn table_rowspan_vertical_break() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let mut f = flow_frame(
+        "vertical",
+        Dim::pt(220),
+        Dim::pt(55),
+        Dim::pt(100),
+        Dim::pt(120),
+    );
+    f.writing_mode = reprise_doc::WritingMode::VerticalRl;
+    f.transform.rotation = reprise_doc::Rotation::Quarter(1);
+    f.transform.mirror_x = true;
+    f.transform.origin_x = Dim::pt(105);
+    f.transform.origin_y = Dim::pt(50);
+    doc.set_page_template(
+        &PageTemplate::new("rotated-table", Dim::pt(420), Dim::pt(360)).with_frame(f),
+    )?;
+    let table = header_table(&doc, 2)?;
+    table_row_of(&doc, table, true, &["Head", "Cols"])?;
+    let first = table_row_of(
+        &doc,
+        table,
+        false,
+        &["l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9", "top"],
+    )?;
+    doc.set_table_cell_span(first[0], 1, 2)?;
+    let second = doc.append_table_row(table, false)?;
+    let cell = doc.append_table_cell(second, 1)?;
+    doc.append_cell_block(cell, BlockKind::Paragraph, "body", "below")?;
+    doc.commit();
+    Ok(Fixture::new(
+        "table_rowspan_vertical_break",
+        doc,
+        &["layout.table-rowspan-split"],
+    ))
+}
+
+/// Two peers concurrently author spans that collide. After the merge both
+/// replicas resolve the same grid, and so lay out identically.
+pub fn table_concurrent_overlapping_spans() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    let table = header_table(&doc, 3)?;
+    let top = table_row_of(&doc, table, false, &["a", "b", "c"])?;
+    let bottom = table_row_of(&doc, table, false, &["d", "e", "f"])?;
+    doc.commit();
+    let other = doc.fork(OTHER_PEER)?;
+    // Peer 1 spans `a` over two columns and rows; peer 2 spans `b` over two
+    // rows and `d` over two columns. All three overlap.
+    doc.set_table_cell_span(top[0], 2, 2)?;
+    other.set_table_cell_span(top[1], 1, 2)?;
+    other.set_table_cell_span(bottom[0], 2, 1)?;
+    doc.merge(&other)?;
+    other.merge(&doc)?;
+    let mut fixture = Fixture::new(
+        "table_concurrent_overlapping_spans",
+        doc,
+        &["layout.table-invalid"],
+    );
+    fixture.replica = Some(other);
+    Ok(fixture)
 }

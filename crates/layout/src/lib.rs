@@ -33,6 +33,9 @@ mod relations;
 mod snapshot;
 pub mod solver;
 mod table;
+mod table_flow;
+#[cfg(test)]
+mod table_tests;
 mod template;
 
 use reprise_compose::{Composer, Greedy};
@@ -45,8 +48,8 @@ use serde::{Deserialize, Serialize};
 pub use display::DisplayOptions;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
-    PageLayout, PositionedRun, RelationLayout, RelationStatus, Resolution, Subject, TargetLayout,
-    TemplateSource, TemplateUsed,
+    PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader, Resolution, Subject,
+    TargetLayout, TemplateSource, TemplateUsed,
 };
 
 /// Engine settings for the flow. Like the rest of the engine configuration
@@ -130,6 +133,7 @@ impl Engine {
             frames: Vec::new(),
             blocks: Vec::new(),
             relations: Vec::new(),
+            repeated_headers: Vec::new(),
             diagnostics: Vec::new(),
         };
         let template = template::resolve(self, doc, &mut snapshot.diagnostics);
