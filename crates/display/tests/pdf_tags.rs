@@ -451,3 +451,63 @@ fn heading_levels_clamp_and_titles_default() {
     assert!(r.xmp.contains(tags::DEFAULT_TITLE));
     assert_eq!(r.lang.as_deref(), Some(tags::DEFAULT_LANG));
 }
+
+#[test]
+fn extreme_geometry_never_panics_the_tagged_renderer() {
+    let (runs, fonts) = runs(&["edge", "far"]);
+    let mut items = glyphs(runs);
+    for (i, extent) in [Length::MIN, Length::MAX, Length::ZERO]
+        .into_iter()
+        .enumerate()
+    {
+        if let Item::Glyphs(run) = &mut items[i % 2] {
+            for glyph in &mut run.glyphs {
+                glyph.x = extent;
+                glyph.y = extent;
+            }
+            run.size = if i == 2 { Length::ZERO } else { run.size };
+        }
+        items.push(Item::Image {
+            asset: "0".repeat(64),
+            rect: Rect::new(Point::new(extent, extent), extent, extent),
+            alt: "extreme".into(),
+            layer: Layer::Content,
+        });
+    }
+    let pages = [page(items)];
+    let mut heading = Node::new(
+        Role::Heading {
+            level: 0,
+            title: "H".into(),
+        },
+        vec![leaf(0, 0)],
+    );
+    heading.at = Some(Point::new(Length::MAX, Length::MIN));
+    heading.key = Some(u32::MAX);
+    let reference = Role::Reference {
+        link: Some(tags::Link {
+            rect: Rect::new(
+                Point::new(Length::MIN, Length::MAX),
+                Length::MAX,
+                Length::MIN,
+            ),
+            target: u32::MAX,
+            alt: String::new(),
+        }),
+    };
+    let structure = vec![
+        Child::Node(heading),
+        node(Role::P, vec![leaf(0, 1)]),
+        node(reference, vec![leaf(0, 2)]),
+        node(
+            Role::Cell(CellRole {
+                header: Some(Scope::Both),
+                row_span: 0,
+                col_span: u32::MAX,
+            }),
+            vec![leaf(0, 3), leaf(0, 4)],
+        ),
+    ];
+    let t = render(&pages, &fonts, &Default::default(), structure).unwrap();
+    check(&t.bytes);
+}
