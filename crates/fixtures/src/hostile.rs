@@ -133,6 +133,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         image_empty_alt()?,
         image_unreadable()?,
         font_legacy_missing()?,
+        pdf_structure_storm()?,
     ])
 }
 
@@ -2264,4 +2265,72 @@ pub fn font_legacy_missing() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("font_legacy_missing", doc, &["font.fallback"]))
+}
+
+/// Everything the tagged PDF structure has to survive at once: a heading style, note
+/// anchors that cut a ligature, overlap, sit at a point or sit in right-to-left text,
+/// a note on a note, a float, a table with an empty cell and an image-less alt.
+pub fn pdf_structure_storm() -> Result<Fixture, DocError> {
+    let doc = region_document()?;
+    doc.define_style(
+        "h1",
+        &Style {
+            size: Some(LengthExpr::Pt(Length::from_pt(12))),
+            line_height: Some(LengthExpr::Pt(Length::from_pt(12))),
+            ..Default::default()
+        },
+    )?;
+    doc.append_block(BlockKind::Paragraph, "h1", "Hall\u{301}way")?;
+    let text = "office \u{5d0}\u{5d1}\u{5d2} end";
+    let body = doc.append_block(BlockKind::Paragraph, "body", text)?;
+    let anchors: [(usize, usize); 5] = [(0, 2), (0, 4), (text.len(), text.len()), (7, 9), (1, 1)];
+    let mut last = body;
+    for (i, (start, end)) in anchors.into_iter().enumerate() {
+        let note = doc.append_block(BlockKind::Annotation, "note", &format!("Note {i}"))?;
+        let policy = if start == end {
+            RangePolicy::POINT
+        } else {
+            RangePolicy::FIXED
+        };
+        let range = doc.add_range(body, start..end, policy)?;
+        doc.add_relation(
+            &SchemaRegistry::builtin(),
+            &Relation::new(reprise_doc::relation::builtin::NOTE)
+                .owned_by(note)
+                .target("anchor", Target::Range(range)),
+        )?;
+        last = note;
+    }
+    // A note on the last note, and an empty note.
+    let nested = doc.append_block(BlockKind::Annotation, "note", "On a note")?;
+    attach_region(&doc, reprise_doc::relation::builtin::NOTE, nested, last, 1)?;
+    let empty = doc.append_block(BlockKind::Annotation, "note", "")?;
+    attach_region(&doc, reprise_doc::relation::builtin::NOTE, empty, body, 3)?;
+    let float = doc.append_block(BlockKind::Annotation, "note", "float")?;
+    let range = doc.add_range(body, 2..3, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(reprise_doc::relation::builtin::FLOAT)
+            .owned_by(float)
+            .target("anchor", Target::Range(range)),
+    )?;
+    let table = doc.append_table(reprise_doc::TableColumns {
+        columns: vec![
+            reprise_doc::Column {
+                width: reprise_doc::ColumnWidth::Proportional(1)
+            };
+            2
+        ],
+    })?;
+    let row = doc.append_table_row(table, true)?;
+    for (column, text) in [(0, "head"), (1, "")] {
+        let cell = doc.append_table_cell(row, column)?;
+        doc.append_cell_block(cell, BlockKind::Paragraph, "body", text)?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "pdf_structure_storm",
+        doc,
+        &["layout.note-continued"],
+    ))
 }
