@@ -2,6 +2,48 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-06: tables merged (hardening)
+
+**Done** (Sonnet 5.5): **header rows that repeat, and row and column spans** (06, 24, 26, 33,
+34, 35).
+
+-   `CellInfo` stores authored `colspan` and `rowspan`. `doc/src/table_grid.rs::resolve_grid`
+    is the one pure interpretation, shared by layout, export and accessibility:
+    -   cells resolve in document order, and the first claim wins;
+    -   a zero span counts as one;
+    -   spans are cut to the edge, to free cells, and to the header rows they start in;
+    -   a cell is dropped when its origin is taken or its column is outside the table.
+
+    Concurrent span edits from two peers therefore resolve identically on every replica.
+    The read-only API is `Document::table_structure` and `table_cell_structure`.
+-   Rows joined by a row span form a group. A group is kept together when a fresh frame fits
+    it; otherwise it splits with `layout.table-rowspan-split`.
+-   The leading header rows repeat on every continuation frame as derived copies in
+    `LayoutSnapshot.repeated_headers`, never in `blocks`. That makes them not navigable: a
+    hit resolves to the nearest authored line. When a copy can't fit, the warning is
+    `layout.table-header-unrepeated`.
+-   **Package features:** optional bit 8 marks header rows and required bit 8 marks spans,
+    so older readers refuse span documents instead of misreading them. Both bits are
+    recomputed on save.
+-   **HTML clipboard:** `th`, `thead`, `colspan` and `rowspan` are read and written, within
+    bounds.
+-   **Orchestrator:**
+    -   Approved the additive `repeated_headers` snapshot field and the feature bits.
+    -   Added `tables_orchestrator.rs`: 48 seeded hostile-span tables in tiny to roomy
+        frames, checked for determinism, incremental equality and no double-claimed grid
+        positions, with counters proving that repeats, issues and splits occur. Also 12
+        rounds of concurrent span and header edits that converge both ways.
+
+**Gaps:** borders; nested tables; a header that itself spans frames never repeats (it only
+warns).
+
+**Hand-offs:**
+
+-   **pdfua:** tag `THead`/`TH` (scope Column) and `RowSpan`/`ColSpan` from
+    `table_structure`, and mark `repeated_headers` copies as Artifacts.
+-   **incremental:** tables added two one-liners in `incremental.rs`: the snapshot field,
+    and `partial()` dropping header copies of a cut frame.
+
 ## 2026-10-05: hardening pass under way
 
 Five workstreams started at 08:00 UTC on Claude (Sonnet 5.5 and Opus 5.5). All stopped at
