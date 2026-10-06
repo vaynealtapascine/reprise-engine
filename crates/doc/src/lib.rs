@@ -21,6 +21,7 @@ use loro::{Container, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID, V
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+mod changes;
 pub mod codes;
 pub mod context;
 mod edit;
@@ -41,8 +42,12 @@ mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
+pub mod sync;
+#[cfg(test)]
+mod sync_tests;
 mod table;
 
+pub use changes::ChangeReport;
 pub use context::ResolutionContext;
 pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
 pub use expr::{ComputedLength, Dependency, Expr};
@@ -230,9 +235,11 @@ impl Document {
     pub fn merge(&self, other: &Document) -> Result<(), DocError> {
         self.commit();
         other.commit();
+        // Only what this replica lacks: both documents are this process's own,
+        // so the binary update encoding is trusted here (see `sync`).
         let updates = other
             .doc
-            .export(loro::ExportMode::all_updates())
+            .export(loro::ExportMode::updates(&self.doc.oplog_vv()))
             .map_err(|e| DocError::Export(e.to_string()))?;
         self.doc.import(&updates)?;
         Ok(())
