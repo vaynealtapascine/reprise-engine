@@ -1,0 +1,4 @@
+# oracle: lines-on-graphemes (seed 31, minimised)
+# bug: UAX #14 allowed a break between a space and a ZWJ, splitting a grapheme cluster.
+# fixed in compose (break_opportunities now drops breaks inside clusters).
+32005600f500d600000000000000000000000000000000470000000000000000000000006e0000a8007e00000000000000c4002700000000b60000000000007f0000000000000000000000000000490071bf000000000000c4000000008ce1

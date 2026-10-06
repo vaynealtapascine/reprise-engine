@@ -63,7 +63,11 @@ pub fn structure(snapshot: &LayoutSnapshot) -> R {
                 "{node}: line starts inside a grapheme at {} of {:?} (lines {:?})",
                 line.text.start,
                 block.text,
-                block.lines.iter().map(|l| l.text.clone()).collect::<Vec<_>>()
+                block
+                    .lines
+                    .iter()
+                    .map(|l| l.text.clone())
+                    .collect::<Vec<_>>()
             );
             ensure!(
                 line.rect.width.0 >= 0 && line.rect.height.0 >= 0,
