@@ -21,7 +21,8 @@ pub struct ChangeReport {
     pub blocks: BTreeSet<NodeId>,
     /// Whether any content node was created, moved or deleted in the tree.
     pub structure: bool,
-    /// Whether any named style changed. Every block may have restyled.
+    /// Whether any named style, page template or page setup changed. Every
+    /// block may have restyled or moved.
     pub styles: bool,
     /// Relations whose records changed.
     pub relations: BTreeSet<RelationId>,
@@ -140,7 +141,7 @@ impl Document {
                         .extend(event.tree.iter().copied().map(RangeId));
                     report.ranges.extend(event.node.map(RangeId));
                 }
-                Some("styles") => report.styles = true,
+                Some("styles" | "page_templates" | "page_setup") => report.styles = true,
                 _ => report.other = true,
             }
         }

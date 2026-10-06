@@ -11,9 +11,12 @@
 //! so a few bytes could ask for gigabytes; JSON expands at most linearly and
 //! every count is checked here first.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use loro::{JsonOpContent, JsonSchema, VersionVector};
+use loro::{
+    Container, ContainerID, ContainerType, JsonOpContent, JsonSchema, JsonTextOp, JsonTreeOp,
+    TreeID, VersionVector,
+};
 use reprise_diag::{Code, Note, Severity};
 
 use crate::changes::ChangeReport;
@@ -487,6 +490,7 @@ impl Document {
                 if i64::from(op.counter) != end {
                     return Err(invalid("operation counters are not contiguous"));
                 }
+                check_op(&op.content)?;
                 let len = op_len(&op.content);
                 if len == 0 || len > MAX_PACKET_OP_LEN {
                     return Err(SyncError::Limit("operation length"));
@@ -555,7 +559,114 @@ impl Document {
                 return Err(SyncError::Missing { have: local });
             }
         }
+        self.preflight_trees(json, &peer_of)
+    }
+
+    /// Tree operations must name nodes that exist, in this replica or created
+    /// by the packet itself. Loro's tree state unwraps a move's target, so a
+    /// move of an unknown node would abort the process.
+    fn preflight_trees(
+        &self,
+        json: &JsonSchema,
+        peer_of: &dyn Fn(u64) -> Result<u64, SyncError>,
+    ) -> Result<(), SyncError> {
+        let container = |id: &ContainerID| -> Result<ContainerID, SyncError> {
+            Ok(match id {
+                ContainerID::Normal {
+                    peer,
+                    counter,
+                    container_type,
+                } => ContainerID::Normal {
+                    peer: peer_of(*peer)?,
+                    counter: *counter,
+                    container_type: *container_type,
+                },
+                root => root.clone(),
+            })
+        };
+        let node = |id: &TreeID| -> Result<TreeID, SyncError> {
+            Ok(TreeID {
+                peer: peer_of(id.peer)?,
+                counter: id.counter,
+            })
+        };
+        let mut created = BTreeSet::new();
+        for change in &json.changes {
+            for op in &change.ops {
+                if let JsonOpContent::Tree(JsonTreeOp::Create { target, .. }) = &op.content {
+                    created.insert((container(&op.container)?.to_string(), node(target)?));
+                }
+            }
+        }
+        for change in &json.changes {
+            for op in &change.ops {
+                let JsonOpContent::Tree(tree_op) = &op.content else {
+                    continue;
+                };
+                let cid = container(&op.container)?;
+                if cid.container_type() != ContainerType::Tree {
+                    return Err(invalid("tree operation on a container that is not a tree"));
+                }
+                let key = cid.to_string();
+                let exists = |id: &TreeID| -> Result<bool, SyncError> {
+                    let id = node(id)?;
+                    Ok(created.contains(&(key.clone(), id)) || self.tree_has(&cid, id))
+                };
+                let (target, parent) = match tree_op {
+                    JsonTreeOp::Create { parent, .. } => (None, parent.as_ref()),
+                    JsonTreeOp::Move { target, parent, .. } => (Some(target), parent.as_ref()),
+                    JsonTreeOp::Delete { target } => (Some(target), None),
+                };
+                for id in target.into_iter().chain(parent) {
+                    if !exists(id)? {
+                        return Err(invalid("tree operation names a node that does not exist"));
+                    }
+                }
+            }
+        }
         Ok(())
+    }
+
+    fn tree_has(&self, cid: &ContainerID, id: TreeID) -> bool {
+        let tree = match cid {
+            ContainerID::Root { name, .. } => self.doc.get_tree(name.as_str()),
+            normal => match self.doc.get_container(normal.clone()) {
+                Some(Container::Tree(tree)) => tree,
+                _ => return false,
+            },
+        };
+        tree.is_node_deleted(&id).is_ok()
+    }
+}
+
+/// The operation vocabulary of `delta-json`: what the engine itself writes.
+/// Map writes, text insertions and deletions, and tree operations. Loro's
+/// text marks, lists, movable lists and counters are never written by the
+/// engine, and its state code unwraps on inconsistent marks, so they are
+/// refused; an engine that needs them must declare a new feature bit.
+///
+/// Every position and length is in `0..2^30`: Loro converts some of them
+/// to `i32`, where `u32::MAX` would turn negative.
+fn check_op(content: &JsonOpContent) -> Result<(), SyncError> {
+    let ok = |n: i64| (0..MAX_PACKET_COUNTER).contains(&n);
+    let in_range = match content {
+        JsonOpContent::Text(JsonTextOp::Insert { pos, .. }) => ok(i64::from(*pos)),
+        JsonOpContent::Text(JsonTextOp::Delete { pos, len, .. }) => {
+            let (pos, len) = (i64::from(*pos), i64::from(*len));
+            ok(pos) && len != 0 && ok(len.abs()) && ok(pos + len.abs())
+        }
+        JsonOpContent::Map(_) | JsonOpContent::Tree(_) => true,
+        JsonOpContent::Text(JsonTextOp::Mark { .. } | JsonTextOp::MarkEnd)
+        | JsonOpContent::List(_)
+        | JsonOpContent::MovableList(_)
+        | JsonOpContent::Future(_) => {
+            return Err(invalid("operation kind is not part of delta-json"));
+        }
+    };
+    if in_range {
+        Ok(())
+    } else {
+        Err(SyncError::Limit("operation positions"))
     }
 }
 

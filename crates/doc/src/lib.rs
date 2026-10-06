@@ -29,7 +29,12 @@ pub mod expr;
 pub mod fragment;
 pub mod function;
 mod history;
+#[cfg(any(test, feature = "hostile-peer"))]
+pub mod hostile;
+#[cfg(test)]
+mod hostile_tests;
 pub mod image;
+pub mod invariants;
 mod lifecycle;
 mod page;
 mod persist;
@@ -501,6 +506,13 @@ impl Document {
                 (RelationId(id), parsed)
             })
             .collect()
+    }
+}
+
+fn get_bool(map: &LoroMap, key: &str) -> Option<bool> {
+    match map.get(key)? {
+        ValueOrContainer::Value(LoroValue::Bool(b)) => Some(b),
+        _ => None,
     }
 }
 
