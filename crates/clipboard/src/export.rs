@@ -620,7 +620,7 @@ pub fn export_pdf(
             },
             "rendered transforms and spiral strips retained",
             "visible placed notes become Note elements with IDs and linked references where the anchor can be cut from its run; floats become Div; unplaced content omitted",
-            "Table, TR and TD elements retained; header cells, scopes and spans are not yet tagged",
+            "Table, THead/TBody, TR, TH (scope Column) and TD retained with RowSpan and ColSpan; repeated header copies are artifacts; column widths, borders and editable table semantics omitted",
             "visible computed styles retained; headings come from styles named h1 to h6 or heading1 to heading6; authored expressions and inheritance omitted",
             "positioned glyphs and ActualText retained; the language is the default unless the caller names one, because the document records none; viewer extraction support varies",
             "rendered used fonts embedded by the PDF backend",

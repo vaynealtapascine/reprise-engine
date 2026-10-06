@@ -203,6 +203,7 @@ pub fn render_ordered_with_assets(
         title: String::new(),
         lang: String::new(),
         children,
+        artifacts: Vec::new(),
     };
     render_tagged(pages, fonts, assets, &structure).map(|t| t.bytes)
 }
@@ -386,6 +387,18 @@ impl Plan {
                 } else if let Some(out) = artifacts.get_mut(page) {
                     out.push(wrap(item.clone(), &parents));
                 }
+            }
+        }
+
+        // Runs the structure names as artifacts paint with the other artifacts.
+        for run in &structure.artifacts {
+            let Some((wrappers, item)) = text.remove(run) else {
+                return Err(error(
+                    "ordered PDF artifact is a duplicate, missing or also a leaf",
+                ));
+            };
+            if let Some(out) = artifacts.get_mut(run.page) {
+                out.push(wrap(item.clone(), &wrappers));
             }
         }
 
@@ -673,6 +686,8 @@ impl Tree<'_> {
             }
             Role::Div => TagGroup::new(Tag::Div),
             Role::Table => TagGroup::new(Tag::Table),
+            Role::TableHead => TagGroup::new(Tag::THead),
+            Role::TableBody => TagGroup::new(Tag::TBody),
             Role::Row => TagGroup::new(Tag::TR),
             Role::Cell(cell) => cell_group(cell),
         };

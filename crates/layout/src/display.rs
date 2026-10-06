@@ -146,8 +146,39 @@ impl LayoutSnapshot {
     /// belong to, with the source bytes each draws. A read-only view for
     /// exporters that build a structure tree over the reading order.
     pub fn pdf_reading_blocks(&self, doc: &reprise_doc::Document) -> Vec<PdfReadingBlock> {
+        let mut addresses = self.pdf_addresses().0;
+        let mut blocks: Vec<PdfReadingBlock> = Vec::new();
+        for step in self.reading_order(doc) {
+            let mut runs = addresses.remove(&step.line).unwrap_or_default();
+            runs.sort_by_key(|r| r.bytes.as_ref().map_or(0, |b| b.start));
+            match blocks.last_mut() {
+                Some(last) if last.node == step.line.node => last.runs.extend(runs),
+                _ => blocks.push(PdfReadingBlock {
+                    node: step.line.node,
+                    runs,
+                }),
+            }
+        }
+        blocks
+    }
+
+    /// The glyph runs and images of repeated table headers in the default display
+    /// lists. They are derived copies, not content: a PDF marks them as artifacts,
+    /// and no reading order names them.
+    pub fn pdf_artifact_runs(&self) -> Vec<reprise_display::pdf::ReadingRun> {
+        self.pdf_addresses().1
+    }
+
+    /// Addresses of the authored runs by line, and of the repeated header copies.
+    fn pdf_addresses(
+        &self,
+    ) -> (
+        std::collections::BTreeMap<crate::LineRef, Vec<PdfReadingRun>>,
+        Vec<reprise_display::pdf::ReadingRun>,
+    ) {
         use std::collections::BTreeMap;
         let mut addresses = BTreeMap::<crate::LineRef, Vec<PdfReadingRun>>::new();
+        let mut copies = Vec::new();
         let mut groups = vec![0usize; self.pages.len()];
         for (frame_index, frame) in self.frames.iter().enumerate() {
             let Some(group) = groups.get_mut(frame.page) else {
@@ -189,21 +220,27 @@ impl LayoutSnapshot {
                     }
                 }
             }
+            // Repeated header copies follow the authored items of the group.
+            for block in self
+                .repeated_headers
+                .iter()
+                .filter(|h| h.frame == frame_index)
+                .flat_map(|h| h.blocks.iter())
+            {
+                for line in block.lines.iter().filter(|l| l.frame == frame_index) {
+                    let items = usize::from(block.image.is_some()) + line.runs.len();
+                    for _ in 0..items {
+                        copies.push(reprise_display::pdf::ReadingRun {
+                            page: frame.page,
+                            path: vec![*group, child],
+                        });
+                        child = child.saturating_add(1);
+                    }
+                }
+            }
             *group = group.saturating_add(1);
         }
-        let mut blocks: Vec<PdfReadingBlock> = Vec::new();
-        for step in self.reading_order(doc) {
-            let mut runs = addresses.remove(&step.line).unwrap_or_default();
-            runs.sort_by_key(|r| r.bytes.as_ref().map_or(0, |b| b.start));
-            match blocks.last_mut() {
-                Some(last) if last.node == step.line.node => last.runs.extend(runs),
-                _ => blocks.push(PdfReadingBlock {
-                    node: step.line.node,
-                    runs,
-                }),
-            }
-        }
-        blocks
+        (addresses, copies)
     }
     /// The display list of one page; empty if there is no such page.
     pub fn to_display_list(&self, page: usize, options: DisplayOptions) -> DisplayList {

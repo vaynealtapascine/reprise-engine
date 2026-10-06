@@ -18,11 +18,14 @@
 
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::rc::Rc;
 
 use reprise_diag::Note;
-use reprise_display::pdf::tags::{self, CellRole, Child, Content, Link, Node, Role, Structure};
+use reprise_display::pdf::tags::{
+    self, CellRole, Child, Content, Link, Node, Role, Scope, Structure,
+};
 use reprise_doc::relation::builtin::{FLOAT, NOTE};
-use reprise_doc::{CellInfo, Document, NodeId, RowInfo, TableColumns, TableRole};
+use reprise_doc::{Document, GridCell, NodeId, TableGrid, TableRole};
 use reprise_geom::{FrameSpace, Length, PageSpace, Point, Rect};
 use reprise_layout::{
     LayoutSnapshot, LineRef, PdfReadingBlock, PdfReadingRun, RelationStatus, Resolution,
@@ -64,15 +67,20 @@ pub fn heading_level(style: &str) -> Option<u8> {
 /// `/Scope`, and its `/RowSpan` and `/ColSpan`.
 ///
 /// Everything about a cell's role is decided here and nowhere else, from the
-/// table's columns, the cell's row and the cell itself. Today every cell is a
-/// plain `TD` spanning one row and column. The `tables` workstream adds header
-/// rows and spans: when merging, return `header: Some(Scope::Column)` for a cell
-/// of a header row (`row.header`) and the real spans, and nothing else changes,
-/// because the renderer already writes `TH`, `/Scope`, `RowSpan` and `ColSpan`.
-pub fn cell_role(_table: &TableColumns, _row: &RowInfo, _cell: &CellInfo) -> CellRole {
-    CellRole::default()
+/// cell's resolved grid entry (`Document::table_structure`). A cell that starts
+/// in a header row is a `TH` with scope `Column`; spans are the grid's clamped
+/// spans. A cell with no grid entry (an unresolvable table) is a plain `TD`.
+pub fn cell_role(cell: Option<&GridCell>) -> CellRole {
+    let Some(cell) = cell else {
+        return CellRole::default();
+    };
+    let span = |n: usize| u32::try_from(n).unwrap_or(u32::MAX).max(1);
+    CellRole {
+        header: cell.header.then_some(Scope::Column),
+        row_span: span(cell.rowspan),
+        col_span: span(cell.colspan),
+    }
 }
-
 /// What a block placed by a relation is.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Placed {
@@ -91,6 +99,7 @@ struct Builder<'a> {
     doc: &'a Document,
     layout: &'a LayoutSnapshot,
     notes: Vec<Note>,
+    grids: BTreeMap<NodeId, Option<Rc<TableGrid>>>,
 }
 
 /// The structure for `layout`, in reading order, with what was lost doing so.
@@ -104,12 +113,15 @@ pub(crate) fn structure(
         doc,
         layout,
         notes: Vec::new(),
+        grids: BTreeMap::new(),
     };
     let (children, derived_title) = builder.tree(&blocks);
     let structure = Structure {
         title: meta.title.clone().or(derived_title).unwrap_or_default(),
         lang: meta.lang.clone().unwrap_or_default(),
         children,
+        // Repeated table headers are derived copies: decoration, never content.
+        artifacts: layout.pdf_artifact_runs(),
     };
     (structure, builder.notes)
 }
@@ -207,8 +219,9 @@ impl Builder<'_> {
         (open.finish(), title.or(first_text))
     }
 
-    /// The table, row and cell containers above `node`, outermost first.
-    fn table_chain(&self, node: NodeId) -> Vec<Container> {
+    /// The table containers above `node`, outermost first: `Table`, then for
+    /// a table with header rows `THead` or `TBody`, then `TR` and the cell.
+    fn table_chain(&mut self, node: NodeId) -> Vec<Container> {
         let mut chain = Vec::new();
         let mut at = self.doc.parent_of(node).flatten();
         let mut steps = 0;
@@ -223,33 +236,65 @@ impl Builder<'_> {
             at = self.doc.parent_of(parent).flatten();
         }
         chain.reverse();
+        let mut out = Vec::new();
         let mut table = None;
-        let mut row = None;
-        chain
-            .into_iter()
-            .map(|(id, role)| {
-                let role = match role {
-                    TableRole::Table(columns) => {
-                        table = Some(columns);
-                        Role::Table
+        for (id, role) in chain {
+            match role {
+                TableRole::Table(_) => {
+                    table = Some(id);
+                    out.push(Container {
+                        key: (id, Part::Node),
+                        role: Role::Table,
+                    });
+                }
+                TableRole::Row(_) => {
+                    if let Some(table) = table
+                        && let Some(grid) = self.grid(table)
+                        && grid.repeating_header_rows > 0
+                    {
+                        let head = grid
+                            .rows
+                            .iter()
+                            .position(|r| r.node == id)
+                            .is_some_and(|i| i < grid.repeating_header_rows);
+                        out.push(if head {
+                            Container {
+                                key: (table, Part::Head),
+                                role: Role::TableHead,
+                            }
+                        } else {
+                            Container {
+                                key: (table, Part::Body),
+                                role: Role::TableBody,
+                            }
+                        });
                     }
-                    TableRole::Row(info) => {
-                        row = Some(info);
-                        Role::Row
-                    }
-                    TableRole::Cell(cell) => Role::Cell(cell_role(
-                        &table.clone().unwrap_or(TableColumns {
-                            columns: Vec::new(),
-                        }),
-                        &row.clone().unwrap_or(RowInfo { header: false }),
-                        &cell,
-                    )),
-                };
-                Container { id, role }
-            })
-            .collect()
+                    out.push(Container {
+                        key: (id, Part::Node),
+                        role: Role::Row,
+                    });
+                }
+                TableRole::Cell(_) => {
+                    let grid = table.and_then(|t| self.grid(t));
+                    let cell = grid.as_ref().and_then(|g| g.cell(id));
+                    out.push(Container {
+                        key: (id, Part::Node),
+                        role: Role::Cell(cell_role(cell)),
+                    });
+                }
+            }
+        }
+        out
     }
 
+    /// A table's resolved grid, computed once per export.
+    fn grid(&mut self, table: NodeId) -> Option<Rc<TableGrid>> {
+        let doc = self.doc;
+        self.grids
+            .entry(table)
+            .or_insert_with(|| doc.table_structure(table).ok().flatten().map(Rc::new))
+            .clone()
+    }
     /// The element for one block: its role around its runs, with note
     /// references cut out of the runs they anchor to.
     fn element(
@@ -454,8 +499,17 @@ fn anchor_chars(text: &str, bytes: &Range<usize>) -> Range<usize> {
     }
 }
 
+/// Which part of a document node a container is: the node itself, or a
+/// `THead` or `TBody` section the table's rows are grouped into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Node,
+    Head,
+    Body,
+}
+
 struct Container {
-    id: NodeId,
+    key: (NodeId, Part),
     role: Role,
 }
 
@@ -464,7 +518,7 @@ struct Container {
 struct Open {
     root: Vec<Node>,
     /// Open containers, outermost first, with the document node each was made for.
-    stack: Vec<(NodeId, Node)>,
+    stack: Vec<((NodeId, Part), Node)>,
 }
 
 impl Open {
@@ -485,12 +539,12 @@ impl Open {
             .stack
             .iter()
             .zip(&chain)
-            .take_while(|((open, _), c)| *open == c.id)
+            .take_while(|((open, _), c)| *open == c.key)
             .count();
         self.close_to(shared);
         for container in chain.into_iter().skip(shared) {
             self.stack
-                .push((container.id, Node::new(container.role, Vec::new())));
+                .push((container.key, Node::new(container.role, Vec::new())));
         }
         match self.stack.last_mut() {
             Some((_, parent)) => parent.children.push(Child::Node(element)),

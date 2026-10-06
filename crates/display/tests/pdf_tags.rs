@@ -194,6 +194,7 @@ fn render(
             title: "House of Leaves".into(),
             lang: "fr".into(),
             children,
+            artifacts: Vec::new(),
         },
     )
 }
@@ -510,4 +511,63 @@ fn extreme_geometry_never_panics_the_tagged_renderer() {
     ];
     let t = render(&pages, &fonts, &Default::default(), structure).unwrap();
     check(&t.bytes);
+}
+
+#[test]
+fn named_artifact_runs_paint_as_artifacts_and_must_not_also_be_leaves() {
+    let (runs, fonts) = runs(&["body", "copy"]);
+    let pages = [page(glyphs(runs))];
+    let go = |structure_children: Vec<Child>, artifacts: Vec<ReadingRun>| {
+        let children = structure_children
+            .into_iter()
+            .map(|c| match c {
+                Child::Node(n) => n,
+                Child::Content(_) => unreachable!(),
+            })
+            .collect();
+        pdf::render_tagged(
+            &pages,
+            &fonts,
+            &Default::default(),
+            &Structure {
+                children,
+                artifacts,
+                ..Default::default()
+            },
+        )
+    };
+    let copy = ReadingRun {
+        page: 0,
+        path: vec![1],
+    };
+    let t = go(vec![node(Role::P, vec![leaf(0, 0)])], vec![copy.clone()]).unwrap();
+    let r = check(&t.bytes);
+    assert_eq!(r.text, "body", "the copy is not content");
+    assert_eq!(r.artifacts, 2, "the background and the copy");
+    // Named twice, named and a leaf, or not there: errors, not panics.
+    assert!(
+        go(
+            vec![node(Role::P, vec![leaf(0, 0)])],
+            vec![copy.clone(), copy.clone()]
+        )
+        .is_err()
+    );
+    assert!(
+        go(
+            vec![node(Role::P, vec![leaf(0, 0), leaf(0, 1)])],
+            vec![copy]
+        )
+        .is_err()
+    );
+    let missing = ReadingRun {
+        page: 0,
+        path: vec![9],
+    };
+    assert!(
+        go(
+            vec![node(Role::P, vec![leaf(0, 0), leaf(0, 1)])],
+            vec![missing]
+        )
+        .is_err()
+    );
 }

@@ -94,6 +94,10 @@ pub enum Role {
     Div,
     /// `Table`.
     Table,
+    /// `THead`: the leading header rows.
+    TableHead,
+    /// `TBody`: the rows after a `THead`.
+    TableBody,
     /// `TR`.
     Row,
     /// `TD` or `TH`.
@@ -155,4 +159,7 @@ pub struct Structure {
     /// The default language, a BCP 47 tag. Empty gets [`DEFAULT_LANG`].
     pub lang: String,
     pub children: Vec<Node>,
+    /// Glyph and image items that are decoration, not content, such as the derived
+    /// copies of a repeated table header. They paint as artifacts and no node names them.
+    pub artifacts: Vec<ReadingRun>,
 }
