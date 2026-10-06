@@ -212,12 +212,10 @@ fn operations_outside_the_vocabulary_are_refused_whole() {
         crate::hostile::scribble_outside(&attacker, &mut rng);
         let before = base.revision();
         let packet = attacker.export_delta(&base.version_vector()).unwrap();
+        let result = base.import_packet(&packet);
         assert!(
-            matches!(
-                base.import_packet(&packet),
-                Err(crate::sync::SyncError::Invalid(_))
-            ),
-            "seed {seed}"
+            matches!(result, Err(crate::sync::SyncError::Invalid(_))),
+            "seed {seed}: {result:?}"
         );
         assert_eq!(base.revision(), before, "nothing applied");
     }

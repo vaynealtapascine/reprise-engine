@@ -296,17 +296,18 @@ fn one(doc: &Document, rng: &mut Rng) -> loro::LoroResult<()> {
 /// Writes one operation outside the `delta-json` vocabulary: a text mark,
 /// a list insertion or a movable list insertion. Sync must refuse it.
 pub fn scribble_outside(doc: &Document, rng: &mut Rng) {
-    let _ = (|| -> loro::LoroResult<()> {
-        match rng.below(3) {
-            0 => {
-                if let Some(t) = texts(doc).into_iter().find(|t| t.len_unicode() > 0) {
-                    t.mark(0..t.len_unicode(), "bold", true)?;
-                }
-            }
-            1 => doc.doc.get_list("zz-list").insert(0, 1)?,
-            _ => doc.doc.get_movable_list("zz-movable").insert(0, 1)?,
-        }
-        Ok(())
-    })();
+    let marked = rng.below(3) == 0
+        && texts(doc)
+            .into_iter()
+            .filter(|t| t.len_unicode() > 0)
+            .any(|t| t.mark(0..t.len_unicode(), "bold", true).is_ok());
+    if !marked {
+        let written = if rng.chance(50) {
+            doc.doc.get_list("zz-list").insert(0, 1)
+        } else {
+            doc.doc.get_movable_list("zz-movable").insert(0, 1)
+        };
+        debug_assert!(written.is_ok());
+    }
     doc.commit();
 }
