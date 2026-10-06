@@ -260,36 +260,42 @@ impl Builder<'_> {
         anchors: &[Anchor],
     ) -> Option<Node> {
         let layout_block = self.layout.block(block.node)?;
-        if let Some(image) = &layout_block.image {
+        let at = block.runs.first().and_then(|r| self.page_point(r.line));
+        let mut node = if let Some(image) = &layout_block.image {
             let leaves = block
                 .runs
                 .iter()
                 .map(|r| Child::Content(Content::whole(r.run.clone())))
                 .collect();
-            return Some(Node::new(
+            let figure = Node::new(
                 Role::Figure {
                     alt: image.alt.clone(),
                 },
                 leaves,
-            ));
-        }
-        let children = self.content(block, anchors);
-        let style = self
-            .doc
-            .block(block.node)
-            .ok()
-            .and_then(|b| b.style)
-            .and_then(|s| heading_level(&s));
-        let at = block.runs.first().and_then(|r| self.page_point(r.line));
-        let mut node = match style {
-            Some(level) => Node::new(
-                Role::Heading {
-                    level,
-                    title: snippet(&layout_block.text),
-                },
-                children,
-            ),
-            None => Node::new(Role::P, children),
+            );
+            if placed == Some(Placed::Float) {
+                // A floated image is its own element; a Div would add nothing.
+                return Some(figure);
+            }
+            figure
+        } else {
+            let children = self.content(block, anchors);
+            let style = self
+                .doc
+                .block(block.node)
+                .ok()
+                .and_then(|b| b.style)
+                .and_then(|s| heading_level(&s));
+            match style {
+                Some(level) => Node::new(
+                    Role::Heading {
+                        level,
+                        title: snippet(&layout_block.text),
+                    },
+                    children,
+                ),
+                None => Node::new(Role::P, children),
+            }
         };
         node.at = at;
         match placed {
