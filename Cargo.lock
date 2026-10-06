@@ -1816,6 +1816,7 @@ name = "reprise-clipboard"
 version = "0.0.0"
 dependencies = [
  "icu_properties",
+ "lopdf",
  "reprise-diag",
  "reprise-display",
  "reprise-doc",
