@@ -681,3 +681,172 @@ fn length_exprs_convert_to_equal_expressions() {
         assert_eq!(used.value, le.resolve(pt(10)), "{le:?}");
     }
 }
+
+// --- keyword properties (20) -------------------------------------------------
+
+fn style_map(doc: &Document, name: &str) -> LoroMap {
+    match doc.doc.get_map("styles").get(name) {
+        Some(loro::ValueOrContainer::Container(loro::Container::Map(m))) => m,
+        _ => panic!("the style is a map"),
+    }
+}
+
+#[test]
+fn orientation_keywords_round_trip_through_loro() {
+    let doc = doc();
+    for (o, c) in [
+        (TextOrientation::Mixed, TextCombineUpright::None),
+        (TextOrientation::Upright, TextCombineUpright::All),
+        (TextOrientation::Sideways, TextCombineUpright::Digits(4)),
+    ] {
+        let style = Style {
+            text_orientation: Some(o),
+            text_combine_upright: Some(c),
+            ..Default::default()
+        };
+        doc.define_style("v", &style).unwrap();
+        assert_eq!(doc.style("v"), Some(style));
+        let map = style_map(&doc, "v");
+        assert_eq!(
+            get_str(&map, TEXT_ORIENTATION).as_deref(),
+            Some(o.keyword())
+        );
+        assert_eq!(get_str(&map, TEXT_COMBINE_UPRIGHT), Some(c.keyword()));
+    }
+}
+
+#[test]
+fn orientation_keywords_inherit_override_and_are_explained() {
+    let doc = doc();
+    doc.define_style(
+        "parent",
+        &Style {
+            text_orientation: Some(TextOrientation::Upright),
+            text_combine_upright: Some(TextCombineUpright::Digits(3)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.define_style(
+        "child",
+        &Style {
+            parent: Some("parent".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let n = doc
+        .append_block(BlockKind::Paragraph, "child", "x")
+        .unwrap();
+    let s = doc.computed_style(n).unwrap();
+    assert_eq!(s.text_orientation, TextOrientation::Upright);
+    assert_eq!(s.text_combine_upright, TextCombineUpright::Digits(3));
+    assert_eq!(s.explain[TEXT_ORIENTATION], "style parent");
+    doc.set_overrides(
+        n,
+        &Style {
+            text_orientation: Some(TextOrientation::Sideways),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let s = doc.computed_style(n).unwrap();
+    assert_eq!(s.text_orientation, TextOrientation::Sideways);
+    assert_eq!(s.explain[TEXT_ORIENTATION], "direct");
+    assert_eq!(s.explain[TEXT_COMBINE_UPRIGHT], "style parent");
+    assert!(s.notes.is_empty());
+}
+
+#[test]
+fn unset_keywords_leave_explanations_and_json_unchanged() {
+    let doc = doc();
+    let n = doc.append_block(BlockKind::Paragraph, "", "x").unwrap();
+    let s = doc.computed_style(n).unwrap();
+    assert_eq!(s.text_orientation, TextOrientation::Mixed);
+    assert_eq!(s.text_combine_upright, TextCombineUpright::None);
+    assert!(!s.explain.contains_key(TEXT_ORIENTATION));
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("text_orientation") && !json.contains("combine"));
+    let json = serde_json::to_string(&default_style()).unwrap();
+    assert!(!json.contains("text_orientation") && !json.contains("unparsed_keywords"));
+}
+
+#[test]
+fn unreadable_keywords_are_kept_reported_and_inherit_through() {
+    let doc = doc();
+    doc.define_style(
+        "base",
+        &Style {
+            text_orientation: Some(TextOrientation::Upright),
+            text_combine_upright: Some(TextCombineUpright::All),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let map = doc
+        .doc
+        .get_map("styles")
+        .insert_container("future", LoroMap::new())
+        .unwrap();
+    map.insert("parent", "base").unwrap();
+    for (key, text) in [
+        (TEXT_ORIENTATION, "sideways-right"),
+        (TEXT_COMBINE_UPRIGHT, "digits 9"),
+    ] {
+        map.insert(key, text).unwrap();
+    }
+    let read = doc.style("future").unwrap();
+    assert_eq!(read.text_orientation, None);
+    assert_eq!(read.unparsed_keywords[TEXT_ORIENTATION], "sideways-right");
+    // Saving what was read writes the same text back, even over a readable value.
+    let mut edited = read.clone();
+    edited.text_orientation = Some(TextOrientation::Mixed);
+    doc.define_style("saved", &edited).unwrap();
+    let saved = style_map(&doc, "saved");
+    assert_eq!(
+        get_str(&saved, TEXT_ORIENTATION).as_deref(),
+        Some("sideways-right")
+    );
+    assert_eq!(
+        get_str(&saved, TEXT_COMBINE_UPRIGHT).as_deref(),
+        Some("digits 9")
+    );
+    let n = doc
+        .append_block(BlockKind::Paragraph, "future", "x")
+        .unwrap();
+    let s = doc.computed_style(n).unwrap();
+    assert_eq!(codes_of(&s.notes), ["style.unparsed", "style.unparsed"]);
+    // The unreadable layer is skipped: the parent's values survive.
+    assert_eq!(s.text_orientation, TextOrientation::Upright);
+    assert_eq!(s.text_combine_upright, TextCombineUpright::All);
+    assert_eq!(s.explain[TEXT_ORIENTATION], "style base");
+}
+
+#[test]
+fn concurrent_keyword_edits_converge() {
+    let a = doc();
+    let n = a.append_block(BlockKind::Paragraph, "", "x").unwrap();
+    a.commit();
+    let b = a.fork(2).unwrap();
+    a.set_overrides(
+        n,
+        &Style {
+            text_orientation: Some(TextOrientation::Upright),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    b.set_overrides(
+        n,
+        &Style {
+            text_combine_upright: Some(TextCombineUpright::Digits(2)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    a.commit();
+    b.commit();
+    a.merge(&b).unwrap();
+    b.merge(&a).unwrap();
+    assert_eq!(a.computed_style(n).unwrap(), b.computed_style(n).unwrap());
+}

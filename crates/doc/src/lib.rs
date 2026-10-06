@@ -62,12 +62,13 @@ pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
     SnapshotOf, SnapshotRef, StructuralQuery, Target, TargetClass,
 };
+pub use reprise_geom::{TextCombineUpright, TextOrientation};
 pub use reprise_text as text;
 pub use resolve::{Binding, Cause, Found, Gone, Outcome, ResolvedRelation, ResolvedTarget};
 pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
 pub use style::{
     Authored, Computed, ComputedStyle, LengthExpr, Property, Specified, StageExplanation, Style,
-    StyleResolution, default_style,
+    StyleResolution, TEXT_COMBINE_UPRIGHT, TEXT_ORIENTATION, default_style,
 };
 pub use table::{CellInfo, Column, ColumnWidth, RowInfo, TableColumns, TableRole};
 
