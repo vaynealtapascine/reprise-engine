@@ -1107,6 +1107,16 @@ expression: snapshot.to_json()
   ],
   "diagnostics": [
     {
+      "severity": "warning",
+      "code": "layout.table-header-unrepeated",
+      "subject": {
+        "kind": "node",
+        "id": "179@1"
+      },
+      "message": "header rows continue across frames; they are not repeated",
+      "bytes": null
+    },
+    {
       "severity": "info",
       "code": "layout.note-continued",
       "subject": {

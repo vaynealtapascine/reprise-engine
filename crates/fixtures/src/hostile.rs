@@ -2489,6 +2489,6 @@ pub fn pdf_structure_storm() -> Result<Fixture, DocError> {
     Ok(Fixture::new(
         "pdf_structure_storm",
         doc,
-        &["layout.note-continued"],
+        &["layout.note-continued", "layout.table-header-unrepeated"],
     ))
 }
