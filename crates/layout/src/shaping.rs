@@ -14,6 +14,7 @@ use reprise_font::FontStore;
 use reprise_geom::InlineDirection;
 use reprise_shape::{Item, ShapeRequest, ShapedGlyph, ShapedRun, ShapedText, ShapingAdapter};
 
+#[cfg(test)]
 use crate::workers::{Workers, map};
 
 /// The most bytes one adapter request covers, unless a single grapheme
@@ -156,7 +157,9 @@ pub(crate) fn assemble(
     ShapedText { runs }
 }
 
-/// The reference: every request of [`plan`], on `workers`, then [`assemble`].
+/// Every request of [`plan`], on `workers`, then [`assemble`]: what
+/// `flow::stage` does in stages. The tests compare it with `Shaper::shape`.
+#[cfg(test)]
 pub(crate) fn shape(
     text: &str,
     items: &[Item],

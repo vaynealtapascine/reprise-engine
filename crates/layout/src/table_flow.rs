@@ -94,6 +94,7 @@ struct Copy {
 }
 
 /// What repeating headers need to remember across a table.
+#[derive(Clone)]
 pub(crate) struct Repeat {
     /// Leading groups that are header groups.
     pub groups: usize,
@@ -152,7 +153,7 @@ impl Flow<'_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn place_group(
+    pub(crate) fn place_group(
         &mut self,
         table: NodeId,
         owned: Group,

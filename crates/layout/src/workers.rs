@@ -102,6 +102,34 @@ pub(crate) fn map<I: Sync, T: Send>(
         .collect()
 }
 
+/// Applies `f` to every item on `workers`. An item the executor skipped is
+/// handled here, serially.
+pub(crate) fn for_each_mut<I: Send>(
+    workers: &dyn Workers,
+    items: &mut [I],
+    f: &(dyn Fn(&mut I) + Sync),
+) {
+    let mut done = vec![false; items.len()];
+    if items.len() > 1 {
+        let tasks: Vec<Task<'_>> = items
+            .iter_mut()
+            .zip(done.iter_mut())
+            .map(|(item, flag)| {
+                Box::new(move || {
+                    f(item);
+                    *flag = true;
+                }) as Task<'_>
+            })
+            .collect();
+        workers.run(tasks);
+    }
+    for (item, flag) in items.iter_mut().zip(done) {
+        if !flag {
+            f(item);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -207,8 +207,9 @@ impl Staged {
     pub(crate) fn len(&self) -> usize {
         self.text.len()
     }
-    pub(crate) fn is_itemized(&self) -> bool {
-        self.itemized.is_some()
+    /// The byte length of every planned shaping request.
+    pub(crate) fn request_bytes(&self) -> Vec<usize> {
+        self.requests.iter().map(|r| r.range.len()).collect()
     }
     /// Shaping requests not yet run.
     pub(crate) fn remaining(&self) -> usize {
@@ -256,16 +257,16 @@ impl Staged {
     }
 
     /// Runs up to `max` of the remaining shaping requests on `workers`, in
-    /// request order. Returns how many ran and their total bytes. Pure.
+    /// request order. Returns the byte length of each request that ran. Pure.
     pub(crate) fn shape(
         &mut self,
         fonts: &reprise_font::FontStore,
         adapter: &dyn reprise_shape::ShapingAdapter,
         workers: &dyn Workers,
         max: usize,
-    ) -> (usize, usize) {
+    ) -> Vec<usize> {
         let Some(itemized) = &self.itemized else {
-            return (0, 0);
+            return Vec::new();
         };
         let pending: Vec<usize> = self
             .glyphs
@@ -285,20 +286,32 @@ impl Staged {
                     shaping::shape_request(text, item, r.range.clone(), fonts, adapter)
                 })
         });
-        let mut bytes = 0usize;
+        let mut sizes = Vec::with_capacity(pending.len());
         for (i, glyphs) in pending.iter().zip(results) {
-            bytes = bytes.saturating_add(self.requests.get(*i).map_or(0, |r| r.range.len()));
+            sizes.push(self.requests.get(*i).map_or(0, |r| r.range.len()));
             if let Some(slot) = self.glyphs.get_mut(*i) {
                 *slot = Some(glyphs);
             }
         }
-        (pending.len(), bytes)
+        sizes
     }
 
     /// UAX #14 break analysis. Pure.
     pub(crate) fn analyse_breaks(&mut self) {
         if self.breaks.is_none() {
             self.breaks = Some(break_opportunities(&self.text));
+        }
+    }
+
+    /// Break analysis, unless itemisation found nothing it could shape (then
+    /// `prepare_with` returns before analysing breaks). Pure.
+    pub(crate) fn analyse_breaks_if_shapeable(&mut self) {
+        if !self
+            .itemized
+            .as_ref()
+            .is_some_and(|i| self.unshapeable_items(&i.items))
+        {
+            self.analyse_breaks();
         }
     }
 
@@ -311,13 +324,7 @@ impl Staged {
     ) {
         self.itemize(fonts);
         self.shape(fonts, adapter, workers, usize::MAX);
-        if !self
-            .itemized
-            .as_ref()
-            .is_some_and(|i| self.unshapeable_items(&i.items))
-        {
-            self.analyse_breaks();
-        }
+        self.analyse_breaks_if_shapeable();
     }
 
     /// Finishes any stage not yet run (serially), then assembles the value,
@@ -416,7 +423,7 @@ pub(crate) fn run(
         Begin::Shape(mut staged) => {
             staged.run_pure(&engine.fonts, engine.shaper.as_ref(), workers);
             if let Some(e) = evaluation {
-                e.shaped(staged.requests.iter().map(|r| r.range.len()));
+                e.shaped(staged.request_bytes());
                 e.scanned(staged.len());
                 if staged.has_breaks() {
                     e.scanned(staged.len());
