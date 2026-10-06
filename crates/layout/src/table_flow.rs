@@ -365,6 +365,7 @@ impl Flow<'_> {
             .map_or(Length::ZERO, |f| f.depth)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compose_header(
         &self,
         groups: &[Group],
