@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use reprise_diag::Code;
 use reprise_doc::{Document, NodeId, SchemaRegistry, TableRole};
 use reprise_font::FontStore;
-use reprise_layout::{DisplayOptions, LayoutSnapshot};
+use reprise_layout::LayoutSnapshot;
 use serde::{Deserialize, Serialize};
 
 use crate::{ClipboardError, copy_all};
@@ -541,50 +541,72 @@ impl Exporter for Pdf {
         let fonts = options
             .fonts
             .ok_or_else(|| ClipboardError::Export("PDF requires fonts".into()))?;
-        let lists = layout.to_display_lists(DisplayOptions::default());
-        let order = layout.pdf_reading_order(doc);
-        let bytes = reprise_display::pdf::render_ordered(&lists, fonts, &order)
-            .map_err(|e| ClipboardError::Export(e.to_string()))?;
-        use Disposition::*;
-        let mut losses = report(
-            [
-                Dropped,
-                Approximated,
-                Preserved,
-                Preserved,
-                Preserved,
-                Approximated,
-                Approximated,
-                Preserved,
-                Approximated,
-                Dropped,
-            ],
-            [
-                "relation graph omitted; visible results retained",
-                "text extraction order supplied; no PDF/UA structure tree",
-                "rendered transforms and spiral strips retained",
-                "visible placed notes/floats retained; unplaced content omitted",
-                "laid-out cells retained; editable table semantics omitted",
-                "visible computed styles retained; authored expressions and inheritance omitted",
-                "positioned glyphs and ActualText retained; viewer extraction support varies",
-                "rendered used fonts embedded by the PDF backend",
-                "displayed content only; resource ownership omitted",
-                "IDs, ranges, editable tree, undo and collaboration history omitted",
-            ],
-        );
-        losses.notes.extend(
-            layout
-                .diagnostics
-                .iter()
-                .map(|d| reprise_diag::Note::new(d.severity, d.code.clone(), d.message.clone())),
-        );
-        losses.notes.extend(
-            layout
-                .reading_order_report(doc)
-                .diagnostics
-                .into_iter()
-                .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
-        );
-        Ok(ExportResult { bytes, losses })
+        export_pdf(
+            doc,
+            layout,
+            fonts,
+            &reprise_display::AssetStore::default(),
+            &crate::PdfMetadata::default(),
+        )
     }
+}
+
+/// A tagged PDF aiming at PDF/UA-1, in reading order, with the title and
+/// language the caller knows (the document records neither). `assets` supplies
+/// image bytes; images without them draw placeholders.
+pub fn export_pdf(
+    doc: &Document,
+    layout: &LayoutSnapshot,
+    fonts: &FontStore,
+    assets: &reprise_display::AssetStore,
+    meta: &crate::PdfMetadata,
+) -> Result<ExportResult, ClipboardError> {
+    validate_layout(doc, Some(layout))?;
+    let (bytes, notes, ua) = crate::pdf_tags::render(doc, layout, fonts, assets, meta)?;
+    use Disposition::*;
+    let mut losses = report(
+        [
+            Dropped,
+            if ua { Preserved } else { Approximated },
+            Preserved,
+            Preserved,
+            Approximated,
+            Approximated,
+            Approximated,
+            Preserved,
+            Approximated,
+            Dropped,
+        ],
+        [
+            "relation graph omitted; visible results retained",
+            if ua {
+                "tagged PDF/UA-1 structure tree in reading order, with ParentTree, artifacts, outline and note links"
+            } else {
+                "tagged in reading order, but a PDF/UA-1 requirement was not met so the file does not claim it; see the notes"
+            },
+            "rendered transforms and spiral strips retained",
+            "visible placed notes become Note elements with IDs and linked references where the anchor can be cut from its run; floats become Div; unplaced content omitted",
+            "Table, TR and TD elements retained; header cells, scopes and spans are not yet tagged",
+            "visible computed styles retained; headings come from styles named h1 to h6 or heading1 to heading6; authored expressions and inheritance omitted",
+            "positioned glyphs and ActualText retained; the language is the default unless the caller names one, because the document records none; viewer extraction support varies",
+            "rendered used fonts embedded by the PDF backend",
+            "displayed content only; image alt text becomes Figure /Alt, and an image without it is an artifact; resource ownership omitted",
+            "IDs, ranges, editable tree, undo and collaboration history omitted",
+        ],
+    );
+    losses.notes.extend(notes);
+    losses.notes.extend(
+        layout
+            .diagnostics
+            .iter()
+            .map(|d| reprise_diag::Note::new(d.severity, d.code.clone(), d.message.clone())),
+    );
+    losses.notes.extend(
+        layout
+            .reading_order_report(doc)
+            .diagnostics
+            .into_iter()
+            .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
+    );
+    Ok(ExportResult { bytes, losses })
 }

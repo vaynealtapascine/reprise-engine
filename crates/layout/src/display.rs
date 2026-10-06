@@ -108,6 +108,8 @@ fn r(rect: Rect<FrameSpace>) -> Rect<reprise_geom::PageSpace> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PdfReadingRun {
     pub run: reprise_display::pdf::ReadingRun,
+    /// The line the run sits on.
+    pub line: crate::LineRef,
     /// The bytes of the block's text the run draws; None for an image.
     pub bytes: Option<std::ops::Range<usize>>,
 }
@@ -169,6 +171,7 @@ impl LayoutSnapshot {
                                 page: frame.page,
                                 path: vec![*group, child],
                             },
+                            line: at,
                             bytes: None,
                         });
                         child = child.saturating_add(1);
@@ -179,6 +182,7 @@ impl LayoutSnapshot {
                                 page: frame.page,
                                 path: vec![*group, child],
                             },
+                            line: at,
                             bytes: Some(run.range.clone()),
                         });
                         child = child.saturating_add(1);
