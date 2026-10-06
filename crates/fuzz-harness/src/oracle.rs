@@ -41,7 +41,11 @@ pub fn diagnostics(snapshot: &LayoutSnapshot) -> R {
 pub fn structure(snapshot: &LayoutSnapshot) -> R {
     for block in &snapshot.blocks {
         let node = block.node;
-        ensure!(!block.lines.is_empty(), "block-has-a-line", "{node} has no line");
+        ensure!(
+            !block.lines.is_empty(),
+            "block-has-a-line",
+            "{node} has no line"
+        );
         let unplaced = snapshot
             .diagnostics_with("layout.text-unplaced")
             .any(|d| d.subject == Subject::Node(node));
@@ -116,7 +120,11 @@ pub fn structure(snapshot: &LayoutSnapshot) -> R {
             );
         }
     }
-    ensure!(!snapshot.pages.is_empty(), "has-a-page", "layout made no page");
+    ensure!(
+        !snapshot.pages.is_empty(),
+        "has-a-page",
+        "layout made no page"
+    );
     let mut page = 0;
     for (i, frame) in snapshot.frames.iter().enumerate() {
         ensure!(
@@ -227,7 +235,7 @@ pub fn render(
         });
         for (page, (plain, overlaid)) in lists.iter().zip(&debug).enumerate() {
             ensure!(
-                overlaid.content_only().to_json() == plain.to_json(),
+                overlaid.content_only().to_json() == plain.content_only().to_json(),
                 "debug-overlay-keeps-content",
                 "page {page}: the debug overlay changed the content"
             );
@@ -238,22 +246,44 @@ pub fn render(
         for (page, list) in first_pages().enumerate() {
             let a = text(svg::render_with_assets(list, &engine.fonts, &engine.assets));
             let b = text(svg::render_with_assets(list, &engine.fonts, &engine.assets));
-            ensure!(a == b, "svg-repeatable", "page {page}: SVG differs between runs");
+            ensure!(
+                a == b,
+                "svg-repeatable",
+                "page {page}: SVG differs between runs"
+            );
             transcript.push(fnv(format!("{a:?}").as_bytes()));
         }
     }
     if flags & RENDER_PNG != 0
         && let Some(list) = lists.first()
     {
-        let a = text(png::render_with_assets(list, &engine.fonts, &engine.assets, 0.25));
-        let b = text(png::render_with_assets(list, &engine.fonts, &engine.assets, 0.25));
+        let a = text(png::render_with_assets(
+            list,
+            &engine.fonts,
+            &engine.assets,
+            0.25,
+        ));
+        let b = text(png::render_with_assets(
+            list,
+            &engine.fonts,
+            &engine.assets,
+            0.25,
+        ));
         ensure!(a == b, "png-repeatable", "PNG differs between runs");
         transcript.push(fnv(format!("{a:?}").as_bytes()));
     }
     if lists.len() <= 12 {
         if flags & RENDER_PDF != 0 {
-            let a = text(pdf::render_with_assets(&lists, &engine.fonts, &engine.assets));
-            let b = text(pdf::render_with_assets(&lists, &engine.fonts, &engine.assets));
+            let a = text(pdf::render_with_assets(
+                &lists,
+                &engine.fonts,
+                &engine.assets,
+            ));
+            let b = text(pdf::render_with_assets(
+                &lists,
+                &engine.fonts,
+                &engine.assets,
+            ));
             ensure!(a == b, "pdf-repeatable", "PDF differs between runs");
             transcript.push(fnv(format!("{a:?}").as_bytes()));
         }

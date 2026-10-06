@@ -179,7 +179,9 @@ pub fn html(index: usize) -> String {
         5 => "<p style=\"font-size: 14pt; font-family: serif\">styled</p>".into(),
         6 => "<table><tr><td><table><tr><td>nested</td></tr></table></td></tr></table>".into(),
         7 => format!("{}deep{}", "<div>".repeat(80), "</div>".repeat(80)),
-        8 => "<p dir=\"rtl\">\u{5d0}\u{5d1}</p><p dir=\"ltr\">\u{5d0}</p>&#x1F600;&#0;&nbsp;".into(),
+        8 => {
+            "<p dir=\"rtl\">\u{5d0}\u{5d1}</p><p dir=\"ltr\">\u{5d0}</p>&#x1F600;&#0;&nbsp;".into()
+        }
         _ => "<<<>>>&&&;;; <p <b> </ ".into(),
     }
 }

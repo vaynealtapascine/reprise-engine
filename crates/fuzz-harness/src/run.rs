@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use reprise_clipboard::{
-    ExportOptions, Exporter, Html, ImportLimits, Native, NativeFragment, Pdf, PlainText,
-    copy_all, copy_blocks, copy_selection, import_html, import_plain,
+    ExportOptions, Exporter, Html, ImportLimits, Native, NativeFragment, Pdf, PlainText, copy_all,
+    copy_blocks, copy_selection, import_html, import_plain,
 };
 use reprise_doc::fragment::CopyBlock;
 use reprise_doc::image::ImageData;
@@ -18,8 +18,8 @@ use reprise_doc::{
     BlockKind, Document, LengthExpr, NewBlock, NodeId, PageTemplate, PersistenceMode, RangeId,
     Relation, Revision, SchemaRegistry, Target,
 };
+use reprise_edit::{Applied, Caret};
 use reprise_edit::{Command, Editor, Movement, Navigator, Selection, Transaction};
-use reprise_edit::{Caret, Applied};
 use reprise_font::FontStore;
 use reprise_format::{DocumentId, Limits, MigrationRegistry, Package};
 use reprise_geom::{Length, PageSpace, Point, Rect};
@@ -73,10 +73,27 @@ enum Expect {
 
 enum Model {
     None,
-    Insert { node: NodeId, at: usize, text: &'static str, before: String },
-    Delete { node: NodeId, range: std::ops::Range<usize>, before: String },
-    Split { node: NodeId, at: usize, before: String },
-    Join { first: NodeId, before_first: String, before_second: String },
+    Insert {
+        node: NodeId,
+        at: usize,
+        text: &'static str,
+        before: String,
+    },
+    Delete {
+        node: NodeId,
+        range: std::ops::Range<usize>,
+        before: String,
+    },
+    Split {
+        node: NodeId,
+        at: usize,
+        before: String,
+    },
+    Join {
+        first: NodeId,
+        before_first: String,
+        before_second: String,
+    },
 }
 
 thread_local! {
@@ -214,7 +231,9 @@ struct Cx<'e, 'w> {
 
 fn pick_block(doc: &Document, dead: &[NodeId], selector: u16) -> Option<NodeId> {
     if selector & 0x8000 != 0 && !dead.is_empty() {
-        return dead.get(usize::from(selector & 0x7fff) % dead.len()).copied();
+        return dead
+            .get(usize::from(selector & 0x7fff) % dead.len())
+            .copied();
     }
     let live = live_blocks(doc);
     live.get(usize::from(selector) % live.len().max(1)).copied()
@@ -275,7 +294,11 @@ fn first_difference(a: &str, b: &str) -> String {
         let to = s.floor_char_boundary((at + 160).min(s.len()));
         s[from..to].to_owned()
     };
-    format!("first difference at byte {at}:\n  left:  {}\n  right: {}", window(a), window(b))
+    format!(
+        "first difference at byte {at}:\n  left:  {}\n  right: {}",
+        window(a),
+        window(b)
+    )
 }
 
 fn snapshots_equal(what: &'static str, left: &LayoutSnapshot, right: &LayoutSnapshot) -> R {
@@ -295,9 +318,7 @@ impl Cx<'_, '_> {
 
     fn refresh_ever(&mut self) {
         for peer in &self.w.peers {
-            self.w
-                .ever
-                .extend(live_blocks(peer.editor.document()));
+            self.w.ever.extend(live_blocks(peer.editor.document()));
         }
         self.w.ever.extend(self.w.dead.iter().copied());
     }
@@ -311,28 +332,46 @@ impl Cx<'_, '_> {
             Op::Redo { peer } => self.undo_redo(usize::from(*peer), false),
             Op::Sync(mode) => self.sync(*mode),
             Op::Copy { peer, sel, wire } => self.copy(usize::from(*peer), sel, *wire),
-            Op::Paste { peer, at, other_namespace } => {
+            Op::Paste {
+                peer,
+                at,
+                other_namespace,
+            } => {
                 let Some(clip) = self.w.clip.clone() else {
                     self.count("paste.skipped");
                     return Ok(());
                 };
                 self.paste_fragment(usize::from(*peer), &clip, *at, *other_namespace)
             }
-            Op::InsertImage { peer, image, size, alt, at } => {
-                self.insert_image(usize::from(*peer), *image, *size, *alt, *at)
-            }
-            Op::ImportText { peer, html, text, at } => {
-                self.import_text(usize::from(*peer), *html, *text, *at)
-            }
+            Op::InsertImage {
+                peer,
+                image,
+                size,
+                alt,
+                at,
+            } => self.insert_image(usize::from(*peer), *image, *size, *alt, *at),
+            Op::ImportText {
+                peer,
+                html,
+                text,
+                at,
+            } => self.import_text(usize::from(*peer), *html, *text, *at),
             Op::Template { peer, which } => self.template(usize::from(*peer), *which),
-            Op::DefineStyle { peer, name, variant, family, parent } => {
-                self.define_style(usize::from(*peer), *name, *variant, *family, *parent)
-            }
+            Op::DefineStyle {
+                peer,
+                name,
+                variant,
+                family,
+                parent,
+            } => self.define_style(usize::from(*peer), *name, *variant, *family, *parent),
             Op::Engine(_) => Ok(()),
             Op::Layout { peer, mode } => self.layout(usize::from(*peer), mode),
-            Op::SaveReopen { peer, shallow, embed_fonts, as_peer } => {
-                self.save_reopen(usize::from(*peer), *shallow, *embed_fonts, *as_peer)
-            }
+            Op::SaveReopen {
+                peer,
+                shallow,
+                embed_fonts,
+                as_peer,
+            } => self.save_reopen(usize::from(*peer), *shallow, *embed_fonts, *as_peer),
             Op::Render { peer, flags } => self.render(usize::from(*peer), *flags),
             Op::Export { peer, kind } => self.export(usize::from(*peer), *kind),
             Op::Navigate { peer, seed } => self.navigate(usize::from(*peer), *seed),
@@ -358,13 +397,20 @@ impl Cx<'_, '_> {
                     _ => Expect::MayFail,
                 };
                 let model = match before {
-                    Some(before) if valid && !dead.contains(&node) => {
-                        Model::Insert { node, at: offset, text: ins, before }
-                    }
+                    Some(before) if valid && !dead.contains(&node) => Model::Insert {
+                        node,
+                        at: offset,
+                        text: ins,
+                        before,
+                    },
                     _ => Model::None,
                 };
                 (
-                    Command::InsertText { node, at: offset, text: ins.into() },
+                    Command::InsertText {
+                        node,
+                        at: offset,
+                        text: ins.into(),
+                    },
                     expect,
                     model,
                 )
@@ -389,9 +435,11 @@ impl Cx<'_, '_> {
                     Expect::MayFail
                 };
                 let model = match before {
-                    Some(before) if ok && !dead.contains(&node) => {
-                        Model::Delete { node, range: range.clone(), before }
-                    }
+                    Some(before) if ok && !dead.contains(&node) => Model::Delete {
+                        node,
+                        range: range.clone(),
+                        before,
+                    },
                     _ => Model::None,
                 };
                 (Command::DeleteText { node, range }, expect, model)
@@ -401,25 +449,50 @@ impl Cx<'_, '_> {
                 let before = text_of(doc, node);
                 let (offset, valid) = pick_offset(before.as_deref().unwrap_or(""), *at);
                 let model = match before {
-                    Some(before) if valid && plain(node) && !dead.contains(&node) => {
-                        Model::Split { node, at: offset, before }
-                    }
+                    Some(before) if valid && plain(node) && !dead.contains(&node) => Model::Split {
+                        node,
+                        at: offset,
+                        before,
+                    },
                     _ => Model::None,
                 };
-                (Command::SplitBlock { node, at: offset }, Expect::MayFail, model)
+                (
+                    Command::SplitBlock { node, at: offset },
+                    Expect::MayFail,
+                    model,
+                )
             }
             Cmd::Join { first, second } => {
                 let a = pick_block(doc, dead, *first)?;
                 let b = pick_block(doc, dead, *second)?;
                 let model = match (text_of(doc, a), text_of(doc, b)) {
-                    (Some(x), Some(y)) if plain(a) && plain(b) && !dead.contains(&a) && !dead.contains(&b) => {
-                        Model::Join { first: a, before_first: x, before_second: y }
+                    (Some(x), Some(y))
+                        if plain(a) && plain(b) && !dead.contains(&a) && !dead.contains(&b) =>
+                    {
+                        Model::Join {
+                            first: a,
+                            before_first: x,
+                            before_second: y,
+                        }
                     }
                     _ => Model::None,
                 };
-                (Command::JoinBlocks { first: a, second: b }, Expect::MayFail, model)
+                (
+                    Command::JoinBlocks {
+                        first: a,
+                        second: b,
+                    },
+                    Expect::MayFail,
+                    model,
+                )
             }
-            Cmd::InsertBlock { parent, index, kind, style, text } => {
+            Cmd::InsertBlock {
+                parent,
+                index,
+                kind,
+                style,
+                text,
+            } => {
                 let parent = parent.and_then(|p| pick_block(doc, dead, p));
                 let siblings = doc.children(parent).len();
                 let kind = match kind % 10 {
@@ -446,7 +519,11 @@ impl Cx<'_, '_> {
                 let node = pick_block(doc, dead, *block)?;
                 (Command::DeleteBlock { node }, Expect::MayFail, Model::None)
             }
-            Cmd::MoveBlock { block, parent, index } => {
+            Cmd::MoveBlock {
+                block,
+                parent,
+                index,
+            } => {
                 let node = pick_block(doc, dead, *block)?;
                 let parent = parent.and_then(|p| pick_block(doc, dead, p));
                 let siblings = doc.children(parent).len();
@@ -460,23 +537,41 @@ impl Cx<'_, '_> {
                     Model::None,
                 )
             }
-            Cmd::SetOverride { block, variant, family, parent } => {
+            Cmd::SetOverride {
+                block,
+                variant,
+                family,
+                parent,
+            } => {
                 let node = pick_block(doc, dead, *block)?;
                 let style = pool::style(
                     usize::from(*variant),
                     usize::from(*family),
                     usize::from(*parent),
                 );
-                (Command::SetStyleOverride { node, style }, Expect::MayFail, Model::None)
+                (
+                    Command::SetStyleOverride { node, style },
+                    Expect::MayFail,
+                    Model::None,
+                )
             }
-            Cmd::AddRelation { kind, owner, target, aux } => {
+            Cmd::AddRelation {
+                kind,
+                owner,
+                target,
+                aux,
+            } => {
                 let owner_node = pick_block(doc, dead, *owner)?;
                 let target_node = pick_block(doc, dead, *target)?;
                 let range = (!pool_ranges.is_empty())
                     .then(|| pool_ranges[usize::from(*target) % pool_ranges.len()]);
                 let layout_target = |r: Option<RangeId>| match r {
-                    Some(range) => Target::Layout(reprise_doc::LayoutQuery::LineContaining { range }),
-                    None => Target::Layout(reprise_doc::LayoutQuery::FirstLine { node: target_node }),
+                    Some(range) => {
+                        Target::Layout(reprise_doc::LayoutQuery::LineContaining { range })
+                    }
+                    None => {
+                        Target::Layout(reprise_doc::LayoutQuery::FirstLine { node: target_node })
+                    }
                 };
                 let pt = |n: i32| LengthExpr::Pt(Length::from_pt(n));
                 let relation = match kind % 8 {
@@ -490,11 +585,15 @@ impl Cx<'_, '_> {
                     2 => Relation::new(reprise_doc::relation::builtin::FLOAT)
                         .owned_by(owner_node)
                         .target("anchor", range.map_or(layout_target(None), Target::Range))
-                        .param("width", reprise_doc::Param::Length(pt(20 + i32::from(*aux % 80))))
+                        .param(
+                            "width",
+                            reprise_doc::Param::Length(pt(20 + i32::from(*aux % 80))),
+                        )
                         .param(
                             "side",
                             reprise_doc::Param::Text(
-                                ["left", "right", "top", "bottom", "sideways"][usize::from(*aux) % 5]
+                                ["left", "right", "top", "bottom", "sideways"]
+                                    [usize::from(*aux) % 5]
                                     .into(),
                             ),
                         ),
@@ -505,8 +604,10 @@ impl Cx<'_, '_> {
                     5 => Relation::new(reprise_doc::relation::SchemaId::new("fuzz.unknown"))
                         .owned_by(owner_node)
                         .target("x", Target::Node(target_node)),
-                    6 => follow_to(owner_node, layout_target(range))
-                        .param("offset", reprise_doc::Param::Length(LengthExpr::Pt(Length::MAX))),
+                    6 => follow_to(owner_node, layout_target(range)).param(
+                        "offset",
+                        reprise_doc::Param::Length(LengthExpr::Pt(Length::MAX)),
+                    ),
                     _ => Relation::new(reprise_doc::relation::builtin::REFERENCE)
                         .owned_by(owner_node)
                         .target(
@@ -517,12 +618,20 @@ impl Cx<'_, '_> {
                             }),
                         ),
                 };
-                (Command::AddRelation { relation }, Expect::MayFail, Model::None)
+                (
+                    Command::AddRelation { relation },
+                    Expect::MayFail,
+                    Model::None,
+                )
             }
             Cmd::RemoveRelation { index } => {
                 let relations = doc.relations();
                 let (id, _) = relations.get(usize::from(*index) % relations.len().max(1))?;
-                (Command::RemoveRelation { id: *id }, Expect::MayFail, Model::None)
+                (
+                    Command::RemoveRelation { id: *id },
+                    Expect::MayFail,
+                    Model::None,
+                )
             }
         })
     }
@@ -565,7 +674,14 @@ impl Cx<'_, '_> {
                 );
                 oracle::documented("edit", [error.note().code.as_str()])?;
                 let peer = &self.w.peers[p];
-                Self::unchanged(peer, &pre, &revision, undo, redo, "refused-edit-changes-nothing")
+                Self::unchanged(
+                    peer,
+                    &pre,
+                    &revision,
+                    undo,
+                    redo,
+                    "refused-edit-changes-nothing",
+                )
             }
             Ok(applied) => {
                 self.count("edit.applied");
@@ -645,7 +761,12 @@ impl Cx<'_, '_> {
         let doc = self.w.peers[p].editor.document();
         match model {
             Model::None => {}
-            Model::Insert { node, at, text, before } => {
+            Model::Insert {
+                node,
+                at,
+                text,
+                before,
+            } => {
                 let mut expected = before.clone();
                 expected.insert_str(*at, text);
                 ensure!(
@@ -655,7 +776,11 @@ impl Cx<'_, '_> {
                     text_of(doc, *node)
                 );
             }
-            Model::Delete { node, range, before } => {
+            Model::Delete {
+                node,
+                range,
+                before,
+            } => {
                 let mut expected = before.clone();
                 expected.replace_range(range.clone(), "");
                 ensure!(
@@ -678,7 +803,11 @@ impl Cx<'_, '_> {
                     new.and_then(|n| text_of(doc, n))
                 );
             }
-            Model::Join { first, before_first, before_second } => {
+            Model::Join {
+                first,
+                before_first,
+                before_second,
+            } => {
                 let joined = if first_is_second(&applied.effects) {
                     before_first.clone()
                 } else {
@@ -699,8 +828,16 @@ impl Cx<'_, '_> {
 
     fn undo_redo(&mut self, p: usize, undo: bool) -> R {
         let peer = &mut self.w.peers[p];
-        let can = if undo { peer.editor.can_undo() } else { peer.editor.can_redo() };
-        let result = if undo { peer.editor.undo() } else { peer.editor.redo() };
+        let can = if undo {
+            peer.editor.can_undo()
+        } else {
+            peer.editor.can_redo()
+        };
+        let result = if undo {
+            peer.editor.undo()
+        } else {
+            peer.editor.redo()
+        };
         let moved = match result {
             Ok(moved) => moved,
             Err(error) => {
@@ -766,7 +903,10 @@ impl Cx<'_, '_> {
                 true
             }
             SyncMode::Crossed => {
-                let (fa, fb) = (fork(a.editor.document(), PEER_A)?, fork(b.editor.document(), PEER_B)?);
+                let (fa, fb) = (
+                    fork(a.editor.document(), PEER_A)?,
+                    fork(b.editor.document(), PEER_B)?,
+                );
                 a.editor.merge(&fb).map_err(wrap)?;
                 b.editor.merge(&fa).map_err(wrap)?;
                 true
@@ -823,7 +963,11 @@ impl Cx<'_, '_> {
             authored::ranges(da, &self.w.ranges),
             authored::ranges(db, &self.w.ranges),
         );
-        ensure!(ra == rb, oracle, "range resolution differs: {ra:?} vs {rb:?}");
+        ensure!(
+            ra == rb,
+            oracle,
+            "range resolution differs: {ra:?} vs {rb:?}"
+        );
         ensure!(
             da.revision() == db.revision(),
             oracle,
@@ -854,13 +998,23 @@ impl Cx<'_, '_> {
                 let mut chosen = Vec::new();
                 let mut single = None;
                 for (block, range) in blocks {
-                    let Some(node) = pick_block(doc, &self.w.dead, *block) else { continue };
+                    let Some(node) = pick_block(doc, &self.w.dead, *block) else {
+                        continue;
+                    };
                     let text = text_of(doc, node).unwrap_or_default();
                     let bytes = range.map(|(a, b)| {
-                        (pick_offset(&text, a).0..pick_offset(&text, b).0, text.clone())
+                        (
+                            pick_offset(&text, a).0..pick_offset(&text, b).0,
+                            text.clone(),
+                        )
                     });
-                    single = bytes.as_ref().map(|(r, t)| t.get(r.clone()).map(str::to_owned));
-                    chosen.push(CopyBlock { node, bytes: bytes.map(|b| b.0) });
+                    single = bytes
+                        .as_ref()
+                        .map(|(r, t)| t.get(r.clone()).map(str::to_owned));
+                    chosen.push(CopyBlock {
+                        node,
+                        bytes: bytes.map(|b| b.0),
+                    });
                 }
                 let expected = match (chosen.len(), single) {
                     (1, Some(Some(slice))) => Some(slice),
@@ -881,9 +1035,17 @@ impl Cx<'_, '_> {
                 self.count("copy.ok");
                 oracle::documented("clipboard", native.notes.iter().map(|n| n.code.as_str()))?;
                 native.validate().map_err(|e| {
-                    Violation::new("native-fragment-valid", format!("a fresh copy is invalid: {e}"))
+                    Violation::new(
+                        "native-fragment-valid",
+                        format!("a fresh copy is invalid: {e}"),
+                    )
                 })?;
-                let text: String = native.fragment.blocks.iter().map(|b| b.text.as_str()).collect();
+                let text: String = native
+                    .fragment
+                    .blocks
+                    .iter()
+                    .map(|b| b.text.as_str())
+                    .collect();
                 if let Some(expected) = expected {
                     ensure!(
                         text == expected,
@@ -896,12 +1058,22 @@ impl Cx<'_, '_> {
                         Violation::new("native-encodes", format!("a fresh copy won't encode: {e}"))
                     })?;
                     let decoded = NativeFragment::decode(&bytes).map_err(|e| {
-                        Violation::new("native-roundtrips", format!("encoded bytes don't decode: {e}"))
+                        Violation::new(
+                            "native-roundtrips",
+                            format!("encoded bytes don't decode: {e}"),
+                        )
                     })?;
                     let again = decoded.encode().map_err(|e| {
-                        Violation::new("native-roundtrips", format!("decoded copy won't encode: {e}"))
+                        Violation::new(
+                            "native-roundtrips",
+                            format!("decoded copy won't encode: {e}"),
+                        )
                     })?;
-                    ensure!(again == bytes, "native-roundtrips", "encode, decode, encode changed the bytes");
+                    ensure!(
+                        again == bytes,
+                        "native-roundtrips",
+                        "encode, decode, encode changed the bytes"
+                    );
                     self.w.report.transcript.push(fnv(&bytes));
                     decoded
                 } else {
@@ -933,7 +1105,12 @@ impl Cx<'_, '_> {
         let expected = match target {
             None => Some(format!(
                 "{before_text}{}",
-                native.fragment.blocks.iter().map(|b| b.text.as_str()).collect::<String>()
+                native
+                    .fragment
+                    .blocks
+                    .iter()
+                    .map(|b| b.text.as_str())
+                    .collect::<String>()
             )),
             Some((node, offset)) if doc.children(Some(node)).is_empty() => {
                 let mut position = offset;
@@ -944,8 +1121,12 @@ impl Cx<'_, '_> {
                     position += text_of(doc, live).map_or(0, |t| t.len());
                 }
                 let mut expected = before_text.clone();
-                let fragment_text: String =
-                    native.fragment.blocks.iter().map(|b| b.text.as_str()).collect();
+                let fragment_text: String = native
+                    .fragment
+                    .blocks
+                    .iter()
+                    .map(|b| b.text.as_str())
+                    .collect();
                 expected.insert_str(position, &fragment_text);
                 Some(expected)
             }
@@ -954,13 +1135,24 @@ impl Cx<'_, '_> {
         let pre = authored(doc);
         let revision = doc.revision();
         let (undo, redo) = (peer.editor.undo_count(), peer.editor.redo_count());
-        let result = native.paste(&mut peer.editor, target, if other { "elsewhere" } else { "ns" });
+        let result = native.paste(
+            &mut peer.editor,
+            target,
+            if other { "elsewhere" } else { "ns" },
+        );
         match result {
             Err(error) => {
                 self.count("paste.refused");
                 oracle::documented("paste", [error.note().code.as_str()])?;
                 let peer = &self.w.peers[p];
-                Self::unchanged(peer, &pre, &revision, undo, redo, "refused-paste-changes-nothing")
+                Self::unchanged(
+                    peer,
+                    &pre,
+                    &revision,
+                    undo,
+                    redo,
+                    "refused-paste-changes-nothing",
+                )
             }
             Ok(pasted) => {
                 self.count("paste.ok");
@@ -987,7 +1179,14 @@ impl Cx<'_, '_> {
         }
     }
 
-    fn insert_image(&mut self, p: usize, image: u8, size: u8, alt: u8, at: Option<(u16, u16)>) -> R {
+    fn insert_image(
+        &mut self,
+        p: usize,
+        image: u8,
+        size: u8,
+        alt: u8,
+        at: Option<(u16, u16)>,
+    ) -> R {
         let scratch = Document::new(77).map_err(|e| Violation::new("scratch", e.to_string()))?;
         let pt = |n: i32| Some(LengthExpr::Pt(Length::from_pt(n)));
         let (width, height) = match size % 6 {
@@ -995,7 +1194,10 @@ impl Cx<'_, '_> {
             1 => (pt(30), None),
             2 => (None, pt(20)),
             3 => (pt(0), pt(0)),
-            4 => (Some(LengthExpr::Pt(Length::MAX)), Some(LengthExpr::Pt(Length::MIN))),
+            4 => (
+                Some(LengthExpr::Pt(Length::MAX)),
+                Some(LengthExpr::Pt(Length::MIN)),
+            ),
             _ => (Some(LengthExpr::Em(-500)), pt(10)),
         };
         let mut data = ImageData::new(pool::image_hash(usize::from(image)));
@@ -1030,8 +1232,13 @@ impl Cx<'_, '_> {
                 self.count("import.ok");
                 oracle::documented("import", import.notes.iter().map(|n| n.code.as_str()))?;
                 if !html {
-                    let text: String =
-                        import.fragment.fragment.blocks.iter().map(|b| b.text.as_str()).collect();
+                    let text: String = import
+                        .fragment
+                        .fragment
+                        .blocks
+                        .iter()
+                        .map(|b| b.text.as_str())
+                        .collect();
                     ensure!(
                         char_bag(&text) == char_bag(&source),
                         "plain-import-keeps-text",
@@ -1068,13 +1275,18 @@ impl Cx<'_, '_> {
         self.count("template");
         self.direct(p, |doc| match which % 7 {
             0 => doc.set_page_template(&PageTemplate::builtin()).is_ok(),
-            1 => doc.set_page_template(&reprise_fixtures::templates::two_columns()).is_ok(),
+            1 => doc
+                .set_page_template(&reprise_fixtures::templates::two_columns())
+                .is_ok(),
             2 => doc
                 .set_page_template(&reprise_fixtures::templates::responsive_columns())
                 .is_ok(),
-            3 => doc.define_page_template(&reprise_fixtures::templates::two_columns()).is_ok(),
+            3 => doc
+                .define_page_template(&reprise_fixtures::templates::two_columns())
+                .is_ok(),
             4 => {
-                doc.store_raw_page_template("junk", "{not a template").is_ok()
+                doc.store_raw_page_template("junk", "{not a template")
+                    .is_ok()
                     && doc.use_page_template("junk").is_ok()
             }
             5 => doc.remove_page_template("two-columns").is_ok(),
@@ -1085,7 +1297,11 @@ impl Cx<'_, '_> {
     fn define_style(&mut self, p: usize, name: u8, variant: u8, family: u8, parent: u8) -> R {
         self.count("define-style");
         let name = pool::style_name(usize::from(name));
-        let style = pool::style(usize::from(variant), usize::from(family), usize::from(parent));
+        let style = pool::style(
+            usize::from(variant),
+            usize::from(family),
+            usize::from(parent),
+        );
         self.direct(p, |doc| doc.define_style(name, &style).is_ok())
     }
 
@@ -1114,9 +1330,20 @@ impl Cx<'_, '_> {
                     .map_err(|e| Violation::new("session-layout", e.to_string()))?;
                 snapshots_equal("incremental-equals-reference", &incremental, &reference)
             }
-            LayoutMode::Job { budgets, viewport: v, partial, cancel_after } => {
-                run_job(&mut self.sessions[p], doc, &reference, budgets, *v, *partial, *cancel_after)
-            }
+            LayoutMode::Job {
+                budgets,
+                viewport: v,
+                partial,
+                cancel_after,
+            } => run_job(
+                &mut self.sessions[p],
+                doc,
+                &reference,
+                budgets,
+                *v,
+                *partial,
+                *cancel_after,
+            ),
         }
     }
 
@@ -1152,7 +1379,10 @@ impl Cx<'_, '_> {
         };
         let run = || exporter.export(doc, layout, &options);
         let (first, second) = (run(), run());
-        let digest = |r: &Result<reprise_clipboard::ExportResult, reprise_clipboard::ClipboardError>| match r {
+        let digest = |r: &Result<
+            reprise_clipboard::ExportResult,
+            reprise_clipboard::ClipboardError,
+        >| match r {
             Ok(r) => Ok(r.bytes.clone()),
             Err(e) => Err(e.to_string()),
         };
@@ -1196,7 +1426,10 @@ impl Cx<'_, '_> {
                 let imported = imported.map_err(|e| {
                     Violation::new(
                         "export-reimports",
-                        format!("the {} export can't be imported again: {e}", ["plain", "HTML"][usize::from(kind % 4)]),
+                        format!(
+                            "the {} export can't be imported again: {e}",
+                            ["plain", "HTML"][usize::from(kind % 4)]
+                        ),
                     )
                 })?;
                 let back: String = imported
@@ -1215,7 +1448,10 @@ impl Cx<'_, '_> {
             }
             2 => {
                 NativeFragment::decode(&result.bytes).map_err(|e| {
-                    Violation::new("export-reimports", format!("native export won't decode: {e}"))
+                    Violation::new(
+                        "export-reimports",
+                        format!("native export won't decode: {e}"),
+                    )
                 })?;
             }
             _ => {}
@@ -1229,18 +1465,29 @@ impl Cx<'_, '_> {
         self.count("save");
         let doc = self.w.peers[p].editor.document();
         doc.commit();
-        let mode = if shallow { PersistenceMode::Shallow } else { PersistenceMode::History };
+        let mode = if shallow {
+            PersistenceMode::Shallow
+        } else {
+            PersistenceMode::History
+        };
         let id = DocumentId([as_peer; 16]);
         let layout = self.engine.layout(doc);
         let package = if embed {
-            Package::new_with_resources(doc, id, mode, &layout, &self.engine.fonts, &self.engine.assets)
+            Package::new_with_resources(
+                doc,
+                id,
+                mode,
+                &layout,
+                &self.engine.fonts,
+                &self.engine.assets,
+            )
         } else {
             Package::new(doc, id, mode)
         }
         .map_err(|e| Violation::new("save-succeeds", format!("saving a document failed: {e}")))?;
-        let bytes = package
-            .save()
-            .map_err(|e| Violation::new("save-succeeds", format!("encoding a package failed: {e}")))?;
+        let bytes = package.save().map_err(|e| {
+            Violation::new("save-succeeds", format!("encoding a package failed: {e}"))
+        })?;
         ensure!(
             package.save().ok().as_ref() == Some(&bytes),
             "save-repeatable",
@@ -1255,10 +1502,18 @@ impl Cx<'_, '_> {
         } else {
             Package::open(&bytes, peer_id, Limits::default(), &migrations)
         }
-        .map_err(|e| Violation::new("reopen-succeeds", format!("a saved package won't open: {e}")))?;
+        .map_err(|e| {
+            Violation::new(
+                "reopen-succeeds",
+                format!("a saved package won't open: {e}"),
+            )
+        })?;
         oracle::documented("format", opened.notes.iter().map(|n| n.code.as_str()))?;
         let reopened = opened.editable_document().map_err(|e| {
-            Violation::new("reopen-succeeds", format!("a saved package opens read-only: {e}"))
+            Violation::new(
+                "reopen-succeeds",
+                format!("a saved package opens read-only: {e}"),
+            )
         })?;
         let (a, b) = (authored(doc), authored(reopened));
         ensure!(
@@ -1279,7 +1534,11 @@ impl Cx<'_, '_> {
                 authored::ranges(doc, &self.w.ranges),
                 authored::ranges(reopened, &self.w.ranges),
             );
-            ensure!(ra == rb, "reopen-identical", "ranges differ: {ra:?} vs {rb:?}");
+            ensure!(
+                ra == rb,
+                "reopen-identical",
+                "ranges differ: {ra:?} vs {rb:?}"
+            );
             if !embed {
                 ensure!(
                     opened.package().save().ok().as_ref() == Some(&bytes),
@@ -1303,7 +1562,9 @@ impl Cx<'_, '_> {
         };
         if shallow {
             ensure!(
-                after.blocks == layout.blocks && after.pages == layout.pages && after.frames == layout.frames,
+                after.blocks == layout.blocks
+                    && after.pages == layout.pages
+                    && after.frames == layout.frames,
                 "reopen-lays-out-identically",
                 "shallow reopen changed the layout: {}",
                 first_difference(&layout.to_json(), &after.to_json())
@@ -1353,7 +1614,10 @@ impl Cx<'_, '_> {
                 );
             }
         }
-        let Some(block) = snapshot.blocks.get(next() as usize % snapshot.blocks.len().max(1)) else {
+        let Some(block) = snapshot
+            .blocks
+            .get(next() as usize % snapshot.blocks.len().max(1))
+        else {
             return Ok(());
         };
         let carets = nav.caret_positions(block.node);
@@ -1362,13 +1626,26 @@ impl Cx<'_, '_> {
         };
         valid(caret)?;
         const MOVES: [Movement; 20] = [
-            Movement::NextGrapheme, Movement::PreviousGrapheme, Movement::NextWord,
-            Movement::PreviousWord, Movement::VisualRight, Movement::VisualLeft,
-            Movement::InlineForward, Movement::InlineBackward, Movement::LineUp,
-            Movement::LineDown, Movement::LineStart, Movement::LineEnd,
-            Movement::LineLeftmost, Movement::LineRightmost, Movement::LineInlineStart,
-            Movement::LineInlineEnd, Movement::BlockStart, Movement::BlockEnd,
-            Movement::DocumentStart, Movement::DocumentEnd,
+            Movement::NextGrapheme,
+            Movement::PreviousGrapheme,
+            Movement::NextWord,
+            Movement::PreviousWord,
+            Movement::VisualRight,
+            Movement::VisualLeft,
+            Movement::InlineForward,
+            Movement::InlineBackward,
+            Movement::LineUp,
+            Movement::LineDown,
+            Movement::LineStart,
+            Movement::LineEnd,
+            Movement::LineLeftmost,
+            Movement::LineRightmost,
+            Movement::LineInlineStart,
+            Movement::LineInlineEnd,
+            Movement::BlockStart,
+            Movement::BlockEnd,
+            Movement::DocumentStart,
+            Movement::DocumentEnd,
         ];
         let mut focus = caret;
         for movement in MOVES {
@@ -1377,7 +1654,10 @@ impl Cx<'_, '_> {
                 focus = moved;
             }
         }
-        let selection = Selection { anchor: caret, focus };
+        let selection = Selection {
+            anchor: caret,
+            focus,
+        };
         let ranges = nav.selection_ranges(&selection);
         let _ = nav.selection_rects(&selection);
         let _ = nav.select_all();
@@ -1386,9 +1666,14 @@ impl Cx<'_, '_> {
         let _ = nav.select_block(caret);
         if ranges.iter().any(|r| !r.bytes.is_empty()) {
             let schemas = self.w.peers[p].editor.schemas();
-            if let Ok(copied) =
-                copy_selection(doc, "ns", &selection, &snapshot, schemas, Some(&self.engine.fonts))
-            {
+            if let Ok(copied) = copy_selection(
+                doc,
+                "ns",
+                &selection,
+                &snapshot,
+                schemas,
+                Some(&self.engine.fonts),
+            ) {
                 oracle::documented("clipboard", copied.notes.iter().map(|n| n.code.as_str()))?;
                 let flattened = copied
                     .notes
@@ -1397,10 +1682,17 @@ impl Cx<'_, '_> {
                 if !flattened {
                     let selected: String = ranges
                         .iter()
-                        .filter_map(|r| text_of(doc, r.node).and_then(|t| t.get(r.bytes.clone()).map(str::to_owned)))
+                        .filter_map(|r| {
+                            text_of(doc, r.node)
+                                .and_then(|t| t.get(r.bytes.clone()).map(str::to_owned))
+                        })
                         .collect();
-                    let text: String =
-                        copied.fragment.blocks.iter().map(|b| b.text.as_str()).collect();
+                    let text: String = copied
+                        .fragment
+                        .blocks
+                        .iter()
+                        .map(|b| b.text.as_str())
+                        .collect();
                     ensure!(
                         char_bag(&text) == char_bag(&selected),
                         "selection-copy-preserves-text",
@@ -1422,6 +1714,9 @@ impl Cx<'_, '_> {
             let finals = authored(self.w.peers[p].editor.document());
             let peer = &mut self.w.peers[p];
             let steps = peer.editor.undo_count();
+            // Redo-all only returns to the final state if nothing was left on
+            // the redo stack when the ops ended.
+            let nothing_to_redo = peer.editor.redo_count() == 0;
             while peer.editor.can_undo() {
                 guard += 1;
                 ensure!(guard < 5000, "undo-terminates", "undo never runs out");
@@ -1447,7 +1742,7 @@ impl Cx<'_, '_> {
                     .map_err(|e| Violation::new("undo-redo-succeeds", e.to_string()))?;
             }
             let redone = authored(peer.editor.document());
-            if !peer.foreign {
+            if !peer.foreign && nothing_to_redo {
                 ensure!(
                     redone == finals,
                     "redo-everything-restores",
@@ -1541,7 +1836,10 @@ fn run_job(
                     .partial()
                     .map_err(|e| Violation::new("job-partial", format!("partial() failed: {e}")))?;
                 view.publish(doc).map_err(|e| {
-                    Violation::new("job-partial", format!("a current partial won't publish: {e}"))
+                    Violation::new(
+                        "job-partial",
+                        format!("a current partial won't publish: {e}"),
+                    )
                 })?;
                 if view.coverage().complete {
                     snapshots_equal("incremental-equals-reference", view.snapshot(), reference)?;
@@ -1559,11 +1857,17 @@ fn run_job(
                     break;
                 }
             }
-            ensure!(finished, "job-terminates", "a job didn't finish in 64 unbounded steps");
+            ensure!(
+                finished,
+                "job-terminates",
+                "a job didn't finish in 64 unbounded steps"
+            );
             let snapshot = job
                 .complete()
                 .map_err(|e| Violation::new("job-complete", e.to_string()))?
-                .ok_or_else(|| Violation::new("job-complete", "a finished job returned no snapshot"))?;
+                .ok_or_else(|| {
+                    Violation::new("job-complete", "a finished job returned no snapshot")
+                })?;
             snapshots_equal("incremental-equals-reference", &snapshot, reference)?;
         }
     }

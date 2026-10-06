@@ -67,16 +67,54 @@ pub struct BaseRelation {
 /// execution time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cmd {
-    InsertText { block: u16, at: u16, text: u8 },
-    DeleteText { block: u16, from: u16, to: u16 },
-    Split { block: u16, at: u16 },
-    Join { first: u16, second: u16 },
-    InsertBlock { parent: Option<u16>, index: u16, kind: u8, style: u8, text: u8 },
-    DeleteBlock { block: u16 },
-    MoveBlock { block: u16, parent: Option<u16>, index: u16 },
-    SetOverride { block: u16, variant: u8, family: u8, parent: u8 },
-    AddRelation { kind: u8, owner: u16, target: u16, aux: u8 },
-    RemoveRelation { index: u16 },
+    InsertText {
+        block: u16,
+        at: u16,
+        text: u8,
+    },
+    DeleteText {
+        block: u16,
+        from: u16,
+        to: u16,
+    },
+    Split {
+        block: u16,
+        at: u16,
+    },
+    Join {
+        first: u16,
+        second: u16,
+    },
+    InsertBlock {
+        parent: Option<u16>,
+        index: u16,
+        kind: u8,
+        style: u8,
+        text: u8,
+    },
+    DeleteBlock {
+        block: u16,
+    },
+    MoveBlock {
+        block: u16,
+        parent: Option<u16>,
+        index: u16,
+    },
+    SetOverride {
+        block: u16,
+        variant: u8,
+        family: u8,
+        parent: u8,
+    },
+    AddRelation {
+        kind: u8,
+        owner: u16,
+        target: u16,
+        aux: u8,
+    },
+    RemoveRelation {
+        index: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,7 +127,9 @@ pub enum SyncMode {
     /// Like `Crossed`, through exported and imported bytes.
     ViaBytes,
     /// Only one direction: replicas may stay apart.
-    OneWay { from_a: bool },
+    OneWay {
+        from_a: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -125,22 +165,74 @@ pub enum LayoutMode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
-    Edit { peer: u8, cmds: Vec<Cmd> },
-    Undo { peer: u8 },
-    Redo { peer: u8 },
+    Edit {
+        peer: u8,
+        cmds: Vec<Cmd>,
+    },
+    Undo {
+        peer: u8,
+    },
+    Redo {
+        peer: u8,
+    },
     Sync(SyncMode),
-    Copy { peer: u8, sel: CopySel, wire: bool },
-    Paste { peer: u8, at: Option<(u16, u16)>, other_namespace: bool },
-    InsertImage { peer: u8, image: u8, size: u8, alt: u8, at: Option<(u16, u16)> },
-    ImportText { peer: u8, html: bool, text: u8, at: Option<(u16, u16)> },
-    Template { peer: u8, which: u8 },
-    DefineStyle { peer: u8, name: u8, variant: u8, family: u8, parent: u8 },
+    Copy {
+        peer: u8,
+        sel: CopySel,
+        wire: bool,
+    },
+    Paste {
+        peer: u8,
+        at: Option<(u16, u16)>,
+        other_namespace: bool,
+    },
+    InsertImage {
+        peer: u8,
+        image: u8,
+        size: u8,
+        alt: u8,
+        at: Option<(u16, u16)>,
+    },
+    ImportText {
+        peer: u8,
+        html: bool,
+        text: u8,
+        at: Option<(u16, u16)>,
+    },
+    Template {
+        peer: u8,
+        which: u8,
+    },
+    DefineStyle {
+        peer: u8,
+        name: u8,
+        variant: u8,
+        family: u8,
+        parent: u8,
+    },
     Engine(EngineChange),
-    Layout { peer: u8, mode: LayoutMode },
-    SaveReopen { peer: u8, shallow: bool, embed_fonts: bool, as_peer: u8 },
-    Render { peer: u8, flags: u8 },
-    Export { peer: u8, kind: u8 },
-    Navigate { peer: u8, seed: u16 },
+    Layout {
+        peer: u8,
+        mode: LayoutMode,
+    },
+    SaveReopen {
+        peer: u8,
+        shallow: bool,
+        embed_fonts: bool,
+        as_peer: u8,
+    },
+    Render {
+        peer: u8,
+        flags: u8,
+    },
+    Export {
+        peer: u8,
+        kind: u8,
+    },
+    Navigate {
+        peer: u8,
+        seed: u16,
+    },
 }
 
 pub const RENDER_SVG: u8 = 1;
@@ -419,8 +511,21 @@ mod tests {
             }
         }
         for kind in [
-            "Edit", "Undo", "Redo", "Sync", "Copy", "Paste", "InsertImage", "ImportText",
-            "Template", "DefineStyle", "Engine", "Layout", "SaveReopen", "Render", "Export",
+            "Edit",
+            "Undo",
+            "Redo",
+            "Sync",
+            "Copy",
+            "Paste",
+            "InsertImage",
+            "ImportText",
+            "Template",
+            "DefineStyle",
+            "Engine",
+            "Layout",
+            "SaveReopen",
+            "Render",
+            "Export",
             "Navigate",
         ] {
             assert!(seen.contains(kind), "{kind} is unreachable: {seen:?}");

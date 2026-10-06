@@ -55,8 +55,18 @@ mod tests {
     fn the_table_is_found_and_covers_every_library() {
         let codes = documented();
         for prefix in [
-            "font.", "shape.", "compose.", "layout.", "relation.", "style.", "format.", "edit.",
-            "plugin.", "clipboard.", "export.", "bindings.",
+            "font.",
+            "shape.",
+            "compose.",
+            "layout.",
+            "relation.",
+            "style.",
+            "format.",
+            "edit.",
+            "plugin.",
+            "clipboard.",
+            "export.",
+            "bindings.",
         ] {
             assert!(
                 codes.iter().any(|c| c.starts_with(prefix)),
