@@ -164,9 +164,18 @@ fn mutated_json_operations_never_panic() {
                     ];
                     *leaf = if leaf.is_string() && rng.chance(50) {
                         serde_json::json!(
-                            rng.pick(&["0@1", "1@66", "999@66", "cid:root-content:Tree", "x"])
-                                .copied()
-                                .unwrap_or("")
+                            rng.pick(&[
+                                "0@1",
+                                "1@66",
+                                "999@66",
+                                "cid:root-content:Tree",
+                                "cid:3@66:Text",
+                                "cid:0@1:Map",
+                                "cid:root-styles:Text",
+                                "x"
+                            ])
+                            .copied()
+                            .unwrap_or("")
                         )
                     } else {
                         serde_json::json!(rng.pick(&numbers).copied().unwrap_or(0))
@@ -177,12 +186,28 @@ fn mutated_json_operations_never_panic() {
         }
     }
     let mut accepted = 0;
-    for seed in 0..200_u64 {
+    // `REPRISE_HOSTILE_SEEDS=4000` runs the long sweep (it passed at 4,000).
+    let seeds = std::env::var("REPRISE_HOSTILE_SEEDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300_u64);
+    for seed in 0..seeds {
         let base = victim();
         let attacker = base.fork(66).unwrap();
         let mut rng = Rng::new(seed);
         scribble(&attacker, &mut rng, 30);
-        let packet = attacker.export_delta(&base.version_vector()).unwrap();
+        let since = base.version_vector();
+        if seed % 2 == 1 {
+            // Concurrent local edits send checks through the shadow replica.
+            let first = base.blocks()[0];
+            base.block(first)
+                .unwrap()
+                .text
+                .insert(0, "concurrent ")
+                .unwrap();
+            base.commit();
+        }
+        let packet = attacker.export_delta(&since).unwrap();
         let (header, body) = crate::sync::read_header(&packet).unwrap();
         let mut json: serde_json::Value = serde_json::from_slice(body).unwrap();
         let mut target = rng.below(4000) % (body.len() / 4).max(1);
@@ -218,5 +243,63 @@ fn operations_outside_the_vocabulary_are_refused_whole() {
             "seed {seed}: {result:?}"
         );
         assert_eq!(base.revision(), before, "nothing applied");
+    }
+}
+
+/// Text positions are checked against the text at the change's own causal
+/// version, on the linear path and through the shadow replica.
+#[test]
+fn text_positions_past_the_end_are_refused_on_both_paths() {
+    fn set_positions(v: &mut serde_json::Value, to: i64) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    if k == "pos" {
+                        *x = serde_json::json!(to);
+                    } else {
+                        set_positions(x, to);
+                    }
+                }
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(|x| set_positions(x, to)),
+            _ => {}
+        }
+    }
+    for concurrent in [false, true] {
+        for delete in [false, true] {
+            for (pos, ok) in [(0, true), (2, true), (3, !delete), (4, false), (100, false)] {
+                let base = Document::new(1).unwrap();
+                let p = base.append_block(BlockKind::Paragraph, "", "abc").unwrap();
+                base.commit();
+                let since = base.version_vector();
+                let attacker = base.fork(66).unwrap();
+                let t = attacker.block(p).unwrap().text;
+                if delete {
+                    t.delete(0..1).unwrap();
+                } else {
+                    t.insert(1, "z").unwrap();
+                }
+                attacker.commit();
+                if concurrent {
+                    base.block(p).unwrap().text.insert(0, "qq").unwrap();
+                    base.commit();
+                }
+                let packet = attacker.export_delta(&since).unwrap();
+                let (header, body) = crate::sync::read_header(&packet).unwrap();
+                let mut json: serde_json::Value = serde_json::from_slice(body).unwrap();
+                set_positions(&mut json, pos);
+                let body = serde_json::to_vec(&json).unwrap();
+                let tampered = crate::sync::tests_support::write(&header, &body);
+                let before = base.block(p).unwrap().text.to_string();
+                let result = base.import_packet(&tampered);
+                let case = format!("concurrent {concurrent} delete {delete} pos {pos}");
+                assert_eq!(result.is_ok(), ok, "{case}: {result:?}");
+                if !ok {
+                    assert_eq!(base.block(p).unwrap().text.to_string(), before, "{case}");
+                }
+                // The honest packet still applies afterwards.
+                base.import_packet(&packet).unwrap();
+            }
+        }
     }
 }

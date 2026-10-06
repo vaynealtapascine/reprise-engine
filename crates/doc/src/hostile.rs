@@ -23,7 +23,7 @@ impl Rng {
         Rng(seed)
     }
 
-    pub fn next(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -36,11 +36,11 @@ impl Rng {
         if n == 0 {
             return 0;
         }
-        usize::try_from(self.next() % u64::try_from(n).unwrap_or(u64::MAX)).unwrap_or(0)
+        usize::try_from(self.next_u64() % u64::try_from(n).unwrap_or(u64::MAX)).unwrap_or(0)
     }
 
     pub fn chance(&mut self, percent: u64) -> bool {
-        self.next() % 100 < percent
+        self.next_u64() % 100 < percent
     }
 
     pub fn pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T> {
@@ -147,7 +147,7 @@ fn value(rng: &mut Rng, doc: &Document) -> LoroValue {
         ),
         4 => LoroValue::Binary(
             (0..rng.below(40))
-                .map(|_| (rng.next() & 0xff) as u8)
+                .map(|_| (rng.next_u64() & 0xff) as u8)
                 .collect::<Vec<_>>()
                 .into(),
         ),

@@ -50,6 +50,7 @@ mod style;
 pub mod sync;
 #[cfg(test)]
 mod sync_tests;
+mod sync_text;
 mod table;
 
 pub use changes::ChangeReport;
@@ -217,15 +218,26 @@ pub struct Revision(pub Vec<(u64, i32)>);
 
 pub struct Document {
     doc: LoroDoc,
+    /// A lazily built replica that sync checks out to read text lengths at
+    /// past versions (see `sync`). Checking out `doc` itself would clear
+    /// its undo history.
+    shadow: std::sync::Mutex<Option<LoroDoc>>,
 }
 
 impl Document {
+    fn wrap(doc: LoroDoc) -> Document {
+        Document {
+            doc,
+            shadow: std::sync::Mutex::new(None),
+        }
+    }
+
     /// `peer` identifies this replica. Fixtures pin it so IDs are reproducible.
     pub fn new(peer: u64) -> Result<Document, DocError> {
         let doc = LoroDoc::new();
         doc.set_peer_id(peer)?;
         doc.get_tree("content").enable_fractional_index(0);
-        Ok(Document { doc })
+        Ok(Document::wrap(doc))
     }
 
     /// A second replica of this document for another peer.
@@ -233,7 +245,7 @@ impl Document {
         self.commit();
         let doc = self.doc.fork();
         doc.set_peer_id(peer)?;
-        Ok(Document { doc })
+        Ok(Document::wrap(doc))
     }
 
     /// Merges another replica's edits into this one (29).

@@ -559,7 +559,8 @@ impl Document {
                 return Err(SyncError::Missing { have: local });
             }
         }
-        self.preflight_trees(json, &peer_of)
+        self.preflight_trees(json, &peer_of)?;
+        self.preflight_texts(json, &peer_of)
     }
 
     /// Tree operations must name nodes that exist, in this replica or created
