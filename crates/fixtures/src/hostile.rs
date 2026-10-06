@@ -139,6 +139,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         table_thousand_columns()?,
         table_rowspan_vertical_break()?,
         table_concurrent_overlapping_spans()?,
+        incremental_long_paragraph_and_table()?,
     ])
 }
 
@@ -2422,5 +2423,35 @@ pub fn table_concurrent_overlapping_spans() -> Result<Fixture, DocError> {
         &["layout.table-invalid"],
     );
     fixture.replica = Some(other);
+    Ok(fixture)
+}
+
+/// Work units smaller than a block: a table of more than one row group, then
+/// one paragraph whose right-to-left item, left-to-right item and single
+/// grapheme cluster are each longer than a shaping chunk. Jobs yield inside
+/// both; the three-page limit keeps the goldens small while the whole paragraph
+/// is still itemised and shaped in chunks.
+pub fn incremental_long_paragraph_and_table() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let table = header_table(&doc, 2)?;
+    table_row_of(&doc, table, true, &["Room", "Measure"])?;
+    for i in 0..20 {
+        table_row_of(&doc, table, false, &[&format!("hall {i}"), "longer inside"])?;
+    }
+    let hebrew = "\u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{5e2}\u{5d5}\u{5dc}\u{5dd} ".repeat(1000);
+    let latin = "the hallway grows longer ".repeat(800);
+    let cluster = format!("a{}", "\u{301}".repeat(9000));
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        &format!("{hebrew}{latin}{cluster} end"),
+    )?;
+    doc.commit();
+    let mut fixture = Fixture::new(
+        "incremental_long_paragraph_and_table",
+        doc,
+        &["layout.page-limit", "layout.text-unplaced"],
+    );
+    fixture.engine.flow.max_pages = 3;
     Ok(fixture)
 }
