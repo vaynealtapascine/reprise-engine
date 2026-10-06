@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use icu_segmenter::LineSegmenter;
+use icu_segmenter::{GraphemeClusterSegmenter, LineSegmenter};
 use icu_segmenter::options::LineBreakOptions;
 use reprise_diag::Note;
 use reprise_geom::Length;
@@ -130,9 +130,14 @@ pub enum BreakKind {
 /// breaking algorithm. The end of the text is always the last one.
 pub fn break_opportunities(text: &str) -> Vec<Break> {
     let segmenter = LineSegmenter::new_auto(LineBreakOptions::default());
+    // UAX #14 can allow a break inside a grapheme cluster: a space followed by
+    // a ZWJ or a combining mark isn't a combining sequence (LB9 excludes SP),
+    // so LB18 breaks between them. A line must start on a grapheme boundary,
+    // so those opportunities are not offered.
+    let graphemes: Vec<usize> = GraphemeClusterSegmenter::new().segment_str(text).collect();
     segmenter
         .segment_str(text)
-        .filter(|&b| b > 0)
+        .filter(|&b| b > 0 && graphemes.binary_search(&b).is_ok())
         .map(|at| Break {
             at,
             kind: if is_forced(text, at) {
@@ -277,6 +282,27 @@ mod tests {
                 (12, BreakKind::Allowed),
             ]
         );
+    }
+
+    /// Found by the cross-crate fuzzer: UAX #14 breaks between a space and a
+    /// following ZWJ or combining mark, which splits a grapheme cluster.
+    #[test]
+    fn breaks_never_fall_inside_a_grapheme_cluster() {
+        for text in [
+            "a \u{200d}\u{1f467} b",
+            "a \u{301}b",
+            "x  \u{200d}\u{200d}y",
+            "\u{1f469}  \u{200d}\u{1f467} family ",
+        ] {
+            let clusters: Vec<usize> = GraphemeClusterSegmenter::new().segment_str(text).collect();
+            for b in break_opportunities(text) {
+                assert!(
+                    clusters.contains(&b.at),
+                    "{text:?}: break at {} is inside a cluster",
+                    b.at
+                );
+            }
+        }
     }
 
     #[test]
