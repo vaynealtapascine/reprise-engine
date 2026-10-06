@@ -12,6 +12,9 @@ use reprise_geom::{PageSpace, Rect};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::sync::Arc;
+
+use crate::workers::{Serial, Workers};
 
 /// A derived unit, separate from authored identities and relations.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -146,6 +149,34 @@ pub struct WorkCounters {
     pub region_passes: usize,
     pub relation_passes: usize,
     pub reading_order_passes: usize,
+}
+/// The work one [`LayoutJob::step`] did, as counters (never time). Hosts and
+/// tests use it to check the per-step bounds in `docs/incremental.md`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StepWork {
+    /// Charged units.
+    pub units: usize,
+    /// Shaping adapter requests and the bytes they covered.
+    pub adapter_requests: usize,
+    pub shaped_bytes: usize,
+    /// The most bytes covered by one adapter request.
+    pub largest_request: usize,
+    /// Composer calls and the lines they returned.
+    pub composer_calls: usize,
+    pub composed_lines: usize,
+    /// Bytes read by linear whole-paragraph scans: itemisation, break
+    /// analysis and each composer call's input.
+    pub scanned_bytes: usize,
+    /// The largest single linear scan.
+    pub largest_scan: usize,
+    /// Table rows prepared and placed.
+    pub table_rows: usize,
+    /// Float and note placements.
+    pub region_placements: usize,
+    /// Relations resolved in the relation pass.
+    pub relations: usize,
+    /// Paragraphs prepared speculatively ahead of the cursor.
+    pub prefetched: usize,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Inputs {
@@ -436,13 +467,56 @@ struct Cache {
     regions: Vec<RegionEntry>,
     final_pass: Option<FinalEntry>,
     counters: WorkCounters,
+    work: StepWork,
     graph: DependencyGraph,
 }
-#[derive(Default)]
 pub(crate) struct Evaluation {
     cache: RefCell<Cache>,
+    workers: Arc<dyn Workers>,
+}
+impl Default for Evaluation {
+    fn default() -> Self {
+        Self {
+            cache: RefCell::default(),
+            workers: Arc::new(Serial),
+        }
+    }
+}
+/// A preparation memo miss, between its start and end bookkeeping.
+#[derive(Clone)]
+pub(crate) struct PrepareMiss {
+    node: NodeId,
+    key: PrepareKey,
+    reasons: BTreeSet<Dependency>,
+}
+pub(crate) enum PrepareStart {
+    Hit(Option<Prepared>, Vec<Diagnostic>),
+    Miss(PrepareMiss),
+    /// The block can't be read; prepare without memo or counters.
+    Untracked,
 }
 impl Evaluation {
+    pub(crate) fn workers(&self) -> Arc<dyn Workers> {
+        self.workers.clone()
+    }
+    pub(crate) fn work(&self, f: impl FnOnce(&mut StepWork)) {
+        f(&mut self.cache.borrow_mut().work);
+    }
+    pub(crate) fn scanned(&self, bytes: usize) {
+        self.work(|w| {
+            w.scanned_bytes = w.scanned_bytes.saturating_add(bytes);
+            w.largest_scan = w.largest_scan.max(bytes);
+        });
+    }
+    pub(crate) fn shaped(&self, requests: impl IntoIterator<Item = usize>) {
+        self.work(|w| {
+            for bytes in requests {
+                w.adapter_requests = w.adapter_requests.saturating_add(1);
+                w.shaped_bytes = w.shaped_bytes.saturating_add(bytes);
+                w.largest_request = w.largest_request.max(bytes);
+            }
+        });
+    }
     pub(crate) fn shaping_hit(
         &self,
         node: NodeId,
@@ -501,8 +575,31 @@ impl Evaluation {
         ctx: &ResolutionContext,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Option<Prepared> {
+        match self.prepare_start(engine, doc, node, ctx) {
+            PrepareStart::Hit(value, notes) => {
+                diagnostics.extend(notes);
+                value
+            }
+            PrepareStart::Untracked => flow::prepare(engine, doc, node, ctx, diagnostics),
+            PrepareStart::Miss(miss) => {
+                let finished =
+                    flow::stage::run(engine, doc, node, ctx, Some(self), &*self.workers());
+                self.prepare_end(miss, &finished);
+                diagnostics.extend(finished.notes);
+                finished.value
+            }
+        }
+    }
+    /// The memo lookup and dependency bookkeeping before a preparation.
+    pub(crate) fn prepare_start(
+        &self,
+        engine: &Engine,
+        doc: &Document,
+        node: NodeId,
+        ctx: &ResolutionContext,
+    ) -> PrepareStart {
         let Some(inputs) = Inputs::read(doc, node) else {
-            return flow::prepare(engine, doc, node, ctx, diagnostics);
+            return PrepareStart::Untracked;
         };
         let key = PrepareKey {
             inputs,
@@ -527,8 +624,7 @@ impl Evaluation {
                 ]),
                 BTreeSet::new(),
             );
-            diagnostics.extend(entry.diagnostics);
-            return entry.value;
+            return PrepareStart::Hit(entry.value, entry.diagnostics);
         }
         let mut reasons = cache
             .prepared
@@ -557,12 +653,13 @@ impl Evaluation {
             ]),
             BTreeSet::new(),
         );
-        let itemizations_before = cache.counters.itemizations;
-        drop(cache);
-        let mut notes = Vec::new();
-        let value = flow::prepare_with(engine, doc, node, ctx, &mut notes, Some(self));
+        PrepareStart::Miss(PrepareMiss { node, key, reasons })
+    }
+    /// The bookkeeping after a missed preparation finished.
+    pub(crate) fn prepare_end(&self, miss: PrepareMiss, finished: &flow::stage::Finished) {
+        let PrepareMiss { node, key, reasons } = miss;
         let mut cache = self.cache.borrow_mut();
-        if cache.counters.itemizations > itemizations_before {
+        if finished.itemized {
             cache
                 .graph
                 .reasons
@@ -576,11 +673,9 @@ impl Evaluation {
         }
         entries.push(PreparedEntry {
             key,
-            value: value.clone(),
-            diagnostics: notes.clone(),
+            value: finished.value.clone(),
+            diagnostics: finished.notes.clone(),
         });
-        diagnostics.extend(notes);
-        value
     }
     pub(crate) fn annotation_hit(
         &self,

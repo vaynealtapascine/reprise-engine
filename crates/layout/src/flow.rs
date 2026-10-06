@@ -26,6 +26,8 @@ use reprise_shape::{
     reorder_line, visual_order,
 };
 
+pub(crate) mod stage;
+
 use crate::region::Bounded;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
@@ -853,184 +855,13 @@ pub(crate) fn prepare_with(
     diagnostics: &mut Vec<Diagnostic>,
     evaluation: Option<&crate::incremental::Evaluation>,
 ) -> Option<Prepared> {
-    let subject = Subject::Node(node);
-    let block = match doc.block(node) {
-        Ok(block) => block,
-        Err(error) => {
-            diagnostics.push(Diagnostic::new(
-                Severity::Error,
-                codes::MALFORMED_BLOCK,
-                subject,
-                error.to_string(),
-            ));
-            return None;
-        }
+    // The stages live in `stage` so a job can run them in separate units.
+    let finished = match evaluation {
+        Some(e) => stage::run(engine, doc, node, ctx, Some(e), &*e.workers()),
+        None => stage::run(engine, doc, node, ctx, None, &crate::workers::Serial),
     };
-    if let Some(e) = evaluation {
-        e.style_resolution();
-    }
-    let style = match doc.computed_style_with(node, ctx, &engine.functions) {
-        Ok(s) => s,
-        Err(e) => {
-            diagnostics.push(Diagnostic::new(
-                Severity::Error,
-                codes::STYLE,
-                subject,
-                e.to_string(),
-            ));
-            return None;
-        }
-    };
-    diagnostics.extend(
-        style
-            .notes
-            .iter()
-            .cloned()
-            .map(|note| Diagnostic::from_note(note, subject.clone())),
-    );
-    for property in &style.clamped {
-        diagnostics.push(Diagnostic::new(
-            Severity::Warning,
-            codes::STYLE_CLAMPED,
-            subject.clone(),
-            format!("{property} resolved to a negative length; clamped to zero"),
-        ));
-    }
-    let text = block.text.to_string();
-    if block.kind == BlockKind::Image {
-        let width = match ctx.block.width {
-            reprise_doc::context::Resolved::Definite(w) => w,
-            _ => Length::MAX,
-        };
-        let image = crate::image::prepare(engine, doc, node, style.size, width, diagnostics);
-        return Some(Prepared {
-            node,
-            kind: block.kind,
-            style,
-            text,
-            items: Vec::new(),
-            levels: Vec::new(),
-            base_level: 0,
-            shaped: ShapedText { runs: Vec::new() },
-            breaks: Vec::new(),
-            fallback: None,
-            image: Some(image),
-        });
-    }
-    let styles = [StyleRun {
-        range: 0..text.len(),
-        families: if style.families.is_empty() {
-            vec![style.family.clone()]
-        } else {
-            style.families.clone()
-        },
-        size: style.size,
-        language: None,
-        features: Vec::new(),
-    }];
-    let fallback = if style.families.is_empty() {
-        engine
-            .fonts
-            .by_family(&style.family)
-            .map(|f| (f.id().clone(), style.size))
-    } else {
-        let generic = style
-            .families
-            .last()
-            .and_then(|family| reprise_font::GenericFamily::parse(family))
-            .unwrap_or(reprise_font::GenericFamily::Serif);
-        Some((engine.fonts.generic(generic).id().clone(), style.size))
-    };
-    let input = ParagraphInput {
-        text: &text,
-        styles: &styles,
-        direction: None,
-    };
-    let shape_key = evaluation.map(|_| {
-        // The additive entry point changes fallback semantics even for the same
-        // list of names. Version only the owned cache representation; itemization
-        // and the adapter receive the original authored families unchanged.
-        let mut key_styles = styles.clone();
-        if !style.families.is_empty() {
-            for run in &mut key_styles {
-                run.families.insert(0, "\0reprise-font-chain1".into());
-            }
-        }
-        let key_input = ParagraphInput {
-            text: &text,
-            styles: &key_styles,
-            direction: input.direction,
-        };
-        crate::incremental::ShapingKey::new(&key_input, fallback.clone())
-    });
-    let shape_notes = diagnostics.len();
-    if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
-        && let Some((value, notes)) = e.shaping_hit(node, key)
-    {
-        diagnostics.extend(notes);
-        return value.map(|mut prepared| {
-            prepared.kind = block.kind;
-            prepared.style = style;
-            prepared
-        });
-    }
-    if let Some(e) = evaluation {
-        e.itemization();
-    }
-    let itemized = if style.families.is_empty() {
-        itemize(&input, &engine.fonts)
-    } else {
-        itemize_families(&input, &engine.fonts)
-    };
-    diagnostics.extend(
-        itemized
-            .notes
-            .into_iter()
-            .map(|n| Diagnostic::from_note(n, subject.clone())),
-    );
-    if itemized.items.is_empty() && !text.is_empty() {
-        if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
-            e.shaping_miss(
-                node,
-                shape_key,
-                None,
-                diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
-            );
-        }
-        return None; // Nothing could be shaped; itemisation said why.
-    }
-    if let Some(e) = evaluation {
-        e.shape();
-    }
-    let shaped = Shaper {
-        text: &text,
-        items: &itemized.items,
-        fonts: &engine.fonts,
-        adapter: engine.shaper.as_ref(),
-    }
-    .shape();
-    let prepared = Prepared {
-        node,
-        kind: block.kind,
-        breaks: break_opportunities(&text),
-        style,
-        text,
-        items: itemized.items,
-        levels: itemized.levels,
-        base_level: itemized.base_level,
-        shaped,
-        fallback,
-        image: None,
-    };
-    if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
-        e.shaping_miss(
-            node,
-            shape_key,
-            Some(prepared.clone()),
-            diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
-        );
-    }
-    Some(prepared)
+    diagnostics.extend(finished.notes);
+    finished.value
 }
 
 impl Prepared {
