@@ -1508,6 +1508,7 @@ impl Cx<'_, '_> {
                 format!("a saved package won't open: {e}"),
             )
         })?;
+        let opened = Leaky::new(opened);
         oracle::documented("format", opened.notes.iter().map(|n| n.code.as_str()))?;
         let reopened = opened.editable_document().map_err(|e| {
             Violation::new(
@@ -1789,6 +1790,35 @@ fn follow_to(owner: NodeId, target: Target) -> Relation {
 
 fn first_is_second(effects: &[reprise_edit::Effect]) -> bool {
     matches!(effects.first(), Some(reprise_edit::Effect::Join { first, second, .. }) if first == second)
+}
+
+/// Holds a value that is leaked, not dropped, while a panic unwinds. A Loro
+/// document whose lock was poisoned by a panic inside it panics again when
+/// dropped, and a panic during unwinding aborts the process, which would hide
+/// the original panic from `catch_unwind` (and from the minimiser).
+struct Leaky<T>(Option<T>);
+
+impl<T> Leaky<T> {
+    fn new(value: T) -> Self {
+        Leaky(Some(value))
+    }
+}
+
+impl<T> std::ops::Deref for Leaky<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.0
+            .as_ref()
+            .expect("a Leaky value is present until dropped")
+    }
+}
+
+impl<T> Drop for Leaky<T> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            std::mem::forget(self.0.take());
+        }
+    }
 }
 
 /// A budgeted job, optionally cancelled part-way, against the reference.

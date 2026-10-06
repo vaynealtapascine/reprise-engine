@@ -8,7 +8,8 @@
 use reprise_doc::{BlockKind, Document};
 use reprise_fuzz_harness::engine::EngineSpec;
 use reprise_fuzz_harness::scenario::{
-    BaseBlock, BaseSpec, EngineChange, Op, RENDER_PNG, Scenario, Start,
+    BaseBlock, BaseRange, BaseRelation, BaseSpec, Cmd, EngineChange, LayoutMode, Op, RENDER_PNG,
+    Scenario, Start,
 };
 use reprise_fuzz_harness::{oracle, run_twice};
 
@@ -70,4 +71,54 @@ fn a_space_before_a_zwj_never_starts_a_line_inside_a_cluster() {
             }
         }
     }
+}
+
+/// A range anchored at text that peer B deleted, saved without history
+/// (`shallow`) and reopened, panicked inside Loro when layout resolved it.
+#[test]
+fn a_range_anchored_at_deleted_text_survives_a_shallow_reopen() {
+    passes(Scenario {
+        start: Start::Synthetic(BaseSpec {
+            blocks: vec![BaseBlock {
+                annotation: false,
+                style: 0,
+                text: 5,
+                extra: 1,
+            }],
+            ranges: vec![BaseRange {
+                block: 0,
+                from: 0,
+                to: 0,
+                policy: 1,
+            }],
+            relations: vec![BaseRelation {
+                kind: 0,
+                owner: 0,
+                range: 0,
+                aux: 0,
+            }],
+            template: 0,
+            styles: vec![],
+        }),
+        ops: vec![
+            Op::Edit {
+                peer: 1,
+                cmds: vec![Cmd::DeleteText {
+                    block: 0,
+                    from: 0,
+                    to: 1,
+                }],
+            },
+            Op::SaveReopen {
+                peer: 1,
+                shallow: true,
+                embed_fonts: false,
+                as_peer: 0,
+            },
+            Op::Layout {
+                peer: 0,
+                mode: LayoutMode::Reference,
+            },
+        ],
+    });
 }
