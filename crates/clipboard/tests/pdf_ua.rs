@@ -268,3 +268,25 @@ fn an_unmet_requirement_is_reported_in_the_loss_report() {
         .unwrap();
     assert_eq!(reading.disposition, Disposition::Approximated);
 }
+
+#[test]
+fn the_structure_storm_keeps_every_run_once_and_reports_what_it_cannot_link() {
+    let f = hostile::pdf_structure_storm().unwrap();
+    let (_, r, losses, plain) = export(&f);
+    assert_eq!(&r.roles[..2], ["Document", "H1"]);
+    for role in ["Div", "Table", "TR", "TD", "Note", "Reference"] {
+        assert!(r.roles.iter().any(|x| x == role), "{role}: {:?}", r.roles);
+    }
+    // The empty note has no glyphs and so no element; the others keep their IDs.
+    assert_eq!(r.note_ids.len(), 6);
+    // Anchors that cut a ligature or overlap another are reported, not linked.
+    let codes: Vec<String> = losses.notes.iter().map(|n| n.code.to_string()).collect();
+    for code in ["pdf.run-split", "pdf.reference-unlinked"] {
+        assert!(codes.iter().any(|c| c == code), "{code}: {codes:?}");
+    }
+    let references = r.roles.iter().filter(|x| *x == "Reference").count();
+    assert!(r.links >= 1 && r.links <= references);
+    assert_eq!((r.links, r.tagged_links), (r.links, r.links));
+    // Every run is drawn once, in reading order: the text is the plain text.
+    assert_eq!(squeeze(&r.text), squeeze(&plain));
+}
