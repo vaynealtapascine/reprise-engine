@@ -498,6 +498,23 @@ impl Open {
     }
 }
 
+/// Renders `layout` as a tagged PDF. Returns the bytes, what the backend and
+/// the structure builder report, and whether the file claims PDF/UA-1.
+pub(crate) fn render(
+    doc: &Document,
+    layout: &LayoutSnapshot,
+    fonts: &reprise_font::FontStore,
+    assets: &reprise_display::AssetStore,
+    meta: &PdfMetadata,
+) -> Result<(Vec<u8>, Vec<Note>, bool), crate::ClipboardError> {
+    let lists = layout.to_display_lists(reprise_layout::DisplayOptions::default());
+    let (structure, mut notes) = structure(doc, layout, meta);
+    let tagged = reprise_display::pdf::render_tagged(&lists, fonts, assets, &structure)
+        .map_err(|e| crate::ClipboardError::Export(e.to_string()))?;
+    notes.extend(tagged.notes);
+    Ok((tagged.bytes, notes, tagged.ua))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,21 +554,4 @@ mod tests {
         let long = "word ".repeat(200);
         assert_eq!(snippet(&long).chars().count(), MAX_TITLE + 1);
     }
-}
-
-/// Renders `layout` as a tagged PDF. Returns the bytes, what the backend and
-/// the structure builder report, and whether the file claims PDF/UA-1.
-pub(crate) fn render(
-    doc: &Document,
-    layout: &LayoutSnapshot,
-    fonts: &reprise_font::FontStore,
-    assets: &reprise_display::AssetStore,
-    meta: &PdfMetadata,
-) -> Result<(Vec<u8>, Vec<Note>, bool), crate::ClipboardError> {
-    let lists = layout.to_display_lists(reprise_layout::DisplayOptions::default());
-    let (structure, mut notes) = structure(doc, layout, meta);
-    let tagged = reprise_display::pdf::render_tagged(&lists, fonts, assets, &structure)
-        .map_err(|e| crate::ClipboardError::Export(e.to_string()))?;
-    notes.extend(tagged.notes);
-    Ok((tagged.bytes, notes, tagged.ua))
 }
