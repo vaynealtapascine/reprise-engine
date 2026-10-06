@@ -1096,6 +1096,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             frames: Vec::new(),
             blocks: Vec::new(),
             relations: Vec::new(),
+            repeated_headers: Vec::new(),
             diagnostics: Vec::new(),
         };
         let template = crate::template::resolve(engine, doc, &mut base.diagnostics);
@@ -1328,6 +1329,8 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                 b.lines.retain(|l| snapshot.frames.get(l.frame).is_some());
                 !b.lines.is_empty()
             });
+            let frames = snapshot.frames.len();
+            snapshot.repeated_headers.retain(|h| h.frame < frames);
             snapshot.relations.clear();
             // Provisional diagnostics may depend on future placement; only
             // complete evaluation publishes the ordered diagnostic stream.

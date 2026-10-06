@@ -1,35 +1,91 @@
-//! Tables allocate columns in a declared solver domain, then fragment rows
-//! synchronously across the body thread. Cell text uses the ordinary composer.
-use crate::flow::{Flow, Prepared, prepare_cached, resolution_context, unplaced};
-use crate::region::Bounded;
-use crate::solver::{MAX_DOMAIN_VARIABLES, SolverDomain, Variable};
+//! Tables allocate columns in a declared solver domain, then fragment row
+//! groups synchronously across the body thread (see `table_flow`). Cell text
+//! uses the ordinary composer. What a cell spans is decided once, by
+//! `Document::table_structure`, so layout, export and accessibility agree.
+use crate::flow::{Flow, Prepared, prepare_cached, resolution_context};
+use crate::solver::{SolverDomain, Variable};
+use crate::table_flow::{Cell, Group};
 use crate::{Diagnostic, Subject, codes};
-use reprise_compose::Measure;
 use reprise_diag::Severity;
-use reprise_doc::{ColumnWidth, Document, NodeId, TableColumns, TableRole};
+use reprise_doc::{
+    ColumnWidth, Document, GridCell, GridIssueKind, NodeId, TableColumns, TableGrid,
+};
 use reprise_geom::Length;
 
-pub const MAX_TABLE_ROWS: usize = 4096;
 pub const MAX_TABLE_BLOCKS: usize = 65536;
 
-struct Cell {
-    column: usize,
-    blocks: Vec<Prepared>,
+/// Min/max content width of one cell, from its shaped blocks.
+fn measure(blocks: &[Prepared]) -> (Length, Length) {
+    let mut min = Length::ZERO;
+    let mut max = Length::ZERO;
+    for p in blocks {
+        let mut start = 0;
+        let mut minimum = Length::ZERO;
+        let mut maximum = Length::ZERO;
+        let mut forced_start = 0;
+        for b in &p.breaks {
+            minimum = minimum.max(p.shaped.width(start..b.at));
+            start = b.at;
+            if b.kind == reprise_compose::BreakKind::Forced {
+                maximum = maximum.max(p.shaped.width(forced_start..b.at));
+                forced_start = b.at;
+            }
+        }
+        maximum = maximum.max(p.shaped.width(forced_start..p.text.len()));
+        if let Some(width) = p.image_width() {
+            minimum = width;
+            maximum = width;
+        }
+        min = min.max(minimum);
+        max = max.max(maximum.max(minimum));
+    }
+    (min, max)
+}
+
+/// Raises the sum of `bounds[column..column + span]` to at least `need`, sharing
+/// the deficit equally (remainder to the first columns) among the spanned
+/// content columns. Columns of other kinds don't read these bounds.
+fn grow(bounds: &mut [Length], eligible: &[bool], column: usize, span: usize, need: Length) {
+    let end = column.saturating_add(span).min(bounds.len());
+    let have: i64 = bounds
+        .get(column..end)
+        .unwrap_or(&[])
+        .iter()
+        .map(|l| i64::from(l.0))
+        .sum();
+    let deficit = i64::from(need.0) - have;
+    let targets: Vec<usize> = (column..end)
+        .filter(|&i| eligible.get(i).copied().unwrap_or(false))
+        .collect();
+    if deficit <= 0 || targets.is_empty() {
+        return;
+    }
+    let count = targets.len() as i64;
+    for (k, &i) in targets.iter().enumerate() {
+        let share = deficit / count + i64::from((k as i64) < deficit % count);
+        if let Some(b) = bounds.get_mut(i) {
+            *b = Length((i64::from(b.0) + share).min(i64::from(i32::MAX)) as i32);
+        }
+    }
 }
 
 impl Flow<'_> {
     pub(crate) fn table(&mut self, doc: &Document, node: NodeId, columns: &TableColumns) {
         let subject = Subject::Node(node);
         let count = columns.columns.len();
-        if count == 0 || count > MAX_DOMAIN_VARIABLES {
-            self.snapshot.diagnostics.push(Diagnostic::new(
-                Severity::Error,
-                codes::TABLE_INVALID,
-                subject,
-                "table must declare 1..256 columns; table omitted",
-            ));
-            return;
-        }
+        let grid = match doc.table_structure(node) {
+            Ok(Some(grid)) => grid,
+            _ => {
+                self.snapshot.diagnostics.push(Diagnostic::new(
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    subject,
+                    "table must declare 1..256 columns; table omitted",
+                ));
+                return;
+            }
+        };
+        self.report_grid(&grid);
         let Some(frame) = self.snapshot.frame(self.frame_index()).cloned() else {
             return;
         };
@@ -38,42 +94,20 @@ impl Flow<'_> {
             .frames
             .get(self.frame_index() % self.template.frames.len().max(1));
         let ctx = resolution_context(self.engine, self.template, starting_frame, frame.rect.width);
-        let mut rows = Vec::new();
         let mut min = vec![Length::ZERO; count];
         let mut max = vec![Length::ZERO; count];
         let mut blocks = 0usize;
-        let children = doc.children(Some(node));
-        if children.len() > MAX_TABLE_ROWS {
-            self.snapshot.diagnostics.push(Diagnostic::new(
-                Severity::Error,
-                codes::TABLE_LIMIT,
-                subject.clone(),
-                "table exceeds 4096 rows; remaining rows omitted",
-            ));
-        }
-        for row in children.into_iter().take(MAX_TABLE_ROWS) {
-            if !matches!(doc.table_role(row), Ok(Some(TableRole::Row(_)))) {
-                self.invalid(row, "table child is not a row");
-                continue;
-            }
-            let mut cells = Vec::new();
-            let mut occupied = std::collections::BTreeSet::new();
-            let children = doc.children(Some(row));
-            if children.len() > count {
-                self.invalid(row, "too many cells; extra cells omitted");
-            }
-            for cell in children.into_iter().take(count) {
-                let Ok(Some(TableRole::Cell(info))) = doc.table_role(cell) else {
-                    self.invalid(cell, "row child is not a cell");
+        // Prepared blocks and measurements per placed cell, in grid order.
+        let mut prepared: Vec<Vec<Prepared>> = Vec::new();
+        let mut kept_rows = 0usize;
+        'rows: for row in &grid.rows {
+            for &index in &row.cells {
+                let Some(cell) = grid.cells.get(index) else {
+                    prepared.push(Vec::new());
                     continue;
                 };
-                let col = info.column as usize;
-                if col >= count || !occupied.insert(col) {
-                    self.invalid(cell, "invalid or duplicate cell column");
-                    continue;
-                }
-                let mut prepared = Vec::new();
-                for block in doc.children(Some(cell)) {
+                let mut cell_blocks = Vec::new();
+                for block in doc.children(Some(cell.node)) {
                     blocks = blocks.saturating_add(1);
                     if blocks > MAX_TABLE_BLOCKS {
                         break;
@@ -98,38 +132,12 @@ impl Flow<'_> {
                         &mut self.snapshot.diagnostics,
                         self.evaluation,
                     ) {
-                        let mut start = 0;
-                        let mut minimum = Length::ZERO;
-                        let mut maximum = Length::ZERO;
-                        let mut forced_start = 0;
-                        for b in &p.breaks {
-                            minimum = minimum.max(p.shaped.width(start..b.at));
-                            start = b.at;
-                            if b.kind == reprise_compose::BreakKind::Forced {
-                                maximum = maximum.max(p.shaped.width(forced_start..b.at));
-                                forced_start = b.at;
-                            }
-                        }
-                        maximum = maximum.max(p.shaped.width(forced_start..p.text.len()));
-                        if let Some(width) = p.image_width() {
-                            minimum = width;
-                            maximum = width;
-                        }
-                        if let Some(m) = min.get_mut(col) {
-                            *m = (*m).max(minimum);
-                        }
-                        if let Some(m) = max.get_mut(col) {
-                            *m = (*m).max(maximum.max(minimum));
-                        }
-                        prepared.push(p);
+                        cell_blocks.push(p);
                     }
                 }
-                cells.push(Cell {
-                    column: col,
-                    blocks: prepared,
-                });
+                prepared.push(cell_blocks);
             }
-            rows.push(cells);
+            kept_rows += 1;
             if blocks > MAX_TABLE_BLOCKS {
                 self.snapshot.diagnostics.push(Diagnostic::new(
                     Severity::Error,
@@ -137,8 +145,41 @@ impl Flow<'_> {
                     subject.clone(),
                     "table exceeds 65536 content blocks; remainder omitted",
                 ));
-                break;
+                break 'rows;
             }
+        }
+        // `prepared` follows the rows' cell order, which is grid order.
+        let placed: Vec<&GridCell> = grid
+            .rows
+            .iter()
+            .take(kept_rows)
+            .flat_map(|r| r.cells.iter())
+            .filter_map(|&i| grid.cells.get(i))
+            .collect();
+        let eligible: Vec<bool> = columns
+            .columns
+            .iter()
+            .map(|c| matches!(c.width, ColumnWidth::Content))
+            .collect();
+        let measured: Vec<(Length, Length)> = prepared.iter().map(|b| measure(b)).collect();
+        for (cell, &(lo, hi)) in placed.iter().zip(&measured) {
+            if cell.colspan == 1 {
+                if let Some(m) = min.get_mut(cell.column) {
+                    *m = (*m).max(lo);
+                }
+                if let Some(m) = max.get_mut(cell.column) {
+                    *m = (*m).max(hi);
+                }
+            }
+        }
+        for (cell, &(lo, hi)) in placed.iter().zip(&measured) {
+            if cell.colspan > 1 {
+                grow(&mut min, &eligible, cell.column, cell.colspan, lo);
+                grow(&mut max, &eligible, cell.column, cell.colspan, hi);
+            }
+        }
+        for (hi, &lo) in max.iter_mut().zip(&min) {
+            *hi = (*hi).max(lo);
         }
         let variables = columns
             .columns
@@ -173,18 +214,121 @@ impl Flow<'_> {
                 .into_iter()
                 .map(|n| Diagnostic::from_note(n, subject.clone())),
         );
-        for mut cells in rows {
-            for cell in &mut cells {
-                let width = solution
-                    .widths
-                    .get(cell.column)
-                    .copied()
-                    .unwrap_or_default();
-                for block in &mut cell.blocks {
-                    block.fit_image_width(width, &mut self.snapshot.diagnostics);
+        // Assemble row groups: rows joined by row spans are composed together.
+        let mut cells = prepared.into_iter();
+        let mut by_row: Vec<Vec<(&GridCell, Vec<Prepared>)>> = Vec::new();
+        for row in grid.rows.iter().take(kept_rows) {
+            let mut in_row = Vec::new();
+            for &i in &row.cells {
+                if let (Some(cell), Some(blocks)) = (grid.cells.get(i), cells.next()) {
+                    in_row.push((cell, blocks));
                 }
             }
-            self.table_row(cells, &solution.widths);
+            by_row.push(in_row);
+        }
+        let mut groups = Vec::new();
+        let mut first = 0usize;
+        while first < by_row.len() {
+            let mut end = first;
+            let mut r = first;
+            while r <= end && r < by_row.len() {
+                for (cell, _) in by_row.get(r).into_iter().flatten() {
+                    end = end.max(cell.row.saturating_add(cell.rowspan).saturating_sub(1));
+                }
+                r += 1;
+            }
+            let end = end.min(by_row.len() - 1);
+            let mut group = Group {
+                rows: end - first + 1,
+                header: grid.rows.get(first).is_some_and(|r| r.header)
+                    && first < grid.repeating_header_rows,
+                cells: Vec::new(),
+            };
+            for row in by_row.iter_mut().take(end + 1).skip(first) {
+                for (cell, blocks) in std::mem::take(row) {
+                    let width: Length = solution
+                        .widths
+                        .iter()
+                        .skip(cell.column)
+                        .take(cell.colspan)
+                        .copied()
+                        .sum();
+                    let mut blocks = blocks;
+                    for block in &mut blocks {
+                        block.fit_image_width(width, &mut self.snapshot.diagnostics);
+                    }
+                    group.cells.push(Cell {
+                        node: cell.node,
+                        row: cell.row - first,
+                        last: (cell.row + cell.rowspan - 1).min(end) - first,
+                        column: cell.column,
+                        colspan: cell.colspan,
+                        blocks,
+                    });
+                }
+            }
+            groups.push(group);
+            first = end + 1;
+        }
+        self.place_groups(node, groups, &solution.widths);
+    }
+
+    /// Reports what the grid had to cut, drop or limit, in document order.
+    fn report_grid(&mut self, grid: &TableGrid) {
+        for issue in &grid.issues {
+            let (severity, code, message) = match issue.kind {
+                GridIssueKind::RowLimit => (
+                    Severity::Error,
+                    codes::TABLE_LIMIT,
+                    "table exceeds 4096 rows; remaining rows omitted",
+                ),
+                GridIssueKind::MisplacedRow => (
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    "table child is not a row",
+                ),
+                GridIssueKind::MisplacedCell => (
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    "row child is not a cell",
+                ),
+                GridIssueKind::TooManyCells => (
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    "too many cells; extra cells omitted",
+                ),
+                GridIssueKind::ColumnOutside | GridIssueKind::Overlap => (
+                    Severity::Error,
+                    codes::TABLE_INVALID,
+                    "invalid or duplicate cell column",
+                ),
+                GridIssueKind::SpanZero => (
+                    Severity::Warning,
+                    codes::TABLE_SPAN,
+                    "a zero span was read as one",
+                ),
+                GridIssueKind::SpanEdge => (
+                    Severity::Warning,
+                    codes::TABLE_SPAN,
+                    "span reaches past the table edge; clamped",
+                ),
+                GridIssueKind::SpanOverlap => (
+                    Severity::Warning,
+                    codes::TABLE_SPAN,
+                    "span overlaps an earlier cell; clamped",
+                ),
+                GridIssueKind::SpanHeader => (
+                    Severity::Warning,
+                    codes::TABLE_SPAN,
+                    "row span reaches out of the header rows; clamped",
+                ),
+            };
+            self.snapshot.diagnostics.push(Diagnostic::new(
+                severity,
+                code,
+                Subject::Node(issue.node),
+                message,
+            ));
         }
     }
 
@@ -195,129 +339,5 @@ impl Flow<'_> {
             Subject::Node(node),
             message,
         ));
-    }
-
-    fn table_row(&mut self, cells: Vec<Cell>, widths: &[Length]) {
-        // Each cell has its own continuation cursor; all advance to the next
-        // frame together. A finished cell stays empty on subsequent fragments.
-        let mut cursors = vec![(0usize, 0usize); cells.len()];
-        let mut output: Vec<Vec<Vec<crate::LineLayout>>> = cells
-            .iter()
-            .map(|c| c.blocks.iter().map(|_| Vec::new()).collect())
-            .collect();
-        loop {
-            let frame_index = self.frame_index();
-            let Some(frame) = self.snapshot.frame(frame_index).cloned() else {
-                break;
-            };
-            let depth = self.depth(frame_index, frame.rect.height);
-            let top = self.table_top();
-            let mut bottom = top;
-            let mut done = true;
-            for (i, cell) in cells.iter().enumerate() {
-                let Some(cursor) = cursors.get_mut(i) else {
-                    continue;
-                };
-                let width = widths.get(cell.column).copied().unwrap_or_default();
-                let x: Length = widths.iter().take(cell.column).copied().sum();
-                let mut y = top;
-                while let Some(p) = cell.blocks.get(cursor.0) {
-                    let subject = Subject::Node(p.node());
-                    if widths.iter().copied().sum::<Length>() > frame.rect.width {
-                        self.snapshot.diagnostics.push(Diagnostic::new(
-                            Severity::Warning,
-                            codes::FRAME_OVERFLOW,
-                            subject.clone(),
-                            "frozen table columns exceed this continuation frame's width",
-                        ));
-                    }
-                    let measure = Measure(width);
-                    let bounded = Bounded {
-                        inner: &measure,
-                        depth,
-                    };
-                    let full_depth = self
-                        .template
-                        .frames
-                        .iter()
-                        .filter(|f| f.is_main_flow())
-                        .map(|f| f.depth)
-                        .max()
-                        .unwrap_or_default();
-                    let overflow = p.line_height() > full_depth && depth > Length::ZERO;
-                    let geometry: &dyn reprise_compose::GeometryProvider =
-                        if overflow { &measure } else { &bounded };
-                    let mut composed = p.compose(
-                        self.engine,
-                        geometry,
-                        frame_index,
-                        cursor.1,
-                        y,
-                        &subject,
-                        &mut self.snapshot.diagnostics,
-                        self.evaluation,
-                    );
-                    if composed.lines.is_empty() {
-                        done = false;
-                        break;
-                    }
-                    if overflow {
-                        self.snapshot.diagnostics.push(Diagnostic::new(
-                            Severity::Warning,
-                            codes::FRAME_OVERFLOW,
-                            subject.clone(),
-                            "cell line taller than every body frame; placed overflowing",
-                        ));
-                    }
-                    for line in &mut composed.lines {
-                        line.rect.origin.x += x;
-                        for run in &mut line.runs {
-                            run.x += x;
-                        }
-                    }
-                    if let Some(lines) = output.get_mut(i).and_then(|o| o.get_mut(cursor.0)) {
-                        lines.extend(composed.lines);
-                    }
-                    y = composed.block_end;
-                    bottom = bottom.max(y);
-                    if let Some(rest) = composed.rest {
-                        cursor.1 = rest;
-                        done = false;
-                        break;
-                    }
-                    cursor.0 = cursor.0.saturating_add(1);
-                    cursor.1 = 0;
-                    y += self.engine.flow.paragraph_spacing;
-                }
-                done &= cursor.0 >= cell.blocks.len();
-            }
-            if bottom > top {
-                self.set_used(bottom + self.engine.flow.paragraph_spacing);
-            }
-            if done || !self.advance() {
-                break;
-            }
-        }
-        for (i, cell) in cells.into_iter().enumerate() {
-            let cursor = cursors.get(i).copied().unwrap_or_default();
-            let mut lines = output
-                .get_mut(i)
-                .map(std::mem::take)
-                .unwrap_or_default()
-                .into_iter();
-            for (j, p) in cell.blocks.into_iter().enumerate() {
-                if j >= cursor.0 {
-                    unplaced(
-                        &mut self.snapshot.diagnostics,
-                        &Subject::Node(p.node()),
-                        if j == cursor.0 { cursor.1 } else { 0 }..p.text.len(),
-                    );
-                }
-                let placed = lines.next().unwrap_or_default();
-                if !placed.is_empty() {
-                    self.snapshot.blocks.push(p.into_block(placed));
-                }
-            }
-        }
     }
 }

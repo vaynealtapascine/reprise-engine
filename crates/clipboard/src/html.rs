@@ -251,8 +251,75 @@ struct Reader {
     max_columns: u32,
     count: usize,
     limits: ImportLimits,
+    /// Rows started in this table; the open row is `rows_started - 1`.
+    rows_started: u32,
+    /// Grid positions claimed by row spans of earlier rows (row, column).
+    occupied: std::collections::BTreeSet<(u32, u32)>,
+    /// Header (`th`) and data (`td`) cells seen in the open row, and whether
+    /// the reader is inside `thead`.
+    row_th: bool,
+    row_td: bool,
+    in_head: bool,
 }
+
+/// Largest spans an import accepts: the table-wide column limit, and a
+/// bounded number of claimed grid positions so spans cannot multiply input.
+const MAX_HTML_COLSPAN: u32 = 128;
+const MAX_HTML_ROWSPAN: u32 = 4096;
+const MAX_HTML_SPAN_CELLS: usize = 65536;
+
+fn span_attribute(
+    attrs: &BTreeMap<String, String>,
+    name: &str,
+    max: u32,
+    notes: &mut Vec<Note>,
+) -> u32 {
+    let Some(raw) = attrs.get(name) else {
+        return 1;
+    };
+    match raw.trim().parse::<u32>() {
+        Ok(n) if (1..=max).contains(&n) => n,
+        Ok(n) if n > max => {
+            once(
+                notes,
+                codes::HTML_APPROXIMATED,
+                "an oversized table span was clamped",
+                false,
+            );
+            max
+        }
+        _ => {
+            once(
+                notes,
+                codes::HTML_APPROXIMATED,
+                "a zero or malformed table span was read as one",
+                false,
+            );
+            1
+        }
+    }
+}
+
 impl Reader {
+    /// Marks the open row as a header row when it holds only `th` cells or sits
+    /// in `thead`. A row mixing `th` and `td` stays a body row, approximated.
+    fn finish_row(&mut self) -> Result<(), ClipboardError> {
+        if let Some(row) = self.row.take() {
+            if self.in_head || (self.row_th && !self.row_td) {
+                self.doc.set_table_row_header(row, true).map_err(store)?;
+            } else if self.row_th && self.row_td {
+                once(
+                    &mut self.notes,
+                    codes::HTML_APPROXIMATED,
+                    "a row mixing th and td cells became a body row",
+                    false,
+                );
+            }
+        }
+        self.row_th = false;
+        self.row_td = false;
+        Ok(())
+    }
     fn finish_table(&mut self) -> Result<(), ClipboardError> {
         if let Some(table) = self.table {
             let count = usize::try_from(self.max_columns.max(1))
@@ -329,7 +396,10 @@ impl Reader {
         closing: bool,
         attrs: &BTreeMap<String, String>,
     ) -> Result<(), ClipboardError> {
-        if attrs.keys().any(|k| k != "dir" && k != "style") {
+        let cell = matches!(name, "td" | "th");
+        let known =
+            |k: &String| k == "dir" || k == "style" || (cell && (k == "colspan" || k == "rowspan"));
+        if !attrs.keys().all(known) {
             once(
                 &mut self.notes,
                 codes::HTML_APPROXIMATED,
@@ -376,6 +446,8 @@ impl Reader {
                 }
                 self.count()?;
                 self.max_columns = 0;
+                self.rows_started = 0;
+                self.occupied.clear();
                 self.table = Some(
                     self.doc
                         .append_table(TableColumns {
@@ -387,9 +459,11 @@ impl Reader {
             ("tr", false) => {
                 self.flush(false)?;
                 self.cell = None;
+                self.finish_row()?;
                 if let Some(table) = self.table {
                     self.count()?;
                     self.row = Some(self.doc.append_table_row(table, false).map_err(store)?);
+                    self.rows_started = self.rows_started.saturating_add(1);
                     self.column = 0;
                 } else {
                     once(
@@ -404,14 +478,48 @@ impl Reader {
                 self.flush(false)?;
                 if let Some(row) = self.row {
                     self.count()?;
+                    let r = self.rows_started.saturating_sub(1);
+                    // Skip positions claimed by an earlier row's span.
+                    while self.occupied.contains(&(r, self.column)) {
+                        self.column = self.column.saturating_add(1);
+                        if self.column > MAX_HTML_COLSPAN {
+                            return Err(ClipboardError::Limit("HTML table columns"));
+                        }
+                    }
+                    let colspan =
+                        span_attribute(attrs, "colspan", MAX_HTML_COLSPAN, &mut self.notes);
+                    let mut rowspan =
+                        span_attribute(attrs, "rowspan", MAX_HTML_ROWSPAN, &mut self.notes);
+                    let area = (colspan as usize).saturating_mul(rowspan as usize);
+                    if rowspan > 1 && self.occupied.len().saturating_add(area) > MAX_HTML_SPAN_CELLS
+                    {
+                        once(
+                            &mut self.notes,
+                            codes::HTML_APPROXIMATED,
+                            "row spans beyond the import bound were read as one row",
+                            false,
+                        );
+                        rowspan = 1;
+                    }
+                    for dr in 1..rowspan {
+                        for dc in 0..colspan {
+                            self.occupied
+                                .insert((r.saturating_add(dr), self.column.saturating_add(dc)));
+                        }
+                    }
                     self.cell = Some(
                         self.doc
-                            .append_table_cell(row, self.column)
+                            .append_table_cell_spanned(row, self.column, colspan, rowspan)
                             .map_err(store)?,
                     );
-                    self.column = self.column.saturating_add(1);
+                    if name == "th" {
+                        self.row_th = true;
+                    } else {
+                        self.row_td = true;
+                    }
+                    self.column = self.column.saturating_add(colspan);
                     self.max_columns = self.max_columns.max(self.column);
-                    if self.max_columns > 128 {
+                    if self.max_columns > MAX_HTML_COLSPAN {
                         return Err(ClipboardError::Limit("HTML table columns"));
                     }
                 } else {
@@ -430,16 +538,22 @@ impl Reader {
             ("tr", true) => {
                 self.flush(false)?;
                 self.cell = None;
-                self.row = None;
+                self.finish_row()?;
+            }
+            ("thead", closing) => {
+                self.flush(false)?;
+                self.in_head = !closing;
             }
             ("table", true) => {
                 self.flush(false)?;
+                self.finish_row()?;
+                self.in_head = false;
                 self.finish_table()?;
                 self.cell = None;
                 self.row = None;
                 self.table = None;
             }
-            ("html" | "body" | "tbody" | "thead" | "tfoot", _) => {}
+            ("html" | "body" | "tbody" | "tfoot", _) => {}
             _ => once(
                 &mut self.notes,
                 codes::HTML_APPROXIMATED,
@@ -472,6 +586,11 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         max_columns: 0,
         count: 0,
         limits,
+        rows_started: 0,
+        occupied: Default::default(),
+        row_th: false,
+        row_td: false,
+        in_head: false,
     };
     let mut rest = html;
     let mut stack = Vec::<String>::new();

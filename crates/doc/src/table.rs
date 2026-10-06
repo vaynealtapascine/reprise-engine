@@ -35,10 +35,37 @@ pub struct RowInfo {
     pub header: bool,
 }
 
+/// A cell's declared column and optional spans. Spans are stored as authored
+/// (zero and oversized values included); [`TableGrid`](crate::TableGrid)
+/// decides what layout and export actually use. A span of one is omitted from
+/// the stored record so spanless tables keep their original bytes, and a record
+/// with spans is rejected by readers that predate them rather than misread.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CellInfo {
     pub column: u32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub colspan: u32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub rowspan: u32,
+}
+
+fn one() -> u32 {
+    1
+}
+
+fn is_one(n: &u32) -> bool {
+    *n == 1
+}
+
+impl CellInfo {
+    pub fn new(column: u32) -> Self {
+        Self {
+            column,
+            colspan: 1,
+            rowspan: 1,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,7 +117,69 @@ impl Document {
         if !matches!(self.table_role(row)?, Some(TableRole::Row(_))) {
             return Err(DocError::Malformed(row, "row parent"));
         }
-        self.table_container(Some(row), TableRole::Cell(CellInfo { column }))
+        self.table_container(Some(row), TableRole::Cell(CellInfo::new(column)))
+    }
+
+    /// Appends a cell that spans `colspan` columns and `rowspan` rows. Values
+    /// are stored as given; layout clamps or drops what cannot be honoured.
+    pub fn append_table_cell_spanned(
+        &self,
+        row: NodeId,
+        column: u32,
+        colspan: u32,
+        rowspan: u32,
+    ) -> Result<NodeId, DocError> {
+        if !matches!(self.table_role(row)?, Some(TableRole::Row(_))) {
+            return Err(DocError::Malformed(row, "row parent"));
+        }
+        self.table_container(
+            Some(row),
+            TableRole::Cell(CellInfo {
+                column,
+                colspan,
+                rowspan,
+            }),
+        )
+    }
+
+    /// Marks or unmarks a row as a header row. Only the leading run of header
+    /// rows repeats after a break; the repeated copies are derived, never stored.
+    pub fn set_table_row_header(&self, row: NodeId, header: bool) -> Result<(), DocError> {
+        if !matches!(self.table_role(row)?, Some(TableRole::Row(_))) {
+            return Err(DocError::Malformed(row, "row parent"));
+        }
+        self.write_table_role(row, TableRole::Row(RowInfo { header }))
+    }
+
+    /// Replaces a cell's spans, keeping its column. Concurrent edits to one cell
+    /// resolve last-writer-wins on the whole record; overlaps between different
+    /// cells are resolved by layout, identically on every replica.
+    pub fn set_table_cell_span(
+        &self,
+        cell: NodeId,
+        colspan: u32,
+        rowspan: u32,
+    ) -> Result<(), DocError> {
+        let Some(TableRole::Cell(info)) = self.table_role(cell)? else {
+            return Err(DocError::Malformed(cell, "cell parent"));
+        };
+        self.write_table_role(
+            cell,
+            TableRole::Cell(CellInfo {
+                colspan,
+                rowspan,
+                ..info
+            }),
+        )
+    }
+
+    fn write_table_role(&self, node: NodeId, role: TableRole) -> Result<(), DocError> {
+        let raw = serde_json::to_string(&Stored { version: 1, role })
+            .map_err(|_| DocError::Malformed(node, "table1"))?;
+        self.tree("content")
+            .get_meta(node.0)?
+            .insert("table1", raw)?;
+        Ok(())
     }
 
     /// Cell content is ordinary blocks, so styles, anchors and relations work unchanged.
@@ -109,11 +198,7 @@ impl Document {
 
     fn table_container(&self, parent: Option<NodeId>, role: TableRole) -> Result<NodeId, DocError> {
         let node = self.table_block(parent, BlockKind::Paragraph, "", "")?;
-        let raw = serde_json::to_string(&Stored { version: 1, role })
-            .map_err(|_| DocError::Malformed(node, "table1"))?;
-        self.tree("content")
-            .get_meta(node.0)?
-            .insert("table1", raw)?;
+        self.write_table_role(node, role)?;
         Ok(node)
     }
 

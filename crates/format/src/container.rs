@@ -206,8 +206,9 @@ impl Container {
         if digest(bytes.get(..48).ok_or(FormatError::Truncated)?) != checksum {
             return Err(FormatError::Integrity(None));
         }
-        if features.required != 0 {
-            return Err(FormatError::RequiredFeatures(features.required));
+        let unknown = features.required & !crate::features::KNOWN_REQUIRED;
+        if unknown != 0 {
+            return Err(FormatError::RequiredFeatures(unknown));
         }
         if count > limits.sections {
             return Err(FormatError::Limit("sections"));

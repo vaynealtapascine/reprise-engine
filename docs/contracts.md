@@ -51,7 +51,7 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback` |
-| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size` |
+| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
@@ -335,6 +335,51 @@ Codes in use:
     -   No line sits above its frame's top.
     -   Every glyph belongs to its own run.
     -   Every query agrees with itself.
+
+## Tables: header rows and spans (06, 24, 33, 34, 37)
+
+- **Authored (additive):** `CellInfo` gains `colspan` and `rowspan` (default 1,
+  omitted from the stored `table1` record when 1, so spanless tables keep their
+  bytes). `RowInfo.header` already existed. New setters:
+  `Document::append_table_cell_spanned`, `set_table_cell_span`,
+  `set_table_row_header`. Values are stored as authored (zero and huge included).
+- **One interpretation:** `Document::table_structure(table) -> Result<Option<TableGrid>>`
+  resolves spans deterministically from the merged document (first claim wins in
+  document order; zero is one; spans are cut to the table edge, to free cells, and
+  to the header rows they start in; a cell whose origin is taken or whose column is
+  outside the table is dropped). `TableGrid` lists `rows`, placed `cells`
+  (`GridCell { node, row, column, colspan, rowspan, header }`),
+  `repeating_header_rows` (the leading run of header rows) and `issues`
+  (`GridIssue { node, kind }`). `Document::table_cell_structure(cell)` answers
+  "is this cell a header, and what does it span?" for one cell. Layout, HTML
+  export and PDF/UA tagging must all read this, never the raw record. `None` means
+  0 or more than 256 columns.
+- **Layout:** rows linked by row spans form a group, composed together. A group
+  that does not fit the rest of a frame but fits a fresh one starts on the fresh
+  frame; one that fits neither splits with `layout.table-rowspan-split` (Warning).
+  Column spans use the sum of the solved widths and raise content min/max bounds.
+  Clamped spans report `layout.table-span` (Warning); dropped cells keep
+  `layout.table-invalid` (Error).
+- **Repeated headers:** after the table continues on a new frame, the leading
+  header rows are composed again at its top. Copies are derived only:
+  `LayoutSnapshot.repeated_headers: Vec<RepeatedHeader { table, frame, blocks }>`
+  (additive snapshot field, omitted from JSON when empty). Copies are not in
+  `blocks`, so block queries, reading order and the editing kernel never see them;
+  their blocks carry the authored node IDs and byte ranges. The display list draws
+  them after the authored blocks of each frame, so authored display-item indices do
+  not move. They are artifacts for accessibility. A copy that does not fit, or
+  would leave the body no room, is skipped with `layout.table-header-unrepeated`
+  (Warning), as is a header that itself spans frames.
+- **Editing kernel:** copies are not navigable. A point over a copy resolves to the
+  nearest authored line (never an authored header on another page); reading order
+  and `Navigator::semantic` visit each authored header block once.
+- **File format:** `format::features` declares optional bit 8 `TABLE_HEADERS` and
+  required bit 8 `TABLE_SPANS` from live content on every save; readers that know no
+  required bit refuse span files with `RequiredFeatures`.
+- **Clipboard/export:** HTML import reads `th`, `thead`, `colspan`, `rowspan`
+  (at most 128 columns, 4096 rows, 65,536 claimed grid positions; clamps noted with
+  `clipboard.html-approximated`); HTML export writes `th` and the resolved spans;
+  `export.tables` details say what headers and spans become in HTML and plain text.
 
 ## Authored and positioned images (05, 24, 33, 34)
 

@@ -379,3 +379,89 @@ fn fixed_seed_framing_mutations_terminate() {
         let _ = std::panic::catch_unwind(|| open(&hostile)).unwrap();
     }
 }
+
+fn table_doc(header: bool, spans: bool) -> Document {
+    use reprise_doc::{Column, ColumnWidth, TableColumns};
+    let doc = Document::new(1).unwrap();
+    let table = doc
+        .append_table(TableColumns {
+            columns: vec![
+                Column {
+                    width: ColumnWidth::Proportional(1)
+                };
+                2
+            ],
+        })
+        .unwrap();
+    let row = doc.append_table_row(table, header).unwrap();
+    let cell = doc.append_table_cell(row, 0).unwrap();
+    if spans {
+        doc.set_table_cell_span(cell, 2, 1).unwrap();
+    }
+    doc.append_cell_block(cell, BlockKind::Paragraph, "body", "x")
+        .unwrap();
+    doc
+}
+
+#[test]
+fn table_features_are_declared_from_content_and_refused_by_old_readers() {
+    use crate::features::{OPTIONAL_TABLE_HEADERS, REQUIRED_TABLE_SPANS};
+    let flags = |doc: &Document| {
+        Package::new(doc, DocumentId([1; 16]), PersistenceMode::History)
+            .unwrap()
+            .container()
+            .header
+            .features
+    };
+    // Spanless, headerless tables write no feature bits: bytes are unchanged.
+    let plain = flags(&table_doc(false, false));
+    assert_eq!((plain.required, plain.optional), (0, 0));
+    let headers = flags(&table_doc(true, false));
+    assert_eq!(
+        (headers.required, headers.optional),
+        (0, OPTIONAL_TABLE_HEADERS)
+    );
+    let spans = flags(&table_doc(false, true));
+    assert_eq!((spans.required, spans.optional), (REQUIRED_TABLE_SPANS, 0));
+
+    // This reader opens its own spans file; a reader that knows no required
+    // bit refuses it with the typed error (checked against the raw mask).
+    let doc = table_doc(true, true);
+    let package = Package::new(&doc, DocumentId([1; 16]), PersistenceMode::History).unwrap();
+    let bytes = package.save().unwrap();
+    assert!(open(&bytes).is_ok());
+    let mut unknown = package.container().clone();
+    unknown.header.features.required |= 1 << 9;
+    assert!(matches!(
+        open(&encoded(&unknown)),
+        Err(FormatError::RequiredFeatures(m)) if m == 1 << 9
+    ));
+
+    // Saving after the last span is removed clears the required bit and keeps
+    // unknown optional bits.
+    let opened = open(&bytes).unwrap();
+    let cell = {
+        let d = opened.editable_document().unwrap();
+        let table = d.blocks()[0];
+        let row = d.children(Some(table))[0];
+        d.children(Some(row))[0]
+    };
+    opened
+        .editable_document()
+        .unwrap()
+        .set_table_cell_span(cell, 1, 1)
+        .unwrap();
+    let mut package = opened.package().clone();
+    package
+        .set_optional_features(1 << 63 | OPTIONAL_TABLE_HEADERS)
+        .unwrap();
+    let again = package
+        .with_document(
+            opened.editable_document().unwrap(),
+            PersistenceMode::History,
+        )
+        .unwrap();
+    let f = again.container().header.features;
+    assert_eq!(f.required, 0);
+    assert_eq!(f.optional, 1 << 63 | OPTIONAL_TABLE_HEADERS);
+}
