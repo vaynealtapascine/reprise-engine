@@ -1704,7 +1704,13 @@ blocks: {:#?}",
                     .notes
                     .iter()
                     .any(|n| n.code.as_str() == "clipboard.selection-table");
-                if !flattened {
+                // A selection that covers whole table cells is promoted to the
+                // whole table, container text included (which the kernel lets a
+                // scenario fill though no layout shows it), so tables are skipped.
+                let tables = live_blocks(doc)
+                    .into_iter()
+                    .any(|n| doc.table_role(n).ok().flatten().is_some());
+                if !flattened && !tables {
                     let selected: String = ranges
                         .iter()
                         .filter_map(|r| {

@@ -164,3 +164,30 @@ fn random_scenarios_reach_the_features_they_exist_to_test() {
         );
     }
 }
+
+/// The same idea through the public facade: sessions, jobs, sync packets,
+/// save/open, copy/paste, export and rendering. See `facade.rs`.
+#[test]
+fn facade_scenarios_hold_every_oracle() {
+    let count = env_number("REPRISE_FUZZ_FACADE_SEEDS", 24);
+    let mut failures = Vec::new();
+    for seed in 0..count {
+        let bytes = seed_bytes(50_000 + seed, 120);
+        if let Err(violation) = reprise_fuzz_harness::facade::run_facade_bytes(&bytes) {
+            failures.push(format!(
+                "facade seed {seed}: {violation}
+  bytes: {}",
+                hex(&bytes)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures.join(
+            "
+
+"
+        )
+    );
+}

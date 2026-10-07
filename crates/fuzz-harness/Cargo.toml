@@ -18,5 +18,6 @@ reprise-format.workspace = true
 reprise-edit.workspace = true
 reprise-clipboard.workspace = true
 reprise-fixtures.workspace = true
+reprise.workspace = true
 
 [dev-dependencies]

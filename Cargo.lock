@@ -1951,6 +1951,7 @@ dependencies = [
 name = "reprise-fuzz-harness"
 version = "0.0.0"
 dependencies = [
+ "reprise",
  "reprise-clipboard",
  "reprise-compose",
  "reprise-diag",
