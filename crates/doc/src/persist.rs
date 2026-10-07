@@ -58,15 +58,26 @@ impl Document {
 }
 
 fn validate_snapshot(bytes: &[u8]) -> Result<(), DocError> {
+    validate_snapshot_mode(bytes, false).map(|_| ())
+}
+
+/// The snapshot checks, returning the snapshot's sorted version vector.
+/// `history` refuses shallow snapshots, which can't serve every peer.
+pub(crate) fn validate_snapshot_mode(
+    bytes: &[u8],
+    history: bool,
+) -> Result<Vec<(u64, i32)>, DocError> {
     if bytes.len() > MAX_PERSIST_BYTES {
         return Err(DocError::Store("snapshot exceeds byte limit".into()));
     }
     preflight_snapshot(bytes)?;
     let meta = loro::LoroDoc::decode_import_blob_meta(bytes, true)?;
-    if !matches!(
-        meta.mode,
-        EncodedBlobMode::Snapshot | EncodedBlobMode::ShallowSnapshot
-    ) {
+    let accepted = match meta.mode {
+        EncodedBlobMode::Snapshot => true,
+        EncodedBlobMode::ShallowSnapshot => !history,
+        _ => false,
+    };
+    if !accepted {
         return Err(DocError::Store("expected a current Loro snapshot".into()));
     }
     let mut ops = 0_u64;
@@ -78,7 +89,14 @@ fn validate_snapshot(bytes: &[u8]) -> Result<(), DocError> {
     if ops > MAX_PERSIST_OPS || u64::from(meta.change_num) > MAX_PERSIST_OPS {
         return Err(DocError::Store("snapshot exceeds operation limit".into()));
     }
-    Ok(())
+    let mut end: Vec<_> = meta
+        .partial_end_vv
+        .iter()
+        .map(|(peer, counter)| (*peer, *counter))
+        .filter(|&(_, counter)| counter > 0)
+        .collect();
+    end.sort_unstable();
+    Ok(end)
 }
 
 fn invalid() -> DocError {

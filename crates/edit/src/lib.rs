@@ -7,6 +7,10 @@
 //!     keeping collaborators' concurrent edits. A deleted block comes back with the
 //!     same ID, because deletion changes its metadata flag (see `reprise-doc`).
 //!
+//! -   **Stable carets** ([`StableCaret`], [`StableSelection`]): carets
+//!     anchored to characters, which follow edits by any peer and resolve the
+//!     same way on every replica.
+//!
 //! -   **Carets, selection and navigation** ([`Navigator`]): hit testing, caret
 //!     geometry, logical and visual movement and selection geometry over a
 //!     layout snapshot, with the gesture operations a UI needs.
@@ -24,6 +28,7 @@ mod navigator;
 mod paste;
 mod plan;
 mod select;
+mod stable;
 
 pub use caret::{
     Affinity, BlockRange, Caret, CaretRect, Cursor, GraphemeCell, Hit, Movement, Selection,
@@ -35,3 +40,4 @@ pub use error::{EditError, Reason};
 pub use navigator::Navigator;
 pub use paste::Pasted;
 pub use plan::{MAX_ANCESTORS, MAX_COMMANDS, MAX_INSERT_BYTES, MAX_TRANSACTION_BYTES};
+pub use stable::{MAX_ANCHOR_BYTES, Resolution, StableCaret, StableError, StableSelection};

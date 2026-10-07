@@ -235,7 +235,7 @@ impl Document {
                 .map_err(|_| VersionError::Compacted)?
         };
         Ok(DocumentAt {
-            doc: Document { doc },
+            doc: Document::wrap(doc),
             version: version.clone(),
         })
     }
@@ -273,6 +273,6 @@ impl Document {
         doc.set_peer_id(peer)?;
         doc.import(&bytes)?;
         doc.get_tree("content").enable_fractional_index(0);
-        Ok(Document { doc })
+        Ok(Document::wrap(doc))
     }
 }

@@ -1,6 +1,7 @@
 //! Transactions and the editor that applies them (29).
 
-use reprise_doc::{Document, NodeId, RelationId, SchemaRegistry, UndoStack};
+use reprise_doc::sync::SyncError;
+use reprise_doc::{ChangeReport, Document, NodeId, RelationId, SchemaRegistry, UndoStack};
 
 use crate::command::{Command, Effect};
 use crate::error::{EditError, Reason};
@@ -290,6 +291,29 @@ impl Editor {
 
     pub fn redo(&mut self) -> Result<bool, EditError> {
         self.undo.redo().map_err(store)
+    }
+
+    /// [`Editor::undo`], also reporting what it changed.
+    pub fn undo_report(&mut self) -> Result<(bool, ChangeReport), EditError> {
+        let (done, report) = self.doc.tracked(|| self.undo.undo());
+        Ok((done.map_err(store)?, report))
+    }
+
+    /// [`Editor::redo`], also reporting what it changed.
+    pub fn redo_report(&mut self) -> Result<(bool, ChangeReport), EditError> {
+        let (done, report) = self.doc.tracked(|| self.undo.redo());
+        Ok((done.map_err(store)?, report))
+    }
+
+    /// Imports a sync packet from another replica (see `reprise_doc::sync`).
+    /// Its edits are never undone by this editor's [`Editor::undo`].
+    pub fn import_packet(&mut self, bytes: &[u8]) -> Result<ChangeReport, SyncError> {
+        self.doc.import_packet(bytes)
+    }
+
+    /// Limits how many steps [`Editor::undo`] keeps.
+    pub fn set_undo_limit(&mut self, steps: usize) {
+        self.undo.set_limit(steps);
     }
 
     pub fn can_undo(&self) -> bool {

@@ -803,3 +803,91 @@ pub enum CopyFormat {
     PlainText,
     Html,
 }
+/// Asks for a sync packet (format 2). `since: None` is a full snapshot for a
+/// first join; a vector is a delta of everything that vector lacks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SyncRequest {
+    pub since: Option<Vec<Clock>>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum SyncKind {
+    Delta,
+    Snapshot,
+}
+/// A sync packet. `format`, `features`, `kind`, `since` and `vector` mirror
+/// the frame in `content`, so a transport can route without decoding; import
+/// checks that they agree with it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SyncPacket {
+    pub document_id: String,
+    pub from_peer: String,
+    pub format: u32,
+    pub features: Vec<String>,
+    pub kind: SyncKind,
+    pub since: Vec<Clock>,
+    pub vector: Vec<Clock>,
+    pub content: Bytes,
+}
+/// What an import, undo or redo changed. `blocks` may name more than
+/// changed, never less; `styles` means every block may have restyled.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Changes {
+    pub blocks: Vec<String>,
+    pub structure: bool,
+    pub styles: bool,
+    pub relations: Vec<String>,
+    pub ranges: Vec<String>,
+    pub other: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SyncReport {
+    pub info: SyncInfo,
+    pub changed: bool,
+    pub changes: Changes,
+    /// The anchored local selection after the import, if one is set.
+    pub selection: Option<Selection>,
+    /// Whether an end of it had to take a fallback.
+    pub selection_moved: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EditReport {
+    pub changed: bool,
+    pub changes: Changes,
+    pub selection: Option<Selection>,
+    pub selection_moved: bool,
+}
+/// A caret anchored to a character. `anchor` is opaque lowercase hex.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StableCaret {
+    pub node: String,
+    pub affinity: Affinity,
+    pub anchor: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StableSelection {
+    pub anchor: StableCaret,
+    pub focus: StableCaret,
+}
+/// This peer's presence: its selection and bounded opaque host metadata
+/// (at most 16 entries, keys of 64 bytes, values of 1 KiB).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct Presence {
+    pub selection: Option<Selection>,
+    pub meta: std::collections::BTreeMap<String, String>,
+}
+/// A peer's presence resolved on the current layout. Stale or garbage
+/// presence gives empty fields, never an error.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PresenceView {
+    pub peer_id: String,
+    pub meta: std::collections::BTreeMap<String, String>,
+    pub selection: Option<Selection>,
+    pub caret: Option<PageRect>,
+    pub rects: Vec<PageRect>,
+}

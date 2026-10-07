@@ -21,6 +21,7 @@ use loro::{Container, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID, V
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+mod changes;
 pub mod codes;
 pub mod context;
 mod edit;
@@ -28,10 +29,16 @@ pub mod expr;
 pub mod fragment;
 pub mod function;
 mod history;
+#[cfg(any(test, feature = "hostile-peer"))]
+pub mod hostile;
+#[cfg(test)]
+mod hostile_tests;
 pub mod image;
+pub mod invariants;
 mod lifecycle;
 mod page;
 mod persist;
+mod position;
 mod ranges;
 pub mod reading;
 mod region_schema;
@@ -41,9 +48,14 @@ mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
+pub mod sync;
+#[cfg(test)]
+mod sync_tests;
+mod sync_text;
 mod table;
 mod table_grid;
 
+pub use changes::ChangeReport;
 pub use context::ResolutionContext;
 pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
 pub use expr::{ComputedLength, Dependency, Expr};
@@ -58,6 +70,7 @@ pub use page::{
 pub use persist::{
     MAX_PERSIST_BYTES, MAX_PERSIST_EXPANDED_BYTES, MAX_PERSIST_OPS, PersistenceMode,
 };
+pub use position::Fallback;
 pub use region_schema::{FloatSide, NotePlacement};
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,
@@ -212,15 +225,26 @@ pub struct Revision(pub Vec<(u64, i32)>);
 
 pub struct Document {
     doc: LoroDoc,
+    /// A lazily built replica that sync checks out to read text lengths at
+    /// past versions (see `sync`). Checking out `doc` itself would clear
+    /// its undo history.
+    shadow: std::sync::Mutex<Option<LoroDoc>>,
 }
 
 impl Document {
+    fn wrap(doc: LoroDoc) -> Document {
+        Document {
+            doc,
+            shadow: std::sync::Mutex::new(None),
+        }
+    }
+
     /// `peer` identifies this replica. Fixtures pin it so IDs are reproducible.
     pub fn new(peer: u64) -> Result<Document, DocError> {
         let doc = LoroDoc::new();
         doc.set_peer_id(peer)?;
         doc.get_tree("content").enable_fractional_index(0);
-        Ok(Document { doc })
+        Ok(Document::wrap(doc))
     }
 
     /// A second replica of this document for another peer.
@@ -228,16 +252,18 @@ impl Document {
         self.commit();
         let doc = self.doc.fork();
         doc.set_peer_id(peer)?;
-        Ok(Document { doc })
+        Ok(Document::wrap(doc))
     }
 
     /// Merges another replica's edits into this one (29).
     pub fn merge(&self, other: &Document) -> Result<(), DocError> {
         self.commit();
         other.commit();
+        // Only what this replica lacks: both documents are this process's own,
+        // so the binary update encoding is trusted here (see `sync`).
         let updates = other
             .doc
-            .export(loro::ExportMode::all_updates())
+            .export(loro::ExportMode::updates(&self.doc.oplog_vv()))
             .map_err(|e| DocError::Export(e.to_string()))?;
         self.doc.import(&updates)?;
         Ok(())
@@ -499,6 +525,13 @@ impl Document {
                 (RelationId(id), parsed)
             })
             .collect()
+    }
+}
+
+fn get_bool(map: &LoroMap, key: &str) -> Option<bool> {
+    match map.get(key)? {
+        ValueOrContainer::Value(LoroValue::Bool(b)) => Some(b),
+        _ => None,
     }
 }
 
