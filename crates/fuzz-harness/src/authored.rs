@@ -87,20 +87,21 @@ pub fn concat_text(doc: &Document) -> String {
 }
 
 /// The text a reader can see: like [`concat_text`], but without the text of
-/// table and row containers, or of any block that holds other blocks. Only cells and ordinary blocks are laid out and
+/// table and row containers and of cells that hold blocks. Only cells and ordinary blocks are laid out and
 /// exported; a container's own text container is never shown, so exporters
 /// rightly leave it out.
 pub fn visible_text(doc: &Document) -> String {
     live_blocks(doc)
         .into_iter()
         .filter(|&node| {
-            let container = matches!(
-                doc.table_role(node).ok().flatten(),
-                Some(reprise_doc::TableRole::Table(_) | reprise_doc::TableRole::Row(_))
-            );
-            // A cell that holds blocks shows those; its own text container is
-            // the (empty) text of the cell itself.
-            !container && doc.children(Some(node)).is_empty()
+            // Only table structure hides its own text; an ordinary block that
+            // holds other blocks is still exported with its own text.
+            let hidden = match doc.table_role(node).ok().flatten() {
+                Some(reprise_doc::TableRole::Table(_) | reprise_doc::TableRole::Row(_)) => true,
+                Some(reprise_doc::TableRole::Cell(_)) => !doc.children(Some(node)).is_empty(),
+                None => false,
+            };
+            !hidden
         })
         .filter_map(|node| doc.block(node).ok())
         .map(|block| block.text.to_string())

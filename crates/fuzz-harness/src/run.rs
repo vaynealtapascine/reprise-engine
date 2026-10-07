@@ -47,8 +47,12 @@ struct Peer {
     editor: Editor,
     /// `(before, after)` of every step since the last time foreign edits
     /// arrived, newest last. Undo must return to `before`, redo to `after`.
-    undo_log: Vec<(Authored, Authored)>,
-    redo_log: Vec<(Authored, Authored)>,
+    ///
+    /// `None` marks a step whose states weren't recorded (it happened before
+    /// a merge, or the log was cleared), so the logs stay aligned with the
+    /// editor's stacks without claiming to know its states.
+    undo_log: Vec<Option<(Authored, Authored)>>,
+    redo_log: Vec<Option<(Authored, Authored)>>,
     initial: Authored,
     /// Whether another replica's edits were merged in.
     foreign: bool,
@@ -740,7 +744,11 @@ impl Cx<'_, '_> {
         let peer = &mut self.w.peers[p];
         if peer.editor.undo_count() > undo_before {
             let post = authored(peer.editor.document());
-            peer.undo_log.push((pre, post));
+            // A step that changed nothing authored (for example removing a
+            // template that isn't there) still counts as a step, but the
+            // undo manager may skip it; leave its states unrecorded rather
+            // than check an undo against the wrong step.
+            peer.undo_log.push((pre != post).then_some((pre, post)));
             peer.redo_log.clear();
         }
     }
@@ -847,8 +855,10 @@ impl Cx<'_, '_> {
                 ));
             }
         };
+        // After a merge, collaborators' edits can make a step impossible to
+        // redo even though the stack still holds it.
         ensure!(
-            moved == can,
+            moved == can || (peer.foreign && can && !undo),
             "undo-redo-agrees-with-can",
             "can_{} was {can} but the call returned {moved}",
             if undo { "undo" } else { "redo" }
@@ -859,23 +869,29 @@ impl Cx<'_, '_> {
         }
         let now = authored(peer.editor.document());
         if undo {
-            if let Some((before, after)) = peer.undo_log.pop() {
+            let step = peer.undo_log.pop().flatten();
+            if let Some((before, _)) = &step {
                 ensure!(
-                    now == before,
+                    &now == before,
                     "undo-restores-state",
-                    "undo did not return to the state before the step:\n{}",
-                    authored::diff(&before, &now)
+                    "undo did not return to the state before the step:
+{}",
+                    authored::diff(before, &now)
                 );
-                peer.redo_log.push((before, after));
             }
-        } else if let Some((before, after)) = peer.redo_log.pop() {
-            ensure!(
-                now == after,
-                "redo-restores-state",
-                "redo did not return to the state after the step:\n{}",
-                authored::diff(&after, &now)
-            );
-            peer.undo_log.push((before, after));
+            peer.redo_log.push(step);
+        } else {
+            let step = peer.redo_log.pop().flatten();
+            if let Some((_, after)) = &step {
+                ensure!(
+                    &now == after,
+                    "redo-restores-state",
+                    "redo did not return to the state after the step:
+{}",
+                    authored::diff(after, &now)
+                );
+            }
+            peer.undo_log.push(step);
         }
         self.count(if undo { "undo" } else { "redo" });
         Ok(())
@@ -1565,13 +1581,17 @@ blocks: {:#?}",
         } else {
             self.engine.layout(reopened)
         };
-        if shallow {
+        // A shallow package has a new revision, and an embedded one carries
+        // only faces with glyphs (a style that merely names a face finds it
+        // missing on reopen and reports `font.fallback`), so those two compare
+        // the geometry and leave diagnostics and revision out.
+        if shallow || embed {
             ensure!(
                 after.blocks == layout.blocks
                     && after.pages == layout.pages
                     && after.frames == layout.frames,
                 "reopen-lays-out-identically",
-                "shallow reopen changed the layout: {}",
+                "reopen changed the geometry: {}",
                 first_difference(&layout.to_json(), &after.to_json())
             );
         } else {
