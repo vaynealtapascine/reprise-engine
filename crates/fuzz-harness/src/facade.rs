@@ -200,7 +200,11 @@ fn execute(data: &[u8]) -> R<Vec<u64>> {
         match op {
             0..=119 => edit(s, &mut input)?,
             120..=134 => {
-                let done = call(if op % 2 == 0 { s.undo() } else { s.redo() })?;
+                let done = call(if op.is_multiple_of(2) {
+                    s.undo()
+                } else {
+                    s.redo()
+                })?;
                 let _ = done;
             }
             135..=159 => sync(&mut sessions)?,
@@ -217,7 +221,7 @@ fn execute(data: &[u8]) -> R<Vec<u64>> {
     Ok(transcript)
 }
 
-fn pick<'a>(blocks: &'a [api::Block], selector: u16) -> Option<&'a api::Block> {
+fn pick(blocks: &[api::Block], selector: u16) -> Option<&api::Block> {
     blocks.get(usize::from(selector) % blocks.len().max(1))
 }
 
@@ -548,7 +552,7 @@ fn export(s: &mut DocumentSession, kind: u8, transcript: &mut Vec<u64>) -> R {
         2 => ExportFormat::Native,
         _ => ExportFormat::Pdf,
     };
-    let first = call(s.export(&Payload::new(format.clone())))?;
+    let first = call(s.export(&Payload::new(format)))?;
     let second = call(s.export(&Payload::new(format)))?;
     ensure!(
         first.as_ref().map(|e| &e.data.content.bytes)
