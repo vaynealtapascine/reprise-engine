@@ -856,3 +856,27 @@ layout workers with `set_layout_threads`; output and work budgets are invariant.
 Existing `Caret`, `Selection` and v1 signatures are unchanged.
 The reference worker's local `edit` and `image` responses now use `edited`,
 carrying both `Applied` (created IDs and selection effects) and current `State`.
+
+### Robustness completion (2026-10-07)
+
+Template version 3 distinguishes downward `vertical-lr` from legacy upward
+`sideways-lr`; version 1/2 spelling preserves existing geometry. Shaping requests,
+items and runs carry upright/combined orientation; shaped/positioned runs carry
+integer horizontal compression. ResolutionContext includes the actual frame
+writing mode. Default fields are omitted from serialized horizontal output.
+
+Character transfer spans are saved metadata on source blocks. The edit carries
+undoable transfer records; an excluded staging commit retains identity history,
+like staged block IDs, so undo/redo can recreate characters without losing caret
+identity. Source and destination spans are guarded by live insertion-prefix anchors
+and SHA-256 digests.
+Stable caret wire payloads stay opaque and unchanged. Nonempty stable caret end
+anchors attach to the last character so structural relocation can identify them.
+After-affinity stable caret end anchors use an opaque versioned `RPAE` wrapper to
+retain end stickiness; legacy raw Loro cursor bytes remain accepted. Authored
+ranges retain raw cursors and their existing block-local policies; no new package
+feature is required. Binary snapshot preflight checks internal allocation-driving
+change counts before decoding.
+
+Combined vertical runs are atomic visual caret units with stops before/after the
+one-em box. Source byte offsets remain available for text edits and authored ranges.

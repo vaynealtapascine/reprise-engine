@@ -164,6 +164,11 @@ cuts across the tree.
 undo, collaboration and relations can restore it or report it missing. Copying creates new IDs
 and remaps them (35). Moving keeps the ID.
 
+Split/join copies retain bidirectional character lineage. Like staged block IDs,
+identity history survives undo; successful undo/redo records aliases for recreated
+character IDs before later edits. Stable carets prefer live identities and search
+at most 256 distinct lineage identities. Authored ranges retain block-local policy.
+
 **Rationale:** This fits the CRDT text store (09) and automatic rebinding (15), which both need
 to know what an ID used to be.
 
@@ -332,6 +337,13 @@ enough on its own. Transforms (20) may use floating point at render time only.
 
 Both logical axes (inline and block) and physical axes exist. Direction, writing mode, rotation
 and mirroring are first-class.
+
+Vertical columns progress downward in both `vertical-rl` and `vertical-lr`;
+`sideways-lr` preserves the earlier upward geometry. Upright shaping and short
+horizontal combinations use integer metrics, with glyph orientation compensated
+inside the shared display list. Combined groups are atomic visual caret units.
+Frame continuations prepare text for the destination mode while freezing the
+starting percentage context and table column allocation.
 
 **Rationale:** The north star needs this: rotated, mirrored and spiralling text.
 
