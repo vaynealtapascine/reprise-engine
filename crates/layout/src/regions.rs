@@ -3,8 +3,8 @@ use crate::flow;
 use crate::relations::resolve::Resolver;
 use crate::template::ResolvedTemplate;
 use crate::{
-    BlockLayout, Diagnostic, Engine, FrameLayout, LayoutSnapshot, LineRef, PageLayout, Resolution,
-    Subject, codes,
+    BlockLayout, Diagnostic, Engine, LayoutSnapshot, LineRef, PageLayout, Resolution, Subject,
+    codes,
 };
 use reprise_diag::Severity;
 use reprise_doc::relation::builtin;
@@ -297,13 +297,7 @@ pub(crate) fn ensure_page(
             height: template.height,
         });
         for frame in &template.frames {
-            snapshot.frames.push(FrameLayout {
-                name: frame.name.clone(),
-                role: frame.role.clone(),
-                page,
-                to_page: frame.to_page(),
-                rect: frame.rect(),
-            });
+            snapshot.frames.push(frame.layout(page));
         }
     }
     true

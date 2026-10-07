@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 88);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 89);
 }
 
 hostile_tests!(
@@ -1152,3 +1152,5 @@ region_hostile_tests!(pdf_structure_storm);
 
 hostile_tests!(space_before_zwj);
 region_hostile_tests!(incremental_long_paragraph_and_table);
+
+hostile_tests!(collab_hostile_peer);

@@ -135,6 +135,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         space_before_zwj()?,
         incremental_long_paragraph_and_table()?,
         font_legacy_missing()?,
+        collab_hostile_peer()?,
         table_header_repeats()?,
         table_header_taller_than_frame()?,
         table_spans_whole_table()?,
@@ -2533,4 +2534,46 @@ pub fn incremental_long_paragraph_and_table() -> Result<Fixture, DocError> {
     );
     fixture.engine.flow.max_pages = 3;
     Ok(fixture)
+}
+
+/// A hostile peer bypasses the editing kernel (docs/collaboration.md): it
+/// gives one paragraph an integer kind and physically deletes a note that a
+/// relation owns, while an honest peer edits concurrently. Every replica
+/// imports both delta packets, in different orders, converges and lays out
+/// the same: the malformed paragraph is left out, the rest flows.
+pub fn collab_hostile_peer() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let honest = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "The honest paragraph keeps its text.",
+    )?;
+    let malformed = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "This paragraph is given an unreadable kind.",
+    )?;
+    paragraph_with_note(&doc, "A noted paragraph whose note is torn out.", "noted")?;
+    doc.commit();
+    let note = doc
+        .blocks()
+        .into_iter()
+        .find(|&n| doc.kind_of(n) == Some(BlockKind::Annotation))
+        .ok_or_else(|| DocError::Store("missing fixture note".into()))?;
+    let since = doc.version_vector();
+    let replica = doc.fork(OTHER_PEER)?;
+    let attacker = doc.fork(66)?;
+    reprise_doc::hostile::scripted(&attacker, malformed, note)?;
+    replica.block(honest)?.text.insert(4, "and concurrent ")?;
+    replica.commit();
+    let sync = |e: reprise_doc::sync::SyncError| DocError::Store(e.to_string());
+    let attack = attacker.export_delta(&since).map_err(sync)?;
+    let edit = replica.export_delta(&since).map_err(sync)?;
+    doc.import_packet(&attack).map_err(sync)?;
+    doc.import_packet(&edit).map_err(sync)?;
+    replica.import_packet(&attack).map_err(sync)?;
+    Ok(Fixture {
+        replica: Some(replica),
+        ..Fixture::new("collab_hostile_peer", doc, &["layout.malformed-block"])
+    })
 }

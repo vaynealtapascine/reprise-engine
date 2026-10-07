@@ -57,6 +57,8 @@ pub struct Feature {
 
 /// One run to shape.
 pub struct ShapeRequest<'a> {
+    pub upright: bool,
+    pub combined: bool,
     /// The whole paragraph. Clusters in the result are byte offsets into it.
     pub text: &'a str,
     /// The run to shape.
@@ -108,6 +110,10 @@ pub trait ShapingAdapter: Send + Sync {
 /// An itemised run of a paragraph: one face, size, bidi level and script (21, 22).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub upright: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub combined: bool,
     pub range: Range<usize>,
     pub face: FaceId,
     pub size: Length,
@@ -130,6 +136,102 @@ pub fn direction_of(level: u8) -> InlineDirection {
     } else {
         InlineDirection::Rtl
     }
+}
+
+/// Split fallback/script items at grapheme orientation boundaries. Combining
+/// marks stay with their base; mixed vertical text keeps Latin and RTL sideways.
+pub fn vertical_items(
+    text: &str,
+    items: &[Item],
+    orientation: reprise_geom::TextOrientation,
+    combine: reprise_geom::TextCombineUpright,
+) -> Vec<Item> {
+    use reprise_geom::TextOrientation;
+    use reprise_text::orientation::{VerticalOrientation, vertical_orientation};
+    let boundaries = reprise_text::segment::grapheme_boundaries(text);
+    let mut combinations = Vec::new();
+    let mut start = None;
+    let mut count = 0usize;
+    let max = match combine {
+        reprise_geom::TextCombineUpright::Digits(n) => usize::from(n.clamp(2, 4)),
+        _ => 4,
+    };
+    for (at, c) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        let candidate = match combine {
+            reprise_geom::TextCombineUpright::None => false,
+            reprise_geom::TextCombineUpright::Digits(_) => c.is_ascii_digit(),
+            reprise_geom::TextCombineUpright::All => !c.is_whitespace(),
+        };
+        if candidate {
+            start.get_or_insert(at);
+            count += 1;
+        } else if let Some(begin) = start.take() {
+            if count <= max && (count >= 2 || combine == reprise_geom::TextCombineUpright::All) {
+                combinations.push(begin..at);
+            }
+            count = 0;
+        }
+    }
+    let mut out: Vec<Item> = Vec::new();
+    for item in items {
+        let from = boundaries
+            .partition_point(|&b| b <= item.range.start)
+            .saturating_sub(1);
+        let until = boundaries
+            .partition_point(|&b| b < item.range.end)
+            .saturating_add(1)
+            .min(boundaries.len());
+        for bounds in boundaries[from..until].windows(2) {
+            let start = bounds[0].max(item.range.start);
+            let end = bounds[1].min(item.range.end);
+            if start >= end {
+                continue;
+            }
+            let position = combinations.partition_point(|r| r.end <= start);
+            let combined_range = combinations.get(position).filter(|r| {
+                r.start <= start
+                    && end <= r.end
+                    && item.range.start <= r.start
+                    && r.end <= item.range.end
+            });
+            let combined = combined_range.is_some();
+            let upright = combined
+                || match orientation {
+                    TextOrientation::Upright => true,
+                    TextOrientation::Sideways => false,
+                    TextOrientation::Mixed => text[start..end].chars().next().is_some_and(|c| {
+                        matches!(
+                            vertical_orientation(c),
+                            VerticalOrientation::Upright | VerticalOrientation::TransformedUpright
+                        )
+                    }),
+                };
+            if let Some(previous) = out.last_mut()
+                && previous.range.end == start
+                && previous.upright == upright
+                && previous.combined == combined
+                && (!combined || combined_range.is_some_and(|r| r.start <= previous.range.start))
+                && previous.face == item.face
+                && previous.size == item.size
+                && previous.level == item.level
+                && previous.script == item.script
+                && previous.language == item.language
+                && previous.features == item.features
+            {
+                previous.range.end = end;
+            } else {
+                let mut run = item.clone();
+                run.range = start..end;
+                run.upright = upright;
+                run.combined = combined;
+                out.push(run);
+            }
+        }
+    }
+    out
 }
 
 /// The visual order of a line's runs from their bidi levels, by rule L2 of
@@ -165,6 +267,12 @@ pub fn visual_order(levels: &[u8]) -> Vec<usize> {
 /// A shaped run: one item, or the part of one that fell on a line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShapedRun {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub upright: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub combined: bool,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub horizontal_scale: reprise_geom::Fixed,
     pub range: Range<usize>,
     pub face: FaceId,
     pub size: Length,
@@ -181,6 +289,47 @@ impl ShapedRun {
     pub fn width(&self) -> Length {
         self.glyphs.iter().map(|g| g.advance).sum()
     }
+}
+
+fn one() -> reprise_geom::Fixed {
+    reprise_geom::Fixed::ONE
+}
+fn is_one(scale: &reprise_geom::Fixed) -> bool {
+    *scale == one()
+}
+
+/// Fit a short horizontal composition into one vertical em. Compression is
+/// horizontal only; every glyph remains mapped to its original source bytes.
+pub fn combine_run(mut run: ShapedRun) -> ShapedRun {
+    if !run.combined || run.glyphs.is_empty() {
+        return run;
+    }
+    let width = run.width().max(Length(1));
+    let scale = reprise_geom::Fixed(
+        reprise_geom::Fixed::from_ratio(run.size.0.min(width.0), width.0)
+            .0
+            .clamp(1, 1 << 16),
+    );
+    run.horizontal_scale = scale;
+    let compressed = width.mul_ratio(scale.0, 1 << 16);
+    let mut pen = Length::ZERO;
+    let mut inline = Length::ZERO;
+    let count = run.glyphs.len();
+    for (index, glyph) in run.glyphs.iter_mut().enumerate() {
+        let advance = glyph.advance;
+        let target = if index + 1 == count {
+            run.size
+        } else {
+            (pen + advance).mul_ratio(run.size.0, width.0)
+        };
+        let x = (pen + glyph.x_offset).mul_ratio(scale.0, 1 << 16) - compressed.mul_ratio(1, 2);
+        glyph.x_offset = run.size.mul_ratio(4, 5) - glyph.y_offset - inline;
+        glyph.y_offset = x;
+        glyph.advance = target - inline;
+        inline = target;
+        pen += advance;
+    }
+    run
 }
 
 /// A shaped paragraph: its runs in logical order.
@@ -219,6 +368,9 @@ impl ShapedText {
                     .copied()
                     .collect();
                 (!glyphs.is_empty()).then(|| ShapedRun {
+                    upright: run.upright,
+                    combined: run.combined,
+                    horizontal_scale: run.horizontal_scale,
                     range,
                     glyphs,
                     ..run.clone()
@@ -293,9 +445,13 @@ fn shape_with_data(request: &ShapeRequest<'_>, data: &harfrust::ShaperData) -> V
     buffer.set_pre_context(pre);
     buffer.push_str(run);
     buffer.set_post_context(post);
-    buffer.set_direction(match request.direction {
-        InlineDirection::Ltr => harfrust::Direction::LeftToRight,
-        InlineDirection::Rtl => harfrust::Direction::RightToLeft,
+    buffer.set_direction(if request.upright && !request.combined {
+        harfrust::Direction::TopToBottom
+    } else {
+        match request.direction {
+            InlineDirection::Ltr => harfrust::Direction::LeftToRight,
+            InlineDirection::Rtl => harfrust::Direction::RightToLeft,
+        }
     });
     if let Some(script) = request
         .script
@@ -307,11 +463,17 @@ fn shape_with_data(request: &ShapeRequest<'_>, data: &harfrust::ShaperData) -> V
         buffer.set_language(language);
     }
     buffer.guess_segment_properties();
-    let features: Vec<harfrust::Feature> = request
+    let mut features: Vec<harfrust::Feature> = request
         .features
         .iter()
         .map(|f| harfrust::Feature::new(harfrust::Tag::new(&f.tag), f.value, ..))
         .collect();
+    if request.upright && !request.combined {
+        features.extend([
+            harfrust::Feature::new(harfrust::Tag::new(b"vert"), 1, ..),
+            harfrust::Feature::new(harfrust::Tag::new(b"vrt2"), 1, ..),
+        ]);
+    }
     // No scale is set, so positions come back in font design units. They are
     // integers, and scaling them with integer arithmetic keeps layout exact.
     let out = shaper.shape(buffer, harfrust::ShapeOptions::new().features(&features));
@@ -323,9 +485,21 @@ fn shape_with_data(request: &ShapeRequest<'_>, data: &harfrust::ShaperData) -> V
         .map(|(info, pos)| ShapedGlyph {
             id: info.glyph_id,
             cluster: info.cluster.saturating_add(range.start as u32),
-            advance: scale(pos.x_advance),
-            x_offset: scale(pos.x_offset),
-            y_offset: scale(pos.y_offset),
+            advance: scale(if request.upright && !request.combined {
+                pos.y_advance.saturating_neg()
+            } else {
+                pos.x_advance
+            }),
+            x_offset: scale(if request.upright && !request.combined {
+                pos.y_offset.saturating_neg()
+            } else {
+                pos.x_offset
+            }),
+            y_offset: scale(if request.upright && !request.combined {
+                pos.x_offset
+            } else {
+                pos.y_offset
+            }),
             unsafe_to_break: info.unsafe_to_break(),
             unsafe_to_concat: info.unsafe_to_concat(),
         })
@@ -338,8 +512,37 @@ mod tests {
 
     const SERIF: &[u8] = include_bytes!("../../../fixtures/fonts/SourceSerifPro-Regular.otf");
 
+    #[test]
+    fn vertical_orientation_keeps_items_inside_a_grapheme() {
+        let face = Face::from_bytes(SERIF).unwrap();
+        let text = "a\u{301}b";
+        let make = |range| Item {
+            range,
+            face: face.id().clone(),
+            size: Length::from_pt(12),
+            level: 0,
+            script: None,
+            language: None,
+            features: vec![],
+            upright: false,
+            combined: false,
+        };
+        let items = vec![make(0..1), make(1..3), make(3..4)];
+        let out = vertical_items(
+            text,
+            &items,
+            reprise_geom::TextOrientation::Mixed,
+            reprise_geom::TextCombineUpright::None,
+        );
+        assert_eq!(out.first().unwrap().range.start, 0);
+        assert_eq!(out.last().unwrap().range.end, text.len());
+        assert_eq!(out.iter().map(|r| r.range.len()).sum::<usize>(), text.len());
+    }
+
     fn request<'a>(text: &'a str, face: &'a Face, range: Range<usize>) -> ShapeRequest<'a> {
         ShapeRequest {
+            upright: false,
+            combined: false,
             text,
             range: range.clone(),
             context: range,
@@ -382,6 +585,8 @@ mod tests {
             value: 0,
         }];
         let without = HarfRust.shape(&ShapeRequest {
+            upright: false,
+            combined: false,
             features: &off,
             ..request(text, &face, 0..text.len())
         });
@@ -397,12 +602,16 @@ mod tests {
             value: 0,
         }];
         let request = ShapeRequest {
+            upright: false,
+            combined: false,
             direction: InlineDirection::Rtl,
             script: Some(Script(*b"Latn")),
             ..request("office", &face, 0..6)
         };
         let with = HarfRust.shape(&request);
         let without = HarfRust.shape(&ShapeRequest {
+            upright: false,
+            combined: false,
             features: &features,
             ..request
         });
@@ -483,6 +692,8 @@ mod tests {
                     for settings in [&[][..], &features[..]] {
                         for script in [None, Some(Script(*b"Latn")), Some(Script(*b"Zyyy"))] {
                             let request = ShapeRequest {
+                                upright: false,
+                                combined: false,
                                 direction,
                                 size,
                                 features: settings,
@@ -501,6 +712,8 @@ mod tests {
         }
         let text = "AV office after";
         let request = ShapeRequest {
+            upright: false,
+            combined: false,
             context: 0..text.len(),
             ..request(text, &face, 3..9)
         };

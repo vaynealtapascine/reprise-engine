@@ -102,31 +102,193 @@ fn caret(node: &str, offset: u32) -> Caret {
 }
 
 #[test]
-fn remote_split_caret_falls_back_without_following_recreated_text() {
+fn remote_split_and_join_carets_follow_character_lineage() {
     let mut a = create("1");
     let p = paragraph(&mut a, "abcdef");
     let mut b = join(&a, "2");
     a.set_selection(&Payload::new(Some(Selection {
         anchor: caret(&p, 5),
-        focus: caret(&p, 5),
+        focus: caret(&p, 6),
     })))
     .unwrap();
-    tx(
+    let applied = tx(
         &mut b,
         vec![Command::SplitBlock {
             node: p.clone(),
             at: 3,
         }],
     );
-    let report = sync(&b, &mut a);
-    let selection = report.selection.unwrap();
-    assert_eq!(selection.focus.node, p);
-    assert_eq!(selection.focus.offset, 3);
-    assert_eq!(blocks(&a), blocks(&b));
-    // Subsequent edits still resolve the fallback caret inside a live block.
-    type_at(&mut b, &p, 0, ">");
+    let new = applied.blocks[0].clone();
+    let selection = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(selection.focus.node, new);
+    assert_eq!((selection.anchor.offset, selection.focus.offset), (2, 3));
+    type_at(&mut b, &new, 0, ">");
     let selection = sync(&b, &mut a).selection.unwrap();
     assert_eq!(selection.focus.offset, 4);
+    tx(
+        &mut b,
+        vec![Command::JoinBlocks {
+            first: p.clone(),
+            second: new.clone(),
+        }],
+    );
+    let selection = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(selection.focus.node, p);
+    assert_eq!((selection.anchor.offset, selection.focus.offset), (6, 7));
+    assert_eq!(blocks(&a), blocks(&b));
+    b.undo_report().unwrap();
+    let selection = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(selection.focus.node, new);
+    assert_eq!((selection.anchor.offset, selection.focus.offset), (3, 4));
+    assert_eq!(blocks(&a), blocks(&b));
+    b.redo_report().unwrap();
+    let selection = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(selection.focus.node, p);
+    assert_eq!((selection.anchor.offset, selection.focus.offset), (6, 7));
+    assert_eq!(blocks(&a), blocks(&b));
+    let saved = a.save().unwrap().data.bytes;
+    let reopened = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "3".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    assert_eq!(blocks(&a), blocks(&reopened));
+}
+
+#[test]
+fn split_undo_redo_keeps_original_and_fresh_carets_on_the_suffix() {
+    let mut a = create("1");
+    let p = paragraph(&mut a, "abcdef");
+    let mut b = join(&a, "2");
+    let selection = Selection {
+        anchor: caret(&p, 5),
+        focus: caret(&p, 6),
+    };
+    let original = a
+        .anchor_selection(&Payload::new(selection.clone()))
+        .unwrap();
+    a.set_selection(&Payload::new(Some(selection.clone())))
+        .unwrap();
+    let new = tx(
+        &mut b,
+        vec![Command::SplitBlock {
+            node: p.clone(),
+            at: 3,
+        }],
+    )
+    .blocks[0]
+        .clone();
+    sync(&b, &mut a);
+    b.undo_report().unwrap();
+    let current = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(current, selection);
+    assert_eq!(
+        a.resolve_selection(&original).unwrap().data.unwrap(),
+        selection
+    );
+    a.set_selection(&Payload::new(Some(selection.clone())))
+        .unwrap();
+    let fresh = a
+        .anchor_selection(&Payload::new(selection.clone()))
+        .unwrap();
+    type_at(&mut a, &p, 4, "X");
+    let inserted = Selection {
+        anchor: caret(&p, 6),
+        focus: caret(&p, 7),
+    };
+    assert_eq!(a.local_selection().data.unwrap(), inserted);
+    assert_eq!(
+        a.resolve_selection(&original).unwrap().data.unwrap(),
+        inserted
+    );
+    assert_eq!(a.resolve_selection(&fresh).unwrap().data.unwrap(), inserted);
+    tx(
+        &mut a,
+        vec![Command::DeleteText {
+            node: p.clone(),
+            start: 3,
+            end: 4,
+        }],
+    );
+    assert_eq!(a.local_selection().data.unwrap(), selection);
+    assert_eq!(
+        a.resolve_selection(&original).unwrap().data.unwrap(),
+        selection
+    );
+    assert_eq!(
+        a.resolve_selection(&fresh).unwrap().data.unwrap(),
+        selection
+    );
+    sync(&a, &mut b);
+    b.redo_report().unwrap();
+    let current = sync(&b, &mut a).selection.unwrap();
+    let expected = Selection {
+        anchor: caret(&new, 2),
+        focus: caret(&new, 3),
+    };
+    assert_eq!(current, expected);
+    assert_eq!(
+        a.resolve_selection(&original).unwrap().data.unwrap(),
+        expected
+    );
+    assert_eq!(a.resolve_selection(&fresh).unwrap().data.unwrap(), expected);
+}
+
+#[test]
+fn a_caret_traverses_three_splits_and_a_deleted_intermediate() {
+    let mut a = create("1");
+    let p = paragraph(&mut a, "abcdefgh");
+    let mut b = join(&a, "2");
+    a.set_selection(&Payload::new(Some(Selection {
+        anchor: caret(&p, 6),
+        focus: caret(&p, 8),
+    })))
+    .unwrap();
+    let q = tx(
+        &mut b,
+        vec![Command::SplitBlock {
+            node: p.clone(),
+            at: 2,
+        }],
+    )
+    .blocks[0]
+        .clone();
+    let r = tx(
+        &mut b,
+        vec![Command::SplitBlock {
+            node: q.clone(),
+            at: 2,
+        }],
+    )
+    .blocks[0]
+        .clone();
+    let s = tx(
+        &mut b,
+        vec![Command::SplitBlock {
+            node: r.clone(),
+            at: 1,
+        }],
+    )
+    .blocks[0]
+        .clone();
+    tx(
+        &mut b,
+        vec![Command::JoinBlocks {
+            first: p,
+            second: q,
+        }],
+    );
+    let selection = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(
+        selection,
+        Selection {
+            anchor: caret(&s, 1),
+            focus: caret(&s, 3)
+        }
+    );
 }
 
 #[test]
@@ -536,4 +698,34 @@ fn three_peer_partition_rejoin_soak() {
         }))
         .unwrap();
     assert!(keystroke.data.content.bytes.len() < 4096);
+}
+
+/// Native/WASM parity: ts/smoke.cjs runs the same script in WASM and compares
+/// the packet bytes with this golden. Re-record with REPRISE_RECORD_SYNC=1.
+#[test]
+fn delta_packet_bytes_are_pinned() {
+    let mut s = create("1");
+    let p = paragraph(&mut s, "parity");
+    type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
+    let packet = s
+        .sync_export(&Payload::new(SyncRequest {
+            since: Some(Vec::new()),
+        }))
+        .unwrap()
+        .data;
+    let hex: String = packet
+        .content
+        .bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sync_delta.hex");
+    if std::env::var_os("REPRISE_RECORD_SYNC").is_some() {
+        std::fs::write(&path, &hex).unwrap();
+    }
+    assert_eq!(hex, include_str!("sync_delta.hex").trim());
+    // The same packet joins a fresh replica.
+    let mut fresh = create("2");
+    fresh.sync_import(&Payload::new(packet)).unwrap();
+    assert_eq!(blocks(&fresh), blocks(&s));
 }

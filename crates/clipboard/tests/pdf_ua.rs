@@ -20,7 +20,20 @@ fn export(f: &Fixture) -> (Vec<u8>, Report, reprise_clipboard::LossReport, Strin
     }
     .export(&f.doc, Some(&layout), &options)
     .unwrap_or_else(|e| panic!("{}: {e}", f.name));
-    let plain = PlainText.export(&f.doc, Some(&layout), &options).unwrap();
+    let plain = if f.name == "collab_hostile_peer" {
+        let error = PlainText
+            .export(&f.doc, Some(&layout), &options)
+            .err()
+            .expect("unreadable peer block must be refused");
+        assert_eq!(error.note().code.as_str(), "clipboard.invalid");
+        assert!(matches!(
+            error,
+            reprise_clipboard::ClipboardError::Invalid(_)
+        ));
+        None
+    } else {
+        Some(PlainText.export(&f.doc, Some(&layout), &options).unwrap())
+    };
     let report = check(&pdf.bytes);
     // Text that is never drawn (a run with no glyphs, or a size of zero or less)
     // has nothing to tag, so it cannot appear in the PDF's text.
@@ -30,12 +43,19 @@ fn export(f: &Fixture) -> (Vec<u8>, Report, reprise_clipboard::LossReport, Strin
         .flat_map(|b| b.lines.iter())
         .flat_map(|l| l.runs.iter())
         .any(|r| r.glyphs.is_empty() || r.size <= reprise_geom::Length::ZERO);
-    let unplaced =
-        undrawn
-            || plain.losses.features.iter().any(|l| {
+    let unplaced = undrawn
+        || plain.as_ref().is_none_or(|p| {
+            p.losses.features.iter().any(|l| {
                 l.feature == Feature::ReadingOrder && l.disposition != Disposition::Preserved
-            });
-    let plain = String::from_utf8(plain.bytes).unwrap();
+            })
+        });
+    let plain = plain
+        .map(|p| String::from_utf8(p.bytes).unwrap())
+        .unwrap_or_default();
+    if f.name == "collab_hostile_peer" {
+        assert!(report.text.contains("concurrent"));
+        assert!(!report.text.contains("unreadable kind"));
+    }
     (
         pdf.bytes,
         report,

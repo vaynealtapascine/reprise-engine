@@ -328,6 +328,8 @@ fn itemize_inner(
                 continue;
             }
             out.items.push(Item {
+                upright: false,
+                combined: false,
                 range: range.clone(),
                 face: face.id().clone(),
                 size: run.size,
@@ -382,6 +384,8 @@ impl Shaper<'_> {
                 }
                 let face = self.fonts.get(&item.face).ok()?;
                 let glyphs = self.adapter.shape(&ShapeRequest {
+                    upright: item.upright,
+                    combined: item.combined,
                     text: self.text,
                     range: part.clone(),
                     context: context.clone(),
@@ -392,13 +396,16 @@ impl Shaper<'_> {
                     language: item.language.as_deref(),
                     features: &item.features,
                 });
-                Some(ShapedRun {
+                Some(crate::combine_run(ShapedRun {
+                    upright: item.upright,
+                    combined: item.combined,
+                    horizontal_scale: reprise_geom::Fixed::ONE,
                     range: part,
                     face: item.face.clone(),
                     size: item.size,
                     level: item.level,
                     glyphs,
-                })
+                }))
             })
             .collect()
     }
@@ -554,6 +561,8 @@ mod tests {
         let alone = Shaper {
             text: "two",
             items: &[Item {
+                upright: false,
+                combined: false,
                 range: 0..3,
                 ..items[0].clone()
             }],

@@ -137,6 +137,8 @@ fn run(text: &str, direction: InlineDirection) -> (GlyphRun, FontStore) {
     let face = Face::from_bytes(reprise_fixtures::SERIF).unwrap();
     let size = Length::from_pt(12);
     let shaped = HarfRust.shape(&ShapeRequest {
+        upright: false,
+        combined: false,
         text,
         range: 0..text.len(),
         context: 0..text.len(),

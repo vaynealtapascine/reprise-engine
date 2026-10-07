@@ -272,6 +272,12 @@ impl Flow<'_> {
 
     /// One iteration of the composing loop.
     fn iteration(&mut self, doc: &Document, p: &mut Paragraph) {
+        let mode = self.template.frames[self.thread[self.pos]].writing_mode;
+        if p.ctx.writing_mode != mode {
+            p.ctx.writing_mode = mode;
+            self.start_preparation(doc, p);
+            return;
+        }
         let engine = self.engine;
         let subject = Subject::Node(p.node);
         let Some(prepared) = p.prepared.as_ref() else {

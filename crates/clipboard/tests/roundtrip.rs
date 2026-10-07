@@ -28,6 +28,25 @@ fn equal_geometry(
 fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
     for fixture in reprise_fixtures::hostile::all().unwrap() {
         let before = fixture.engine.layout(&fixture.doc);
+        if fixture.name == "collab_hostile_peer" {
+            let error = copy_all(
+                &fixture.doc,
+                "source",
+                &fixture.engine.schemas,
+                Some(&before),
+                Some(&fixture.engine.fonts),
+            )
+            .err()
+            .expect("unreadable peer block must be refused");
+            assert_eq!(error.note().code.as_str(), "clipboard.invalid");
+            assert!(matches!(
+                error,
+                reprise_clipboard::ClipboardError::Fragment(
+                    reprise_clipboard::FragmentError::Invalid(_)
+                )
+            ));
+            continue;
+        }
         let fragment = copy_all(
             &fixture.doc,
             "source",

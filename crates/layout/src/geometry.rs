@@ -72,7 +72,11 @@ pub(crate) fn resolve_frames(
             width,
             Matrix::rotate_quarter(1).then(&Matrix::translate(width, Length::ZERO)),
         ),
-        WritingMode::VerticalLr => (
+        // Downward, columns to the right: the axes swap. A reflection, which
+        // display compensates for so glyphs keep their handedness.
+        WritingMode::VerticalLr => (depth, width, Matrix::transpose()),
+        // Upward, columns to the right: the pre-version-3 `vertical-lr`.
+        WritingMode::SidewaysLr => (
             depth,
             width,
             Matrix::rotate_quarter(3).then(&Matrix::translate(Length::ZERO, depth)),
@@ -86,6 +90,7 @@ pub(crate) fn resolve_frames(
         width: logical_width,
         depth: logical_depth,
         transform: mode.then(&transform),
+        writing_mode: frame.writing_mode,
     };
     let Some(path) = &frame.path else {
         return vec![ordinary()];
@@ -156,6 +161,7 @@ pub(crate) fn resolve_frames(
             width: Length::hypot(dx, dy),
             depth,
             transform: m,
+            writing_mode: WritingMode::HorizontalTb,
         });
     }
     if invalid {
@@ -210,7 +216,8 @@ mod tests {
         for (mode, start, end) in [
             (WritingMode::HorizontalTb, (10, 20), (110, 220)),
             (WritingMode::VerticalRl, (110, 20), (10, 220)),
-            (WritingMode::VerticalLr, (10, 220), (110, 20)),
+            (WritingMode::VerticalLr, (10, 20), (110, 220)),
+            (WritingMode::SidewaysLr, (10, 220), (110, 20)),
         ] {
             let mut f = frame();
             f.writing_mode = mode;

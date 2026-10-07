@@ -24,6 +24,7 @@ pub(crate) struct Staged {
     node: NodeId,
     kind: BlockKind,
     style: ComputedStyle,
+    vertical: bool,
     text: String,
     styles: Vec<StyleRun>,
     fallback: Option<(FaceId, Length)>,
@@ -159,6 +160,20 @@ pub(crate) fn begin(
         // list of names. Version only the owned cache representation; itemization
         // and the adapter receive the original authored families unchanged.
         let mut key_styles = styles.clone();
+        if matches!(
+            ctx.writing_mode,
+            reprise_doc::WritingMode::VerticalRl | reprise_doc::WritingMode::VerticalLr
+        ) {
+            for run in &mut key_styles {
+                run.families.insert(
+                    0,
+                    format!(
+                        "\0vertical:{:?}:{:?}",
+                        style.text_orientation, style.text_combine_upright
+                    ),
+                );
+            }
+        }
         if !style.families.is_empty() {
             for run in &mut key_styles {
                 run.families.insert(0, "\0reprise-font-chain1".into());
@@ -186,6 +201,10 @@ pub(crate) fn begin(
         );
     }
     Begin::Shape(Box::new(Staged {
+        vertical: matches!(
+            ctx.writing_mode,
+            reprise_doc::WritingMode::VerticalRl | reprise_doc::WritingMode::VerticalLr
+        ),
         node,
         kind: block.kind,
         style,
@@ -229,11 +248,26 @@ impl Staged {
             styles: &self.styles,
             direction: None,
         };
-        let itemized = if self.style.families.is_empty() {
+        let mut itemized = if self.style.families.is_empty() {
             itemize(&input, fonts)
         } else {
             itemize_families(&input, fonts)
         };
+        if self.vertical {
+            itemized.items = reprise_shape::vertical_items(
+                &self.text,
+                &itemized.items,
+                self.style.text_orientation,
+                self.style.text_combine_upright,
+            );
+        }
+        if self.vertical && self.style.text_orientation == reprise_geom::TextOrientation::Upright {
+            itemized.base_level = 0;
+            itemized.levels.fill(0);
+            for item in &mut itemized.items {
+                item.level = 0;
+            }
+        }
         let subject = Subject::Node(self.node);
         self.notes.extend(
             itemized
@@ -299,7 +333,16 @@ impl Staged {
     /// UAX #14 break analysis. Pure.
     pub(crate) fn analyse_breaks(&mut self) {
         if self.breaks.is_none() {
-            self.breaks = Some(break_opportunities(&self.text));
+            let mut breaks = break_opportunities(&self.text);
+            if let Some(items) = &self.itemized {
+                breaks.retain(|b| {
+                    !items
+                        .items
+                        .iter()
+                        .any(|i| i.combined && i.range.start < b.at && b.at < i.range.end)
+                });
+            }
+            self.breaks = Some(breaks);
         }
     }
 

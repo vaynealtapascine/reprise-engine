@@ -5,8 +5,12 @@ expression: snapshot.to_json()
 {
   "revision": [
     [
-      1,
-      163
+      2,
+      14
+    ],
+    [
+      66,
+      2
     ]
   ],
   "adapter": {
@@ -25,44 +29,64 @@ expression: snapshot.to_json()
     "annotation_spacing": 4096
   },
   "template": {
-    "name": "vertical",
-    "source": "document"
+    "name": "default",
+    "source": "builtin"
   },
   "pages": [
     {
-      "width": 184320,
+      "width": 430080,
       "height": 307200
     }
   ],
   "frames": [
     {
-      "name": "vertical",
+      "name": "main",
       "role": {
         "flow": "main"
       },
       "page": 0,
       "to_page": {
-        "xx": 0,
-        "yx": 65536,
-        "xy": -65536,
-        "yy": 0,
-        "tx": 133120,
-        "ty": 25600
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
       },
       "rect": {
         "origin": {
           "x": 0,
           "y": 0
         },
-        "width": 245760,
-        "height": 102400
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
       },
-      "writing_mode": "vertical-rl"
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
     }
   ],
   "blocks": [
     {
-      "node": "8@1",
+      "node": "6@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -79,19 +103,19 @@ expression: snapshot.to_json()
           "frame": 0,
           "text": {
             "start": 0,
-            "end": 45
+            "end": 42
           },
-          "preview": "The columns descend, one after another, from",
+          "preview": "The and concurrent honest paragraph keeps",
           "rect": {
             "origin": {
               "x": 0,
               "y": 0
             },
-            "width": 245760,
+            "width": 225280,
             "height": 13517
           },
           "baseline": 10707,
-          "width": 232259,
+          "width": 222055,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -105,7 +129,7 @@ expression: snapshot.to_json()
             {
               "range": {
                 "start": 0,
-                "end": 45
+                "end": 42
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -114,113 +138,27 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 234884
+              "width": 224680
             }
           ]
         },
         {
           "frame": 0,
           "text": {
-            "start": 45,
-            "end": 93
+            "start": 42,
+            "end": 51
           },
-          "preview": "the right edge of the page. The house is taller",
+          "preview": "its text.",
           "rect": {
             "origin": {
               "x": 0,
               "y": 13517
             },
-            "width": 245760,
+            "width": 225280,
             "height": 13517
           },
           "baseline": 24224,
-          "width": 224568,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 45,
-                "end": 93
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 227193
-            }
-          ]
-        },
-        {
-          "frame": 0,
-          "text": {
-            "start": 93,
-            "end": 143
-          },
-          "preview": "inside than outside. The next column is a step to",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 27034
-            },
-            "width": 245760,
-            "height": 13517
-          },
-          "baseline": 37741,
-          "width": 241036,
-          "explanation": {
-            "reason": "opportunity",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 93,
-                "end": 143
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 243661
-            }
-          ]
-        },
-        {
-          "frame": 0,
-          "text": {
-            "start": 143,
-            "end": 152
-          },
-          "preview": "the left.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 40551
-            },
-            "width": 245760,
-            "height": 13517
-          },
-          "baseline": 51258,
-          "width": 38423,
+          "width": 36903,
           "explanation": {
             "reason": "end",
             "score": null,
@@ -233,8 +171,8 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 143,
-                "end": 152
+                "start": 42,
+                "end": 51
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -243,13 +181,102 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 38423
+              "width": 36903
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "93@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 41
+          },
+          "preview": "A noted paragraph whose note is torn out.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 35226
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 45933,
+          "width": 209889,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 41
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 209889
             }
           ]
         }
       ]
     }
   ],
-  "relations": [],
-  "diagnostics": []
+  "relations": [
+    {
+      "id": "154@1",
+      "schema": "reprise.follow",
+      "owner": "138@1",
+      "status": "owner-deleted",
+      "applied": false,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "layout.malformed-block",
+      "subject": {
+        "kind": "node",
+        "id": "46@1"
+      },
+      "message": "node 46@1 is malformed: kind",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "relation.owner-deleted",
+      "subject": {
+        "kind": "relation",
+        "id": "154@1"
+      },
+      "message": "owner 138@1 was deleted; the relation went with it",
+      "bytes": null
+    }
+  ]
 }

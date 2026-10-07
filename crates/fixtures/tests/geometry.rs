@@ -288,10 +288,10 @@ fn cycles_missing_endpoints_and_downstream_nodes_have_total_deterministic_order(
 }
 
 #[test]
-fn vertical_lr_uses_sideways_latin_and_physical_sizes() {
+fn sideways_lr_uses_sideways_latin_and_physical_sizes() {
     let doc = Document::new(PEER).unwrap();
     let mut f = flow_frame("lr", Dim::pt(0), Dim::pt(0), Dim::pt(80), Dim::pt(220));
-    f.writing_mode = WritingMode::VerticalLr;
+    f.writing_mode = WritingMode::SidewaysLr;
     doc.set_page_template(&PageTemplate::new("lr", Dim::pt(100), Dim::pt(240)).with_frame(f))
         .unwrap();
     doc.append_block(BlockKind::Paragraph, "", "Sideways Latin.")

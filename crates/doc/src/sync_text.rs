@@ -11,12 +11,15 @@
 //! -   Along a linear chain (each change depends exactly on the state before
 //!     it) lengths are simulated from the live state, with no copying. That is
 //!     the common case: a peer typing on top of what this replica has.
-//! -   A change with other dependencies is checked against a **shadow**
+//! -   A change with other dependencies, all known here, reads the live
+//!     length of every text that nothing after its dependencies changed;
+//!     the containers changed in between come from the store's own index.
+//! -   Otherwise it is checked against a **shadow**
 //!     replica checked out at them. Checking out the live document would
 //!     clear its undo history. The shadow is built on first need and kept up
 //!     to date incrementally, and dropped when a packet is refused.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use loro::{
     Container, ContainerID, ExportMode, Frontiers, ID, JsonOpContent, JsonSchema, JsonTextOp,
@@ -25,6 +28,17 @@ use loro::{
 
 use crate::Document;
 use crate::sync::SyncError;
+
+/// What the uncached text lengths of the current version are read from.
+enum Base {
+    /// The live state is at the current version.
+    Live,
+    /// The live state is ahead of the current version; these containers
+    /// changed in between, the rest have their live lengths.
+    Diverged(HashSet<ContainerID>),
+    /// The shadow replica is checked out at the current version.
+    Shadow,
+}
 
 type PeerOf<'a> = &'a dyn Fn(u64) -> Result<u64, SyncError>;
 type Ids = BTreeSet<(u64, i32)>;
@@ -97,6 +111,7 @@ impl Document {
         // Lengths at `frontier`, for lookup only; `None` when they can't be simulated.
         let mut lengths: Option<HashMap<ContainerID, i64>> = Some(HashMap::new());
         let mut shadow_active = false;
+        let mut base = Base::Live;
         let mut done: Vec<usize> = Vec::new();
 
         for (_, peer, counter, i) in order {
@@ -125,19 +140,25 @@ impl Document {
                 .any(|op| matches!(op.content, JsonOpContent::Text(_)));
             if deps != frontier || lengths.is_none() {
                 if has_text {
-                    *touched |= !done.is_empty();
-                    let shadow = self.shadow_for(slot, json, &done, shadow_active)?;
-                    shadow_active = true;
-                    shadow
-                        .checkout(&frontiers(&deps))
-                        .map_err(|_| invalid("dependencies are not in the history"))?;
                     lengths = Some(HashMap::new());
+                    base = if deps.iter().all(|&(p, c)| known_local(p, c)) {
+                        Base::Diverged(self.changed_since(&deps))
+                    } else {
+                        self.checkout_shadow(
+                            slot,
+                            json,
+                            &done,
+                            &mut shadow_active,
+                            touched,
+                            &deps,
+                        )?;
+                        Base::Shadow
+                    };
                 } else {
                     lengths = None;
                 }
             }
             if let Some(cache) = lengths.as_mut() {
-                let source = if shadow_active { slot.as_ref() } else { None };
                 for op in &change.ops {
                     let JsonOpContent::Text(text_op) = &op.content else {
                         continue;
@@ -154,11 +175,34 @@ impl Document {
                         },
                         root => root.clone(),
                     };
-                    let len = cache.entry(cid.clone()).or_insert_with(|| match source {
-                        Some(shadow) => text_len(shadow, &cid),
-                        None => text_len(&self.doc, &cid),
-                    });
-                    apply(text_op, len)?;
+                    if !cache.contains_key(&cid) {
+                        let live = match &base {
+                            Base::Live => true,
+                            Base::Diverged(changed) => !changed.contains(&cid),
+                            Base::Shadow => false,
+                        };
+                        let len = if live {
+                            text_len(&self.doc, &cid)
+                        } else {
+                            if !matches!(base, Base::Shadow) {
+                                // Edited concurrently: read it at the dependencies.
+                                self.checkout_shadow(
+                                    slot,
+                                    json,
+                                    &done,
+                                    &mut shadow_active,
+                                    touched,
+                                    &deps,
+                                )?;
+                                base = Base::Shadow;
+                            }
+                            slot.as_ref().map_or(0, |shadow| text_len(shadow, &cid))
+                        };
+                        cache.insert(cid.clone(), len);
+                    }
+                    if let Some(len) = cache.get_mut(&cid) {
+                        apply(text_op, len)?;
+                    }
                 }
             }
             let end = change
@@ -176,6 +220,41 @@ impl Document {
             }
         }
         Ok(())
+    }
+
+    /// Checks the shadow replica out at `deps`, bringing it up to date first.
+    fn checkout_shadow(
+        &self,
+        slot: &mut Option<LoroDoc>,
+        json: &JsonSchema,
+        done: &[usize],
+        shadow_active: &mut bool,
+        touched: &mut bool,
+        deps: &Ids,
+    ) -> Result<(), SyncError> {
+        *touched |= !done.is_empty();
+        let shadow = self.shadow_for(slot, json, done, *shadow_active)?;
+        *shadow_active = true;
+        shadow
+            .checkout(&frontiers(deps))
+            .map_err(|_| invalid("dependencies are not in the history"))
+    }
+
+    /// The containers that operations after `deps` and up to the live state
+    /// changed. A text outside this set has the same length at `deps` as now.
+    fn changed_since(&self, deps: &Ids) -> HashSet<ContainerID> {
+        let diff = self
+            .doc
+            .find_id_spans_between(&frontiers(deps), &self.doc.oplog_frontiers());
+        let mut changed = HashSet::new();
+        for (peer, span) in diff.forward.iter() {
+            let len = usize::try_from(span.end.saturating_sub(span.start)).unwrap_or(0);
+            changed.extend(
+                self.doc
+                    .get_changed_containers_in(ID::new(*peer, span.start), len),
+            );
+        }
+        changed
     }
 
     /// The shadow replica, holding everything the live document has plus the

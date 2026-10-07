@@ -98,6 +98,8 @@ fn runs(texts: &[&str]) -> (Vec<GlyphRun>, FontStore) {
         .enumerate()
         .map(|(row, text)| {
             let shaped = HarfRust.shape(&ShapeRequest {
+                upright: false,
+                combined: false,
                 text,
                 range: 0..text.len(),
                 context: 0..text.len(),

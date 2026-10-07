@@ -43,6 +43,19 @@ blocks"), so they stay meaningful after any mutation:
 An epilogue then undoes everything, redoes everything and syncs, checking state
 and convergence at each stage.
 
+### Through the facade
+
+`facade.rs` runs byte-string scenarios through the public `reprise` crate, as a host
+would: two sessions that share history (one is the other saved and opened), edits,
+undo and redo, update packets, layout jobs stepped with random budgets and viewports,
+a job interrupted by an edit, save and open, copy and paste, exports, SVG and PNG. It
+checks that every error code is documented, that a refused call changes nothing, that
+any budgets give the pages one unbounded job gives, that an interrupted job is stale
+and a fresh one is current, that replicas converge and lay out identically, that a
+reopened session draws exactly what the original drew, and that output is
+byte-identical when produced twice. Run it with `FACADE=1` on the `explore` example,
+or `REPRISE_FUZZ_FACADE_SEEDS=<count>` on the test.
+
 ## Oracles
 
 Checked after every op (the name is what a failing run prints in brackets):
@@ -144,3 +157,13 @@ a corpus entry under `corpus/regress/` and an explicit regression.
     snapshot panics inside Loro and poisons the document; reopening a history-free
     package aborted on layout (fixed: such an anchor resolves as a tombstone at the
     start of the text).
+
+Gaps it surfaced that the kernel's contract allows, left as they are (see the report):
+
+-   The kernel accepts `InsertText` into a table or row container, or into a cell that
+    holds blocks. That text is never laid out or exported, so it is invisible content.
+    Copying a selection that covers whole cells promotes the table and copies it too.
+-   `Editor::can_redo()` can stay true after a merge while `redo()` returns `false`
+    (a collaborator's edit made the step impossible to redo).
+-   A package embeds only faces with glyphs in the layout, so a style that merely
+    names a face reports `font.fallback` when the package is opened without that face.

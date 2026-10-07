@@ -114,5 +114,12 @@ assert.equal(remote.state().data.blocks.find(b => b.id === node).text, incoming)
 assert.equal(remote.redo_report().data.changed, true);
 remote.set_selection(p(null)); assert.equal(remote.local_selection().data, null);
 remote.free();
+// Run the native packet-golden script through actual WASM bindings.
+const parity = ws.create(p({ document_id: "00112233445566778899aabbccddeeff", peer_id: "1" }));
+const parityNode = parity.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "parity", style: { families: null, size: null, line_height: null } }] })).data.blocks[0];
+parity.apply(p({ commands: [{ kind: "insert-text", node: parityNode, at: 6, text: " אב" }] }));
+const parityPacket = parity.sync_export(p({ since: [] }));
+assert.equal(Buffer.from(parityPacket.data.content.bytes).toString("hex"), fs.readFileSync(path.join(__dirname, "../../reprise/tests/sync_delta.hex"), "utf8").trim());
+parity.free();
 second.free();doc.free();ws.free();
 console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, bytes, and hostile objects passed");

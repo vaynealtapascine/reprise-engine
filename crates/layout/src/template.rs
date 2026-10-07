@@ -25,6 +25,8 @@ pub(crate) struct ResolvedFrame {
     /// Never negative.
     pub depth: Length,
     pub transform: reprise_geom::Matrix,
+    /// The authored writing mode; spiral strips are always horizontal.
+    pub writing_mode: reprise_doc::WritingMode,
 }
 
 impl ResolvedFrame {
@@ -39,6 +41,18 @@ impl ResolvedFrame {
             self.transform
                 .then(&reprise_geom::Matrix::translate(self.x, self.y)),
         )
+    }
+
+    /// The frame as it is placed on `page` in a snapshot.
+    pub fn layout(&self, page: usize) -> crate::FrameLayout {
+        crate::FrameLayout {
+            name: self.name.clone(),
+            role: self.role.clone(),
+            page,
+            to_page: self.to_page(),
+            rect: self.rect(),
+            writing_mode: self.writing_mode,
+        }
     }
 
     /// Whether lines can be put in it: a frame with no depth is full already.

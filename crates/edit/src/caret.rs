@@ -118,7 +118,7 @@ pub struct Hit {
     pub inside: bool,
 }
 
-/// One grapheme as laid out on a line.
+/// One visual text unit on a line: a grapheme, or an atomic combined run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphemeCell {
     /// Its bytes in the block's text.

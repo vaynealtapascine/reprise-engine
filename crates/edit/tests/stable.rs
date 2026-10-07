@@ -135,7 +135,7 @@ fn a_joined_block_maps_to_its_successor() {
     assert_eq!(text(&a, ids[0]), "abcdefgh");
     assert_eq!(
         in_second.resolve(a.document()),
-        Resolution::Moved(caret(ids[0], 5, Affinity::Downstream)),
+        Resolution::Exact(caret(ids[0], 5, Affinity::Downstream)),
         "exact for a join with no later edits"
     );
 }

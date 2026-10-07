@@ -2,6 +2,67 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-07: remaining robustness limits completed on main
+
+Recovered and integrated the vertical worktree's remaining geometry/template
+changes. Version 3 adds actual downward vertical-lr; old templates retain upward
+sideways-lr behavior. Upright runs use UAX #50 and vertical OpenType shaping;
+short combinations fit one em with integer horizontal compression. Shared display
+groups compensate the frame reflection/rotation across SVG, PNG and PDF. Cache
+identity and paragraph continuation track the actual frame mode. The new vertical
+suite pins native/stepped parity, storage and reading-order addresses; the PNGs
+were visually checked. `all` combinations are bounded to four scalars per item.
+
+Binary snapshot preflight checks internal columnar counts and sums retained
+counter lengths across change blocks after bounding KV expansion. Regression
+cases refuse oversized/change-count inconsistencies at document import before
+Loro sees the block. The known unbounded n_changes allocation path is closed.
+Binary compatibility remains separate from preflighted format-2 peer transport.
+
+Split/join operations now save compact character-ID lineage spans.
+Excluded staging commits retain identity history across split undo; undo/redo
+captures explicit aliases for recreated IDs. Fresh carets retain live identities;
+old carets follow those aliases through subsequent ordinary text edits. Stable
+carets follow recreated text through chained structural edits and block cycles;
+end carets anchor to the last character. Exact lineage keeps the original stable
+identity across merges. Anchored insertion boundaries and SHA-256 span digests
+recover redo copies under fresh IDs. Malformed metadata is ignored, competing
+records sort deterministically, and breadth-first traversal visits at most 256
+distinct identities. Atomic combined-digit caret geometry is covered by pointer
+hits and caret-rectangle round trips. Existing authored
+range block policies and concurrent split/join intent anomalies remain explicit.
+
+The final worktree audit recovered later collaboration commits: unchanged-text
+sync validation optimization, structural partition/rejoin soak, packet-byte parity
+and the scripted malformed-peer fixture. The soak now fails on every generated
+edit/undo error. Native clipboard/plain-text tests assert typed refusal of unreadable
+blocks; tagged PDF still renders and structurally checks the readable remainder.
+Main keeps the stronger worker responses and fuzz oracles instead of overwriting
+them with the older worktree versions. Original worktrees/recovery patches remain.
+
+Verification: the complete workspace passed 828 tests (one ignored visual-artifact
+writer), including the widened 2,100-step sync soak (143.79 s) and 2,000-edit
+structural soak (405.92 s). Formatting and strict all-target Clippy passed. All
+required WASM crates check, the actual WASM build and JavaScript smoke pass,
+including native packet bytes; the compiled reference worker passes its effect,
+created-ID, split-selection and image checks. Strict TypeScript compilation and
+generated web declaration parity passed. Vertical PNGs were visually inspected.
+The three existing vertical snapshots add only writing-mode metadata; geometry
+is unchanged. The malformed-peer fixture adds diagnosed readable-remainder
+snapshots rather than normalizing away hostile authored data.
+
+Astra-medium reviewed the completed source and all responses to earlier findings:
+no unresolved concrete multiplayer correctness blocker. This was a read-only
+correctness review, with validation performed by the primary agent. Main reconciles
+the later collab/fuzz branch ancestry after recovering their unique work; original
+worktrees and uncommitted scratch/recovery changes remain intact.
+
+Host-owned transport, authentication, peer identity, resource distribution and
+presence expiry remain explicit integration responsibilities. Concurrent structural
+intent anomalies converge but are not semantically merged; authored ranges retain
+their block policy. Binary compatibility remains trusted, and bounded format 2 is
+the peer transport. These contracts are documented in `docs/collaboration.md`.
+
 ## 2026-10-07: multiplayer hardening consolidated for Reprise
 
 **Consolidation:** `hardening/collab`, `hardening/pdfua`, `hardening/fuzz`,

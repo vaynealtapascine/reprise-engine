@@ -30,8 +30,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DocError, Document, get_str};
 
-/// The version of the stored template envelope.
+/// The version of the stored template envelope, for templates without the
+/// version 3 writing modes.
 const VERSION: u32 = 2;
+/// The envelope version that reads `"vertical-lr"` as the downward mode and
+/// knows `"sideways-lr"`. Written only for templates that use either, so every
+/// other template stays readable by engines that know only version 2.
+const VERSION_MODES: u32 = 3;
 
 /// What the document is being laid out for: the viewport, or the paper. A
 /// layout input, not authored state (05, 38).
@@ -159,10 +164,15 @@ pub enum Rotation {
     },
 }
 
-/// Physical writing axes. Latin glyphs are sideways in vertical modes.
-/// Vertical-rl reads downwards with columns to the left. Vertical-lr uses
-/// the sideways-lr convention: upwards with columns to the right. Upright
-/// CJK and downward vertical-lr need vertical shaping and glyph orientation.
+/// Physical writing axes, as in CSS (see `docs/vertical.md`).
+///
+/// -   `vertical-rl`: lines run down, columns progress to the left.
+/// -   `vertical-lr`: lines run down, columns progress to the right.
+/// -   `sideways-lr`: lines run up, columns progress to the right, and every
+///     glyph is sideways. Version 1 and 2 templates stored this mode as
+///     `"vertical-lr"`; they are read as `SidewaysLr`.
+///
+/// In both vertical modes, glyphs follow the block's `text-orientation`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WritingMode {
@@ -170,6 +180,15 @@ pub enum WritingMode {
     HorizontalTb,
     VerticalRl,
     VerticalLr,
+    SidewaysLr,
+}
+
+impl WritingMode {
+    /// True for the modes whose lines run down a column, where glyphs follow
+    /// `text-orientation`.
+    pub fn is_vertical(self) -> bool {
+        matches!(self, WritingMode::VerticalRl | WritingMode::VerticalLr)
+    }
 }
 
 /// A transform in physical frame coordinates, before placement at (x,y).
@@ -334,6 +353,18 @@ pub struct StoredTemplate {
     pub template: Result<PageTemplate, String>,
 }
 
+/// Before version 3, `"vertical-lr"` meant the upward mode now called
+/// `sideways-lr`; reading it that way keeps stored documents laid out as they
+/// were (34).
+fn legacy_modes(mut template: PageTemplate) -> PageTemplate {
+    for frame in &mut template.frames {
+        if frame.writing_mode == WritingMode::VerticalLr {
+            frame.writing_mode = WritingMode::SidewaysLr;
+        }
+    }
+    template
+}
+
 /// Which template layout uses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TemplateChoice {
@@ -358,8 +389,14 @@ impl Document {
     /// same way on every replica. It does not change which template is in use;
     /// see [`Document::use_page_template`].
     pub fn define_page_template(&self, template: &PageTemplate) -> Result<(), DocError> {
+        let modes = template.frames.iter().any(|f| {
+            matches!(
+                f.writing_mode,
+                WritingMode::VerticalLr | WritingMode::SidewaysLr
+            )
+        });
         let json = serde_json::to_string(&Envelope {
-            version: VERSION,
+            version: if modes { VERSION_MODES } else { VERSION },
             template: template.clone(),
         })
         .map_err(|e| DocError::Store(e.to_string()))?;
@@ -412,7 +449,8 @@ impl Document {
                     other => format!("{:?}", other.get_deep_value()),
                 };
                 let template = match serde_json::from_str::<Envelope>(&raw) {
-                    Ok(e) if (1..=VERSION).contains(&e.version) => Ok(e.template),
+                    Ok(e) if (1..=VERSION).contains(&e.version) => Ok(legacy_modes(e.template)),
+                    Ok(e) if e.version == VERSION_MODES => Ok(e.template),
                     _ => Err(raw),
                 };
                 Some(StoredTemplate { name, template })
@@ -611,6 +649,20 @@ mod geometry_storage_tests {
         assert_eq!(doc.page_template(), TemplateChoice::Template(t.clone()));
         let raw = get_str(&doc.templates_map(), &t.name).unwrap();
         assert_eq!(serde_json::from_str::<Envelope>(&raw).unwrap().version, 2);
+        for mode in [WritingMode::VerticalLr, WritingMode::SidewaysLr] {
+            let mut moded = t.clone();
+            moded.name = format!("{mode:?}");
+            moded.frames[1].writing_mode = mode;
+            doc.define_page_template(&moded).unwrap();
+            let raw = get_str(&doc.templates_map(), &moded.name).unwrap();
+            assert_eq!(serde_json::from_str::<Envelope>(&raw).unwrap().version, 3);
+            let read = doc
+                .page_templates()
+                .into_iter()
+                .find(|s| s.name == moded.name)
+                .unwrap();
+            assert_eq!(read.template, Ok(moded));
+        }
         let replica = doc.fork(2).unwrap();
         assert_eq!(replica.page_template(), doc.page_template());
         let mut legacy = serde_json::to_value(Envelope {
@@ -633,5 +685,76 @@ mod geometry_storage_tests {
                 .iter()
                 .any(|s| s.name == "unknown" && s.template == Err(raw.clone()))
         );
+    }
+}
+
+#[cfg(test)]
+mod writing_mode_storage_tests {
+    use super::*;
+
+    fn moded(mode: WritingMode) -> PageTemplate {
+        let mut t = PageTemplate::builtin();
+        t.name = "moded".into();
+        t.frames[0].writing_mode = mode;
+        t
+    }
+
+    fn stored(version: u32, mode: &str) -> String {
+        let mut value = serde_json::to_value(Envelope {
+            version: 2,
+            template: moded(WritingMode::VerticalRl),
+        })
+        .unwrap();
+        value["version"] = serde_json::json!(version);
+        value["template"]["frames"][0]["writing_mode"] = serde_json::json!(mode);
+        value.to_string()
+    }
+
+    fn read(raw: &str) -> Result<PageTemplate, String> {
+        let doc = Document::new(1).unwrap();
+        doc.store_raw_page_template("moded", raw).unwrap();
+        doc.page_templates().remove(0).template
+    }
+
+    #[test]
+    fn version_two_vertical_lr_is_read_as_the_upward_sideways_mode() {
+        for version in [1, 2] {
+            let t = read(&stored(version, "vertical-lr")).unwrap();
+            assert_eq!(t.frames[0].writing_mode, WritingMode::SidewaysLr);
+            let t = read(&stored(version, "vertical-rl")).unwrap();
+            assert_eq!(t.frames[0].writing_mode, WritingMode::VerticalRl);
+        }
+        let t = read(&stored(3, "vertical-lr")).unwrap();
+        assert_eq!(t.frames[0].writing_mode, WritingMode::VerticalLr);
+        let t = read(&stored(3, "sideways-lr")).unwrap();
+        assert_eq!(t.frames[0].writing_mode, WritingMode::SidewaysLr);
+    }
+
+    #[test]
+    fn templates_without_new_modes_stay_version_two_for_older_engines() {
+        let doc = Document::new(1).unwrap();
+        for (mode, version) in [
+            (WritingMode::HorizontalTb, 2),
+            (WritingMode::VerticalRl, 2),
+            (WritingMode::VerticalLr, 3),
+            (WritingMode::SidewaysLr, 3),
+        ] {
+            doc.define_page_template(&moded(mode)).unwrap();
+            let raw = get_str(&doc.templates_map(), "moded").unwrap();
+            let envelope: Envelope = serde_json::from_str(&raw).unwrap();
+            assert_eq!(envelope.version, version, "{mode:?}");
+            assert_eq!(doc.page_template(), TemplateChoice::Template(moded(mode)));
+        }
+    }
+
+    #[test]
+    fn unknown_versions_and_modes_are_kept_unread() {
+        for raw in [
+            stored(4, "vertical-lr"),
+            stored(3, "sideways-rl"),
+            stored(0, "vertical-rl"),
+        ] {
+            assert_eq!(read(&raw), Err(raw.clone()));
+        }
     }
 }

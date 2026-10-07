@@ -82,7 +82,20 @@ impl<'a> Navigator<'a> {
             .iter()
             .map(|(n, &i)| {
                 let block = &snapshot.blocks[i];
-                (*n, BlockInfo::new(&block.text, block.base_level))
+                let mut info = BlockInfo::new(&block.text, block.base_level);
+                let mut combined: Vec<_> = block
+                    .lines
+                    .iter()
+                    .flat_map(|l| &l.runs)
+                    .filter(|r| r.combined)
+                    .map(|r| r.range.clone())
+                    .collect();
+                combined.sort_by_key(|r| r.start);
+                info.boundaries.retain(|b| {
+                    let i = combined.partition_point(|r| r.end <= *b);
+                    !combined.get(i).is_some_and(|r| r.start < *b && *b < r.end)
+                });
+                (*n, info)
             })
             .collect();
         let models = position

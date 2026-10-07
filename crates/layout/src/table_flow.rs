@@ -27,7 +27,7 @@ use crate::region::Bounded;
 use crate::{BlockLayout, Diagnostic, LineLayout, Subject, codes};
 use reprise_compose::Measure;
 use reprise_diag::Severity;
-use reprise_doc::NodeId;
+use reprise_doc::{Document, NodeId};
 use reprise_geom::Length;
 
 #[derive(Clone)]
@@ -39,6 +39,8 @@ pub(crate) struct Cell {
     pub column: usize,
     pub colspan: usize,
     pub blocks: Vec<Prepared>,
+    pub ctx: reprise_doc::ResolutionContext,
+    pub oriented: std::cell::RefCell<Vec<Vec<(reprise_doc::WritingMode, Prepared)>>>,
 }
 
 #[derive(Clone)]
@@ -135,6 +137,7 @@ impl Flow<'_> {
     /// Places every group of a table, in order.
     pub(crate) fn place_groups(
         &mut self,
+        doc: &Document,
         table: NodeId,
         mut groups: Vec<Group>,
         widths: &[Length],
@@ -145,16 +148,25 @@ impl Flow<'_> {
         let mut repeat = Repeat::new(headers.len(), self.used() > Length::ZERO);
         // Header groups are kept for the copies, so they are placed from clones.
         for (index, group) in headers.iter().enumerate() {
-            self.place_group(table, group.clone(), index, &headers, widths, &mut repeat);
+            self.place_group(
+                doc,
+                table,
+                group.clone(),
+                index,
+                &headers,
+                widths,
+                &mut repeat,
+            );
         }
         for group in bodies {
-            self.place_group(table, group, usize::MAX, &headers, widths, &mut repeat);
+            self.place_group(doc, table, group, usize::MAX, &headers, widths, &mut repeat);
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn place_group(
         &mut self,
+        doc: &Document,
         table: NodeId,
         owned: Group,
         index: usize,
@@ -185,6 +197,7 @@ impl Flow<'_> {
             if repeat.pending && !group.header {
                 repeat.pending = false;
                 if let Some(c) = self.compose_header(
+                    doc,
                     groups,
                     repeat,
                     widths,
@@ -200,6 +213,7 @@ impl Flow<'_> {
                 }
             }
             let (mut next, mut fragment) = self.compose_fragment(
+                doc,
                 group,
                 widths,
                 &state,
@@ -214,6 +228,7 @@ impl Flow<'_> {
                 top = plain_top;
                 self.header_unrepeated(table, repeat, "a repeated header would leave no room");
                 (next, fragment) = self.compose_fragment(
+                    doc,
                     group,
                     widths,
                     &state,
@@ -235,6 +250,7 @@ impl Flow<'_> {
                     Length::ZERO
                 };
                 let (_, fresh) = self.compose_fragment(
+                    doc,
                     group,
                     widths,
                     &state,
@@ -369,6 +385,7 @@ impl Flow<'_> {
     #[allow(clippy::too_many_arguments)]
     fn compose_header(
         &self,
+        doc: &Document,
         groups: &[Group],
         repeat: &Repeat,
         widths: &[Length],
@@ -383,6 +400,7 @@ impl Flow<'_> {
         let mut blocks = Vec::new();
         for group in groups.iter().take(repeat.groups) {
             let (_, fragment) = self.compose_fragment(
+                doc,
                 group,
                 widths,
                 &State::start(group),
@@ -431,6 +449,7 @@ impl Flow<'_> {
     #[allow(clippy::too_many_arguments)]
     fn compose_fragment(
         &self,
+        doc: &Document,
         group: &Group,
         widths: &[Length],
         state: &State,
@@ -476,6 +495,7 @@ impl Flow<'_> {
                     *c = true;
                 }
                 let out = self.compose_cell(
+                    doc,
                     cell,
                     widths,
                     cursor,
@@ -533,6 +553,7 @@ impl Flow<'_> {
     #[allow(clippy::too_many_arguments)]
     fn compose_cell(
         &self,
+        doc: &Document,
         cell: &Cell,
         widths: &[Length],
         mut cursor: (usize, usize),
@@ -551,6 +572,42 @@ impl Flow<'_> {
         let mut bottom = y0;
         let mut lines = Vec::new();
         while let Some(p) = cell.blocks.get(cursor.0) {
+            let mode = self
+                .snapshot
+                .frame(frame_index)
+                .map(|f| f.writing_mode)
+                .unwrap_or_default();
+            // At most one preparation per block and destination mode, even if
+            // a long cell continues through hundreds of alternating frames.
+            let mut variants = cell.oriented.borrow_mut();
+            let p = if mode != cell.ctx.writing_mode {
+                let entries = &mut variants[cursor.0];
+                let index = match entries.iter().position(|(m, _)| *m == mode) {
+                    Some(index) => index,
+                    None => {
+                        let mut ctx = cell.ctx.clone();
+                        ctx.writing_mode = mode;
+                        let Some(mut prepared) = crate::flow::prepare_cached(
+                            self.engine,
+                            doc,
+                            p.node(),
+                            &ctx,
+                            diagnostics,
+                            self.evaluation,
+                        ) else {
+                            cursor.0 += 1;
+                            cursor.1 = 0;
+                            continue;
+                        };
+                        prepared.fit_image_width(width, diagnostics);
+                        entries.push((mode, prepared));
+                        entries.len() - 1
+                    }
+                };
+                &entries[index].1
+            } else {
+                p
+            };
             let subject = Subject::Node(p.node());
             if total > frame_width {
                 diagnostics.push(Diagnostic::new(

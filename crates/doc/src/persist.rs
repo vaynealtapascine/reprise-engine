@@ -112,9 +112,13 @@ fn preflight_snapshot(bytes: &[u8]) -> Result<(), DocError> {
     }
     let mut input = Input(bytes.get(22..).ok_or_else(invalid)?);
     let mut expanded = 0_usize;
-    for _ in 0..3 {
+    let mut oplog = &[][..];
+    for index in 0..3 {
         let len = input.u32()?;
         let table = input.take(len)?;
+        if index == 0 {
+            oplog = table;
+        }
         if !table.is_empty() && table != b"E" {
             preflight_table(table, &mut expanded)?;
         }
@@ -122,12 +126,83 @@ fn preflight_snapshot(bytes: &[u8]) -> Result<(), DocError> {
     if !input.0.is_empty() {
         return Err(invalid());
     }
+    preflight_change_counts(oplog)?;
+    Ok(())
+}
+
+/// Read the columnar block's allocation-driving counts before Loro reads its
+/// header. KV expansion has already been bounded above. Sum across blocks:
+/// bounding each block alone would permit many independent large allocations.
+fn preflight_change_counts(table: &[u8]) -> Result<(), DocError> {
+    use std::ops::Bound::Unbounded;
+    if table.is_empty() || table == b"E" {
+        return Ok(());
+    }
+    let mut store = loro_kv_store::mem_store::MemKvConfig::default().build();
+    store
+        .import_all(bytes::Bytes::copy_from_slice(table))
+        .map_err(|_| invalid())?;
+    let mut total = 0_u64;
+    for (key, value) in store.scan(Unbounded, Unbounded) {
+        // The change store also contains version/frontier metadata under
+        // non-ID keys; only peer(u64)+counter(u32) keys hold change blocks.
+        if key.len() != 12 {
+            continue;
+        }
+        let mut input = Input(&value);
+        let start = input.var_u32()?;
+        let len = input.var_u32()?;
+        let lamport = input.var_u32()?;
+        let lamport_len = input.var_u32()?;
+        let changes = input.var_u32()?;
+        if changes == 0
+            || changes > len
+            || len > MAX_PERSIST_OPS
+            || start.checked_add(len).is_none_or(|n| n >= 1 << 30)
+            || lamport
+                .checked_add(lamport_len)
+                .is_none_or(|n| n >= 1 << 30)
+        {
+            return Err(invalid());
+        }
+        total = total.checked_add(len).ok_or_else(invalid)?;
+        if total > MAX_PERSIST_OPS {
+            return Err(invalid());
+        }
+        // Postcard's borrowed byte arrays have no allocation. Require the
+        // complete pinned schema, including a header large enough to encode
+        // at least one length byte per additional change.
+        for field in 0..8 {
+            let bytes = input.var_u32()?;
+            let data = input.take(usize::try_from(bytes).map_err(|_| invalid())?)?;
+            if field == 0 && data.len() < usize::try_from(changes).map_err(|_| invalid())? {
+                return Err(invalid());
+            }
+        }
+        if !input.0.is_empty() {
+            return Err(invalid());
+        }
+    }
     Ok(())
 }
 
 struct Input<'a>(&'a [u8]);
 
 impl<'a> Input<'a> {
+    fn var_u32(&mut self) -> Result<u64, DocError> {
+        let mut value = 0_u64;
+        for shift in (0..35).step_by(7) {
+            let byte = self.byte()?;
+            if shift == 28 && byte > 15 {
+                return Err(invalid());
+            }
+            value |= u64::from(byte & 127) << shift;
+            if byte & 128 == 0 {
+                return Ok(value);
+            }
+        }
+        Err(invalid())
+    }
     fn take(&mut self, len: usize) -> Result<&'a [u8], DocError> {
         let head = self.0.get(..len).ok_or_else(invalid)?;
         self.0 = self.0.get(len..).ok_or_else(invalid)?;
@@ -342,6 +417,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn columnar_change_counts_are_bounded_before_decode() {
+        fn encoded(count: u32, len: u32) -> Vec<u8> {
+            fn var(out: &mut Vec<u8>, mut n: u32) {
+                loop {
+                    let b = (n & 127) as u8;
+                    n >>= 7;
+                    out.push(b | if n == 0 { 0 } else { 128 });
+                    if n == 0 {
+                        break;
+                    }
+                }
+            }
+            let mut out = Vec::new();
+            for n in [0, len, 0, len, count] {
+                var(&mut out, n);
+            }
+            // One tiny header and seven empty borrowed fields.
+            out.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0, 0]);
+            out
+        }
+        for block in [
+            encoded(u32::MAX, 1),
+            encoded(1, u32::MAX),
+            encoded(1000, 1000),
+        ] {
+            let mut store = loro_kv_store::mem_store::MemKvConfig::default().build();
+            store.set(&[1; 12], bytes::Bytes::from(block));
+            let table = store.export_all();
+            assert!(preflight_change_counts(&table).is_err());
+            let mut snapshot = b"loro".to_vec();
+            snapshot.extend_from_slice(&[0; 16]);
+            snapshot.extend_from_slice(&[0, 3]);
+            snapshot.extend_from_slice(&(table.len() as u32).to_le_bytes());
+            snapshot.extend_from_slice(&table);
+            snapshot.extend_from_slice(&[0; 8]);
+            assert!(Document::import(&snapshot, 2).is_err());
+        }
+        let mut store = loro_kv_store::mem_store::MemKvConfig::default().build();
+        for key in [[1; 12], [2; 12]] {
+            store.set(&key, bytes::Bytes::from(encoded(1, 3_000_000)));
+        }
+        assert!(preflight_change_counts(&store.export_all()).is_err());
+    }
+
+    #[test]
     fn bounded_lz4_rejects_bombs_and_counts_literals_and_matches() {
         let bomb = [
             vec![4, 34, 77, 24, 0x68, 0x70],
@@ -476,7 +596,7 @@ version = \"1.16.2\""
         );
         let snapshot = doc.export(PersistenceMode::History);
         let mut trailing = snapshot.clone();
-        trailing.extend_from_slice(b" trailing");
+        trailing.extend_from_slice(b"\0trailing");
         assert!(Document::import(&trailing, 1).is_err(), "trailing bytes");
         let mut twice = snapshot.clone();
         twice.extend_from_slice(&snapshot);

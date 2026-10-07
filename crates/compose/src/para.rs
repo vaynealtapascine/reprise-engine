@@ -283,6 +283,9 @@ impl<'r, 'a> Para<'r, 'a> {
                     .copied()
                     .collect();
                 (!glyphs.is_empty()).then(|| ShapedRun {
+                    upright: run.upright,
+                    combined: run.combined,
+                    horizontal_scale: run.horizontal_scale,
                     range,
                     face: run.face.clone(),
                     size: run.size,

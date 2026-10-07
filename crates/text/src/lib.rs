@@ -103,6 +103,8 @@ impl fmt::Debug for TextId {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Anchor {
     cursor: Cursor,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    end_after: bool,
 }
 
 /// Where an anchor resolved to.
@@ -213,15 +215,39 @@ impl Text {
     pub fn anchor(&self, at: usize, affinity: Affinity) -> Result<Anchor, TextError> {
         self.check_boundary(at)?;
         let pos = self.to_unicode(at)?;
+        let cursor = if pos > 0 && affinity == Affinity::Before {
+            self.text.get_cursor(pos - 1, Side::Right)
+        } else {
+            self.text.get_cursor(pos, Side::Left)
+        };
+        cursor
+            .map(|cursor| Anchor {
+                cursor,
+                end_after: false,
+            })
+            .ok_or(TextError::BadOffset(at))
+    }
+
+    /// A UI caret anchor that retains character identity through structural
+    /// transfers, including EOF. Authored ranges use `anchor` and retain their
+    /// legacy raw-cursor representation and block-local policy.
+    pub fn anchor_for_transfer(&self, at: usize, affinity: Affinity) -> Result<Anchor, TextError> {
+        self.check_boundary(at)?;
+        let pos = self.to_unicode(at)?;
         // A Loro cursor attaches to the character at `pos`. Side::Left sits before
         // it and Side::Right after it, so "stick to the previous character" is
         // the character at pos - 1 with Side::Right.
         let cursor = match affinity {
-            Affinity::Before if pos > 0 => self.text.get_cursor(pos - 1, Side::Right),
+            _ if pos > 0 && (affinity == Affinity::Before || pos == self.text.len_unicode()) => {
+                self.text.get_cursor(pos - 1, Side::Right)
+            }
             _ => self.text.get_cursor(pos, Side::Left),
         };
         cursor
-            .map(|cursor| Anchor { cursor })
+            .map(|cursor| Anchor {
+                cursor,
+                end_after: pos == self.text.len_unicode() && affinity == Affinity::After,
+            })
             .ok_or(TextError::BadOffset(at))
     }
 
@@ -256,7 +282,9 @@ impl Text {
                 .convert_pos(unicode, PosType::Unicode, PosType::Bytes)
                 .ok_or(TextError::TextGone)?
         };
-        Ok(if tombstoned {
+        Ok(if anchor.end_after && !tombstoned {
+            Resolved::Live(self.text.len_utf8())
+        } else if tombstoned {
             Resolved::Tombstoned(bytes)
         } else {
             Resolved::Live(bytes)
@@ -325,11 +353,38 @@ impl Anchor {
 
     /// Bytes for storing the anchor inside the document.
     pub fn encode(&self) -> Vec<u8> {
+        if self.end_after {
+            [b"RPAE\x01".as_slice(), self.cursor.encode().as_slice()].concat()
+        } else {
+            self.cursor.encode()
+        }
+    }
+
+    /// Raw cursor identity for authored character-lineage records.
+    pub fn cursor_bytes(&self) -> Vec<u8> {
         self.cursor.encode()
     }
 
+    /// Retain end insertion affinity while remapping a character identity.
+    pub fn remapped(&self, bytes: &[u8]) -> Option<Anchor> {
+        Some(Anchor {
+            cursor: Cursor::decode(bytes).ok()?,
+            end_after: self.end_after,
+        })
+    }
+
     pub fn decode(bytes: &[u8]) -> Option<Anchor> {
-        Cursor::decode(bytes).ok().map(|cursor| Anchor { cursor })
+        let (bytes, end_after) = if bytes.starts_with(b"RPAE") {
+            if bytes.get(4) != Some(&1) {
+                return None;
+            }
+            (bytes.get(5..)?, true)
+        } else {
+            (bytes, false)
+        };
+        Cursor::decode(bytes)
+            .ok()
+            .map(|cursor| Anchor { cursor, end_after })
     }
 }
 
@@ -351,6 +406,39 @@ mod tests {
             text.resolve(a).unwrap().offset(),
             text.resolve(b).unwrap().offset(),
         )
+    }
+
+    #[test]
+    fn end_affinity_survives_encoding_and_remote_append() {
+        let (doc, text) = setup("abc");
+        doc.commit();
+        let before = Anchor::decode(&text.anchor(3, Affinity::Before).unwrap().encode()).unwrap();
+        let after = Anchor::decode(&text.anchor(3, Affinity::After).unwrap().encode()).unwrap();
+        let transferred = Anchor::decode(
+            &text
+                .anchor_for_transfer(3, Affinity::After)
+                .unwrap()
+                .encode(),
+        )
+        .unwrap();
+        assert!(
+            !text
+                .anchor(3, Affinity::After)
+                .unwrap()
+                .encode()
+                .starts_with(b"RPAE")
+        );
+        let remote = LoroDoc::new();
+        remote
+            .import(&doc.export(loro::ExportMode::Snapshot).unwrap())
+            .unwrap();
+        remote.get_text("t").insert(3, "d").unwrap();
+        remote.commit();
+        doc.import(&remote.export(loro::ExportMode::Snapshot).unwrap())
+            .unwrap();
+        assert_eq!(text.resolve(&before).unwrap(), Resolved::Live(3));
+        assert_eq!(text.resolve(&after).unwrap(), Resolved::Live(4));
+        assert_eq!(text.resolve(&transferred).unwrap(), Resolved::Live(4));
     }
 
     #[test]

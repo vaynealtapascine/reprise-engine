@@ -12,7 +12,7 @@ use reprise_compose::Explanation;
 use reprise_diag::{Code, Note, Severity};
 use reprise_doc::{
     BlockKind, ComputedStyle, FrameRole, Medium, NodeId, RangeId, RelationId, Revision, SchemaId,
-    SnapshotContent,
+    SnapshotContent, WritingMode,
 };
 use reprise_font::FaceId;
 use reprise_geom::{FrameSpace, Length, LineSpace, Matrix, PageSpace, Rect, Transform};
@@ -95,6 +95,15 @@ pub struct FrameLayout {
     pub to_page: Transform<FrameSpace, PageSpace>,
     /// The frame's extent; its origin is the frame's start corner.
     pub rect: Rect<FrameSpace>,
+    /// How glyphs sit in the frame's lines (20): needed to draw upright runs
+    /// and the reflected `vertical-lr` frame map. Left out of JSON when
+    /// horizontal.
+    #[serde(skip_serializing_if = "is_horizontal")]
+    pub writing_mode: WritingMode,
+}
+
+fn is_horizontal(mode: &WritingMode) -> bool {
+    *mode == WritingMode::HorizontalTb
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -165,6 +174,12 @@ pub struct LineLayout {
 /// A run of glyphs placed on a line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PositionedRun {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub upright: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub combined: bool,
+    #[serde(skip)]
+    pub horizontal_scale: reprise_geom::Fixed,
     pub range: Range<usize>,
     pub face: FaceId,
     pub size: Length,

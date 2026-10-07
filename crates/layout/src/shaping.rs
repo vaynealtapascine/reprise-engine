@@ -102,6 +102,8 @@ pub(crate) fn shape_request(
         return Vec::new();
     };
     adapter.shape(&ShapeRequest {
+        upright: item.upright,
+        combined: item.combined,
         text,
         range,
         context: 0..text.len(),
@@ -142,16 +144,19 @@ pub(crate) fn assemble(
             .iter_mut()
             .map(std::mem::take)
             .collect();
-        if item.direction() == InlineDirection::Rtl {
+        if item.direction() == InlineDirection::Rtl && !item.upright {
             parts.reverse();
         }
-        runs.push(ShapedRun {
+        runs.push(reprise_shape::combine_run(ShapedRun {
+            upright: item.upright,
+            combined: item.combined,
+            horizontal_scale: reprise_geom::Fixed::ONE,
             range: item.range.start..item.range.end.min(text_len),
             face: item.face.clone(),
             size: item.size,
             level: item.level,
             glyphs: parts.concat(),
-        });
+        }));
         at = end;
     }
     ShapedText { runs }

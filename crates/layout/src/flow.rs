@@ -450,10 +450,10 @@ impl Flow<'_> {
                     crate::table_flow::Repeat::new(headers.len(), self.used() > Length::ZERO)
                 });
                 if let Some(group) = headers.get(*next_header).cloned() {
-                    self.place_group(*node, group, *next_header, headers, widths, repeat);
+                    self.place_group(doc, *node, group, *next_header, headers, widths, repeat);
                     *next_header += 1;
                 } else if let Some(group) = bodies.pop_front() {
-                    self.place_group(*node, group, usize::MAX, headers, widths, repeat);
+                    self.place_group(doc, *node, group, usize::MAX, headers, widths, repeat);
                 }
                 return *next_header >= headers.len() && bodies.is_empty();
             }
@@ -490,13 +490,7 @@ impl Flow<'_> {
             height: self.template.height,
         });
         for frame in &self.template.frames {
-            self.snapshot.frames.push(FrameLayout {
-                name: frame.name.clone(),
-                role: frame.role.clone(),
-                page,
-                to_page: frame.to_page(),
-                rect: frame.rect(),
-            });
+            self.snapshot.frames.push(frame.layout(page));
             self.fills.push(Fill {
                 used: Length::ZERO,
                 empty: true,
@@ -678,6 +672,7 @@ pub(crate) fn resolution_context(
         ctx = ctx.with_named_frame(&f.name, Extent::definite(f.width, f.depth));
     }
     if let Some(f) = frame {
+        ctx.writing_mode = f.writing_mode;
         ctx = ctx.with_current_frame(&f.name, Extent::definite(f.width, f.depth));
     }
     ctx.with_block(Extent::auto_height(width))
@@ -1100,6 +1095,9 @@ fn line_layout(
         .map(|run| {
             let width = run.width();
             let placed = PositionedRun {
+                upright: run.upright,
+                horizontal_scale: run.horizontal_scale,
+                combined: run.combined,
                 range: run.range,
                 face: run.face,
                 size: run.size,
@@ -1205,6 +1203,9 @@ mod tests {
 
     fn synthetic_run(clusters: &[u32]) -> ShapedRun {
         ShapedRun {
+            upright: false,
+            combined: false,
+            horizontal_scale: reprise_geom::Fixed::ONE,
             range: 0..8,
             face: FaceId {
                 family: "test".into(),
@@ -1379,6 +1380,7 @@ mod tests {
             y: Length::MAX,
             width: Length::MAX,
             depth: Length::ZERO,
+            writing_mode: reprise_doc::WritingMode::HorizontalTb,
         };
         let template = ResolvedTemplate {
             name: "extreme".into(),

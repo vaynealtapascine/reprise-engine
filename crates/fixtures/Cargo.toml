@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 reprise-geom.workspace = true
 reprise-compose.workspace = true
-reprise-doc.workspace = true
+reprise-doc = { workspace = true, features = ["hostile-peer"] }
 reprise-font.workspace = true
 reprise-layout.workspace = true
 reprise-plugin.workspace = true

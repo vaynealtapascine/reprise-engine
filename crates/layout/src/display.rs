@@ -6,7 +6,8 @@
 use reprise_compose::BreakReason;
 use reprise_diag::Severity;
 use reprise_display::{Color, DisplayList, Glyph, GlyphRun, Item, Layer, Path, Stroke};
-use reprise_geom::{FrameSpace, Length, Point, Rect};
+use reprise_doc::WritingMode;
+use reprise_geom::{FrameSpace, Length, Matrix, Point, Rect};
 
 use crate::{LayoutSnapshot, LineLayout, PositionedRun, RelationStatus, Resolution, Subject};
 
@@ -208,10 +209,14 @@ impl LayoutSnapshot {
                         child = child.saturating_add(1);
                     }
                     for run in &line.runs {
+                        let mut path = vec![*group, child];
+                        if glyph_transform(frame.writing_mode, run.upright).is_some() {
+                            path.push(0);
+                        }
                         addresses.entry(at).or_default().push(PdfReadingRun {
                             run: reprise_display::pdf::ReadingRun {
                                 page: frame.page,
-                                path: vec![*group, child],
+                                path,
                             },
                             line: at,
                             bytes: Some(run.range.clone()),
@@ -229,10 +234,19 @@ impl LayoutSnapshot {
             {
                 for line in block.lines.iter().filter(|l| l.frame == frame_index) {
                     let items = usize::from(block.image.is_some()) + line.runs.len();
-                    for _ in 0..items {
+                    for item in 0..items {
+                        let mut path = vec![*group, child];
+                        if let Some(run) = line
+                            .runs
+                            .get(item.saturating_sub(usize::from(block.image.is_some())))
+                            && (block.image.is_none() || item > 0)
+                            && glyph_transform(frame.writing_mode, run.upright).is_some()
+                        {
+                            path.push(0);
+                        }
                         copies.push(reprise_display::pdf::ReadingRun {
                             page: frame.page,
-                            path: vec![*group, child],
+                            path,
                         });
                         child = child.saturating_add(1);
                     }
@@ -314,7 +328,35 @@ impl LayoutSnapshot {
                         }
                     }
                     for run in &line.runs {
-                        children.push(Item::Glyphs(glyph_run(run, line, &block.text)));
+                        let mut glyphs = glyph_run(run, line, &block.text);
+                        if let Some(transform) = glyph_transform(frame.writing_mode, run.upright) {
+                            if run.upright && frame.writing_mode == WritingMode::VerticalLr {
+                                for glyph in &mut glyphs.glyphs {
+                                    glyph.y = line.baseline + (line.baseline - glyph.y);
+                                }
+                            }
+                            let transform = if run.combined {
+                                Matrix::scale(run.horizontal_scale, reprise_geom::Fixed::ONE)
+                                    .then(&transform)
+                            } else {
+                                transform
+                            };
+                            let inverse = transform
+                                .inverse()
+                                .expect("quarter turn/reflection is invertible");
+                            for glyph in &mut glyphs.glyphs {
+                                let (x, y) = inverse.apply(glyph.x, glyph.y);
+                                glyph.x = x;
+                                glyph.y = y;
+                            }
+                            children.push(Item::Group {
+                                transform,
+                                clip: None,
+                                items: vec![Item::Glyphs(glyphs)],
+                            });
+                        } else {
+                            children.push(Item::Glyphs(glyphs));
+                        }
                     }
                 }
             }
@@ -425,6 +467,15 @@ impl LayoutSnapshot {
                 .collect(),
             Some(Resolution::Snapshot(_) | Resolution::Page(_)) | None => Vec::new(),
         }
+    }
+}
+
+fn glyph_transform(mode: WritingMode, upright: bool) -> Option<Matrix> {
+    match (mode, upright) {
+        (WritingMode::VerticalRl, true) => Some(Matrix::rotate_quarter(3)),
+        (WritingMode::VerticalLr, true) => Some(Matrix::transpose()),
+        (WritingMode::VerticalLr, false) => Some(Matrix::mirror_y()),
+        _ => None,
     }
 }
 

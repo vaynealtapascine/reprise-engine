@@ -54,6 +54,7 @@ mod sync_tests;
 mod sync_text;
 mod table;
 mod table_grid;
+mod transfers;
 
 pub use changes::ChangeReport;
 pub use context::ResolutionContext;
@@ -230,6 +231,7 @@ pub struct Document {
     /// past versions (see `sync`). Checking out `doc` itself would clear
     /// its undo history.
     shadow: std::sync::Mutex<Option<LoroDoc>>,
+    lineage_pending: std::sync::Mutex<Vec<(NodeId, String, String)>>,
 }
 
 impl Document {
@@ -237,6 +239,7 @@ impl Document {
         Document {
             doc,
             shadow: std::sync::Mutex::new(None),
+            lineage_pending: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -272,6 +275,7 @@ impl Document {
 
     pub fn commit(&self) {
         self.doc.commit();
+        self.commit_lineage();
     }
 
     pub fn revision(&self) -> Revision {

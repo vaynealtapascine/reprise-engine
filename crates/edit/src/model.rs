@@ -21,7 +21,8 @@ use crate::caret::{Affinity, GraphemeCell};
 
 /// What the navigator needs to know about a block's text.
 pub(crate) struct BlockInfo {
-    /// Every grapheme boundary, `0` and the length included.
+    /// Every visual unit boundary, `0` and the length included; combined runs
+    /// are atomic, so their interior grapheme boundaries are omitted.
     pub boundaries: Vec<usize>,
     /// The paragraph direction actually used by layout, from its base level.
     pub rtl: bool,
@@ -330,6 +331,16 @@ pub(crate) fn gap(a: Length, b: Length, v: Length) -> i64 {
 
 /// The cells of one run, appended in visual order.
 fn run_cells(run: &reprise_layout::PositionedRun, info: &BlockInfo, out: &mut Vec<GraphemeCell>) {
+    if run.combined {
+        out.push(GraphemeCell {
+            range: run.range.clone(),
+            x0: run.x,
+            x1: run.x + run.width,
+            level: run.level,
+        });
+        return;
+    }
+
     let rtl = run.level % 2 == 1;
     let range = &run.range;
     if range.start >= range.end {

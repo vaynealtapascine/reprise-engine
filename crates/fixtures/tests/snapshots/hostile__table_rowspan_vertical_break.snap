@@ -60,7 +60,8 @@ expression: snapshot.to_json()
         },
         "width": 122880,
         "height": 102400
-      }
+      },
+      "writing_mode": "vertical-rl"
     },
     {
       "name": "vertical",
@@ -83,7 +84,8 @@ expression: snapshot.to_json()
         },
         "width": 122880,
         "height": 102400
-      }
+      },
+      "writing_mode": "vertical-rl"
     }
   ],
   "blocks": [

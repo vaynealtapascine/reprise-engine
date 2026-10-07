@@ -253,6 +253,8 @@ pub(crate) fn quote(s: &str) -> String {
 /// style that only uses `pt` and `em` resolves the same in every context.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResolutionContext {
+    /// Writing mode of the frame being composed; part of preparation identity.
+    pub writing_mode: crate::WritingMode,
     pub medium: Extent,
     pub page: Extent,
     /// The frame the block is being laid out in.

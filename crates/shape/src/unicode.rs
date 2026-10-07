@@ -178,6 +178,9 @@ mod tests {
                 .enumerate()
                 .filter(|(index, _)| active_indices.contains(index))
                 .map(|(_, (byte, c))| crate::ShapedRun {
+                    upright: false,
+                    combined: false,
+                    horizontal_scale: reprise_geom::Fixed::ONE,
                     range: byte..byte + c.len_utf8(),
                     face: reprise_font::FaceId {
                         family: "conformance".into(),

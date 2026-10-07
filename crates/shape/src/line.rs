@@ -123,6 +123,9 @@ pub fn reorder_line(
         let mut parts: Vec<_> = pieces
             .into_iter()
             .map(|(range, level)| ShapedRun {
+                upright: run.upright,
+                combined: run.combined,
+                horizontal_scale: run.horizontal_scale,
                 range,
                 level,
                 glyphs: Vec::new(),
@@ -141,7 +144,7 @@ pub fn reorder_line(
             }
         }
         for mut part in parts {
-            if (part.level % 2) != (run.level % 2) {
+            if (part.level % 2) != (run.level % 2) && !part.upright {
                 part.glyphs.reverse();
             }
             split.push(part);
@@ -206,6 +209,9 @@ mod tests {
             glyphs.reverse();
         }
         ShapedRun {
+            upright: false,
+            combined: false,
+            horizontal_scale: reprise_geom::Fixed::ONE,
             range,
             level,
             glyphs,

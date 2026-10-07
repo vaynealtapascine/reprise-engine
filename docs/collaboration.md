@@ -390,17 +390,22 @@ What the Reprise side sends:
 
 ## Known limits
 
--   **Columnar change blocks inside binary snapshots** (trusted v1 sync and
-    package open) are decoded by Loro without a count bound. Their LZ4 expansion is
-    bounded, but a hostile `n_changes` inside an otherwise valid block can still ask for a
-    large allocation. Closing this needs a bounded decoder for Loro's block format, or a
-    Loro change. Format-2 packets, including first joins, avoid that decoder entirely.
+-   **Binary compatibility** remains the trusted v1/package path. Its snapshot
+    preflight now bounds expanded KV bytes and the internal columnar change and
+    counter counts, summed across blocks, before Loro allocates them. Unknown
+    encodings fail closed. Use format 2 for peer transport and its operation
+    vocabulary/preflight, rather than treating binary compatibility as a fallback.
 -   **Intent anomalies** such as a split concurrent with a join, which duplicates text,
     converge but are not merged semantically.
--   **Remote splits/joins** recreate moved text in another block. A stable caret in
-    that text falls back to the surviving original block or a nearby live block;
-    it does not follow the recreated suffix. Local edits supply explicit effects
-    so the UI can transform its selection before anchoring it again.
+-   **Remote splits/joins** carry compact authored character lineage. Stable
+    carets follow recreated characters across blocks, including chained splits
+    and joins. Resolution prefers a still-live original; competing transfers use
+    sorted record keys. Breadth-first search visits at most 256 distinct identities.
+    Identity history survives undo; undo/redo records aliases for recreated IDs,
+    so fresh and old carets follow later ordinary edits without relying on unchanged
+    text. Alias discovery requires a live insertion prefix and matching SHA-256
+    span digest. Dead intermediate identities remain searchable. Authored ranges
+    retain their original block semantics.
 -   **Authentication and authorisation** are out of scope (see the trust model).
 
 ## End-to-end verification
@@ -410,3 +415,10 @@ sessions across partitions, shuffled delivery, refused dependencies, replay, per
 undo/redo, anti-entropy, stable selections, identical layout and package reopen.
 `REPRISE_COLLAB_STEPS` controls its length. The WASM smoke test exercises the same
 sync, selection, presence and undo APIs through actual generated JavaScript bindings.
+
+`crates/reprise/tests/soak.rs` adds structural edits and block deletion to shuffled
+partition/rejoin delivery; `REPRISE_SOAK_EDITS` controls its length. The native
+packet-byte golden in `tests/sync_delta.hex` is checked by actual WASM bindings.
+Diverged packet validation reads live lengths only for containers the store proves
+unchanged since the packet dependencies; concurrently edited texts still use the
+isolated shadow checkout.

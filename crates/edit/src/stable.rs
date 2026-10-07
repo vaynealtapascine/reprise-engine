@@ -38,7 +38,7 @@ pub struct StableSelection {
 /// What a stable caret resolved to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resolution {
-    /// In its block, at its anchored character.
+    /// At its anchored character, including authored split/join lineage.
     Exact(Caret),
     /// Somewhere else: its character or its block was deleted, and the
     /// documented fallback chose this caret.
@@ -94,7 +94,7 @@ impl StableCaret {
         };
         let anchor = block
             .text
-            .anchor(caret.offset, side)
+            .anchor_for_transfer(caret.offset, side)
             .map_err(|_| StableError::BadOffset(caret.offset))?;
         Ok(StableCaret {
             node: caret.node,
@@ -110,6 +110,47 @@ impl StableCaret {
         let anchor = (self.anchor.len() <= MAX_ANCHOR_BYTES)
             .then(|| Anchor::decode(&self.anchor))
             .flatten();
+        // Follow authored relocation only when the original character or
+        // block is gone. Undo revives the original; concurrent competing
+        // transfers have a deterministic order. Bound cycles and chain depth.
+        if let Some(current) = anchor.clone() {
+            let mut seen = std::collections::BTreeSet::from([(self.node, current.encode())]);
+            let mut queue = std::collections::VecDeque::from([(self.node, current)]);
+            let mut queued = 1usize;
+            while let Some((node, mut current)) = queue.pop_front() {
+                if doc.is_caret_block(node)
+                    && let Some(text) = doc.text_of_any(node)
+                    && matches!(text.resolve(&current), Ok(Resolved::Tombstoned(_)))
+                    && let Some(restored) = doc.restored_transfer_anchor(node, &current)
+                {
+                    current = restored;
+                }
+                if doc.is_caret_block(node)
+                    && let Some(text) = doc.text_of_any(node)
+                    && let Ok(Resolved::Live(offset)) = text.resolve(&current)
+                {
+                    let s = text.to_string();
+                    let offset = floor_grapheme(&s, offset);
+                    if node != self.node || current.encode() != self.anchor {
+                        return Resolution::Exact(Caret {
+                            node,
+                            offset,
+                            affinity: self.affinity,
+                        });
+                    }
+                    break;
+                }
+                for candidate in doc.transfer_anchors(node, &current) {
+                    if queued >= 256 {
+                        break;
+                    }
+                    if seen.insert((candidate.0, candidate.1.encode())) {
+                        queue.push_back(candidate);
+                        queued += 1;
+                    }
+                }
+            }
+        }
         let caret = |node, offset| Caret {
             node,
             offset,

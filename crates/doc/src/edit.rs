@@ -53,6 +53,7 @@ impl Document {
     pub fn commit_step(&self) {
         self.doc.set_next_commit_origin(STEP_ORIGIN);
         self.doc.commit();
+        self.commit_lineage();
     }
 
     /// An undo history for this replica's edits (29). It records the edits
@@ -66,7 +67,10 @@ impl Document {
         inner.set_max_undo_steps(DEFAULT_UNDO_STEPS);
         // Staging is how identity survives undo, so it is never undone.
         inner.add_exclude_origin_prefix(STAGE_ORIGIN);
-        UndoStack { inner }
+        UndoStack {
+            inner,
+            doc: self.doc.clone(),
+        }
     }
 
     /// Creates a block at `index` among the live children of `parent` (the
@@ -144,10 +148,9 @@ impl Document {
     /// The undoable half of a split: `new`, staged with the tail of `id`'s
     /// text, takes its place after `id`, and the tail leaves `id`.
     ///
-    /// The tail's characters are deleted from `id` and exist anew in `new`,
-    /// so a range or anchor that sat inside the tail resolves as `Rebound` to
-    /// the end of `id`, or `Missing` if it was entirely in the tail. Moving
-    /// text between blocks doesn't carry ranges with it yet (12).
+    /// The tail is recreated in `new`; compact authored character lineage
+    /// lets stable carets follow it on every replica. Ranges still keep their
+    /// authored block and report rebound/missing (12).
     pub fn split_block_into(&self, id: NodeId, at: usize, new: NodeId) -> Result<(), DocError> {
         let block = self.block(id)?;
         if !self.is_soft_deleted(new) {
@@ -163,6 +166,7 @@ impl Document {
             .iter()
             .position(|&c| c == id)
             .ok_or(DocError::NoNode(id))?;
+        self.record_transfer(id, at, new, 0, end - at)?;
         block.text.delete(at..end)?;
         self.activate_block_at(new, parent, index + 1)
     }
@@ -188,7 +192,9 @@ impl Document {
                 "a block with children can't be joined",
             ));
         }
-        a.text.insert(a.text.len(), &b.text.to_string())?;
+        let at = a.text.len();
+        a.text.insert(at, &b.text.to_string())?;
+        self.record_transfer(second, 0, first, at, b.text.len())?;
         self.supersede(second, first)?;
         self.soft_delete_block(second)
     }
@@ -203,17 +209,26 @@ impl Document {
 /// relations, ranges and anchors work again.
 pub struct UndoStack {
     inner: UndoManager,
+    doc: loro::LoroDoc,
 }
 
 impl UndoStack {
     /// Undoes the last step. `false` when there was nothing to undo.
     pub fn undo(&mut self) -> Result<bool, DocError> {
-        Ok(self.inner.undo()?)
+        let changed = self.inner.undo()?;
+        if changed {
+            Document::wrap(self.doc.clone()).capture_restored_lineage();
+        }
+        Ok(changed)
     }
 
     /// Redoes the last undone step. `false` when there was nothing to redo.
     pub fn redo(&mut self) -> Result<bool, DocError> {
-        Ok(self.inner.redo()?)
+        let changed = self.inner.redo()?;
+        if changed {
+            Document::wrap(self.doc.clone()).capture_restored_lineage();
+        }
+        Ok(changed)
     }
 
     pub fn can_undo(&self) -> bool {

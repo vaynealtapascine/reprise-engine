@@ -12,6 +12,10 @@ start with `docs/`, which names repository-level documentation.
 | `text` | `src/lib.rs` | `Text` (byte offsets over Loro), `Anchor`, `Affinity`, `RangePolicy`, `Resolved` | 09, 10, 12 |
 | `text` | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
 | `doc` | `src/lib.rs` | `Document`: content tree, versioned authored ranges (`add_range`, `range_policy`, resolution), styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas; legacy policies remain distinguishable from unreadable metadata | 05–07, 10, 12, 15, 29, 34, 35 |
+| `reprise` | `tests/soak.rs`, `tests/sync_delta.hex` | Structural partition/rejoin/undo soak, deterministic peer fixture and native/WASM packet-byte golden | 29, 34, 38 |
+| `doc` | `src/transfers.rs`, `src/persist.rs` | Retained split/join character lineage, undo/redo aliases and bounded columnar snapshot counts | 10, 12, 29, 34 |
+| `shape`, `layout` | `shape/src/lib.rs`, `layout/src/flow/stage.rs`, `layout/src/display.rs` | Upright vertical shaping, bounded combinations and display compensation | 20, 22, 38 |
+| `fixtures` | `tests/vertical.rs` | Both downward modes, combination, frame transitions, storage and export parity | 20, 33, 38 |
 | `doc` | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`, `reprise.reading-order`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13–15, 27, 35 |
 | `doc` | `src/structure.rs` | Live tree navigation and structural queries (`evaluate`), inherited deletion through table nesting, succession links (`supersede`, `succession`) | 06, 07, 13, 15, 24 |
 | `doc` | `src/history.rs` | `DocumentAt` (a past version), `HistoryCache`, snapshot resolution, `compact_history` | 07, 13 |
@@ -24,7 +28,7 @@ start with `docs/`, which names repository-level documentation.
 | `doc` | `src/codes.rs` | The `style.*` diagnostic codes | 37 |
 | `doc` | `src/page.rs` | `PageTemplate`, `FrameTemplate`, `FrameRole`, `Dim` (lengths that may follow the `Medium`), v2 authored transforms, writing modes and spiral paths, v1-compatible Loro storage and the built-in template | 05, 20, 24, 34 |
 | `doc` | `src/reading.rs` | Independent `reprise.reading-order` block-precedence schema and authoring helper | 01, 14, 33 |
-| `doc` | `src/persist.rs` | Opaque snapshot export/import, explicit peer/history mode, allocation-free Loro/LZ4 expansion preflight | 07, 09, 29, 34, 37 |
+| `doc` | `src/persist.rs` | Opaque snapshot export/import, explicit peer/history mode, bounded Loro/KV/LZ4 expansion and columnar-count preflight | 07, 09, 29, 34, 37 |
 | `doc` | `src/region_schema.rs` | Owned float/note relation schemas and parameter vocabularies | 05, 13, 24 |
 | `doc` | `src/table.rs` | Versioned authored table/row/cell topology, column declarations, cell spans and row header setters on the movable tree | 05, 06, 24 |
 | `doc` | `src/table_grid.rs` | `resolve_grid` and `Document::table_structure`: the single deterministic interpretation of authored spans and header rows, with issues, shared by layout, export and accessibility | 06, 24, 33, 37 |
@@ -91,7 +95,7 @@ start with `docs/`, which names repository-level documentation.
 | `plugin` | `test-plugins/`, `examples/compile_test_plugins.rs` | Checked-in test sources and deterministic explicit fixture compiler, no build-time toolchain requirement | 36, 38, 39 |
 | `edit` | `src/lib.rs`, `src/command.rs`, `src/editor.rs`, `src/plan.rs` | Validated typed commands, staged activation, atomic commit/undo, bounded transaction models and position effects | 02, 05, 07, 12, 29, 37 |
 | `edit` | `src/error.rs`, `src/codes.rs` | Typed refusals and stable Error diagnostics for validation, resource bounds and store failures | 37 |
-| `edit` | `src/caret.rs`, `src/model.rs`, `src/navigator.rs` | Byte/affinity carets, cached cluster/grapheme cells, integer page geometry, overlapping-strip hit testing and snapshot reading-order integration | 09, 20, 22, 30, 33 |
+| `edit` | `src/caret.rs`, `src/model.rs`, `src/navigator.rs` | Byte/affinity carets, cached cluster/grapheme cells, atomic combined-run caret units, integer page geometry, overlapping-strip hit testing and snapshot reading-order integration | 09, 20, 22, 30, 33 |
 | `edit` | `src/movement.rs`, `src/select.rs` | Logical/page-direction navigation through frame transforms, goal-x line movement, reading order, logical selection ranges, bidi geometry and gesture operations | 20, 30, 31, 33 |
 | `edit` | `src/paste.rs` | Validated standalone paste, fresh staged IDs, style collision and dangling-reference handling, relation remapping, returned activated prefix/suffix IDs, identity-preserving host-range reanchoring with authored policy and diagnosed cross-block omissions; atomic commit/undo | 07, 12, 29, 35, 37 |
 | `edit` | `tests/audit.rs`, `tests/transactions.rs` | Real-peer identity, atomic deletion, retained history, every command and fixed-seed convergence/undo properties; split/join preserve authored range policy through undo/redo | 07, 12, 29 |

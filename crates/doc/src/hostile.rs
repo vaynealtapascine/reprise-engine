@@ -311,3 +311,21 @@ pub fn scribble_outside(doc: &Document, rng: &mut Rng) {
     }
     doc.commit();
 }
+
+/// A fixed attack for fixtures: `malformed` gets an integer kind, `removed`
+/// is deleted physically from the store's tree (which the kernel never
+/// does), and an unknown root container is written. Commits.
+pub fn scripted(
+    doc: &Document,
+    malformed: crate::NodeId,
+    removed: crate::NodeId,
+) -> loro::LoroResult<()> {
+    let tree = doc.doc.get_tree("content");
+    tree.get_meta(malformed.0)?.insert("kind", 42)?;
+    tree.delete(removed.0)?;
+    doc.doc
+        .get_map("zz-unknown-root")
+        .insert("from-the-future", "kept")?;
+    doc.commit();
+    Ok(())
+}

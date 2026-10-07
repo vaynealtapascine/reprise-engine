@@ -56,7 +56,8 @@ expression: snapshot.to_json()
         },
         "width": 102400,
         "height": 102400
-      }
+      },
+      "writing_mode": "vertical-rl"
     }
   ],
   "blocks": [
