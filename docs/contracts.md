@@ -829,8 +829,11 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
   Modules share the core's deterministic wasmi sandbox on both platforms.
 - Sync v1 exchanges sorted version vectors and self-contained retained-history
   snapshots as update packets. Import verifies document scope, distinct declared
-  peers and agreement of vector with bytes before merging. Compact delta packets
-  are a future version; no transport/server/authentication is inferred. Fonts,
+  peers and agreement of vector with bytes before merging. Format 2 adds bounded
+  JSON delta packets, complete JSON join packets, tracked
+  change reports, stable local selections and typed ephemeral presence; see
+  [collaboration.md](collaboration.md). Binary v1 is a trusted compatibility path.
+  No transport/server/authentication is inferred. Fonts,
   assets and engine configuration use separate host-owned resource channels.
   Awareness is bounded opaque bytes with document/peer metadata and no persistence.
 - The typed `Error` enum maps core notes without changing stable codes/severities.
@@ -841,3 +844,15 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
   filesystem or network I/O. Sessions retain the core's single-threaded caches;
   native hosts create and drive them on a dedicated engine thread/actor rather
   than moving live jobs between arbitrary Tauri command threads.
+
+### Multiplayer additions (2026-10-07)
+
+Format-2 full join packets require `snapshot-json` (bit 2) and pass the delta
+preflight with an empty base vector. The earlier unmerged binary join bit 1 is
+reserved and refused at the untrusted boundary because its decoder is not bounded.
+Native, WASM and the reference worker expose identical additive sync, stable
+selection, tracked undo/redo and presence APIs. Native sessions can select scoped
+layout workers with `set_layout_threads`; output and work budgets are invariant.
+Existing `Caret`, `Selection` and v1 signatures are unchanged.
+The reference worker's local `edit` and `image` responses now use `edited`,
+carrying both `Applied` (created IDs and selection effects) and current `State`.
