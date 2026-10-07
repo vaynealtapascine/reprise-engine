@@ -69,8 +69,9 @@ fn root_name(id: &ContainerID) -> Option<String> {
 }
 
 impl Document {
-    /// Runs `f` and reports what it changed in the document.
-    pub(crate) fn tracked<R>(&self, f: impl FnOnce() -> R) -> (R, ChangeReport) {
+    /// Runs `f` and reports what it changed in the document, for example an
+    /// undo or a merge.
+    pub fn tracked<R>(&self, f: impl FnOnce() -> R) -> (R, ChangeReport) {
         let raw: Arc<Mutex<Vec<Raw>>> = Arc::default();
         let sink = Arc::clone(&raw);
         let subscription = self.doc.subscribe_root(Arc::new(move |event| {

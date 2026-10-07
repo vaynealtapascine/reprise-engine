@@ -38,6 +38,7 @@ pub mod invariants;
 mod lifecycle;
 mod page;
 mod persist;
+mod position;
 mod ranges;
 pub mod reading;
 mod region_schema;
@@ -68,6 +69,7 @@ pub use page::{
 pub use persist::{
     MAX_PERSIST_BYTES, MAX_PERSIST_EXPANDED_BYTES, MAX_PERSIST_OPS, PersistenceMode,
 };
+pub use position::Fallback;
 pub use region_schema::{FloatSide, NotePlacement};
 pub use relation::{
     LayoutQuery, Param, ParamKind, Relation, RelationSchema, SchemaError, SchemaId, SchemaRegistry,

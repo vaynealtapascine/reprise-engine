@@ -55,12 +55,14 @@ impl Document {
         let Ok(mut slot) = self.shadow.lock() else {
             return Err(SyncError::Store("shadow replica lock poisoned".into()));
         };
-        let result = self.check_texts(json, peer_of, &mut slot);
-        match (&result, slot.as_ref()) {
-            (Ok(()), Some(shadow)) => shadow.checkout_to_latest(),
-            // The shadow may hold part of a refused packet: rebuild it later.
-            (Err(_), _) => *slot = None,
-            _ => {}
+        let mut touched = false;
+        let result = self.check_texts(json, peer_of, &mut slot, &mut touched);
+        // The shadow may hold part of a refused packet, which a peer could
+        // later resend with different content under the same IDs: rebuild it.
+        // It stays checked out where it is otherwise, so the next checkout
+        // moves only as far as the next packet's dependencies.
+        if result.is_err() && touched {
+            *slot = None;
         }
         result
     }
@@ -70,6 +72,7 @@ impl Document {
         json: &JsonSchema,
         peer_of: PeerOf<'_>,
         slot: &mut Option<LoroDoc>,
+        touched: &mut bool,
     ) -> Result<(), SyncError> {
         let mut order = Vec::with_capacity(json.changes.len());
         for (i, change) in json.changes.iter().enumerate() {
@@ -122,6 +125,7 @@ impl Document {
                 .any(|op| matches!(op.content, JsonOpContent::Text(_)));
             if deps != frontier || lengths.is_none() {
                 if has_text {
+                    *touched |= !done.is_empty();
                     let shadow = self.shadow_for(slot, json, &done, shadow_active)?;
                     shadow_active = true;
                     shadow
@@ -167,6 +171,7 @@ impl Document {
             frontier = Ids::from([(peer, end - 1)]);
             done.push(i);
             if shadow_active && let Some(shadow) = slot.as_ref() {
+                *touched = true;
                 import_one(shadow, json, i)?;
             }
         }
@@ -191,7 +196,7 @@ impl Document {
             return Err(SyncError::Store("no shadow replica".into()));
         };
         if !active {
-            shadow.checkout_to_latest();
+            // Imports reach its history even while it is checked out.
             let missing = self
                 .doc
                 .export(ExportMode::updates(&shadow.oplog_vv()))

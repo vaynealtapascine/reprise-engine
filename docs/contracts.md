@@ -60,6 +60,7 @@ Codes in use:
 | clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped` |
 | export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure` |
 | bindings | `bindings.version`, `bindings.invalid`, `bindings.limit`, `bindings.id`, `bindings.stale`, `bindings.cancelled`, `bindings.layout-required`, `bindings.read-only`, `bindings.store`, `bindings.render` |
+| sync (collaboration) | `sync.format`, `sync.feature`, `sync.invalid`, `sync.limit`, `sync.missing`, `sync.local-peer`, `sync.store`, `collab.malformed-node`, `collab.tree-tombstone`, `collab.hidden-content` |
 
 ## Text store: `reprise-text`
 
