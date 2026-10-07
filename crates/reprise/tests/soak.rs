@@ -7,6 +7,8 @@
 //!
 //! `REPRISE_SOAK_EDITS` sets the number of edits. The default, 600, keeps it
 //! near 15 s in debug; 2,000 passed in about 45 s in release.
+// Peers are addressed by index throughout: `known[from][to]` and the network.
+#![allow(clippy::needless_range_loop)]
 use reprise::*;
 
 const DOC: &str = "00112233445566778899aabbccddeeff";
