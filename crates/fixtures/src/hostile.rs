@@ -2273,14 +2273,13 @@ pub fn font_legacy_missing() -> Result<Fixture, DocError> {
 /// may start between them wherever the line happens to fill.
 pub fn space_before_zwj() -> Result<Fixture, DocError> {
     let doc = document()?;
-    for words in 0..46 {
-        let joiner = if words % 2 == 0 {
-            "\u{200D}\u{1F467}"
-        } else {
-            "\u{301}\u{200D}"
-        };
-        let text = format!("{}  {joiner} tail end.", "word ".repeat(words));
-        doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    // A line holds about eight "word " units, so ten prefixes put the pair at
+    // every distance from the line start.
+    for words in 0..10 {
+        for joiner in ["\u{200D}\u{1F467}", "\u{301}\u{200D}"] {
+            let text = format!("{}  {joiner} tail end.", "word ".repeat(words));
+            doc.append_block(BlockKind::Paragraph, "body", &text)?;
+        }
     }
     doc.commit();
     Ok(Fixture::new("space_before_zwj", doc, &[]))

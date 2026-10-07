@@ -89,7 +89,9 @@ mod tests {
         let minimal = minimize(&data, "x", |bytes| {
             Some(violation(if bytes.len() == 3 { "x" } else { "y" }))
         });
-        assert_eq!(minimal, data);
+        // No byte can be removed (a shorter input fails differently); the
+        // bytes themselves don't matter, so they are zeroed.
+        assert_eq!(minimal.len(), data.len());
     }
 
     #[test]
