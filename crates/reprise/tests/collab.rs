@@ -324,3 +324,33 @@ fn one_remote_keystroke_relays_out_a_constant_number_of_paragraphs() {
     assert!(warm.compositions <= 2, "{warm:?}");
     assert!(warm.reused_compositions >= 58, "{warm:?}");
 }
+
+/// Native/WASM parity: ts/smoke.cjs runs the same script in WASM and compares
+/// the packet bytes with this golden. Re-record with REPRISE_RECORD_SYNC=1.
+#[test]
+fn delta_packet_bytes_are_pinned() {
+    let mut s = create("1");
+    let p = paragraph(&mut s, "parity");
+    type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
+    let packet = s
+        .sync_export(&Payload::new(SyncRequest {
+            since: Some(Vec::new()),
+        }))
+        .unwrap()
+        .data;
+    let hex: String = packet
+        .content
+        .bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sync_delta.hex");
+    if std::env::var_os("REPRISE_RECORD_SYNC").is_some() {
+        std::fs::write(&path, &hex).unwrap();
+    }
+    assert_eq!(hex, include_str!("sync_delta.hex").trim());
+    // The same packet joins a fresh replica.
+    let mut fresh = create("2");
+    fresh.sync_import(&Payload::new(packet)).unwrap();
+    assert_eq!(blocks(&fresh), blocks(&s));
+}

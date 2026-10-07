@@ -2,7 +2,8 @@
 // Compile as ES modules and deploy beside wasm-bindgen's web output.
 import init, { Workspace, DocumentSession } from "./reprise_wasm.js";
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
-  DisplayPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert } from "./types.js";
+  DisplayPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert,
+  SyncRequest, SyncPacket, SyncReport, EditReport, Selection, Presence, Awareness, PresenceView } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
@@ -15,8 +16,16 @@ type Request = Payload<{ id: string } & (
   | { kind: "step"; job: number; budget: number }
   | { kind: "cancel"; job: number }
   | { kind: "save" }
-  | { kind: "sync-export" }
+  // Without `packet`: a v1 snapshot update. With it: a format-2 packet,
+  // a delta since `packet.data.since` or a full snapshot when that is null.
+  | { kind: "sync-export"; packet?: Payload<SyncRequest> }
   | { kind: "sync-import"; request: Payload<SyncUpdate> }
+  | { kind: "sync-import"; packet: Payload<SyncPacket> }
+  | { kind: "undo" }
+  | { kind: "redo" }
+  | { kind: "selection"; request: Payload<Selection | null> }
+  | { kind: "presence"; request: Payload<Presence> }
+  | { kind: "presence-resolve"; request: Payload<Awareness> }
   | { kind: "close" }
 )>;
 export type Response = Payload<{ id: string } & (
@@ -25,6 +34,11 @@ export type Response = Payload<{ id: string } & (
   | { kind: "layout"; job: number; progress: Payload<LayoutProgress>; pages: Payload<DisplayPage>[] }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
+  | { kind: "packet"; packet: Payload<SyncPacket> }
+  | { kind: "synced"; report: Payload<SyncReport>; state: Payload<State> }
+  | { kind: "edited"; report: Payload<EditReport>; state: Payload<State> }
+  | { kind: "awareness"; awareness: Payload<Awareness> }
+  | { kind: "presence"; view: Payload<PresenceView> }
   | { kind: "asset"; hash: Payload<string> }
   | { kind: "ack" }
   | { kind: "error"; error: Payload<ErrorPayload> }
@@ -77,8 +91,24 @@ scope.onmessage = (event: MessageEvent<Request>) => {
         }
         case "cancel": current().cancel(data.job); if (data.job === active) release(); post({ id, kind: "ack" }); break;
         case "save": { release(); const content = current().save(); post({ id, kind: "saved", content }, [content.data.bytes.buffer]); break; }
-        case "sync-export": { const update = current().export_updates(); post({ id, kind: "sync", update }, [update.data.content.bytes.buffer]); break; }
-        case "sync-import": current().import_updates(data.request); release(); post({ id, kind: "state", state: current().state() }); break;
+        case "sync-export": {
+          if (data.packet) { const packet = current().sync_export(data.packet); post({ id, kind: "packet", packet }, [packet.data.content.bytes.buffer]); break; }
+          const update = current().export_updates(); post({ id, kind: "sync", update }, [update.data.content.bytes.buffer]); break;
+        }
+        case "sync-import": {
+          // A refused packet changes nothing; on sync.missing, ask the sender for
+          // a delta since this session's sync_info().data.vector.
+          if ("packet" in data) { const report = current().sync_import(data.packet); if (report.data.changed) release(); post({ id, kind: "synced", report, state: current().state() }); break; }
+          current().import_updates(data.request); release(); post({ id, kind: "state", state: current().state() }); break;
+        }
+        case "undo": case "redo": {
+          const report = data.kind === "undo" ? current().undo_report() : current().redo_report();
+          if (report.data.changed) release();
+          post({ id, kind: "edited", report, state: current().state() }); break;
+        }
+        case "selection": current().set_selection(data.request); post({ id, kind: "ack" }); break;
+        case "presence": post({ id, kind: "awareness", awareness: current().presence(data.request) }); break;
+        case "presence-resolve": post({ id, kind: "presence", view: current().resolve_presence(data.request) }); break;
         case "close": release(); document?.free(); document = undefined; post({ id, kind: "ack" }); break;
         default: throw new Error("Unknown worker request");
       }
