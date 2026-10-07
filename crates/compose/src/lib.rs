@@ -7,8 +7,8 @@
 
 use std::ops::Range;
 
-use icu_segmenter::{GraphemeClusterSegmenter, LineSegmenter};
 use icu_segmenter::options::LineBreakOptions;
+use icu_segmenter::{GraphemeClusterSegmenter, LineSegmenter};
 use reprise_diag::Note;
 use reprise_geom::Length;
 use reprise_shape::{Reshape, ShapedRun, ShapedText};

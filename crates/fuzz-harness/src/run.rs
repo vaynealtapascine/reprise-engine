@@ -1434,7 +1434,7 @@ impl Cx<'_, '_> {
         match kind % 4 {
             0 | 1 => {
                 let text = String::from_utf8_lossy(&result.bytes).into_owned();
-                let imported = if kind % 4 == 0 {
+                let imported = if kind.is_multiple_of(4) {
                     import_plain(&text)
                 } else {
                     import_html(&text, ImportLimits::default())

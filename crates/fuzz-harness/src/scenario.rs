@@ -255,7 +255,7 @@ impl Scenario {
 }
 
 fn decode_start(input: &mut Input<'_>) -> Start {
-    if input.u8() % 8 == 0 {
+    if input.u8().is_multiple_of(8) {
         return Start::Fixture(input.u8());
     }
     let blocks = (0..1 + input.below(5))
