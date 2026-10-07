@@ -1,11 +1,10 @@
 //! Asset-aware exports are additive; the frozen ExportOptions stays unchanged.
 use crate::{
-    ClipboardError, Disposition, ExportOptions, ExportResult, Exporter, Feature, Native, Pdf,
-    copy_all,
+    ClipboardError, Disposition, ExportOptions, ExportResult, Exporter, Feature, Native, copy_all,
 };
 use reprise_display::AssetStore;
 use reprise_doc::{BlockKind, Document};
-use reprise_layout::{DisplayOptions, LayoutSnapshot};
+use reprise_layout::LayoutSnapshot;
 
 pub struct NativeWithAssets<'a> {
     pub assets: &'a AssetStore,
@@ -72,18 +71,17 @@ impl Exporter for PdfWithAssets<'_> {
         layout: Option<&LayoutSnapshot>,
         options: &ExportOptions<'_>,
     ) -> Result<ExportResult, ClipboardError> {
-        let mut result = Pdf.export(doc, layout, options)?;
         let layout = layout.ok_or_else(|| ClipboardError::Export("PDF requires layout".into()))?;
         let fonts = options
             .fonts
             .ok_or_else(|| ClipboardError::Export("PDF requires fonts".into()))?;
-        result.bytes = reprise_display::pdf::render_ordered_with_assets(
-            &layout.to_display_lists(DisplayOptions::default()),
+        let mut result = crate::export_pdf(
+            doc,
+            layout,
             fonts,
             self.assets,
-            &layout.pdf_reading_order(doc),
-        )
-        .map_err(|e| ClipboardError::Export(e.to_string()))?;
+            &crate::PdfMetadata::default(),
+        )?;
         let preserved = doc
             .document_order()
             .into_iter()

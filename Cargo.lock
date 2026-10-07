@@ -1816,6 +1816,7 @@ name = "reprise-clipboard"
 version = "0.0.0"
 dependencies = [
  "icu_properties",
+ "lopdf",
  "reprise-diag",
  "reprise-display",
  "reprise-doc",
@@ -1859,6 +1860,7 @@ dependencies = [
  "krilla",
  "lopdf",
  "png",
+ "reprise-diag",
  "reprise-doc",
  "reprise-fixtures",
  "reprise-font",

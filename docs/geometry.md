@@ -60,10 +60,11 @@ and `pdf::render_ordered(lists, fonts, order)`. Run addresses index the original
 page/group items; every glyph item must be named exactly once. Runs sort by source
 byte start even where visual bidi order differs. Ordered PDF keeps transforms
 and clips, paints nontext first, and wraps each run in an ActualText span. This
-changes painting order where content overlaps. It is extraction support, not a
-PDF/UA structure tree. Cross-page reversals return a typed rendering error;
-physical pages are not reordered. Existing `pdf::render` remains unchanged.
-A full tagged structure tree is the follow-up for arbitrary cross-page reading.
+changes painting order where content overlaps. The output is a tagged PDF aiming at
+PDF/UA-1: `pdf::render_tagged` takes the structure (`pdf::tags`) built from this
+reading order, and `render_ordered` writes a flat one. Physical pages are not
+reordered, but the structure may name a later page first, so a cross-page reading
+override is carried by the tree. Existing `pdf::render` remains unchanged.
 The CLI still uses the frozen renderer unless a caller selects ordered export.
 
 `tests/geometry.rs` includes a manually invoked SVG/PNG export for all six new

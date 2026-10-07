@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 85);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 86);
 }
 
 hostile_tests!(
@@ -1148,3 +1148,4 @@ region_hostile_tests!(
     table_rowspan_vertical_break,
     table_concurrent_overlapping_spans,
 );
+region_hostile_tests!(pdf_structure_storm);

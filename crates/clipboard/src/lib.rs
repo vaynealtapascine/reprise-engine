@@ -4,11 +4,13 @@ mod export;
 mod html;
 mod image_export;
 mod native;
+mod pdf_tags;
 pub use image_export::{NativeWithAssets, PdfWithAssets};
+pub use pdf_tags::{PdfMetadata, cell_role, heading_level};
 
 pub use export::{
     Disposition, ExportOptions, ExportResult, Exporter, Feature, Html, Loss, LossReport, Native,
-    Pdf, PlainText,
+    Pdf, PlainText, export_pdf,
 };
 pub use html::{Import, ImportLimits, import_html, import_plain};
 pub use native::{
