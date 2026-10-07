@@ -1,0 +1,4 @@
+# oracle: no-panic (seed 160, minimised to 84 bytes)
+# bug: a range anchored at text deleted before a shallow snapshot panicked inside Loro on layout
+# after reopening (poisoning the document, then aborting). Fixed in reprise-text Text::resolve.
+e2bf000000000000ad00e00000000023af00250000000000000000c60000000000005d000000b4000000ee004600000000ca0000ed000000000000ec00000000000000000000000000af016573004b000b30e335

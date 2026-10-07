@@ -1,0 +1,22 @@
+[package]
+name = "reprise-fuzz-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+reprise-diag.workspace = true
+reprise-geom.workspace = true
+reprise-doc.workspace = true
+reprise-font.workspace = true
+reprise-compose.workspace = true
+reprise-layout.workspace = true
+reprise-display.workspace = true
+reprise-format.workspace = true
+reprise-edit.workspace = true
+reprise-clipboard.workspace = true
+reprise-fixtures.workspace = true
+
+[dev-dependencies]

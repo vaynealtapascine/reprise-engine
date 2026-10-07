@@ -133,6 +133,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         image_empty_alt()?,
         image_unreadable()?,
         font_legacy_missing()?,
+<<<<<<< HEAD
         table_header_repeats()?,
         table_header_taller_than_frame()?,
         table_spans_whole_table()?,
@@ -140,6 +141,9 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         table_rowspan_vertical_break()?,
         table_concurrent_overlapping_spans()?,
         pdf_structure_storm()?,
+=======
+        space_before_zwj()?,
+>>>>>>> hardening/fuzz
     ])
 }
 
@@ -2273,6 +2277,7 @@ pub fn font_legacy_missing() -> Result<Fixture, DocError> {
     Ok(Fixture::new("font_legacy_missing", doc, &["font.fallback"]))
 }
 
+<<<<<<< HEAD
 // ---- Tables: repeated headers and spans (24, 33, 37) ----
 
 fn header_table(doc: &Document, columns: usize) -> Result<NodeId, DocError> {
@@ -2491,4 +2496,23 @@ pub fn pdf_structure_storm() -> Result<Fixture, DocError> {
         doc,
         &["layout.note-continued", "layout.table-header-unrepeated"],
     ))
+=======
+/// A space followed by a zero-width joiner or a combining mark, at every
+/// distance from the start of a line (found by the cross-crate fuzzer). UAX #14
+/// allows a break between them, but the pair is one grapheme cluster, so no line
+/// may start between them wherever the line happens to fill.
+pub fn space_before_zwj() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    for words in 0..46 {
+        let joiner = if words % 2 == 0 {
+            "\u{200D}\u{1F467}"
+        } else {
+            "\u{301}\u{200D}"
+        };
+        let text = format!("{}  {joiner} tail end.", "word ".repeat(words));
+        doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    }
+    doc.commit();
+    Ok(Fixture::new("space_before_zwj", doc, &[]))
+>>>>>>> hardening/fuzz
 }

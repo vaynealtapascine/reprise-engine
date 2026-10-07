@@ -35,6 +35,25 @@ jobs:
         env:
           INSTA_UPDATE: "no"
 
+  # The cross-crate fuzz target (docs/fuzzing.md). `cargo test --workspace`
+  # already runs its bounded default (the regression corpus plus 40 seeds);
+  # this job widens the seeded range, and checks that the libFuzzer targets
+  # still build (nightly). Failures print the bytes that reproduce them.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p reprise-fuzz-harness
+        env:
+          REPRISE_FUZZ_SEEDS: "300"
+          REPRISE_FUZZ_FIRST: "100000"
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz build
+        working-directory: fuzz
+
   wasm:
     runs-on: ubuntu-latest
     steps:
@@ -43,4 +62,4 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm
+      - run: cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm -p reprise-fuzz-harness

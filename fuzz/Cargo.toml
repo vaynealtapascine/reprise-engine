@@ -1,0 +1,32 @@
+[package]
+name = "reprise-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+reprise-fuzz-harness = { path = "../crates/fuzz-harness" }
+
+# Not part of the main workspace (the root manifest excludes `fuzz/`): it needs
+# nightly and libFuzzer, and its build output must not mix with the tests'.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "scenario"
+path = "fuzz_targets/scenario.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scenario_twice"
+path = "fuzz_targets/scenario_twice.rs"
+test = false
+doc = false
+bench = false

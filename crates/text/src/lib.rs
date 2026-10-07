@@ -230,6 +230,14 @@ impl Text {
             return Err(TextError::OtherText);
         }
         let doc = self.text.doc().ok_or(TextError::TextGone)?;
+        if self.is_unrecoverable(&doc, anchor) {
+            // The anchored character was deleted before the shallow snapshot
+            // this document came from, so its history is gone. Loro can't say
+            // where it was (it panics when asked), so it resolves to the start
+            // of the text, as a tombstone: the author's range reports as
+            // moved, never as live.
+            return Ok(Resolved::Tombstoned(0));
+        }
         let found = doc
             .get_cursor_pos(&anchor.cursor)
             .map_err(|_| TextError::TextGone)?;
@@ -252,6 +260,29 @@ impl Text {
         } else {
             Resolved::Live(bytes)
         })
+    }
+
+    /// Whether `anchor` names a character that is deleted *and* older than the
+    /// shallow start of `doc`. Only then is its position unknowable: live
+    /// characters resolve without history, and deletions after the shallow
+    /// start still have it.
+    fn is_unrecoverable(&self, doc: &loro::LoroDoc, anchor: &Anchor) -> bool {
+        let Some(id) = anchor.cursor.id else {
+            return false;
+        };
+        if !doc.is_shallow() {
+            return false;
+        }
+        let trimmed = doc
+            .shallow_since_vv()
+            .get(&id.peer)
+            .is_some_and(|&start| id.counter < start);
+        trimmed
+            && !(0..self.text.len_unicode()).any(|pos| {
+                self.text
+                    .get_cursor(pos, Side::Left)
+                    .is_some_and(|c| c.id == Some(id))
+            })
     }
 
     /// The grapheme boundary after `at`, or `None` at the end.
@@ -415,5 +446,28 @@ mod tests {
             text.insert(99, "x"),
             Err(TextError::BadOffset(99))
         ));
+    }
+
+    /// Found by the cross-crate fuzzer: asking Loro where a character was
+    /// deleted before a shallow snapshot panics (and poisons the document), so
+    /// a document saved without history and reopened aborted on layout.
+    #[test]
+    fn anchors_on_text_deleted_before_a_shallow_snapshot_resolve_without_panicking() {
+        let (doc, text) = setup("abcdef");
+        let start = text.anchor(0, Affinity::Before).unwrap();
+        let live = text.anchor(4, Affinity::After).unwrap();
+        doc.commit();
+        text.delete(0..2).unwrap();
+        doc.commit();
+        let bytes = doc
+            .export(loro::ExportMode::shallow_snapshot(&doc.state_frontiers()))
+            .unwrap();
+        let reopened = LoroDoc::new();
+        reopened.import(&bytes).unwrap();
+        let text = Text::from_loro(reopened.get_text("t"));
+        assert_eq!(text.to_string(), "cdef");
+        assert_eq!(text.resolve(&start).unwrap(), Resolved::Tombstoned(0));
+        // A character that survived still resolves exactly, history or not.
+        assert_eq!(text.resolve(&live).unwrap(), Resolved::Live(2));
     }
 }
