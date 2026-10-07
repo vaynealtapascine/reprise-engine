@@ -26,6 +26,9 @@ use reprise_shape::{
     reorder_line, visual_order,
 };
 
+pub(crate) mod paragraph;
+pub(crate) mod stage;
+
 use crate::region::Bounded;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
@@ -71,7 +74,53 @@ pub(crate) struct Cursor {
     pending: Vec<Pending>,
     region_owners: std::collections::BTreeSet<NodeId>,
     previous: Option<NodeId>,
+    /// The block in progress, between units of an incremental job.
+    active: Option<Active>,
 }
+
+/// A block that takes more than one unit.
+#[derive(Clone)]
+pub(crate) enum Active {
+    Paragraph(Box<paragraph::Paragraph>),
+    Table(Box<TableStep>),
+}
+
+impl Active {
+    fn node(&self) -> NodeId {
+        match self {
+            Active::Paragraph(p) => p.node(),
+            Active::Table(t) => t.node(),
+        }
+    }
+}
+
+/// A table's phases, one unit at a time (see `Flow::table`).
+#[derive(Clone)]
+pub(crate) enum TableStep {
+    Start(NodeId, reprise_doc::TableColumns),
+    Rows(crate::table::TableBuild),
+    Place {
+        node: NodeId,
+        headers: Vec<crate::table_flow::Group>,
+        bodies: std::collections::VecDeque<crate::table_flow::Group>,
+        next_header: usize,
+        widths: Vec<Length>,
+        repeat: Option<crate::table_flow::Repeat>,
+    },
+}
+
+impl TableStep {
+    fn node(&self) -> NodeId {
+        match self {
+            TableStep::Start(node, _) | TableStep::Place { node, .. } => *node,
+            TableStep::Rows(build) => build.node(),
+        }
+    }
+}
+
+/// Rows a table prepares in one unit, at most.
+pub const TABLE_ROW_GROUP: usize = 16;
+
 impl Cursor {
     pub(crate) fn new(
         engine: &Engine,
@@ -104,6 +153,7 @@ impl Cursor {
             limit_hit: thread_is_empty,
             pending: Vec::new(),
             region_owners: crate::regions::owners(engine, doc),
+            upcoming: &[],
         };
         // Even an empty document gets a page.
         flow.new_page();
@@ -125,6 +175,59 @@ impl Cursor {
         flow.node(doc, node);
         flow.previous = Some(node);
         flow.cursor()
+    }
+    /// A block is in progress.
+    pub(crate) fn busy(&self) -> bool {
+        self.active.is_some()
+    }
+    /// The lines a paragraph in progress has placed so far.
+    pub(crate) fn in_progress(&self) -> Option<BlockLayout> {
+        match &self.active {
+            Some(Active::Paragraph(p)) => p.in_progress(),
+            _ => None,
+        }
+    }
+    /// One unit of an incremental job: starts `start` when no block is in
+    /// progress, then runs one unit of the block in progress. `upcoming` are
+    /// the blocks after it, for speculative preparation. Returns the units
+    /// charged (at least 1, at most `allowance.max(1)`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn unit(
+        mut self,
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        evaluation: Option<&crate::incremental::Evaluation>,
+        start: Option<NodeId>,
+        upcoming: &[NodeId],
+        allowance: usize,
+    ) -> (Self, usize) {
+        let mut active = self.active.take();
+        let mut flow = self.restore(engine, template, snapshot, plan, evaluation);
+        flow.upcoming = upcoming;
+        let mut used = 1;
+        if active.is_none()
+            && let Some(node) = start
+        {
+            active = flow.begin_block(doc, node);
+            if active.is_none() {
+                flow.previous = Some(node);
+            }
+        }
+        if let Some(mut block) = active.take() {
+            let (units, done) = flow.block_unit(doc, &mut block, allowance);
+            used = units.max(1);
+            if done {
+                flow.previous = Some(block.node());
+            } else {
+                active = Some(block);
+            }
+        }
+        let mut cursor = flow.cursor();
+        cursor.active = active;
+        (cursor, used)
     }
     pub(crate) fn finish(
         self,
@@ -168,6 +271,7 @@ impl Cursor {
             pending: self.pending,
             region_owners: self.region_owners,
             previous: self.previous,
+            upcoming: &[],
         }
     }
 }
@@ -185,6 +289,8 @@ pub(crate) struct Flow<'a> {
     pub(crate) pending: Vec<Pending>,
     pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
     pub(crate) previous: Option<NodeId>,
+    /// Blocks after the current one, for speculative preparation.
+    pub(crate) upcoming: &'a [NodeId],
     pub(crate) engine: &'a Engine,
     pub(crate) evaluation: Option<&'a crate::incremental::Evaluation>,
     pub(crate) template: &'a ResolvedTemplate,
@@ -206,11 +312,23 @@ pub(crate) struct Flow<'a> {
 
 impl Flow<'_> {
     fn node(&mut self, doc: &Document, node: NodeId) {
+        // `table` runs the same phases as `table_unit`, back to back.
+        if let Ok(Some(reprise_doc::TableRole::Table(columns))) = doc.table_role(node) {
+            self.table(doc, node, &columns);
+            return;
+        }
+        if let Some(mut block) = self.begin_block(doc, node) {
+            while !self.block_unit(doc, &mut block, usize::MAX).1 {}
+        }
+    }
+
+    /// Starts a block. Blocks that take one step are laid out here and give
+    /// `None`; paragraphs, flowed images and tables give their machine.
+    fn begin_block(&mut self, doc: &Document, node: NodeId) -> Option<Active> {
         let flow = self;
         match doc.table_role(node) {
             Ok(Some(reprise_doc::TableRole::Table(columns))) => {
-                flow.table(doc, node, &columns);
-                return;
+                return Some(Active::Table(Box::new(TableStep::Start(node, columns))));
             }
             Ok(Some(_)) | Err(_) => {
                 flow.snapshot.diagnostics.push(Diagnostic::new(
@@ -219,7 +337,7 @@ impl Flow<'_> {
                     Subject::Node(node),
                     "unreadable or misplaced table container",
                 ));
-                return;
+                return None;
             }
             Ok(None) => {}
         }
@@ -232,11 +350,12 @@ impl Flow<'_> {
                     Subject::Node(node),
                     e.to_string(),
                 ));
-                return;
+                return None;
             }
         };
+        let paragraph = || Some(Active::Paragraph(Box::new(paragraph::Paragraph::new(node))));
         match kind {
-            BlockKind::Paragraph => flow.paragraph(doc, node),
+            BlockKind::Paragraph => return paragraph(),
             BlockKind::Image => {
                 if !flow.region_owners.contains(&node) {
                     let follows = doc.relations().iter().any(|(_, r)| {
@@ -245,12 +364,11 @@ impl Flow<'_> {
                                 && r.schema == reprise_doc::relation::builtin::FOLLOW
                         })
                     });
-                    if follows {
-                        if let Some(image) = flow.annotation(doc, node) {
-                            flow.pending.push(image);
-                        }
-                    } else {
-                        flow.paragraph(doc, node);
+                    if !follows {
+                        return paragraph();
+                    }
+                    if let Some(image) = flow.annotation(doc, node) {
+                        flow.pending.push(image);
                     }
                 }
             }
@@ -262,7 +380,87 @@ impl Flow<'_> {
                 }
             }
         }
+        None
     }
+
+    /// One unit of a block in progress. Returns the units used and whether
+    /// the block is finished.
+    fn block_unit(
+        &mut self,
+        doc: &Document,
+        block: &mut Active,
+        allowance: usize,
+    ) -> (usize, bool) {
+        match block {
+            Active::Paragraph(p) => {
+                let used = self.paragraph_unit(doc, p, allowance);
+                (used, p.is_finished())
+            }
+            Active::Table(t) => (1, self.table_unit(doc, t)),
+        }
+    }
+
+    /// One phase of a table: its start, the cells of a group of rows, the
+    /// columns, or placing one row group. `Flow::table` runs the same phases
+    /// back to back.
+    fn table_unit(&mut self, doc: &Document, step: &mut TableStep) -> bool {
+        let (rows, bytes) = (TABLE_ROW_GROUP, crate::shaping::SHAPE_CHUNK_BYTES);
+        match step {
+            TableStep::Start(node, columns) => match self.table_begin(doc, *node, columns) {
+                Some(build) => *step = TableStep::Rows(build),
+                None => return true,
+            },
+            TableStep::Rows(build) => {
+                if self.table_rows(doc, build, rows, bytes) {
+                    let node = build.node();
+                    let placeholder = TableStep::Place {
+                        node,
+                        headers: Vec::new(),
+                        bodies: Default::default(),
+                        next_header: 0,
+                        widths: Vec::new(),
+                        repeat: None,
+                    };
+                    let TableStep::Rows(build) = std::mem::replace(step, placeholder) else {
+                        return true;
+                    };
+                    let (mut groups, widths) = self.table_columns(build);
+                    let split = groups.iter().take_while(|g| g.header).count();
+                    let bodies = groups.split_off(split).into();
+                    *step = TableStep::Place {
+                        node,
+                        headers: groups,
+                        bodies,
+                        next_header: 0,
+                        widths,
+                        repeat: None,
+                    };
+                }
+            }
+            TableStep::Place {
+                node,
+                headers,
+                bodies,
+                next_header,
+                widths,
+                repeat,
+            } => {
+                // As `place_groups`: the repeat state starts when placing does.
+                let repeat = repeat.get_or_insert_with(|| {
+                    crate::table_flow::Repeat::new(headers.len(), self.used() > Length::ZERO)
+                });
+                if let Some(group) = headers.get(*next_header).cloned() {
+                    self.place_group(*node, group, *next_header, headers, widths, repeat);
+                    *next_header += 1;
+                } else if let Some(group) = bodies.pop_front() {
+                    self.place_group(*node, group, usize::MAX, headers, widths, repeat);
+                }
+                return *next_header >= headers.len() && bodies.is_empty();
+            }
+        }
+        false
+    }
+
     fn cursor(self) -> Cursor {
         Cursor {
             thread: self.thread,
@@ -275,6 +473,7 @@ impl Flow<'_> {
             pending: self.pending,
             region_owners: self.region_owners,
             previous: self.previous,
+            active: None,
         }
     }
 
@@ -336,200 +535,6 @@ impl Flow<'_> {
             ));
         }
         false
-    }
-
-    fn paragraph(&mut self, doc: &Document, node: NodeId) {
-        let Some(evaluation) = self.evaluation else {
-            self.paragraph_inner(doc, node);
-            return;
-        };
-        let key = crate::incremental::FlowKey::new(self, doc, node);
-        if let Some(delta) = evaluation.flow_hit(node, &key, self.engine) {
-            self.apply_delta(delta);
-            return;
-        }
-        let before = self.mark();
-        self.paragraph_inner(doc, node);
-        let delta = self.delta(before);
-        evaluation.flow_miss(node, key, &delta);
-    }
-    fn paragraph_inner(&mut self, doc: &Document, node: NodeId) {
-        let engine = self.engine;
-        let subject = Subject::Node(node);
-        let mut preparation_notes = Vec::new();
-        let mut ctx = self.paragraph_context();
-        let Some(mut prepared) = prepare_cached(
-            engine,
-            doc,
-            node,
-            &ctx,
-            &mut preparation_notes,
-            self.evaluation,
-        ) else {
-            self.snapshot.diagnostics.extend(preparation_notes);
-            return;
-        };
-        let len = prepared.text.len();
-        if self.limit_hit {
-            self.snapshot.diagnostics.extend(preparation_notes);
-            unplaced(&mut self.snapshot.diagnostics, &subject, 0..len);
-            return;
-        }
-
-        // A line taller than every frame fits nowhere; placing it overflowing
-        // is better than leaving the text out or hunting through pages.
-        let mut lines = Vec::new();
-        let mut start = 0;
-        let mut done = false;
-        let mut stalls = 0;
-        let mut forced = false;
-        let mut overflowed = false;
-        while !done {
-            let index = self.frame_index();
-            let fill = self.fills[index];
-            let template = self.template;
-            let frame = &template.frames[self.thread[self.pos]];
-            let y = if prepared.image.is_some() {
-                self.table_top()
-            } else if fill.empty {
-                Length::ZERO
-            } else {
-                fill.used
-            };
-            let measure = Measure(frame.width);
-            let runaround = Runaround {
-                base: measure,
-                exclusions: self
-                    .plan
-                    .exclusions
-                    .get(&index)
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    .map(Polygon::rect)
-                    .collect(),
-                margin: Length::ZERO,
-                min_width: Length(1),
-            };
-            let depth = self.depth(index, frame.depth);
-            if prepared.image.is_some()
-                && y > Length::ZERO
-                && (y > depth || depth - y < prepared.line_height())
-            {
-                if !self.advance() {
-                    break;
-                }
-                ctx = self.paragraph_context();
-                preparation_notes.clear();
-                let Some(next) = prepare_cached(
-                    engine,
-                    doc,
-                    node,
-                    &ctx,
-                    &mut preparation_notes,
-                    self.evaluation,
-                ) else {
-                    self.snapshot.diagnostics.extend(preparation_notes);
-                    return;
-                };
-                prepared = next;
-                continue;
-            }
-            let inner: &dyn GeometryProvider = if runaround.exclusions.is_empty() {
-                &runaround.base
-            } else {
-                &runaround
-            };
-            let bounded = Bounded { inner, depth };
-            let unbounded =
-                (prepared.line_height() > self.max_depth || forced) && depth > Length::ZERO;
-            let geometry: &dyn GeometryProvider = if unbounded { inner } else { &bounded };
-            let mut composition_notes = Vec::new();
-            let composed = prepared.compose(
-                engine,
-                geometry,
-                index,
-                start,
-                y,
-                &subject,
-                &mut composition_notes,
-                self.evaluation,
-            );
-            if composed.lines.is_empty() {
-                self.snapshot.diagnostics.extend(composition_notes);
-                // Nothing fit here. That is ordinary for a frame that is
-                // already partly full. A whole page of empty frames that can't
-                // take a line means the geometry will never allow one: place it
-                // anyway, overflowing.
-                stalls += usize::from(fill.empty && depth > Length::ZERO);
-                if stalls > self.thread.len() && !forced {
-                    forced = true;
-                } else if !self.advance() {
-                    break;
-                }
-                if lines.is_empty() {
-                    // No line has been placed yet: resolve against the new
-                    // candidate starting frame, discarding provisional notes.
-                    ctx = self.paragraph_context();
-                    preparation_notes.clear();
-                    let Some(next) = prepare_cached(
-                        engine,
-                        doc,
-                        node,
-                        &ctx,
-                        &mut preparation_notes,
-                        self.evaluation,
-                    ) else {
-                        self.snapshot.diagnostics.extend(preparation_notes);
-                        return;
-                    };
-                    prepared = next;
-                }
-                continue;
-            }
-            self.snapshot.diagnostics.append(&mut preparation_notes);
-            self.snapshot.diagnostics.extend(composition_notes);
-            if unbounded && !overflowed {
-                overflowed = true;
-                self.snapshot.diagnostics.push(Diagnostic::new(
-                    Severity::Warning,
-                    codes::FRAME_OVERFLOW,
-                    subject.clone(),
-                    "a line is taller than every frame of the main flow; placed overflowing",
-                ));
-            }
-            stalls = 0;
-            forced = false;
-            lines.extend(composed.lines);
-            let spacing = engine.flow.paragraph_spacing;
-            match composed.rest {
-                None => {
-                    done = true;
-                    self.fills[index] = Fill {
-                        used: composed.block_end + spacing,
-                        empty: false,
-                    };
-                }
-                Some(rest) => {
-                    start = rest;
-                    self.fills[index] = Fill {
-                        used: composed.block_end,
-                        empty: false,
-                    };
-                    if !self.advance() {
-                        break;
-                    }
-                }
-            }
-        }
-
-        self.snapshot.diagnostics.extend(preparation_notes);
-        if !done {
-            unplaced(&mut self.snapshot.diagnostics, &subject, start..len);
-        }
-        if !lines.is_empty() {
-            self.snapshot.blocks.push(prepared.into_block(lines));
-        }
     }
 
     pub(crate) fn depth(&self, index: usize, full: Length) -> Length {
@@ -725,7 +730,8 @@ pub(crate) struct Delta {
     limit_hit: bool,
     tail: usize,
 }
-struct Mark {
+#[derive(Clone)]
+pub(crate) struct Mark {
     pages: usize,
     frames: usize,
     blocks: usize,
@@ -853,184 +859,13 @@ pub(crate) fn prepare_with(
     diagnostics: &mut Vec<Diagnostic>,
     evaluation: Option<&crate::incremental::Evaluation>,
 ) -> Option<Prepared> {
-    let subject = Subject::Node(node);
-    let block = match doc.block(node) {
-        Ok(block) => block,
-        Err(error) => {
-            diagnostics.push(Diagnostic::new(
-                Severity::Error,
-                codes::MALFORMED_BLOCK,
-                subject,
-                error.to_string(),
-            ));
-            return None;
-        }
+    // The stages live in `stage` so a job can run them in separate units.
+    let finished = match evaluation {
+        Some(e) => stage::run(engine, doc, node, ctx, Some(e), &*e.workers()),
+        None => stage::run(engine, doc, node, ctx, None, &crate::workers::Serial),
     };
-    if let Some(e) = evaluation {
-        e.style_resolution();
-    }
-    let style = match doc.computed_style_with(node, ctx, &engine.functions) {
-        Ok(s) => s,
-        Err(e) => {
-            diagnostics.push(Diagnostic::new(
-                Severity::Error,
-                codes::STYLE,
-                subject,
-                e.to_string(),
-            ));
-            return None;
-        }
-    };
-    diagnostics.extend(
-        style
-            .notes
-            .iter()
-            .cloned()
-            .map(|note| Diagnostic::from_note(note, subject.clone())),
-    );
-    for property in &style.clamped {
-        diagnostics.push(Diagnostic::new(
-            Severity::Warning,
-            codes::STYLE_CLAMPED,
-            subject.clone(),
-            format!("{property} resolved to a negative length; clamped to zero"),
-        ));
-    }
-    let text = block.text.to_string();
-    if block.kind == BlockKind::Image {
-        let width = match ctx.block.width {
-            reprise_doc::context::Resolved::Definite(w) => w,
-            _ => Length::MAX,
-        };
-        let image = crate::image::prepare(engine, doc, node, style.size, width, diagnostics);
-        return Some(Prepared {
-            node,
-            kind: block.kind,
-            style,
-            text,
-            items: Vec::new(),
-            levels: Vec::new(),
-            base_level: 0,
-            shaped: ShapedText { runs: Vec::new() },
-            breaks: Vec::new(),
-            fallback: None,
-            image: Some(image),
-        });
-    }
-    let styles = [StyleRun {
-        range: 0..text.len(),
-        families: if style.families.is_empty() {
-            vec![style.family.clone()]
-        } else {
-            style.families.clone()
-        },
-        size: style.size,
-        language: None,
-        features: Vec::new(),
-    }];
-    let fallback = if style.families.is_empty() {
-        engine
-            .fonts
-            .by_family(&style.family)
-            .map(|f| (f.id().clone(), style.size))
-    } else {
-        let generic = style
-            .families
-            .last()
-            .and_then(|family| reprise_font::GenericFamily::parse(family))
-            .unwrap_or(reprise_font::GenericFamily::Serif);
-        Some((engine.fonts.generic(generic).id().clone(), style.size))
-    };
-    let input = ParagraphInput {
-        text: &text,
-        styles: &styles,
-        direction: None,
-    };
-    let shape_key = evaluation.map(|_| {
-        // The additive entry point changes fallback semantics even for the same
-        // list of names. Version only the owned cache representation; itemization
-        // and the adapter receive the original authored families unchanged.
-        let mut key_styles = styles.clone();
-        if !style.families.is_empty() {
-            for run in &mut key_styles {
-                run.families.insert(0, "\0reprise-font-chain1".into());
-            }
-        }
-        let key_input = ParagraphInput {
-            text: &text,
-            styles: &key_styles,
-            direction: input.direction,
-        };
-        crate::incremental::ShapingKey::new(&key_input, fallback.clone())
-    });
-    let shape_notes = diagnostics.len();
-    if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
-        && let Some((value, notes)) = e.shaping_hit(node, key)
-    {
-        diagnostics.extend(notes);
-        return value.map(|mut prepared| {
-            prepared.kind = block.kind;
-            prepared.style = style;
-            prepared
-        });
-    }
-    if let Some(e) = evaluation {
-        e.itemization();
-    }
-    let itemized = if style.families.is_empty() {
-        itemize(&input, &engine.fonts)
-    } else {
-        itemize_families(&input, &engine.fonts)
-    };
-    diagnostics.extend(
-        itemized
-            .notes
-            .into_iter()
-            .map(|n| Diagnostic::from_note(n, subject.clone())),
-    );
-    if itemized.items.is_empty() && !text.is_empty() {
-        if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
-            e.shaping_miss(
-                node,
-                shape_key,
-                None,
-                diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
-            );
-        }
-        return None; // Nothing could be shaped; itemisation said why.
-    }
-    if let Some(e) = evaluation {
-        e.shape();
-    }
-    let shaped = Shaper {
-        text: &text,
-        items: &itemized.items,
-        fonts: &engine.fonts,
-        adapter: engine.shaper.as_ref(),
-    }
-    .shape();
-    let prepared = Prepared {
-        node,
-        kind: block.kind,
-        breaks: break_opportunities(&text),
-        style,
-        text,
-        items: itemized.items,
-        levels: itemized.levels,
-        base_level: itemized.base_level,
-        shaped,
-        fallback,
-        image: None,
-    };
-    if let (Some(e), Some(shape_key)) = (evaluation, shape_key) {
-        e.shaping_miss(
-            node,
-            shape_key,
-            Some(prepared.clone()),
-            diagnostics.get(shape_notes..).unwrap_or_default().to_vec(),
-        );
-    }
-    Some(prepared)
+    diagnostics.extend(finished.notes);
+    finished.value
 }
 
 impl Prepared {

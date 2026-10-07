@@ -12,6 +12,9 @@ use reprise_geom::{PageSpace, Rect};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::sync::Arc;
+
+use crate::workers::{Serial, Workers};
 
 /// A derived unit, separate from authored identities and relations.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -146,6 +149,34 @@ pub struct WorkCounters {
     pub region_passes: usize,
     pub relation_passes: usize,
     pub reading_order_passes: usize,
+}
+/// The work one [`LayoutJob::step`] did, as counters (never time). Hosts and
+/// tests use it to check the per-step bounds in `docs/incremental.md`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StepWork {
+    /// Charged units.
+    pub units: usize,
+    /// Shaping adapter requests and the bytes they covered.
+    pub adapter_requests: usize,
+    pub shaped_bytes: usize,
+    /// The most bytes covered by one adapter request.
+    pub largest_request: usize,
+    /// Composer calls and the lines they returned.
+    pub composer_calls: usize,
+    pub composed_lines: usize,
+    /// Bytes read by linear whole-paragraph scans: itemisation, break
+    /// analysis and each composer call's input.
+    pub scanned_bytes: usize,
+    /// The largest single linear scan.
+    pub largest_scan: usize,
+    /// Table rows prepared and placed.
+    pub table_rows: usize,
+    /// Float and note placements.
+    pub region_placements: usize,
+    /// Relations resolved in the relation pass.
+    pub relations: usize,
+    /// Paragraphs prepared speculatively ahead of the cursor.
+    pub prefetched: usize,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Inputs {
@@ -436,13 +467,60 @@ struct Cache {
     regions: Vec<RegionEntry>,
     final_pass: Option<FinalEntry>,
     counters: WorkCounters,
+    work: StepWork,
     graph: DependencyGraph,
 }
-#[derive(Default)]
 pub(crate) struct Evaluation {
     cache: RefCell<Cache>,
+    workers: Arc<dyn Workers>,
+}
+impl Default for Evaluation {
+    fn default() -> Self {
+        Self {
+            cache: RefCell::default(),
+            workers: Arc::new(Serial),
+        }
+    }
+}
+/// A preparation memo miss, between its start and end bookkeeping.
+#[derive(Clone)]
+pub(crate) struct PrepareMiss {
+    node: NodeId,
+    key: PrepareKey,
+    reasons: BTreeSet<Dependency>,
+}
+pub(crate) enum PrepareStart {
+    Hit(Option<Prepared>, Vec<Diagnostic>),
+    Miss(PrepareMiss),
+    /// The block can't be read; prepare without memo or counters.
+    Untracked,
 }
 impl Evaluation {
+    /// Drops every memo and counter, keeping the workers.
+    fn clear(&self) {
+        *self.cache.borrow_mut() = Cache::default();
+    }
+    pub(crate) fn workers(&self) -> Arc<dyn Workers> {
+        self.workers.clone()
+    }
+    pub(crate) fn work(&self, f: impl FnOnce(&mut StepWork)) {
+        f(&mut self.cache.borrow_mut().work);
+    }
+    pub(crate) fn scanned(&self, bytes: usize) {
+        self.work(|w| {
+            w.scanned_bytes = w.scanned_bytes.saturating_add(bytes);
+            w.largest_scan = w.largest_scan.max(bytes);
+        });
+    }
+    pub(crate) fn shaped(&self, requests: impl IntoIterator<Item = usize>) {
+        self.work(|w| {
+            for bytes in requests {
+                w.adapter_requests = w.adapter_requests.saturating_add(1);
+                w.shaped_bytes = w.shaped_bytes.saturating_add(bytes);
+                w.largest_request = w.largest_request.max(bytes);
+            }
+        });
+    }
     pub(crate) fn shaping_hit(
         &self,
         node: NodeId,
@@ -501,8 +579,31 @@ impl Evaluation {
         ctx: &ResolutionContext,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Option<Prepared> {
+        match self.prepare_start(engine, doc, node, ctx) {
+            PrepareStart::Hit(value, notes) => {
+                diagnostics.extend(notes);
+                value
+            }
+            PrepareStart::Untracked => flow::prepare(engine, doc, node, ctx, diagnostics),
+            PrepareStart::Miss(miss) => {
+                let finished =
+                    flow::stage::run(engine, doc, node, ctx, Some(self), &*self.workers());
+                self.prepare_end(miss, &finished);
+                diagnostics.extend(finished.notes);
+                finished.value
+            }
+        }
+    }
+    /// The memo lookup and dependency bookkeeping before a preparation.
+    pub(crate) fn prepare_start(
+        &self,
+        engine: &Engine,
+        doc: &Document,
+        node: NodeId,
+        ctx: &ResolutionContext,
+    ) -> PrepareStart {
         let Some(inputs) = Inputs::read(doc, node) else {
-            return flow::prepare(engine, doc, node, ctx, diagnostics);
+            return PrepareStart::Untracked;
         };
         let key = PrepareKey {
             inputs,
@@ -527,8 +628,7 @@ impl Evaluation {
                 ]),
                 BTreeSet::new(),
             );
-            diagnostics.extend(entry.diagnostics);
-            return entry.value;
+            return PrepareStart::Hit(entry.value, entry.diagnostics);
         }
         let mut reasons = cache
             .prepared
@@ -557,12 +657,102 @@ impl Evaluation {
             ]),
             BTreeSet::new(),
         );
-        let itemizations_before = cache.counters.itemizations;
-        drop(cache);
-        let mut notes = Vec::new();
-        let value = flow::prepare_with(engine, doc, node, ctx, &mut notes, Some(self));
+        PrepareStart::Miss(PrepareMiss { node, key, reasons })
+    }
+    /// True when `node` was prepared before with exactly these inputs, in
+    /// any context: its shaping is then memoised, so it is not speculated on.
+    fn has_inputs(&self, node: NodeId, inputs: &Inputs) -> bool {
+        self.cache
+            .borrow()
+            .prepared
+            .get(&node)
+            .is_some_and(|v| v.iter().any(|e| &e.key.inputs == inputs))
+    }
+    /// Prepares a short paragraph whose preparation memo missed (`current`,
+    /// already staged) together with up to `PREFETCH_BLOCKS - 1` following
+    /// paragraphs, speculatively, in the predicted context `ctx`. Style
+    /// resolution and all bookkeeping run here, in block order; itemisation,
+    /// shaping and break analysis run on the workers. Returns the current
+    /// block's result; the caller records its memo.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_ahead(
+        &self,
+        engine: &Engine,
+        doc: &Document,
+        current: &PrepareMiss,
+        staged: flow::stage::Staged,
+        ctx: &ResolutionContext,
+        upcoming: &[NodeId],
+        owners: &BTreeSet<NodeId>,
+    ) -> flow::stage::Finished {
+        let mut batch: Vec<(Option<PrepareMiss>, flow::stage::Staged)> = vec![(None, staged)];
+        // Only new text is worth speculating on: a block prepared before with
+        // equal inputs is followed by blocks whose shaping is memoised too.
+        if !self.has_inputs(current.node, &current.key.inputs) {
+            for &node in upcoming.iter().take(PREFETCH_BLOCKS.saturating_sub(1)) {
+                if owners.contains(&node)
+                    || doc.kind_of(node) != Some(BlockKind::Paragraph)
+                    || !matches!(doc.table_role(node), Ok(None))
+                {
+                    continue;
+                }
+                let Some(inputs) = Inputs::read(doc, node) else {
+                    continue;
+                };
+                if inputs.text.len() > crate::shaping::SHAPE_CHUNK_BYTES
+                    || self.has_inputs(node, &inputs)
+                {
+                    continue;
+                }
+                let PrepareStart::Miss(miss) = self.prepare_start(engine, doc, node, ctx) else {
+                    continue;
+                };
+                match flow::stage::begin(engine, doc, node, ctx, Some(self)) {
+                    flow::stage::Begin::Done(value, notes) => {
+                        let finished = flow::stage::Finished {
+                            value,
+                            notes,
+                            itemized: false,
+                        };
+                        self.prepare_end(miss, &finished);
+                    }
+                    flow::stage::Begin::Shape(staged) => batch.push((Some(miss), *staged)),
+                }
+            }
+        }
+        let workers = self.workers();
+        let fonts = &engine.fonts;
+        let adapter = engine.shaper.as_ref();
+        crate::workers::for_each_mut(&*workers, &mut batch, &|(_, staged)| {
+            staged.run_pure(fonts, adapter, &Serial)
+        });
+        let mut result = None;
+        for (miss, staged) in batch {
+            self.shaped(staged.request_bytes());
+            self.scanned(staged.len());
+            if staged.has_breaks() {
+                self.scanned(staged.len());
+            }
+            let finished = staged.finish(engine, Some(self));
+            match miss {
+                None => result = Some(finished),
+                Some(miss) => {
+                    self.prepare_end(miss, &finished);
+                    self.work(|w| w.prefetched = w.prefetched.saturating_add(1));
+                }
+            }
+        }
+        result.unwrap_or(flow::stage::Finished {
+            value: None,
+            notes: Vec::new(),
+            itemized: false,
+        })
+    }
+    /// The bookkeeping after a missed preparation finished.
+    pub(crate) fn prepare_end(&self, miss: PrepareMiss, finished: &flow::stage::Finished) {
+        let PrepareMiss { node, key, reasons } = miss;
         let mut cache = self.cache.borrow_mut();
-        if cache.counters.itemizations > itemizations_before {
+        if finished.itemized {
             cache
                 .graph
                 .reasons
@@ -576,11 +766,9 @@ impl Evaluation {
         }
         entries.push(PreparedEntry {
             key,
-            value: value.clone(),
-            diagnostics: notes.clone(),
+            value: finished.value.clone(),
+            diagnostics: finished.notes.clone(),
         });
-        diagnostics.extend(notes);
-        value
     }
     pub(crate) fn annotation_hit(
         &self,
@@ -805,6 +993,12 @@ impl Evaluation {
     }
 }
 
+/// Short paragraphs prepared together, speculatively, at a block start (one
+/// current block plus up to this many minus one following blocks).
+pub const PREFETCH_BLOCKS: usize = 8;
+pub use crate::flow::TABLE_ROW_GROUP;
+pub use crate::shaping::SHAPE_CHUNK_BYTES;
+
 /// Viewport demand. Page numbers are zero based; empty/reversed ranges demand nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Viewport {
@@ -925,6 +1119,12 @@ impl<'engine> LayoutSession<'engine> {
     pub fn counters(&self) -> WorkCounters {
         self.evaluation.cache.borrow().counters.clone()
     }
+    /// Lends the session an executor for pure preparation tasks (see
+    /// `docs/incremental.md`, "Native workers"). Output, unit charging and
+    /// counters do not depend on it. The default is [`Serial`].
+    pub fn set_workers(&mut self, workers: Arc<dyn Workers>) {
+        self.evaluation.workers = workers;
+    }
     pub fn graph(&self) -> DependencyGraph {
         self.evaluation.cache.borrow().graph.clone()
     }
@@ -935,7 +1135,7 @@ impl<'engine> LayoutSession<'engine> {
     ) -> LayoutJob<'job, 'engine> {
         doc.commit();
         if self.document.is_some_and(|p| !std::ptr::eq(p, doc)) {
-            self.evaluation = Evaluation::default();
+            self.evaluation.clear();
         }
         self.document = Some(doc);
         {
@@ -1059,7 +1259,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             self.terminal.set(Some(JobError::Stale));
             // A concurrent edit can race key capture and a unit's reads. Reject
             // both publication and every cache entry from that job.
-            self.session.evaluation = Evaluation::default();
+            self.session.evaluation.clear();
             return Err(JobError::Stale);
         }
         Ok(())
@@ -1081,23 +1281,38 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         self.current()?;
         let was_ready = self.viewport_ready();
         let mut used = 0usize;
+        self.session.evaluation.cache.borrow_mut().work = StepWork::default();
         while used < budget && self.pass != Pass::Complete {
             let engine = self.session.engine;
+            let mut charged = 1usize;
             match self.pass {
                 Pass::Flow => {
-                    if let Some(&node) = self.nodes.get(self.next_node) {
+                    let busy = self.cursor.as_ref().is_some_and(Cursor::busy);
+                    let start = if busy {
+                        None
+                    } else {
+                        self.nodes.get(self.next_node).copied()
+                    };
+                    if busy || start.is_some() {
+                        if start.is_some() {
+                            self.next_node = self.next_node.saturating_add(1);
+                        }
                         if let Some(cursor) = self.cursor.take() {
-                            self.cursor = Some(cursor.step(
+                            let upcoming = self.nodes.get(self.next_node..).unwrap_or_default();
+                            let (cursor, units) = cursor.unit(
                                 engine,
                                 self.doc,
                                 &self.template,
                                 &mut self.snapshot,
                                 &self.plan,
-                                node,
                                 Some(&self.session.evaluation),
-                            ));
+                                start,
+                                upcoming,
+                                budget.saturating_sub(used),
+                            );
+                            self.cursor = Some(cursor);
+                            charged = units;
                         }
-                        self.next_node = self.next_node.saturating_add(1);
                     } else {
                         if let Some(cursor) = self.cursor.take() {
                             self.pending = cursor.finish(
@@ -1206,10 +1421,11 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                 }
                 Pass::Complete => {}
             }
-            used = used.saturating_add(1);
+            used = used.saturating_add(charged);
             {
                 let mut cache = self.session.evaluation.cache.borrow_mut();
-                cache.counters.units = cache.counters.units.saturating_add(1);
+                cache.counters.units = cache.counters.units.saturating_add(charged);
+                cache.work.units = cache.work.units.saturating_add(charged);
             }
             if !was_ready && self.viewport_ready() {
                 break;
@@ -1223,10 +1439,19 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             complete: self.pass == Pass::Complete,
         })
     }
+    /// The work the most recent [`step`](Self::step) did, as counters.
+    pub fn step_work(&self) -> StepWork {
+        self.session.evaluation.cache.borrow().work.clone()
+    }
     pub fn partial(&mut self) -> Result<PartialLayout<'job>, JobError> {
         self.current()?;
         let sealed = self.sealed_pages();
         let mut snapshot = self.snapshot.clone();
+        if self.pass == Pass::Flow
+            && let Some(block) = self.cursor.as_ref().and_then(Cursor::in_progress)
+        {
+            snapshot.blocks.push(block);
+        }
         if self.pass != Pass::Complete {
             snapshot.pages.truncate(sealed);
             snapshot.frames.retain(|f| f.page < sealed);
@@ -1486,7 +1711,7 @@ impl<'engine> LayoutSession<'engine> {
         state: LayoutContinuation,
     ) -> Result<LayoutJob<'job, 'engine>, JobError> {
         if !std::ptr::eq(state.document, doc) || state.revision != doc.revision() {
-            self.evaluation = Evaluation::default();
+            self.evaluation.clear();
             return Err(JobError::Stale);
         }
         self.document = Some(doc);

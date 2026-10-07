@@ -14,6 +14,23 @@ use reprise_geom::Length;
 
 pub const MAX_TABLE_BLOCKS: usize = 65536;
 
+/// A table between its phases: everything `Flow::table` keeps across them.
+#[derive(Clone)]
+pub(crate) struct TableBuild {
+    node: NodeId,
+    columns: TableColumns,
+    grid: TableGrid,
+    frame_width: Length,
+    ctx: reprise_doc::ResolutionContext,
+    blocks: usize,
+    /// Prepared blocks per placed cell, in grid order.
+    prepared: Vec<Vec<Prepared>>,
+    /// Rows whose cells are prepared.
+    kept_rows: usize,
+    /// The block limit stopped the table.
+    stopped: bool,
+}
+
 /// Min/max content width of one cell, from its shaped blocks.
 fn measure(blocks: &[Prepared]) -> (Length, Length) {
     let mut min = Length::ZERO;
@@ -69,10 +86,31 @@ fn grow(bounds: &mut [Length], eligible: &[bool], column: usize, span: usize, ne
     }
 }
 
+impl TableBuild {
+    pub(crate) fn node(&self) -> NodeId {
+        self.node
+    }
+}
+
 impl Flow<'_> {
     pub(crate) fn table(&mut self, doc: &Document, node: NodeId, columns: &TableColumns) {
+        // The phases below are also run one unit at a time by incremental jobs.
+        let Some(mut build) = self.table_begin(doc, node, columns) else {
+            return;
+        };
+        while !self.table_rows(doc, &mut build, usize::MAX, usize::MAX) {}
+        let (groups, widths) = self.table_columns(build);
+        self.place_groups(node, groups, &widths);
+    }
+
+    /// Validates the grid and fixes the cells' resolution context.
+    pub(crate) fn table_begin(
+        &mut self,
+        doc: &Document,
+        node: NodeId,
+        columns: &TableColumns,
+    ) -> Option<TableBuild> {
         let subject = Subject::Node(node);
-        let count = columns.columns.len();
         let grid = match doc.table_structure(node) {
             Ok(Some(grid)) => grid,
             _ => {
@@ -82,34 +120,56 @@ impl Flow<'_> {
                     subject,
                     "table must declare 1..256 columns; table omitted",
                 ));
-                return;
+                return None;
             }
         };
         self.report_grid(&grid);
-        let Some(frame) = self.snapshot.frame(self.frame_index()).cloned() else {
-            return;
-        };
+        let frame = self.snapshot.frame(self.frame_index()).cloned()?;
         let starting_frame = self
             .template
             .frames
             .get(self.frame_index() % self.template.frames.len().max(1));
         let ctx = resolution_context(self.engine, self.template, starting_frame, frame.rect.width);
-        let mut min = vec![Length::ZERO; count];
-        let mut max = vec![Length::ZERO; count];
-        let mut blocks = 0usize;
-        // Prepared blocks and measurements per placed cell, in grid order.
-        let mut prepared: Vec<Vec<Prepared>> = Vec::new();
-        let mut kept_rows = 0usize;
-        'rows: for row in &grid.rows {
+        Some(TableBuild {
+            node,
+            columns: columns.clone(),
+            grid,
+            frame_width: frame.rect.width,
+            ctx,
+            blocks: 0,
+            prepared: Vec::new(),
+            kept_rows: 0,
+            stopped: false,
+        })
+    }
+
+    /// Prepares the cells of up to `max_rows` more rows, stopping after the
+    /// row in which `max_bytes` of cell text have been prepared. True once
+    /// every row is prepared or the block limit stopped the table.
+    pub(crate) fn table_rows(
+        &mut self,
+        doc: &Document,
+        build: &mut TableBuild,
+        max_rows: usize,
+        max_bytes: usize,
+    ) -> bool {
+        let subject = Subject::Node(build.node);
+        let ctx = build.ctx.clone();
+        let mut rows_done = 0usize;
+        let mut bytes = 0usize;
+        while !build.stopped && rows_done < max_rows && bytes < max_bytes {
+            let Some(row) = build.grid.rows.get(build.kept_rows) else {
+                break;
+            };
             for &index in &row.cells {
-                let Some(cell) = grid.cells.get(index) else {
-                    prepared.push(Vec::new());
+                let Some(cell) = build.grid.cells.get(index) else {
+                    build.prepared.push(Vec::new());
                     continue;
                 };
                 let mut cell_blocks = Vec::new();
                 for block in doc.children(Some(cell.node)) {
-                    blocks = blocks.saturating_add(1);
-                    if blocks > MAX_TABLE_BLOCKS {
+                    build.blocks = build.blocks.saturating_add(1);
+                    if build.blocks > MAX_TABLE_BLOCKS {
                         break;
                     }
                     if !matches!(doc.table_role(block), Ok(None)) {
@@ -132,22 +192,45 @@ impl Flow<'_> {
                         &mut self.snapshot.diagnostics,
                         self.evaluation,
                     ) {
+                        bytes = bytes.saturating_add(p.text.len());
                         cell_blocks.push(p);
                     }
                 }
-                prepared.push(cell_blocks);
+                build.prepared.push(cell_blocks);
             }
-            kept_rows += 1;
-            if blocks > MAX_TABLE_BLOCKS {
+            build.kept_rows += 1;
+            rows_done += 1;
+            if build.blocks > MAX_TABLE_BLOCKS {
                 self.snapshot.diagnostics.push(Diagnostic::new(
                     Severity::Error,
                     codes::TABLE_LIMIT,
                     subject.clone(),
                     "table exceeds 65536 content blocks; remainder omitted",
                 ));
-                break 'rows;
+                build.stopped = true;
             }
         }
+        if let Some(e) = self.evaluation {
+            e.work(|w| w.table_rows = w.table_rows.saturating_add(rows_done));
+        }
+        build.stopped || build.kept_rows >= build.grid.rows.len()
+    }
+
+    /// Solves the columns and assembles the row groups.
+    pub(crate) fn table_columns(&mut self, build: TableBuild) -> (Vec<Group>, Vec<Length>) {
+        let TableBuild {
+            node,
+            columns,
+            grid,
+            frame_width,
+            prepared,
+            kept_rows,
+            ..
+        } = build;
+        let subject = Subject::Node(node);
+        let count = columns.columns.len();
+        let mut min = vec![Length::ZERO; count];
+        let mut max = vec![Length::ZERO; count];
         // `prepared` follows the rows' cell order, which is grid order.
         let placed: Vec<&GridCell> = grid
             .rows
@@ -204,7 +287,7 @@ impl Flow<'_> {
             })
             .collect();
         let solution = SolverDomain {
-            budget: frame.rect.width,
+            budget: frame_width,
             variables,
         }
         .solve();
@@ -270,7 +353,7 @@ impl Flow<'_> {
             groups.push(group);
             first = end + 1;
         }
-        self.place_groups(node, groups, &solution.widths);
+        (groups, solution.widths)
     }
 
     /// Reports what the grid had to cut, drop or limit, in document order.

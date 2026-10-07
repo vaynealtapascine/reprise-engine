@@ -248,11 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-<<<<<<< HEAD
-    assert_eq!(hostile::all().expect("fixtures build").len(), 86);
-=======
-    assert_eq!(hostile::all().expect("fixtures build").len(), 80);
->>>>>>> hardening/fuzz
+    assert_eq!(hostile::all().expect("fixtures build").len(), 88);
 }
 
 hostile_tests!(
@@ -1142,7 +1138,6 @@ hostile_tests!(
 );
 region_hostile_tests!(image_float, image_note);
 
-<<<<<<< HEAD
 hostile_tests!(font_legacy_missing);
 
 region_hostile_tests!(
@@ -1154,6 +1149,6 @@ region_hostile_tests!(
     table_concurrent_overlapping_spans,
 );
 region_hostile_tests!(pdf_structure_storm);
-=======
-hostile_tests!(font_legacy_missing, space_before_zwj);
->>>>>>> hardening/fuzz
+
+hostile_tests!(space_before_zwj);
+region_hostile_tests!(incremental_long_paragraph_and_table);

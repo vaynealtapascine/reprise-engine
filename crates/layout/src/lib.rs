@@ -30,6 +30,7 @@ pub mod reading;
 mod region;
 mod regions;
 mod relations;
+mod shaping;
 mod snapshot;
 pub mod solver;
 mod table;
@@ -37,6 +38,7 @@ mod table_flow;
 #[cfg(test)]
 mod table_tests;
 mod template;
+pub mod workers;
 
 use reprise_compose::{Composer, Greedy};
 use reprise_doc::{Document, FunctionRegistry, Medium, SchemaRegistry};
@@ -46,6 +48,7 @@ use reprise_shape::{HarfRust, ShapingAdapter};
 use serde::{Deserialize, Serialize};
 
 pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
+pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
     PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader, Resolution, Subject,

@@ -132,8 +132,9 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         image_vertical()?,
         image_empty_alt()?,
         image_unreadable()?,
+        space_before_zwj()?,
+        incremental_long_paragraph_and_table()?,
         font_legacy_missing()?,
-<<<<<<< HEAD
         table_header_repeats()?,
         table_header_taller_than_frame()?,
         table_spans_whole_table()?,
@@ -141,9 +142,6 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         table_rowspan_vertical_break()?,
         table_concurrent_overlapping_spans()?,
         pdf_structure_storm()?,
-=======
-        space_before_zwj()?,
->>>>>>> hardening/fuzz
     ])
 }
 
@@ -2277,7 +2275,6 @@ pub fn font_legacy_missing() -> Result<Fixture, DocError> {
     Ok(Fixture::new("font_legacy_missing", doc, &["font.fallback"]))
 }
 
-<<<<<<< HEAD
 // ---- Tables: repeated headers and spans (24, 33, 37) ----
 
 fn header_table(doc: &Document, columns: usize) -> Result<NodeId, DocError> {
@@ -2496,11 +2493,8 @@ pub fn pdf_structure_storm() -> Result<Fixture, DocError> {
         doc,
         &["layout.note-continued", "layout.table-header-unrepeated"],
     ))
-=======
-/// A space followed by a zero-width joiner or a combining mark, at every
-/// distance from the start of a line (found by the cross-crate fuzzer). UAX #14
-/// allows a break between them, but the pair is one grapheme cluster, so no line
-/// may start between them wherever the line happens to fill.
+}
+
 pub fn space_before_zwj() -> Result<Fixture, DocError> {
     let doc = document()?;
     for words in 0..46 {
@@ -2514,5 +2508,29 @@ pub fn space_before_zwj() -> Result<Fixture, DocError> {
     }
     doc.commit();
     Ok(Fixture::new("space_before_zwj", doc, &[]))
->>>>>>> hardening/fuzz
+}
+
+pub fn incremental_long_paragraph_and_table() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let table = header_table(&doc, 2)?;
+    table_row_of(&doc, table, true, &["Room", "Measure"])?;
+    for i in 0..20 {
+        table_row_of(&doc, table, false, &[&format!("hall {i}"), "longer inside"])?;
+    }
+    let hebrew = "\u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{5e2}\u{5d5}\u{5dc}\u{5dd} ".repeat(1000);
+    let latin = "the hallway grows longer ".repeat(800);
+    let cluster = format!("a{}", "\u{301}".repeat(9000));
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        &format!("{hebrew}{latin}{cluster} end"),
+    )?;
+    doc.commit();
+    let mut fixture = Fixture::new(
+        "incremental_long_paragraph_and_table",
+        doc,
+        &["layout.page-limit", "layout.text-unplaced"],
+    );
+    fixture.engine.flow.max_pages = 3;
+    Ok(fixture)
 }
