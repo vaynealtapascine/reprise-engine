@@ -13,7 +13,7 @@ use reprise_shape::ShapedGlyph;
 /// The result of the first stage: either preparation already finished (a
 /// failure, an image, or a shaping memo hit), or shaping work remains.
 pub(crate) enum Begin {
-    Done(Option<Prepared>, Vec<Diagnostic>),
+    Done(Option<Box<Prepared>>, Vec<Diagnostic>),
     Shape(Box<Staged>),
 }
 
@@ -114,7 +114,7 @@ pub(crate) fn begin(
         };
         let image = crate::image::prepare(engine, doc, node, style.size, width, &mut notes);
         return Begin::Done(
-            Some(Prepared {
+            Some(Box::new(Prepared {
                 node,
                 kind: block.kind,
                 style,
@@ -126,7 +126,7 @@ pub(crate) fn begin(
                 breaks: Vec::new(),
                 fallback: None,
                 image: Some(image),
-            }),
+            })),
             notes,
         );
     }
@@ -180,7 +180,7 @@ pub(crate) fn begin(
             value.map(|mut prepared| {
                 prepared.kind = block.kind;
                 prepared.style = style;
-                prepared
+                Box::new(prepared)
             }),
             notes,
         );
@@ -416,7 +416,7 @@ pub(crate) fn run(
 ) -> Finished {
     match begin(engine, doc, node, ctx, evaluation) {
         Begin::Done(value, notes) => Finished {
-            value,
+            value: value.map(|p| *p),
             notes,
             itemized: false,
         },

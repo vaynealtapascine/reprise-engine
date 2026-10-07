@@ -17,7 +17,8 @@ The pieces are:
 6.  **Per-user undo** across remote edits.
 
 The **v1** path (`export_updates`/`import_updates` with self-contained history snapshots)
-is unchanged and still readable. It is the fallback and the compatibility path.
+is still readable for trusted legacy peers. New multiplayer transports use format 2
+for both first join and ongoing edits; do not fall back to v1 on untrusted input.
 
 ## Trust model
 
@@ -112,7 +113,7 @@ diagnostics use only documented codes.
 
 ### Hostile-peer fuzz
 
-`crates/doc/tests/hostile_peer.rs` writes seeded random raw Loro operations into the
+`crates/doc/src/hostile_tests.rs` writes seeded random raw Loro operations into the
 engine's containers from a separate `LoroDoc`:
 
 -   wrong value types, unknown keys and kinds;
@@ -146,7 +147,10 @@ by peer, peers are distinct, counters are positive, and there are at most 4,096 
 Feature bits in format 2:
 
 -   bit 0, `DELTA_JSON`: the delta body is Loro's JSON change schema, version 1, in UTF-8.
--   bit 1, `SNAPSHOT_LORO_1_16`: the snapshot body is a Loro 1.16 history snapshot.
+-   bit 1, `SNAPSHOT_LORO_1_16`: reserved legacy binary snapshot bit, refused with
+    `sync.feature` at the untrusted packet boundary.
+-   bit 2, `SNAPSHOT_JSON`: a complete history in the same bounded JSON schema and
+    operation vocabulary as deltas, with an empty `since` vector.
 
 A packet sets only the bit its kind needs. A receiver refuses a packet with an unknown
 format (`sync.format`) or an unknown feature bit (`sync.feature`) **before** reading the
@@ -168,10 +172,10 @@ before Loro sees the changes. Loro's own JSON import also validates counters, op
 and created container IDs. One keystroke is a few hundred bytes of JSON, so delta size is
 not the bottleneck.
 
-The **snapshot** kind uses Loro's binary history snapshot, with the same preflight as
-opening a package (`MAX_PERSIST_BYTES`, the LZ4 expansion bound, the operation count, and
-mode `Snapshot` only). Change blocks inside a snapshot's KV store use the same columnar
-encoding. That residual risk is the one package files already carry; see *Known limits*.
+The **snapshot** kind also uses JSON and passes every delta preflight check, including
+causal text positions, operation vocabulary, receiver peer protection, and vector agreement.
+Binary history snapshots are refused before decoding at this boundary. Package persistence
+and the trusted v1 compatibility API remain binary; their separate limits are below.
 
 ### Delta preflight
 
@@ -359,11 +363,16 @@ What the Reprise side sends:
     and drop the refused packet. Retrying it later is harmless but unnecessary.
 -   **On reconnect after offline:** exchange vectors and send each other deltas since the
     other's vector. Both sides then converge. A delta larger than the packet bound fails
-    with `sync.limit`: fall back to a full snapshot packet, or to the v1 path.
+    with `sync.limit`: request a full JSON snapshot packet. If that also exceeds the bound,
+    the host must retain the session and report the limit; v1 is not an untrusted fallback.
 -   **On `sync.format` or `sync.feature`:** the peer runs a newer engine. Keep the session
     and tell the user. Do not retry.
 -   **On `sync.invalid` or `sync.local-peer`:** the sender is buggy or hostile. Drop the
     packet and consider disconnecting it.
+-   **After compaction:** a replica can send deltas only from its retained base.
+    If the requested vector predates that base, `sync.invalid` refuses the export;
+    request the missing history from a full-history replica. Keep such a replica
+    available when the host uses shallow packages.
 -   **Presence:** send `presence(...)` bytes on selection change, throttled by the host.
     On receipt, call `resolve_presence` after each layout.
 
@@ -381,11 +390,23 @@ What the Reprise side sends:
 
 ## Known limits
 
--   **Columnar change blocks inside snapshots** (the snapshot packet kind, v1 sync, and
+-   **Columnar change blocks inside binary snapshots** (trusted v1 sync and
     package open) are decoded by Loro without a count bound. Their LZ4 expansion is
     bounded, but a hostile `n_changes` inside an otherwise valid block can still ask for a
     large allocation. Closing this needs a bounded decoder for Loro's block format, or a
-    Loro change. Deltas avoid it entirely.
+    Loro change. Format-2 packets, including first joins, avoid that decoder entirely.
 -   **Intent anomalies** such as a split concurrent with a join, which duplicates text,
     converge but are not merged semantically.
+-   **Remote splits/joins** recreate moved text in another block. A stable caret in
+    that text falls back to the surviving original block or a nearby live block;
+    it does not follow the recreated suffix. Local edits supply explicit effects
+    so the UI can transform its selection before anchoring it again.
 -   **Authentication and authorisation** are out of scope (see the trust model).
+
+## End-to-end verification
+
+`crates/reprise/tests/collab.rs::three_peer_partition_rejoin_soak` exercises three
+sessions across partitions, shuffled delivery, refused dependencies, replay, per-user
+undo/redo, anti-entropy, stable selections, identical layout and package reopen.
+`REPRISE_COLLAB_STEPS` controls its length. The WASM smoke test exercises the same
+sync, selection, presence and undo APIs through actual generated JavaScript bindings.

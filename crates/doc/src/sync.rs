@@ -19,9 +19,9 @@ use loro::{
 };
 use reprise_diag::{Code, Note, Severity};
 
+use crate::Document;
 use crate::changes::ChangeReport;
-use crate::persist::{MAX_PERSIST_OPS, validate_snapshot_mode};
-use crate::{DocError, Document};
+use crate::persist::MAX_PERSIST_OPS;
 
 /// The packet format this engine writes and reads. Format 1 is the facade's
 /// self-contained `SyncUpdate` snapshot, which stays readable there.
@@ -53,12 +53,16 @@ impl Features {
     pub const DELTA_JSON: Features = Features(1);
     /// The snapshot body is a Loro 1.16 history snapshot.
     pub const SNAPSHOT_LORO_1_16: Features = Features(1 << 1);
-    /// Everything this engine reads.
-    pub const SUPPORTED: Features = Features(1 | (1 << 1));
+    /// A complete history in the same bounded JSON vocabulary as deltas.
+    pub const SNAPSHOT_JSON: Features = Features(1 << 2);
+    /// Everything accepted at the untrusted packet boundary. Binary snapshots
+    /// remain a legacy persistence API, not a safe network packet format.
+    pub const SUPPORTED: Features = Features(1 | (1 << 2));
 
-    const NAMES: [(Features, &'static str); 2] = [
+    const NAMES: [(Features, &'static str); 3] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
+        (Features::SNAPSHOT_JSON, "snapshot-json"),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -282,7 +286,7 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
     };
     let needed = match kind {
         PacketKind::Delta => Features::DELTA_JSON,
-        PacketKind::Snapshot => Features::SNAPSHOT_LORO_1_16,
+        PacketKind::Snapshot => Features::SNAPSHOT_JSON,
     };
     if features != needed {
         return Err(invalid("packet features don't match its kind"));
@@ -359,6 +363,15 @@ impl Document {
             .map(|&(peer, counter)| (peer, lookup(since, peer).min(counter)))
             .filter(|&(_, counter)| counter > 0)
             .collect();
+        // Loro cannot export operations trimmed by a shallow snapshot. Refuse
+        // before its JSON exporter silently clamps the request or asserts.
+        for (&peer, &counter) in self.doc.shallow_since_vv().iter() {
+            if lookup(&clamped, peer) < counter {
+                return Err(invalid(
+                    "requested sync history was compacted; use a full-history replica",
+                ));
+            }
+        }
         let json = self
             .doc
             .export_json_updates(&to_vv(&clamped), &to_vv(&until));
@@ -375,19 +388,11 @@ impl Document {
 
     /// A snapshot packet: this replica's whole history, for a first join.
     pub fn export_snapshot_packet(&self) -> Result<Vec<u8>, SyncError> {
-        let body = self
-            .try_export(crate::PersistenceMode::History)
-            .map_err(|e| SyncError::Store(e.to_string()))?;
-        let until = self.version_vector();
-        check_vector(&until)?;
-        let header = PacketHeader {
-            format: SYNC_FORMAT,
-            features: Features::SNAPSHOT_LORO_1_16,
-            kind: PacketKind::Snapshot,
-            since: Vec::new(),
-            until,
-        };
-        write_packet(&header, &body)
+        let packet = self.export_delta(&[])?;
+        let (mut header, body) = read_header(&packet)?;
+        header.kind = PacketKind::Snapshot;
+        header.features = Features::SNAPSHOT_JSON;
+        write_packet(&header, body)
     }
 
     /// Imports a packet from another replica and reports what changed. A
@@ -396,10 +401,7 @@ impl Document {
     pub fn import_packet(&self, bytes: &[u8]) -> Result<ChangeReport, SyncError> {
         let (header, body) = read_header(bytes)?;
         self.commit();
-        match header.kind {
-            PacketKind::Delta => self.import_delta(&header, body),
-            PacketKind::Snapshot => self.import_snapshot(&header, body),
-        }
+        self.import_delta(&header, body)
     }
 
     fn import_delta(&self, header: &PacketHeader, body: &[u8]) -> Result<ChangeReport, SyncError> {
@@ -407,33 +409,6 @@ impl Document {
             serde_json::from_slice(body).map_err(|e| SyncError::Invalid(e.to_string()))?;
         self.preflight_delta(header, &json)?;
         let (status, report) = self.tracked(|| self.doc.import_json_updates(json));
-        let status = status.map_err(|e| SyncError::Store(e.to_string()))?;
-        if status.pending.is_some() {
-            return Err(SyncError::Missing {
-                have: self.version_vector(),
-            });
-        }
-        Ok(report)
-    }
-
-    fn import_snapshot(
-        &self,
-        header: &PacketHeader,
-        body: &[u8],
-    ) -> Result<ChangeReport, SyncError> {
-        let end = validate_snapshot_mode(body, true).map_err(|e| match e {
-            DocError::Store(why) => SyncError::Invalid(why),
-            other => SyncError::Invalid(other.to_string()),
-        })?;
-        if end != header.until {
-            return Err(invalid("until does not describe the snapshot"));
-        }
-        let local = self.version_vector();
-        let own = self.peer();
-        if lookup(&header.until, own) > lookup(&local, own) {
-            return Err(SyncError::LocalPeer);
-        }
-        let (status, report) = self.tracked(|| self.doc.import(body));
         let status = status.map_err(|e| SyncError::Store(e.to_string()))?;
         if status.pending.is_some() {
             return Err(SyncError::Missing {
@@ -592,14 +567,20 @@ impl Document {
             })
         };
         let mut created = BTreeSet::new();
-        for change in &json.changes {
-            for op in &change.ops {
-                if let JsonOpContent::Tree(JsonTreeOp::Create { target, .. }) = &op.content {
-                    created.insert((container(&op.container)?.to_string(), node(target)?));
-                }
-            }
+        // Loro applies changes in causal/Lamport order. A node created later
+        // in the packet cannot make an earlier move or delete safe.
+        let mut order = Vec::with_capacity(json.changes.len());
+        for (i, change) in json.changes.iter().enumerate() {
+            order.push((
+                change.lamport,
+                peer_of(change.id.peer)?,
+                change.id.counter,
+                i,
+            ));
         }
-        for change in &json.changes {
+        order.sort_unstable();
+        for (_, _, _, i) in order {
+            let change = &json.changes[i];
             for op in &change.ops {
                 let JsonOpContent::Tree(tree_op) = &op.content else {
                     continue;
@@ -622,6 +603,9 @@ impl Document {
                     if !exists(id)? {
                         return Err(invalid("tree operation names a node that does not exist"));
                     }
+                }
+                if let JsonTreeOp::Create { target, .. } = tree_op {
+                    created.insert((key, node(target)?));
                 }
             }
         }

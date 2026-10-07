@@ -301,7 +301,7 @@ mod tests {
         past.range = 4..usize::MAX;
         items.push(past);
         let mut reversed = items[0].clone();
-        reversed.range = 7..2;
+        reversed.range = std::ops::Range { start: 7, end: 2 };
         items.push(reversed);
         assert_eq!(
             shape(text, &items, &fonts, &HarfRust, &Serial),

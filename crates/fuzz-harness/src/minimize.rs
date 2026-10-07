@@ -89,7 +89,9 @@ mod tests {
         let minimal = minimize(&data, "x", |bytes| {
             Some(violation(if bytes.len() == 3 { "x" } else { "y" }))
         });
-        assert_eq!(minimal, data);
+        // Byte normalisation is allowed when it retains oracle x, but no
+        // length reduction may switch to oracle y.
+        assert_eq!(minimal, vec![0, 0, 0]);
     }
 
     #[test]

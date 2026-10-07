@@ -90,6 +90,24 @@ export type Resource = { id: string, kind: ResourceKind, hash: string, available
 export type ResourceKind = "font" | "image" | "other";
 export type ResourceLocation = { "kind": "path", "value": string } | { "kind": "url", "value": string };
 export type CopyFormat = "plain-text" | "html";
+export type SyncRequest = { since: Array<Clock> | null, };
+export type SyncKind = "delta" | "snapshot";
+export type SyncPacket = { document_id: string, from_peer: string, format: number, features: Array<string>, kind: SyncKind, since: Array<Clock>, vector: Array<Clock>, content: Bytes, };
+export type Changes = { blocks: Array<string>, structure: boolean, styles: boolean, relations: Array<string>, ranges: Array<string>, other: boolean, };
+export type SyncReport = { info: SyncInfo, changed: boolean, changes: Changes,
+/**
+ * The anchored local selection after the import, if one is set.
+ */
+selection: Selection | null,
+/**
+ * Whether an end of it had to take a fallback.
+ */
+selection_moved: boolean, };
+export type EditReport = { changed: boolean, changes: Changes, selection: Selection | null, selection_moved: boolean, };
+export type StableCaret = { node: string, affinity: Affinity, anchor: string, };
+export type StableSelection = { anchor: StableCaret, focus: StableCaret, };
+export type Presence = { selection: Selection | null, meta: { [key in string]: string }, };
+export type PresenceView = { peer_id: string, meta: { [key in string]: string }, selection: Selection | null, caret: PageRect | null, rects: Array<PageRect>, };
 
 
 
@@ -97,6 +115,7 @@ export class DocumentSession {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    anchor_selection(request: Payload<Selection>): Payload<StableSelection>;
     apply(request: Payload<Transaction>): Payload<Applied>;
     awareness(content: Uint8Array): Payload<Awareness>;
     cancel(job: number): Payload<boolean>;
@@ -115,26 +134,35 @@ export class DocumentSession {
     insert_image(request: Payload<ImageInsert>): Payload<Applied>;
     install_plugin(plugin: number, request: Payload<PluginInstall>): Payload<boolean>;
     load_plugin(request: Payload<PluginSpec>, content: Uint8Array): Payload<number>;
+    local_selection(): Payload<Selection | null>;
     move_cursor(request: Payload<Move>): Payload<Cursor>;
     partial_page(job: number, page: number): Payload<DisplayPage>;
     paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
     png(page: number, scale_permille: number): Payload<Bytes>;
+    presence(request: Payload<Presence>): Payload<Awareness>;
     reading_order(): Payload<Array<ReadingStep>>;
     redo(): Payload<boolean>;
+    redo_report(): Payload<EditReport>;
     register_asset(request: Payload<AssetDeclaration>, content: Uint8Array): Payload<string>;
     release_job(job: number): Payload<boolean>;
     release_plugin(plugin: number): Payload<boolean>;
+    resolve_presence(request: Payload<Awareness>): Payload<PresenceView>;
+    resolve_selection(request: Payload<StableSelection>): Payload<Selection | null>;
     resource_bytes(request: Payload<string>): Payload<Bytes>;
     resources(): Payload<Array<Resource>>;
     run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
     save(): Payload<Bytes>;
     selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
+    set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
     start_layout(request: Payload<LayoutOptions>): Payload<number>;
     state(): Payload<State>;
     step(job: number, budget: number): Payload<LayoutProgress>;
     svg(page: number): Payload<string>;
+    sync_export(request: Payload<SyncRequest>): Payload<SyncPacket>;
+    sync_import(request: Payload<SyncPacket>): Payload<SyncReport>;
     sync_info(): Payload<SyncInfo>;
     undo(): Payload<boolean>;
+    undo_report(): Payload<EditReport>;
     validate_awareness(request: Payload<Awareness>): Payload<Bytes>;
 }
 
@@ -152,6 +180,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_documentsession_free: (a: number, b: number) => void;
     readonly __wbg_workspace_free: (a: number, b: number) => void;
+    readonly documentsession_anchor_selection: (a: number, b: any) => [number, number, number];
     readonly documentsession_apply: (a: number, b: any) => [number, number, number];
     readonly documentsession_awareness: (a: number, b: any) => [number, number, number];
     readonly documentsession_cancel: (a: number, b: number) => [number, number, number];
@@ -170,26 +199,35 @@ export interface InitOutput {
     readonly documentsession_insert_image: (a: number, b: any) => [number, number, number];
     readonly documentsession_install_plugin: (a: number, b: number, c: any) => [number, number, number];
     readonly documentsession_load_plugin: (a: number, b: any, c: any) => [number, number, number];
+    readonly documentsession_local_selection: (a: number) => [number, number, number];
     readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
     readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
     readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];
     readonly documentsession_png: (a: number, b: number, c: number) => [number, number, number];
+    readonly documentsession_presence: (a: number, b: any) => [number, number, number];
     readonly documentsession_reading_order: (a: number) => [number, number, number];
     readonly documentsession_redo: (a: number) => [number, number, number];
+    readonly documentsession_redo_report: (a: number) => [number, number, number];
     readonly documentsession_register_asset: (a: number, b: any, c: any) => [number, number, number];
     readonly documentsession_release_job: (a: number, b: number) => [number, number, number];
     readonly documentsession_release_plugin: (a: number, b: number) => [number, number, number];
+    readonly documentsession_resolve_presence: (a: number, b: any) => [number, number, number];
+    readonly documentsession_resolve_selection: (a: number, b: any) => [number, number, number];
     readonly documentsession_resource_bytes: (a: number, b: any) => [number, number, number];
     readonly documentsession_resources: (a: number) => [number, number, number];
     readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
     readonly documentsession_save: (a: number) => [number, number, number];
     readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
+    readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
     readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
     readonly documentsession_state: (a: number) => [number, number, number];
     readonly documentsession_step: (a: number, b: number, c: number) => [number, number, number];
     readonly documentsession_svg: (a: number, b: number) => [number, number, number];
+    readonly documentsession_sync_export: (a: number, b: any) => [number, number, number];
+    readonly documentsession_sync_import: (a: number, b: any) => [number, number, number];
     readonly documentsession_sync_info: (a: number) => [number, number, number];
     readonly documentsession_undo: (a: number) => [number, number, number];
+    readonly documentsession_undo_report: (a: number) => [number, number, number];
     readonly documentsession_validate_awareness: (a: number, b: any) => [number, number, number];
     readonly workspace_create: (a: number, b: any) => [number, number, number];
     readonly workspace_new: () => number;

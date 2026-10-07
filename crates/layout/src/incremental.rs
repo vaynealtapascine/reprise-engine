@@ -512,6 +512,14 @@ impl Evaluation {
             w.largest_scan = w.largest_scan.max(bytes);
         });
     }
+    /// A composer call over a paragraph of `bytes`, returning `lines`.
+    pub(crate) fn composed(&self, bytes: usize, lines: usize) {
+        self.scanned(bytes);
+        self.work(|w| {
+            w.composer_calls = w.composer_calls.saturating_add(1);
+            w.composed_lines = w.composed_lines.saturating_add(lines);
+        });
+    }
     pub(crate) fn shaped(&self, requests: impl IntoIterator<Item = usize>) {
         self.work(|w| {
             for bytes in requests {
@@ -710,7 +718,7 @@ impl Evaluation {
                 match flow::stage::begin(engine, doc, node, ctx, Some(self)) {
                     flow::stage::Begin::Done(value, notes) => {
                         let finished = flow::stage::Finished {
-                            value,
+                            value: value.map(|p| *p),
                             notes,
                             itemized: false,
                         };

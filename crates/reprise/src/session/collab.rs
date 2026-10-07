@@ -49,7 +49,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn unhex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 || s.len() > 2 * reprise_edit::MAX_ANCHOR_BYTES {
+    if !s.len().is_multiple_of(2) || s.len() > 2 * reprise_edit::MAX_ANCHOR_BYTES {
         return None;
     }
     (0..s.len())
@@ -88,9 +88,11 @@ fn stable_out(s: &reprise_edit::StableCaret) -> StableCaret {
 }
 
 fn stable_in(s: &StableCaret) -> Option<reprise_edit::StableCaret> {
+    let anchor = unhex(&s.anchor)?;
+    reprise_doc::text::Anchor::decode(&anchor)?;
     Some(reprise_edit::StableCaret {
         node: reprise_doc::NodeId::parse(&s.node)?,
-        anchor: unhex(&s.anchor)?,
+        anchor,
         affinity: affinity_in(s.affinity),
     })
 }
@@ -316,6 +318,15 @@ impl DocumentSession {
             .selection
             .as_ref()
             .and_then(selection_in)
+            .filter(|s| {
+                [&s.anchor, &s.focus].into_iter().all(|c| {
+                    let Some(text) = self.doc().text_of_any(c.node) else {
+                        return false;
+                    };
+                    reprise_doc::text::Anchor::decode(&c.anchor)
+                        .is_some_and(|a| a.text_id() == text.id())
+                })
+            })
             .and_then(|s| s.resolve(self.doc()))
         else {
             return Ok(Payload::new(view));

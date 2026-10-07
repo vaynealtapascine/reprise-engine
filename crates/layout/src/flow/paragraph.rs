@@ -156,7 +156,7 @@ impl Flow<'_> {
                     p,
                     miss,
                     Finished {
-                        value,
+                        value: value.map(|p| *p),
                         notes,
                         itemized: false,
                     },

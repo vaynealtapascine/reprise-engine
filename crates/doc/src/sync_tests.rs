@@ -312,3 +312,80 @@ fn merge_sends_only_what_is_missing() {
     a.merge(&b).unwrap();
     assert_eq!(dump(&a), dump(&b));
 }
+
+#[test]
+fn full_join_uses_json_and_refuses_legacy_binary_before_decoding() {
+    let (a, b, _) = pair();
+    let packet = a.export_snapshot_packet().unwrap();
+    let (header, body) = read_header(&packet).unwrap();
+    assert_eq!(header.features, Features::SNAPSHOT_JSON);
+    assert_eq!(header.kind, PacketKind::Snapshot);
+    assert!(serde_json::from_slice::<JsonSchema>(body).is_ok());
+    let mut legacy = header.clone();
+    legacy.features = Features::SNAPSHOT_LORO_1_16;
+    let before = b.revision();
+    // Even an invalid body never reaches the binary decoder.
+    assert_eq!(
+        b.import_packet(&repack(&legacy, b"hostile binary")),
+        Err(SyncError::Feature(Features::SNAPSHOT_LORO_1_16.0))
+    );
+    assert_eq!(b.revision(), before);
+}
+
+#[test]
+fn compacted_history_refuses_requests_before_its_retained_base() {
+    let (a, _, p) = pair();
+    let bytes = a.try_export(crate::PersistenceMode::Shallow).unwrap();
+    let compact = Document::import(&bytes, 9).unwrap();
+    assert!(matches!(
+        compact.export_snapshot_packet(),
+        Err(SyncError::Invalid(_))
+    ));
+    let since = compact.version_vector();
+    type_at(&compact, p, 0, "new");
+    let packet = compact.export_delta(&since).unwrap();
+    a.import_packet(&packet).unwrap();
+    assert_eq!(dump(&compact), dump(&a));
+}
+
+#[test]
+fn a_tree_parent_created_later_in_the_packet_is_refused_before_import() {
+    use loro::{JsonOpContent, JsonTreeOp};
+    let (a, b, _) = pair();
+    b.append_block(BlockKind::Paragraph, "", "first").unwrap();
+    b.commit();
+    b.append_block(BlockKind::Paragraph, "", "later").unwrap();
+    b.commit();
+    let packet = b.export_delta(&a.version_vector()).unwrap();
+    let (header, body) = read_header(&packet).unwrap();
+    let mut json: JsonSchema = serde_json::from_slice(body).unwrap();
+    let targets: Vec<_> = json
+        .changes
+        .iter()
+        .flat_map(|c| &c.ops)
+        .filter_map(|op| {
+            if let JsonOpContent::Tree(JsonTreeOp::Create { target, .. }) = &op.content {
+                Some(*target)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(targets.len(), 2);
+    for op in json.changes.iter_mut().flat_map(|c| &mut c.ops) {
+        if let JsonOpContent::Tree(JsonTreeOp::Create { target, parent, .. }) = &mut op.content
+            && *target == targets[0]
+        {
+            *parent = Some(targets[1]);
+        }
+    }
+    let before = a.revision();
+    let tampered = repack(&header, &serde_json::to_vec(&json).unwrap());
+    assert!(matches!(
+        a.import_packet(&tampered),
+        Err(SyncError::Invalid(_))
+    ));
+    assert_eq!(a.revision(), before);
+    a.import_packet(&packet).unwrap();
+    assert_eq!(dump(&a), dump(&b));
+}

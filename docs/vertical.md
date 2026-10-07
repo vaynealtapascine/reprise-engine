@@ -1,5 +1,11 @@
 # Vertical text
 
+> Implementation status (2026-10-07): this is the workstream design, not a
+> completed feature. Main has the orientation table, style vocabulary, geometry
+> helpers and pinned test font. Upright shaping, display compensation and
+> tate-chu-yoko remain unfinished in the preserved vertical worktree.
+
+
 How reprise-engine sets real vertical typography: upright CJK, UAX #50 glyph
 orientation, vertical shaping, downward `vertical-lr`, and tate-chū-yoko
 (decisions 20, 21, 22, 23, 30, 33 and 38). [geometry.md](geometry.md) covers frame

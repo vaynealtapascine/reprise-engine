@@ -983,6 +983,9 @@ impl Prepared {
                 .into_iter()
                 .map(|n| Diagnostic::from_note(n, subject.clone())),
         );
+        if let Some(e) = evaluation {
+            e.composed(self.text.len(), composition.lines.len());
+        }
         Composed {
             lines: composition
                 .lines

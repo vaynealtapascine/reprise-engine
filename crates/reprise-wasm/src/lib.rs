@@ -11,6 +11,25 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<SyncRequest>")]
+    pub type SyncRequestPayload;
+    #[wasm_bindgen(typescript_type = "Payload<SyncPacket>")]
+    pub type SyncPacketPayload;
+    #[wasm_bindgen(typescript_type = "Payload<SyncReport>")]
+    pub type SyncReportPayload;
+    #[wasm_bindgen(typescript_type = "Payload<StableSelection>")]
+    pub type StableSelectionPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Selection | null>")]
+    pub type OptionalSelectionPayload;
+    #[wasm_bindgen(typescript_type = "Payload<StableSelection | null>")]
+    pub type OptionalStableSelectionPayload;
+    #[wasm_bindgen(typescript_type = "Payload<EditReport>")]
+    pub type EditReportPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Presence>")]
+    pub type PresencePayload;
+    #[wasm_bindgen(typescript_type = "Payload<PresenceView>")]
+    pub type PresenceViewPayload;
+
     #[wasm_bindgen(typescript_type = "Payload<CopyAs>")]
     pub type CopyAsPayload;
     #[wasm_bindgen(typescript_type = "Payload<Array<Resource>>")]
@@ -291,6 +310,51 @@ impl WasmDocument {
 }
 #[wasm_bindgen(js_class=DocumentSession)]
 impl WasmDocument {
+    pub fn sync_export(&self, request: &SyncRequestPayload) -> Result<SyncPacketPayload, JsValue> {
+        Ok(encode(self.inner.sync_export(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn sync_import(
+        &mut self,
+        request: &SyncPacketPayload,
+    ) -> Result<SyncReportPayload, JsValue> {
+        Ok(encode(self.inner.sync_import(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn set_selection(
+        &mut self,
+        request: &OptionalSelectionPayload,
+    ) -> Result<OptionalStableSelectionPayload, JsValue> {
+        Ok(encode(self.inner.set_selection(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn anchor_selection(
+        &self,
+        request: &SelectionPayload,
+    ) -> Result<StableSelectionPayload, JsValue> {
+        Ok(encode(self.inner.anchor_selection(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn resolve_selection(
+        &self,
+        request: &StableSelectionPayload,
+    ) -> Result<OptionalSelectionPayload, JsValue> {
+        Ok(encode(self.inner.resolve_selection(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn presence(&self, request: &PresencePayload) -> Result<AwarenessPayload, JsValue> {
+        Ok(encode(self.inner.presence(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn resolve_presence(
+        &self,
+        request: &AwarenessPayload,
+    ) -> Result<PresenceViewPayload, JsValue> {
+        Ok(encode(self.inner.resolve_presence(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn local_selection(&self) -> Result<OptionalSelectionPayload, JsValue> {
+        Ok(encode(Ok(self.inner.local_selection()))?.unchecked_into())
+    }
+    pub fn undo_report(&mut self) -> Result<EditReportPayload, JsValue> {
+        Ok(encode(self.inner.undo_report())?.unchecked_into())
+    }
+    pub fn redo_report(&mut self) -> Result<EditReportPayload, JsValue> {
+        Ok(encode(self.inner.redo_report())?.unchecked_into())
+    }
     pub fn copy_as(&self, request: &CopyAsPayload) -> Result<ExportedPayload, JsValue> {
         Ok(encode(self.inner.copy_as(&decode(request.as_ref())?))?.unchecked_into())
     }

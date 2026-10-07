@@ -2,6 +2,58 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-07: multiplayer hardening consolidated for Reprise
+
+**Consolidation:** `hardening/collab`, `hardening/pdfua`, `hardening/fuzz`,
+`hardening/incremental` and the committed `hardening/vertical` foundations are
+merged into main. Tables were already merged. The uncommitted facade fuzzer and
+incremental work counters/tests were recovered into main. Original worktrees and
+their changes remain intact. The fuzz scratch driver requiring `SEED` is kept in
+its worktree, not added to the suite. Incomplete vertical geometry edits remain
+in `F:/reprise-wt/vertical`: they require the missing shaping/display implementation
+and must not publish a reflected vertical-lr glyph transform on their own.
+
+**Multiplayer boundary:** Opus's delta sync, causal text preflight, invariant audit,
+change reports, stable selections, presence and per-user undo are now exposed
+through both native and WASM facades and the reference worker. New first joins
+use `snapshot-json`, with the same preflight as deltas. Binary v2 join packets are
+refused before decoding; trusted v1 and package compatibility remain readable.
+Compacted replicas refuse requests for trimmed history with a typed error.
+Tree preflight checks creation order; corrupt presence cursor bytes and foreign
+text containers cannot fabricate remote carets. Native facade layout jobs can
+select scoped workers without changing output, steps or counters.
+
+**Verification additions:** a seeded three-peer partition/rejoin soak with replay,
+explicit missing predecessors, local undo/redo, selection parity, convergence,
+layout, reopen and bounded keystroke packets; actual WASM/JavaScript multiplayer
+smoke coverage; native/WASM and TypeScript checks in CI. The recovered facade
+harness now uses valid step budgets and does not undo a preceding action after a
+no-op paste. Its seeded scenarios pass. The incremental table oracle now accounts
+for multiple cell compositions per placement unit, as documented. Large paragraph
+coverage defaults to 10,000 words; `REPRISE_LONG_PARAGRAPH_WORDS=100000` widens it.
+`REPRISE_COLLAB_STEPS=2100` widens the default 300-step soak.
+
+**Remaining scope:** binary package/v1 decoding still has the upstream columnar
+allocation risk documented in `docs/collaboration.md`; Reprise's untrusted
+multiplayer transport must use format 2. Resources, authentication, authorization,
+peer identity allocation, presence expiry and transport acknowledgements belong
+to the host. Upright vertical shaping is unfinished; the retained foundation
+properties do not yet affect glyph orientation. Table borders and nested tables
+remain feature gaps rather than multiplayer invariant failures.
+
+**Final checks and Astra-medium review:** full workspace tests passed (809),
+including all snapshot, hostile-document, cross-crate and recovered incremental
+checks. Strict Clippy, formatting, all-crate WASM checks, the actual WASM build
+and JavaScript smoke, and strict TypeScript compilation passed. The added remote
+split fallback regression passes, bringing the test total to 810. Astra-medium
+found one worker integration defect: local edits discarded `Applied`. Fixed
+`edit`/`image` responses to return effects and created IDs with state, and verified
+the compiled worker against real WASM bindings. No further ordinary multiplayer
+correctness blocker was found. Remote split caret fallback is now documented
+and pinned; the review was a correctness review, not a security certification.
+The widened 2,100-step three-peer partition/rejoin soak also passed (129.64 s).
+
+
 ## 2026-10-06: tables merged (hardening)
 
 **Done** (Sonnet 5.5): **header rows that repeat, and row and column spans** (06, 24, 26, 33,

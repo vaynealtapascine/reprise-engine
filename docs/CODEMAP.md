@@ -146,10 +146,20 @@ start with `docs/`, which names repository-level documentation.
 | `reprise-wasm` | `src/lib.rs`, `ts/`, `package.json` | Typed JavaScript objects, Uint8Array resources and explicit worker job steps over the same facade | 04, 28, 36, 38, 41 |
 | `fuzz-harness` | `src/input.rs`, `src/scenario.rs`, `src/pool.rs` | Total byte-to-scenario decoder (every byte string is valid), seeded byte generator, and the fixed pools (texts, styles, fonts, images, HTML) scenarios draw from | 39 |
 | `fuzz-harness` | `src/start.rs`, `src/engine.rs` | Starting documents (synthetic, or a hostile fixture through a saved package, once per peer) and the engine configuration as data, rebuilt when an op changes it | 34, 38, 39 |
-| `fuzz-harness` | `src/run.rs`, `src/oracle.rs`, `src/authored.rs`, `src/codes.rs`, `src/violation.rs` | The executor over two peers (edit, undo/redo, sync, copy/paste, import/export, styles/templates, layout through `Engine::layout` and budgeted jobs, save/reopen, render, navigation) and the oracles checked after every op: no panic, incremental equals reference, convergence, undo/redo restores state, reopen identical, copy/paste keeps text, reading order covers each line once, byte-identical output, documented diagnostic codes | 07, 16, 27–29, 33–35, 37–39 |
+| `fuzz-harness` | `src/run.rs`, `src/oracle.rs`, `src/authored.rs`, `src/codes.rs`, `src/violation.rs` | The executor over two peers (edit, undo/redo, sync, copy/paste, import/export, styles/templates, layout through `Engine::layout` and budgeted jobs, save/reopen, render, navigation) and the oracles checked after every op: no panic, incremental equals reference, convergence, undo/redo restores state, reopen identical, copy/paste keeps text, reading order covers each line once, byte-identical output, documented diagnostic codes | 07, 16, 27â€“29, 33â€“35, 37â€“39 |
 | `fuzz-harness` | `src/minimize.rs`, `examples/explore.rs`, `examples/corpus_to_bin.rs` | Delta-debugging shrinker for failing byte strings, a seeded explorer that prints minimised failures, and the hex-corpus-to-libFuzzer converter | 39 |
 | `fuzz-harness` | `tests/cross_crate.rs`, `tests/regressions.rs`, `corpus/` | The bounded stable target (corpus twice, seeded random scenarios, feature-coverage guard), one explicit regression per bug found, and the checked-in minimised corpus (`corpus/regress/*.hex`) | 37, 39 |
 | `fuzz` | `fuzz/Cargo.toml`, `fuzz/fuzz_targets/` | cargo-fuzz (nightly, libFuzzer) targets over the same harness; not in the workspace | 39 |
+
+| `doc` | `src/sync.rs`, `src/sync_text.rs`, `src/sync_tests.rs` | Bounded JSON deltas and full joins, negotiation, causal preflight and atomic refusals | 29, 34, 37 |
+| `doc` | `src/changes.rs`, `src/invariants.rs`, `src/position.rs` | Change reports, read-time invariant audit and stable-caret fallback | 07, 10, 12, 27, 30 |
+| `doc` | `src/hostile.rs`, `src/hostile_tests.rs` | Bounded seeded raw-peer mutations and malformed packet regressions | 37, 39 |
+| `edit` | `src/stable.rs`, `tests/stable.rs`, `tests/concurrency.rs` | Anchored selections, per-user undo and the conflicting-command matrix | 07, 10, 12, 29, 30 |
+| `reprise` | `src/session/collab.rs`, `tests/collab.rs`, `tests/hostile_peer.rs` | Native multiplayer API, presence geometry, partition/rejoin soak and hostile-session pipeline | 29, 30, 37, 39 |
+| `reprise-wasm` | `src/lib.rs`, `ts/worker.ts`, `ts/smoke.cjs`, `ts/worker-smoke.cjs` | Browser multiplayer API, worker selection effects and native/WASM behavior parity | 29, 30, 38 |
+| `layout` | `src/shaping.rs`, `src/workers.rs`, `src/incremental.rs` | Fine layout units, scoped workers and deterministic staged preparation | 27, 28, 38 |
+| `fixtures` | `tests/incremental_steps.rs` | Budget bounds, worker order parity, stale jobs and remote memo reuse | 27, 28, 38 |
+| `fuzz-harness` | `src/facade.rs` | Public session, job, sync, save/reopen, clipboard and rendering oracles | 29, 34, 37, 39 |
 
 Other files:
 

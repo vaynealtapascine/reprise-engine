@@ -102,6 +102,7 @@ pub struct DocumentSession {
     notes: Vec<reprise_diag::Note>,
     /// The host's selection, anchored (see `set_selection`).
     selection: Option<reprise_edit::StableSelection>,
+    workers: std::sync::Arc<dyn reprise_layout::workers::Workers>,
 }
 impl DocumentSession {
     fn new(
@@ -125,6 +126,7 @@ impl DocumentSession {
             identity: Rc::new(()),
             notes,
             selection: None,
+            workers: std::sync::Arc::new(reprise_layout::workers::Serial),
         }
     }
     fn doc(&self) -> &Document {
@@ -204,6 +206,21 @@ impl DocumentSession {
             blocks,
             diagnostics,
         }))
+    }
+    /// Select scoped native layout workers. WASM and builds without
+    /// `native-workers` stay serial. Workers never change output or budgets.
+    pub fn set_layout_threads(&mut self, threads: usize) -> usize {
+        #[cfg(all(feature = "native-workers", not(target_arch = "wasm32")))]
+        {
+            let threads = threads.clamp(1, 256);
+            self.workers = std::sync::Arc::new(reprise_layout::workers::Threads(threads));
+            threads
+        }
+        #[cfg(any(not(feature = "native-workers"), target_arch = "wasm32"))]
+        {
+            let _ = threads;
+            1
+        }
     }
     pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>> {
         let r = validate(request)?;
@@ -387,6 +404,7 @@ impl DocumentSession {
         self.bump()?;
         let cache = std::mem::take(&mut self.cache);
         let mut session = LayoutSession::from_cache(&self.engine, cache);
+        session.set_workers(self.workers.clone());
         let job = session.start(
             self.doc(),
             reprise_layout::incremental::Viewport::Pages(
@@ -1129,6 +1147,7 @@ impl LayoutJob {
         let continuation = self.continuation.take().ok_or(Error::Cancelled)?;
         let mut layout =
             LayoutSession::from_cache(&session.engine, std::mem::take(&mut session.cache));
+        layout.set_workers(session.workers.clone());
         let mut job = layout.resume(session.doc(), continuation)?;
         let step = job.step(budget as usize)?;
         let view = job.partial()?;

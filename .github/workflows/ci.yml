@@ -63,3 +63,13 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm -p reprise-fuzz-harness
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: cargo build --target wasm32-unknown-unknown -p reprise-wasm
+      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - run: wasm-bindgen target/wasm32-unknown-unknown/debug/reprise_wasm.wasm --target nodejs --out-dir target/wasm-node
+      - run: node crates/reprise-wasm/ts/smoke.cjs target/wasm-node
+      - run: npx --yes --package typescript@5.9.3 tsc -p crates/reprise-wasm/ts
+      - run: npx --yes --package typescript@5.9.3 tsc -p crates/reprise-wasm/ts --noEmit false --module commonjs --moduleResolution node --outDir target/worker-js
+      - run: node crates/reprise-wasm/ts/worker-smoke.cjs target/wasm-node target/worker-js/worker.js

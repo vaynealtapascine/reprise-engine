@@ -267,6 +267,21 @@ incremental caches; create/drive native sessions **inside a dedicated engine
 thread/actor** and forward commands to it, instead of moving a live session
 between Tauri command threads. No thread is required for correctness.
 
+### Layout workers
+
+With the default `native-workers` feature on a native target,
+`DocumentSession::set_layout_threads(threads)` lends each layout step up to
+`threads` scoped threads (the engine thread included) for pure preparation
+tasks: shaping requests and short-paragraph itemisation, shaping and break
+analysis. It returns the count actually used. That is `1` on WASM, without the
+feature, or for `threads <= 1`, and it is capped at 256. The default is `1`.
+Worker threads exist only inside a step and are joined before it returns, so
+the session stays single-threaded between calls and still belongs on the
+engine thread/actor. The thread count never changes output, budget charging,
+partial coverage or work counters; it only changes elapsed time. The WASM
+facade has no such method: browser layout runs these tasks serially inside the
+one worker that owns the session. See [incremental.md](incremental.md#native-workers).
+
 The necessary additive internal accessors are `Document::version_vector`,
 `Package::with_document`, `Editor::register_schema`, and the incremental
 `LayoutCache`/`LayoutContinuation` suspend/resume accessors. The editor is boxed
@@ -339,3 +354,22 @@ js-sys 0.3.106 are promoted existing dependencies under MIT OR Apache-2.0.
 The facade image tests also use the existing workspace lopdf 0.38.0 dependency
 (MIT) to verify embedded PDF image objects; no new package is added for it.
 All are GPLv3-compatible; the facade/package license is AGPL-3.0-or-later.
+
+### Multiplayer worker messages (format 2)
+
+`sync-export` with a `Payload<SyncRequest>` returns `sync-packet`; `since: null`
+requests a complete JSON join, and a vector requests a delta. Omitting the request
+retains the trusted legacy v1 response. `sync-packet-import` returns `synced`,
+including the change report, transformed local selection and current state.
+`sync-info` supplies the vector for acknowledgement and anti-entropy. Failed
+imports retain the active layout job; successful document changes release it.
+
+`selection` sets or clears the anchored local selection and returns its stable
+form. `resolve-selection` resolves an opaque stable selection. `presence` creates
+awareness bytes; `resolve-presence` returns the current geometry and metadata.
+`undo`/`redo` return `history` with the edit report and current state.
+`edit`/`image` return `edited` with `Applied` and current state. Use its created
+IDs and effects to transform the UI selection after local split/join/delete
+commands, then send `selection` to anchor the resulting caret.
+See [collaboration.md](collaboration.md) for the transport recovery rules and
+trust boundary. Resources travel over the host's separate resource channel.

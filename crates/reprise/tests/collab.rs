@@ -102,6 +102,34 @@ fn caret(node: &str, offset: u32) -> Caret {
 }
 
 #[test]
+fn remote_split_caret_falls_back_without_following_recreated_text() {
+    let mut a = create("1");
+    let p = paragraph(&mut a, "abcdef");
+    let mut b = join(&a, "2");
+    a.set_selection(&Payload::new(Some(Selection {
+        anchor: caret(&p, 5),
+        focus: caret(&p, 5),
+    })))
+    .unwrap();
+    tx(
+        &mut b,
+        vec![Command::SplitBlock {
+            node: p.clone(),
+            at: 3,
+        }],
+    );
+    let report = sync(&b, &mut a);
+    let selection = report.selection.unwrap();
+    assert_eq!(selection.focus.node, p);
+    assert_eq!(selection.focus.offset, 3);
+    assert_eq!(blocks(&a), blocks(&b));
+    // Subsequent edits still resolve the fallback caret inside a live block.
+    type_at(&mut b, &p, 0, ">");
+    let selection = sync(&b, &mut a).selection.unwrap();
+    assert_eq!(selection.focus.offset, 4);
+}
+
+#[test]
 fn deltas_converge_and_report_changes() {
     let mut a = create("1");
     let p = paragraph(&mut a, "hello");
@@ -226,7 +254,7 @@ fn local_selection_survives_sync_undo_and_redo() {
     let back = a.resolve_selection(&stable).unwrap().data.unwrap();
     assert_eq!((back.anchor.offset, back.focus.offset), (1, 3));
     let mut bad = stable.clone();
-    bad.data.anchor.anchor = "zz".into();
+    bad.data.anchor.anchor = "00".into();
     assert_eq!(
         a.resolve_selection(&bad).unwrap_err().code(),
         "bindings.invalid"
@@ -248,6 +276,19 @@ fn presence_resolves_to_geometry_and_garbage_degrades() {
             meta: meta.clone(),
         }))
         .unwrap();
+    // A syntactically valid envelope carrying garbage cursor bytes must not
+    // paint a fabricated caret at the first block's start.
+    let mut corrupt = presence.clone();
+    let mut wire: serde_json::Value = serde_json::from_slice(&corrupt.data.content.bytes).unwrap();
+    wire["selection"]["anchor"]["anchor"] = serde_json::json!("00");
+    corrupt.data.content.bytes = serde_json::to_vec(&wire).unwrap();
+    assert!(
+        b.resolve_presence(&corrupt)
+            .unwrap()
+            .data
+            .selection
+            .is_none()
+    );
     // Without a layout: selection but no geometry.
     let view = b.resolve_presence(&presence).unwrap().data;
     assert_eq!(view.meta, meta);
@@ -323,4 +364,176 @@ fn one_remote_keystroke_relays_out_a_constant_number_of_paragraphs() {
     );
     assert!(warm.compositions <= 2, "{warm:?}");
     assert!(warm.reused_compositions >= 58, "{warm:?}");
+}
+
+/// Shuffled delivery, offline divergence, replay, undo and reopen through the
+/// same boundary the UI uses. Raise REPRISE_COLLAB_STEPS for longer local runs.
+#[test]
+fn three_peer_partition_rejoin_soak() {
+    let steps = std::env::var("REPRISE_COLLAB_STEPS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(300);
+    let mut a = create("1");
+    let ids: Vec<_> = (0..3).map(|_| paragraph(&mut a, "seed text")).collect();
+    let b = join(&a, "2");
+    let c = join(&a, "3");
+    let mut peers = [a, b, c];
+    let mut rng = 0x7b14_02a9_341e_004du64;
+    let mut next = || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        rng as usize
+    };
+    let mut packets = Vec::new();
+    // A deliberately dependent packet arrives before its predecessor.
+    let base = peers[1].sync_info().data.vector;
+    type_at(&mut peers[0], &ids[0], 0, "a");
+    let predecessor = peers[0]
+        .sync_export(&Payload::new(SyncRequest { since: Some(base) }))
+        .unwrap();
+    let since = peers[0].sync_info().data.vector;
+    type_at(&mut peers[0], &ids[0], 0, "b");
+    let dependent = peers[0]
+        .sync_export(&Payload::new(SyncRequest { since: Some(since) }))
+        .unwrap();
+    assert_eq!(
+        peers[1].sync_import(&dependent).unwrap_err().code(),
+        "sync.missing"
+    );
+    peers[1].sync_import(&predecessor).unwrap();
+    peers[1].sync_import(&dependent).unwrap();
+    let mut missing = 1;
+    let mut replayed = 0;
+    for step in 0..steps {
+        let i = next() % 3;
+        let n = next() % ids.len();
+        let text = peers[i].state().unwrap().data.blocks[n].text.clone();
+        if step % 31 == 0 {
+            peers[i].undo_report().unwrap();
+        } else if step % 37 == 0 {
+            peers[i].redo_report().unwrap();
+        } else if text.len() > 80 && next() % 2 == 0 {
+            let start = next() % text.len();
+            tx(
+                &mut peers[i],
+                vec![Command::DeleteText {
+                    node: ids[n].clone(),
+                    start: start as u32,
+                    end: (start + 1) as u32,
+                }],
+            );
+        } else {
+            let at = next() % (text.len() + 1);
+            type_at(&mut peers[i], &ids[n], at as u32, "x");
+        }
+        let selected = Selection {
+            anchor: caret(&ids[n], 0),
+            focus: caret(&ids[n], 0),
+        };
+        peers[i]
+            .set_selection(&Payload::new(Some(selected)))
+            .unwrap();
+        let j = (i + 1 + next() % 2) % 3;
+        packets.push((j, delta(&peers[i], &peers[j])));
+        // Partitions last 17 steps; packets leave their queue in random order.
+        if step % 17 == 0 {
+            while !packets.is_empty() {
+                let at = next() % packets.len();
+                let (to, packet) = packets.swap_remove(at);
+                let before = peers[to].sync_info();
+                match peers[to].sync_import(&packet) {
+                    Ok(_) => {
+                        let replay = peers[to].sync_import(&packet).unwrap().data;
+                        assert!(
+                            !replay.changed
+                                && replay.changes.blocks.is_empty()
+                                && !replay.changes.structure
+                                && !replay.changes.styles
+                                && replay.changes.relations.is_empty()
+                                && replay.changes.ranges.is_empty()
+                                && !replay.changes.other
+                        );
+                        replayed += 1;
+                    }
+                    Err(e) if e.code() == "sync.missing" => {
+                        missing += 1;
+                        assert_eq!(before, peers[to].sync_info());
+                    }
+                    Err(e) => panic!("step {step}: {e}"),
+                }
+            }
+        }
+        if step % 101 == 0 {
+            for from in 0..3 {
+                for to in 0..3 {
+                    if from != to {
+                        let packet = delta(&peers[from], &peers[to]);
+                        peers[to].sync_import(&packet).unwrap();
+                    }
+                }
+            }
+        }
+    }
+    // Anti-entropy with current vectors recovers refused packets and partitions.
+    for _ in 0..2 {
+        for from in 0..3 {
+            for to in 0..3 {
+                if from != to {
+                    let packet = delta(&peers[from], &peers[to]);
+                    peers[to].sync_import(&packet).unwrap();
+                }
+            }
+        }
+    }
+    assert!(missing > 0 && replayed > 0);
+    assert_eq!(blocks(&peers[0]), blocks(&peers[1]));
+    assert_eq!(blocks(&peers[0]), blocks(&peers[2]));
+    assert_eq!(
+        peers[0].sync_info().data.vector,
+        peers[2].sync_info().data.vector
+    );
+    for i in 0..3 {
+        let local = peers[i].local_selection().data.unwrap();
+        let stable = peers[i]
+            .anchor_selection(&Payload::new(local.clone()))
+            .unwrap();
+        for peer in &peers {
+            assert_eq!(
+                peer.resolve_selection(&stable).unwrap().data,
+                Some(local.clone())
+            );
+        }
+    }
+    for peer in &mut peers {
+        layout(peer);
+    }
+    assert_eq!(
+        peers[0].display_json(0).unwrap(),
+        peers[2].display_json(0).unwrap()
+    );
+    let saved = peers[0].save().unwrap();
+    let mut reopened = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "4".into(),
+            }),
+            &saved.data.bytes,
+        )
+        .unwrap();
+    assert_eq!(blocks(&peers[0]), blocks(&reopened));
+    layout(&mut reopened);
+    assert_eq!(
+        peers[0].display_json(0).unwrap().data,
+        reopened.display_json(0).unwrap().data
+    );
+    let vector = peers[1].sync_info().data.vector;
+    type_at(&mut peers[1], &ids[0], 0, "z");
+    let keystroke = peers[1]
+        .sync_export(&Payload::new(SyncRequest {
+            since: Some(vector),
+        }))
+        .unwrap();
+    assert!(keystroke.data.content.bytes.len() < 4096);
 }
