@@ -76,7 +76,7 @@ use std::fmt;
 
 use loro::{LoroMap, LoroValue};
 use reprise_diag::Note;
-use reprise_geom::Length;
+use reprise_geom::{Length, TextCombineUpright, TextOrientation};
 use serde::{Deserialize, Serialize};
 
 use crate::codes;
@@ -272,7 +272,24 @@ pub struct Style {
     /// same property in the same style. [`Style::set`] keeps the two apart.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub values: BTreeMap<Property, Authored>,
+    /// `text-orientation` (20): how glyphs sit in vertical lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_orientation: Option<TextOrientation>,
+    /// `text-combine-upright` (20): tate-chū-yoko in vertical lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_combine_upright: Option<TextCombineUpright>,
+    /// Stored keyword values this engine can't read, by property name
+    /// (`text-orientation`, `text-combine-upright`). Kept verbatim, written
+    /// back unchanged and reported; an entry replaces the readable field for
+    /// the same property in the same style (34).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unparsed_keywords: BTreeMap<String, String>,
 }
+
+/// The stored and explained name of the `text-orientation` property.
+pub const TEXT_ORIENTATION: &str = "text-orientation";
+/// The stored and explained name of the `text-combine-upright` property.
+pub const TEXT_COMBINE_UPRIGHT: &str = "text-combine-upright";
 
 impl Style {
     /// The authored value of a property, wherever it is held.
@@ -330,6 +347,23 @@ impl Style {
                 map.insert(p.name(), v.to_stored().as_str())?;
             }
         }
+        let keywords = [
+            (
+                TEXT_ORIENTATION,
+                self.text_orientation.map(|o| o.keyword().to_string()),
+            ),
+            (
+                TEXT_COMBINE_UPRIGHT,
+                self.text_combine_upright.map(|c| c.keyword()),
+            ),
+        ];
+        for (name, known) in keywords {
+            if let Some(raw) = self.unparsed_keywords.get(name) {
+                map.insert(name, raw.as_str())?;
+            } else if let Some(keyword) = known {
+                map.insert(name, keyword.as_str())?;
+            }
+        }
         Ok(())
     }
 
@@ -351,6 +385,24 @@ impl Style {
         for p in Property::ALL {
             if let Some(text) = get_str(map, p.name()) {
                 style.set(p, Authored::from_stored(&text));
+            }
+        }
+        if let Some(raw) = get_str(map, TEXT_ORIENTATION) {
+            match TextOrientation::parse(&raw) {
+                Some(o) => style.text_orientation = Some(o),
+                None => {
+                    style.unparsed_keywords.insert(TEXT_ORIENTATION.into(), raw);
+                }
+            }
+        }
+        if let Some(raw) = get_str(map, TEXT_COMBINE_UPRIGHT) {
+            match TextCombineUpright::parse(&raw) {
+                Some(c) => style.text_combine_upright = Some(c),
+                None => {
+                    style
+                        .unparsed_keywords
+                        .insert(TEXT_COMBINE_UPRIGHT.into(), raw);
+                }
             }
         }
         style
@@ -380,6 +432,20 @@ pub struct ComputedStyle {
     /// publishes them with the block as their subject.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,
+    /// Left out of JSON when `mixed`, the default.
+    #[serde(default, skip_serializing_if = "is_mixed")]
+    pub text_orientation: TextOrientation,
+    /// Left out of JSON when `none`, the default.
+    #[serde(default, skip_serializing_if = "is_no_combination")]
+    pub text_combine_upright: TextCombineUpright,
+}
+
+fn is_mixed(o: &TextOrientation) -> bool {
+    *o == TextOrientation::Mixed
+}
+
+fn is_no_combination(c: &TextCombineUpright) -> bool {
+    *c == TextCombineUpright::None
 }
 
 /// Engine defaults, the bottom of every style chain.
@@ -392,6 +458,11 @@ pub fn default_style() -> Style {
         size: Some(LengthExpr::Pt(Length::from_pt(10))),
         line_height: Some(LengthExpr::Em(1200)),
         values: BTreeMap::new(),
+        // Left unset, so `explain` names only layers that author them; the
+        // computed defaults are `mixed` and `none`.
+        text_orientation: None,
+        text_combine_upright: None,
+        unparsed_keywords: BTreeMap::new(),
     }
 }
 
@@ -511,6 +582,10 @@ pub struct Computed {
     family_layer: Option<String>,
     pub size: PropertyChain,
     pub line_height: PropertyChain,
+    pub text_orientation: TextOrientation,
+    pub text_combine_upright: TextCombineUpright,
+    /// The layer that set each keyword property, by property name.
+    keyword_layers: BTreeMap<&'static str, String>,
     /// Problems found so far: the chain's, and any layer's value that could not
     /// be computed. A layer that failed is not in the chain.
     pub notes: Vec<Note>,
@@ -546,6 +621,37 @@ impl Specified {
                 }
             }
         }
+        // Keywords inherit as they are: the last layer with a readable value
+        // wins. An unreadable value is reported and skipped, so the property
+        // keeps what it inherited.
+        let mut text_orientation = TextOrientation::default();
+        let mut text_combine_upright = TextCombineUpright::default();
+        let mut keyword_layers = BTreeMap::new();
+        for layer in &self.layers {
+            let unparsed = &layer.style.unparsed_keywords;
+            for (name, raw) in unparsed {
+                notes.push(Note::warning(
+                    codes::STYLE_UNPARSED,
+                    format!(
+                        "{name} in {}: the stored value {raw:?} can't be read; \
+                         it is kept, and ignored",
+                        layer.name
+                    ),
+                ));
+            }
+            if !unparsed.contains_key(TEXT_ORIENTATION)
+                && let Some(o) = layer.style.text_orientation
+            {
+                text_orientation = o;
+                keyword_layers.insert(TEXT_ORIENTATION, layer.name.clone());
+            }
+            if !unparsed.contains_key(TEXT_COMBINE_UPRIGHT)
+                && let Some(c) = layer.style.text_combine_upright
+            {
+                text_combine_upright = c;
+                keyword_layers.insert(TEXT_COMBINE_UPRIGHT, layer.name.clone());
+            }
+        }
         let mut chain = |p: Property| compute_property(p, &self.layers, functions, &mut notes);
         let size = chain(Property::Size);
         let line_height = chain(Property::LineHeight);
@@ -555,6 +661,9 @@ impl Specified {
             family_layer,
             size,
             line_height,
+            text_orientation,
+            text_combine_upright,
+            keyword_layers,
             notes,
         }
     }
@@ -718,6 +827,9 @@ impl Computed {
         if let Some(layer) = &self.family_layer {
             explain.insert("family".to_string(), layer.clone());
         }
+        for (name, layer) in &self.keyword_layers {
+            explain.insert((*name).to_string(), layer.clone());
+        }
 
         let size = self.resolve(
             Property::Size,
@@ -784,6 +896,8 @@ impl Computed {
                 clamped,
                 bases,
                 notes,
+                text_orientation: self.text_orientation,
+                text_combine_upright: self.text_combine_upright,
             },
             stages,
         }

@@ -671,6 +671,125 @@ pub enum InlineDirection {
     Rtl,
 }
 
+/// `text-orientation` (20): how glyphs sit in vertical lines. An authored
+/// style keyword; it has no effect in horizontal frames.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextOrientation {
+    /// UAX #50: upright for `U` and `Tu`, rotated for `R`, and for `Tr` upright
+    /// only when the face has a vertical alternate.
+    #[default]
+    Mixed,
+    /// Every character upright, and strong left to right for bidi.
+    Upright,
+    /// Every character rotated, as in horizontal text turned a quarter.
+    Sideways,
+}
+
+impl TextOrientation {
+    /// The stored keyword.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            TextOrientation::Mixed => "mixed",
+            TextOrientation::Upright => "upright",
+            TextOrientation::Sideways => "sideways",
+        }
+    }
+
+    /// Reads a stored keyword; `None` for anything else, which callers keep
+    /// verbatim and report.
+    pub fn parse(keyword: &str) -> Option<TextOrientation> {
+        match keyword {
+            "mixed" => Some(TextOrientation::Mixed),
+            "upright" => Some(TextOrientation::Upright),
+            "sideways" => Some(TextOrientation::Sideways),
+            _ => None,
+        }
+    }
+}
+
+/// `text-combine-upright` (20): tate-chū-yoko, short horizontal runs set
+/// upright in one em of a vertical line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextCombineUpright {
+    #[default]
+    None,
+    /// Each maximal run of non-whitespace graphemes, up to a limit.
+    All,
+    /// Each maximal run of at most this many ASCII digits. Always 2 to 4.
+    Digits(u8),
+}
+
+impl TextCombineUpright {
+    /// The stored keyword: `none`, `all` or `digits N`.
+    pub fn keyword(self) -> String {
+        match self {
+            TextCombineUpright::None => "none".into(),
+            TextCombineUpright::All => "all".into(),
+            TextCombineUpright::Digits(n) => format!("digits {n}"),
+        }
+    }
+
+    /// Reads a stored keyword. `digits` alone means `digits 2`; counts outside
+    /// 2 to 4 are not readable, as in CSS.
+    pub fn parse(keyword: &str) -> Option<TextCombineUpright> {
+        match keyword {
+            "none" => Some(TextCombineUpright::None),
+            "all" => Some(TextCombineUpright::All),
+            "digits" => Some(TextCombineUpright::Digits(2)),
+            _ => match keyword.strip_prefix("digits ")? {
+                "2" => Some(TextCombineUpright::Digits(2)),
+                "3" => Some(TextCombineUpright::Digits(3)),
+                "4" => Some(TextCombineUpright::Digits(4)),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// How a shaped run's glyphs sit relative to its line (20, 22). Derived by
+/// shaping and recorded in layout, so editing and display agree.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GlyphOrientation {
+    /// Glyph axes are the line's axes: horizontal text, or sideways in a
+    /// vertical line. Shaped horizontally.
+    #[default]
+    Sideways,
+    /// Each glyph's top points to the line's start: shaped vertically, with
+    /// inline advances down the column, on the line's central baseline.
+    Upright,
+    /// Tate-chū-yoko: a horizontal composition standing upright in one em of
+    /// the line. Drawn like `Upright`.
+    Combined,
+}
+
+impl GlyphOrientation {
+    pub fn is_sideways(&self) -> bool {
+        *self == GlyphOrientation::Sideways
+    }
+
+    /// True for runs whose glyphs stand upright in a vertical line.
+    pub fn is_upright(self) -> bool {
+        !self.is_sideways()
+    }
+}
+
+impl Matrix {
+    /// Swaps the axes: x becomes y and y becomes x. A reflection, exact.
+    pub const fn transpose() -> Matrix {
+        Matrix {
+            xx: Fixed::ZERO,
+            yx: Fixed::ONE,
+            xy: Fixed::ONE,
+            yy: Fixed::ZERO,
+            tx: Length::ZERO,
+            ty: Length::ZERO,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,6 +823,51 @@ mod tests {
         assert_eq!(pt(-1).mul_ratio(1, 0), Length::MIN);
         assert_eq!(Length::ZERO.mul_ratio(1, 0), Length::ZERO);
         assert_eq!(Length::from_font_units(500, pt(12), 0), Length::MAX);
+    }
+
+    #[test]
+    fn orientation_keywords_round_trip_and_refuse_the_rest() {
+        for o in [
+            TextOrientation::Mixed,
+            TextOrientation::Upright,
+            TextOrientation::Sideways,
+        ] {
+            assert_eq!(TextOrientation::parse(o.keyword()), Some(o));
+        }
+        for c in [
+            TextCombineUpright::None,
+            TextCombineUpright::All,
+            TextCombineUpright::Digits(2),
+            TextCombineUpright::Digits(3),
+            TextCombineUpright::Digits(4),
+        ] {
+            assert_eq!(TextCombineUpright::parse(&c.keyword()), Some(c));
+        }
+        assert_eq!(
+            TextCombineUpright::parse("digits"),
+            Some(TextCombineUpright::Digits(2))
+        );
+        for bad in [
+            "",
+            "Mixed",
+            "digits 1",
+            "digits 5",
+            "digits  2",
+            "digits -2",
+            "sideways-right",
+        ] {
+            assert_eq!(TextOrientation::parse(bad), None);
+            assert_eq!(TextCombineUpright::parse(bad), None);
+        }
+    }
+
+    #[test]
+    fn transposition_is_an_exact_involution() {
+        let t = Matrix::transpose();
+        assert_eq!(t.then(&t), Matrix::IDENTITY);
+        assert_eq!(t.apply(pt(3), pt(-7)), (pt(-7), pt(3)));
+        assert!(t.determinant() < 0);
+        assert_eq!(t.inverse(), Some(t));
     }
 
     #[test]
