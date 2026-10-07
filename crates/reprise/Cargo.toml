@@ -24,4 +24,6 @@ reprise-compose.workspace = true
 ts-rs.workspace = true
 
 [dev-dependencies]
+# Raw hostile-peer operations for the sync fuzz; Loro stays inside reprise-doc.
+reprise-doc = { workspace = true, features = ["hostile-peer"] }
 lopdf.workspace = true

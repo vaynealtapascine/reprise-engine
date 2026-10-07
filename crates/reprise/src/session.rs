@@ -152,11 +152,29 @@ impl DocumentSession {
             .map(|n| (n, 0u32))
             .collect();
         let mut blocks = Vec::new();
+        // A peer can write a node whose envelope doesn't read (collaboration
+        // invariant I2): leave it out, keep its children, and say so.
+        let mut malformed = Vec::new();
         while let Some((node, depth)) = todo.pop() {
             if blocks.len() >= 100_000 || depth > 1024 {
                 return Err(Error::Limit("document tree".into()));
             }
-            let block = self.doc().block(node)?;
+            let block = match self.doc().block(node) {
+                Ok(block) => Some(block),
+                Err(reprise_doc::DocError::Malformed(..)) => None,
+                Err(e) => return Err(e.into()),
+            };
+            todo.extend(
+                self.doc()
+                    .children(Some(node))
+                    .into_iter()
+                    .rev()
+                    .map(|n| (n, depth.saturating_add(1))),
+            );
+            let Some(block) = block else {
+                malformed.push(node);
+                continue;
+            };
             blocks.push(Block {
                 id: node.to_string(),
                 parent: self.doc().parent_of(node).flatten().map(|n| n.to_string()),
@@ -167,14 +185,16 @@ impl DocumentSession {
                 },
                 text: block.text.to_string(),
             });
-            todo.extend(
-                self.doc()
-                    .children(Some(node))
-                    .into_iter()
-                    .rev()
-                    .map(|n| (n, depth.saturating_add(1))),
-            );
         }
+        let mut diagnostics = self.diagnostics().data;
+        diagnostics.extend(malformed.into_iter().map(|node| Diagnostic {
+            code: reprise_doc::invariants::MALFORMED_NODE.as_str().into(),
+            severity: Severity::Error,
+            message: format!("node {node} has an unreadable envelope and is left out"),
+            subject: Some(node.to_string()),
+            start: None,
+            end: None,
+        }));
         Ok(Payload::new(State {
             document_id: self.document_id.clone(),
             peer_id: self.peer_id.clone(),
@@ -182,7 +202,7 @@ impl DocumentSession {
             can_undo: self.editor.can_undo(),
             can_redo: self.editor.can_redo(),
             blocks,
-            diagnostics: self.diagnostics().data,
+            diagnostics,
         }))
     }
     pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>> {
