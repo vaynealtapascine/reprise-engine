@@ -133,6 +133,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         image_empty_alt()?,
         image_unreadable()?,
         font_legacy_missing()?,
+        space_before_zwj()?,
     ])
 }
 
@@ -2264,4 +2265,23 @@ pub fn font_legacy_missing() -> Result<Fixture, DocError> {
     )?;
     doc.commit();
     Ok(Fixture::new("font_legacy_missing", doc, &["font.fallback"]))
+}
+
+/// A space followed by a zero-width joiner or a combining mark, at every
+/// distance from the start of a line (found by the cross-crate fuzzer). UAX #14
+/// allows a break between them, but the pair is one grapheme cluster, so no line
+/// may start between them wherever the line happens to fill.
+pub fn space_before_zwj() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    for words in 0..46 {
+        let joiner = if words % 2 == 0 {
+            "\u{200D}\u{1F467}"
+        } else {
+            "\u{301}\u{200D}"
+        };
+        let text = format!("{}  {joiner} tail end.", "word ".repeat(words));
+        doc.append_block(BlockKind::Paragraph, "body", &text)?;
+    }
+    doc.commit();
+    Ok(Fixture::new("space_before_zwj", doc, &[]))
 }
