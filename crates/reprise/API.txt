@@ -59,3 +59,14 @@ pub const API_VERSION: u32 = 1;
 pub fn new(data: T) -> Self
 pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error>
 pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error>
+collab
+pub fn sync_export(&self, request: &Payload<SyncRequest>) -> Result<Payload<SyncPacket>>
+pub fn sync_import(&mut self, request: &Payload<SyncPacket>) -> Result<Payload<SyncReport>>
+pub fn set_selection( &mut self, request: &Payload<Option<Selection>>, ) -> Result<Payload<Option<StableSelection>>>
+pub fn local_selection(&self) -> Payload<Option<Selection>>
+pub fn anchor_selection( &self, request: &Payload<Selection>, ) -> Result<Payload<StableSelection>>
+pub fn resolve_selection( &self, request: &Payload<StableSelection>, ) -> Result<Payload<Option<Selection>>>
+pub fn undo_report(&mut self) -> Result<Payload<EditReport>>
+pub fn redo_report(&mut self) -> Result<Payload<EditReport>>
+pub fn presence(&self, request: &Payload<Presence>) -> Result<Payload<Awareness>>
+pub fn resolve_presence(&self, request: &Payload<Awareness>) -> Result<Payload<PresenceView>>

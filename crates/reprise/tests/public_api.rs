@@ -6,6 +6,7 @@ fn listing() -> String {
         ("error", include_str!("../src/error.rs")),
         ("typescript", include_str!("../src/typescript.rs")),
         ("dto", include_str!("../src/dto.rs")),
+        ("collab", include_str!("../src/session/collab.rs")),
     ] {
         out.push_str(name);
         out.push('\n');

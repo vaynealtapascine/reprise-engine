@@ -88,3 +88,21 @@ export type Resource = { id: string, kind: ResourceKind, hash: string, available
 export type ResourceKind = "font" | "image" | "other";
 export type ResourceLocation = { "kind": "path", "value": string } | { "kind": "url", "value": string };
 export type CopyFormat = "plain-text" | "html";
+export type SyncRequest = { since: Array<Clock> | null, };
+export type SyncKind = "delta" | "snapshot";
+export type SyncPacket = { document_id: string, from_peer: string, format: number, features: Array<string>, kind: SyncKind, since: Array<Clock>, vector: Array<Clock>, content: Bytes, };
+export type Changes = { blocks: Array<string>, structure: boolean, styles: boolean, relations: Array<string>, ranges: Array<string>, other: boolean, };
+export type SyncReport = { info: SyncInfo, changed: boolean, changes: Changes, 
+/**
+ * The anchored local selection after the import, if one is set.
+ */
+selection: Selection | null, 
+/**
+ * Whether an end of it had to take a fallback.
+ */
+selection_moved: boolean, };
+export type EditReport = { changed: boolean, changes: Changes, selection: Selection | null, selection_moved: boolean, };
+export type StableCaret = { node: string, affinity: Affinity, anchor: string, };
+export type StableSelection = { anchor: StableCaret, focus: StableCaret, };
+export type Presence = { selection: Selection | null, meta: { [key in string]: string }, };
+export type PresenceView = { peer_id: string, meta: { [key in string]: string }, selection: Selection | null, caret: PageRect | null, rects: Array<PageRect>, };

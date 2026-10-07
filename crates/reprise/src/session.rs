@@ -1,3 +1,4 @@
+mod collab;
 use crate::convert as cv;
 use crate::*;
 use reprise_doc::{Document, PersistenceMode};
@@ -99,6 +100,8 @@ pub struct DocumentSession {
     generation: u64,
     identity: Rc<()>,
     notes: Vec<reprise_diag::Note>,
+    /// The host's selection, anchored (see `set_selection`).
+    selection: Option<reprise_edit::StableSelection>,
 }
 impl DocumentSession {
     fn new(
@@ -121,6 +124,7 @@ impl DocumentSession {
             generation: 0,
             identity: Rc::new(()),
             notes,
+            selection: None,
         }
     }
     fn doc(&self) -> &Document {

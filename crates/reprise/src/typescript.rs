@@ -273,5 +273,35 @@ pub fn declarations() -> String {
     text.push_str("export ");
     text.push_str(&CopyFormat::decl(&cfg));
     text.push('\n');
+    text.push_str("export ");
+    text.push_str(&SyncRequest::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&SyncKind::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&SyncPacket::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&Changes::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&SyncReport::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&EditReport::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&StableCaret::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&StableSelection::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&Presence::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&PresenceView::decl(&cfg));
+    text.push('\n');
     text
 }
