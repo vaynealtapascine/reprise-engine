@@ -97,6 +97,11 @@ impl Fragment {
         }
         let mut nodes = BTreeMap::new();
         for block in &self.blocks {
+            if block.text.contains(crate::text::BREAK) {
+                return Err(FragmentError::Invalid(
+                    "reserved flow marker in authored text".into(),
+                ));
+            }
             let depth = match block.parent {
                 Some(p) => nodes.get(&p).map(|(_, d)| d + 1).ok_or_else(|| {
                     FragmentError::Invalid("parent is not earlier in preorder".into())
@@ -276,14 +281,21 @@ impl Document {
                 .get_meta(id)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
             let node = get_str(&meta, "node").and_then(|n| NodeId::parse(&n));
-            if !node.is_some_and(|n| cuts.contains_key(&n)) {
+            let resolved = self.resolve_range(range_id);
+            let resolved_node = match &resolved {
+                RangeState::Valid { node, .. } | RangeState::Rebound { node, .. } => Some(*node),
+                RangeState::Missing { .. } => None,
+            };
+            if !node.is_some_and(|n| cuts.contains_key(&n))
+                && !resolved_node.is_some_and(|n| cuts.contains_key(&n))
+            {
                 continue;
             }
             // Read before resolution: an unreadable policy must refuse the copy,
             // rather than silently omit the range as missing.
             let authored_policy = self.range_policy(range_id).map_err(bad)?;
             let (RangeState::Valid { node, bytes } | RangeState::Rebound { node, bytes }) =
-                self.resolve_range(range_id)
+                resolved
             else {
                 continue;
             };
@@ -405,11 +417,19 @@ impl Document {
         if bytes.start > bytes.end {
             return Err(crate::text::TextError::BadRange(bytes).into());
         }
-        let meta = self.tree("content").get_meta(node.node)?;
-        let Some(ValueOrContainer::Container(Container::Text(text))) = meta.get("text") else {
-            return Err(DocError::Malformed(node, "text"));
+        // A live block is read through its view (a paragraph of a flow has
+        // offsets of its own); a staged one is a whole text.
+        let text = match self.block(node) {
+            Ok(block) => block.text,
+            Err(_) => {
+                let meta = self.tree("content").get_meta(node.node)?;
+                let Some(ValueOrContainer::Container(Container::Text(text))) = meta.get("text")
+                else {
+                    return Err(DocError::Malformed(node, "text"));
+                };
+                crate::text::Text::from_loro(text)
+            }
         };
-        let text = crate::text::Text::from_loro(text);
         let start = text.anchor(bytes.start, policy.start)?;
         let end = text.anchor(bytes.end, policy.end)?;
         self.commit_part();

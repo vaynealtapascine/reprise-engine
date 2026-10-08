@@ -407,17 +407,24 @@ What the Reprise side sends:
     counter counts, summed across blocks, before Loro allocates them. Unknown
     encodings fail closed. Use format 2 for peer transport and its operation
     vocabulary/preflight, rather than treating binary compatibility as a fallback.
--   **Intent anomalies** such as a split concurrent with a join, which duplicates text,
-    converge but are not merged semantically.
--   **Remote splits/joins** carry compact authored character lineage. Stable
-    carets follow recreated characters across blocks, including chained splits
-    and joins. Resolution prefers a still-live original; competing transfers use
-    sorted record keys. Breadth-first search visits at most 256 distinct identities.
+-   **Flow splits/joins** retain character identities: split activates a staged
+    break and an adjacent join deactivates it. Concurrent typing and deletion
+    therefore stay in the shared text. Joins between separate hosts and explicit
+    paragraph moves still copy text and can have concurrent intent anomalies.
+    The same limitation applies when splitting inside concurrent text inherited
+    before a surviving paragraph's marker after head deletion (see `flow.md`).
+-   **Copies across hosts** carry compact authored character lineage. Stable
+    carets follow recreated characters across blocks. Resolution prefers a still-live
+    original. A per-revision source-ID index retains at most 4,096 records per node,
+    in numeric ID order, and considers at most 16 matching spans per lookup.
+    Noncanonical keys and keys that disagree with their cursors are ignored.
+    Breadth-first search visits at most 256 distinct identities.
     Identity history survives undo; undo/redo records aliases for recreated IDs,
     so fresh and old carets follow later ordinary edits without relying on unchanged
     text. Alias discovery requires a live insertion prefix and matching SHA-256
     span digest. Dead intermediate identities remain searchable. Authored ranges
-    retain their original block semantics.
+    follow their endpoints across paragraphs of the same flow. These read limits
+    never reject or rewrite replicated operations; excess records remain saved.
 -   **Authentication and authorisation** are out of scope (see the trust model).
 
 ## End-to-end verification

@@ -237,6 +237,38 @@ fn deleting_the_head_keeps_the_rest_of_the_flow() {
 }
 
 #[test]
+fn splitting_after_head_deletion_keeps_the_original_paragraph_first() {
+    for concurrent_prefix in ["", "zero "] {
+        for at in [0, 2] {
+            let (doc, head) = one("one two");
+            let surviving = doc.split_block(head, 4).unwrap();
+            doc.commit_step();
+            let peer = doc.fork(2).unwrap();
+            doc.delete_block(head).unwrap();
+            doc.commit_step();
+            peer.block(head)
+                .unwrap()
+                .text
+                .insert(0, concurrent_prefix)
+                .unwrap();
+            both_ways(&doc, &peer);
+            let before = doc.block(surviving).unwrap().text.to_string();
+            let mut undo = doc.undo_stack();
+            let tail = doc.split_block(surviving, at).unwrap();
+            doc.commit_step();
+            assert_eq!(doc.blocks(), [surviving, tail]);
+            assert_eq!(dump(&doc), [&before[..at], &before[at..]]);
+            assert!(undo.undo().unwrap());
+            assert_eq!(doc.blocks(), [surviving]);
+            assert_eq!(dump(&doc), std::slice::from_ref(&before));
+            assert!(undo.redo().unwrap());
+            assert_eq!(doc.blocks(), [surviving, tail]);
+            assert_eq!(dump(&doc), [&before[..at], &before[at..]]);
+        }
+    }
+}
+
+#[test]
 fn a_lone_head_is_deleted_as_a_block() {
     let (doc, p) = one("only");
     doc.delete_block(p).unwrap();
@@ -540,4 +572,89 @@ fn range_ends_read_from_every_stored_form() {
     meta.insert("end", loro::LoroValue::List(vec![999i64.into()].into()))
         .unwrap();
     assert_eq!(doc.resolve_range(r), RangeState::Missing { node: Some(p) });
+}
+
+#[test]
+fn a_range_with_an_empty_first_slice_still_spans_the_next_paragraph() {
+    let (doc, head) = one("abcd");
+    let range = doc.add_range(head, 2..4, RangePolicy::EXPANDING).unwrap();
+    let tail = doc.split_block(head, 2).unwrap();
+    assert!(!matches!(
+        doc.resolve_range(range),
+        RangeState::Missing { .. }
+    ));
+    let extent = doc.range_extent(range).unwrap();
+    assert_eq!(extent.start, (head, 2));
+    assert_eq!(extent.end, (tail, 2));
+    assert!(!extent.rebound);
+}
+
+#[test]
+fn copying_a_split_tail_keeps_ranges_created_before_the_split() {
+    let (doc, head) = one("abcd");
+    let range = doc.add_range(head, 2..4, RangePolicy::FIXED).unwrap();
+    let tail = doc.split_block(head, 2).unwrap();
+    let fragment = doc
+        .copy_fragment(
+            "test",
+            &[crate::fragment::CopyBlock {
+                node: tail,
+                bytes: None,
+            }],
+            &SchemaRegistry::builtin(),
+        )
+        .unwrap();
+    assert_eq!(fragment.ranges.len(), 1);
+    assert_eq!(fragment.ranges[0].id, range);
+    assert_eq!(fragment.ranges[0].bytes, 0..2);
+}
+
+#[test]
+fn excessive_embed_depth_is_hidden_and_reported_without_repair() {
+    let (doc, mut host) = one("ab");
+    for _ in 0..=crate::MAX_FLOW_DEPTH {
+        let tail = doc.split_block(host, 1).unwrap();
+        let index = doc.blocks().iter().position(|&n| n == tail).unwrap();
+        host = doc
+            .insert_block_at(None, index, &NewBlock::new(BlockKind::Paragraph, "", "ab"))
+            .unwrap();
+    }
+    doc.commit();
+    let revision = doc.revision();
+    assert!(!doc.document_order().contains(&host));
+    assert!(
+        doc.audit()
+            .iter()
+            .any(|f| f.node == host && f.note.code == crate::invariants::FLOW_DEPTH)
+    );
+    assert_eq!(doc.revision(), revision);
+}
+
+#[test]
+fn copying_lineage_skips_inactive_markers_inside_the_source() {
+    let (doc, source) = one("abcd");
+    let target = doc
+        .append_block(BlockKind::Paragraph, "body", "prefix")
+        .unwrap();
+    let tail = doc.split_block(source, 2).unwrap();
+    let anchor = doc
+        .block(tail)
+        .unwrap()
+        .text
+        .anchor(1, Affinity::After)
+        .unwrap();
+    doc.join_blocks(source, tail).unwrap();
+    doc.join_blocks(target, source).unwrap();
+    assert_eq!(text(&doc, target), "prefixabcd");
+    let (node, mapped) = doc.transferred_anchor(source, &anchor).unwrap();
+    assert_eq!(node, target);
+    assert_eq!(
+        doc.block(target)
+            .unwrap()
+            .text
+            .resolve(&mapped)
+            .unwrap()
+            .offset(),
+        9
+    );
 }

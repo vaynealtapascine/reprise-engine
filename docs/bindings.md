@@ -33,6 +33,12 @@ opaque canonical strings; never derive meaning from their apparent spelling.
 Revisions/frontiers and sorted version vectors contain peer strings and signed
 32-bit counters, without JS precision loss. A frontier is not a version vector.
 
+Flow paragraph IDs include both host and break identity, for example `12@1/34@2`.
+Splitting returns this new paragraph ID. Moving a paragraph of a shared flow copies
+it and returns `{ kind: "moved", node, new }` in `Applied.effects`; hosts must map
+positions from `node` to `new`. Whole-tree moves retain their ID. This additive
+effect is declared in the Rust DTO and generated TypeScript union.
+
 Geometry uses signed integer units of **1/1024 point**. Display matrices use
 signed integer **16.16** coefficients and integer length translations. Caret
 positions and glyph source ranges are **UTF-8 byte offsets**, not UTF-16 indexes.

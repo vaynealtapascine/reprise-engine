@@ -45,7 +45,7 @@ pub(crate) enum Step {
         node: NodeId,
         range: Range<usize>,
     },
-    /// `new` indexes [`Plan::blocks`].
+    /// `new` indexes [`Plan::created`]; the split creates it.
     Split {
         node: NodeId,
         at: usize,
@@ -68,6 +68,14 @@ pub(crate) enum Step {
         parent: Option<NodeId>,
         index: usize,
     },
+    /// Moves a paragraph of a flow by copying it to `new` (a staged block
+    /// in [`Plan::created`]) and deleting it.
+    MoveCopy {
+        node: NodeId,
+        new: usize,
+        parent: Option<NodeId>,
+        index: usize,
+    },
     SetOverrides {
         node: NodeId,
         style: Style,
@@ -81,11 +89,21 @@ pub(crate) enum Step {
     },
 }
 
+/// A block the transaction creates.
+#[derive(Debug)]
+pub(crate) enum Created {
+    /// Staged before the steps run, then placed.
+    Staged(Box<NewBlock>),
+    /// Made by a split step.
+    Split,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Plan {
     pub paste: Option<crate::paste::Prepared>,
-    /// Blocks to stage first, in order.
-    pub blocks: Vec<NewBlock>,
+    /// The blocks the transaction creates, in command order. Staged ones are
+    /// staged first; steps name them by index.
+    pub created: Vec<Created>,
     pub relations: Vec<Relation>,
     pub steps: Vec<Step>,
     /// The commands' effects, with staged blocks as indices; the editor
@@ -112,6 +130,11 @@ pub(crate) enum PlannedEffect {
         at: usize,
     },
     Deleted(NodeId),
+    /// `node` moved as a copy, to `new`.
+    Moved {
+        node: NodeId,
+        new: usize,
+    },
 }
 
 /// A child in the model: a block that exists, or the nth block the
@@ -294,6 +317,9 @@ impl Model<'_> {
 
     fn check_parent(&self, parent: Option<NodeId>) -> Result<(), Reason> {
         match parent {
+            Some(p) if p.is_break() => {
+                Err(Reason::Store("a break paragraph has no children".into()))
+            }
             Some(p) => self.require(p),
             None => Ok(()),
         }
@@ -350,6 +376,9 @@ impl Model<'_> {
     }
 
     fn insert_text(&mut self, node: NodeId, at: usize, text: &str) -> Result<(), Reason> {
+        if text.contains(reprise_doc::text::BREAK) {
+            return Err(Reason::Store("U+FDD0 is not text".into()));
+        }
         self.add_payload(text.len())?;
         let s = self.text(node)?;
         if !s.is_char_boundary(at) {
@@ -404,28 +433,21 @@ impl Model<'_> {
     }
 
     fn split(&mut self, node: NodeId, at: usize) -> Result<(), Reason> {
+        // Earlier text commands may shift the inherited prefix. Count the
+        // tail conservatively for break paragraphs whose source head is gone.
+        let copy_may_be_needed =
+            !self.doc.in_flow(node) || (node.is_break() && !self.doc.is_live(node.host()));
         let s = self.text(node)?;
         if !s.is_char_boundary(at) {
             return Err(Reason::BadOffset { node, offset: at });
         }
         let tail = s.split_off(at);
-        self.add_payload(tail.len())?;
-        let block = self
-            .doc
-            .block(node)
-            .map_err(|_| Reason::NoSuchBlock(node))?;
-        let overrides = self
-            .overrides
-            .get(&node)
-            .cloned()
-            .unwrap_or(block.overrides);
-        let new = self.plan.blocks.len();
-        self.plan.blocks.push(NewBlock {
-            kind: block.kind,
-            style: block.style.unwrap_or_default(),
-            overrides,
-            text: tail,
-        });
+        if copy_may_be_needed {
+            // Only a block outside a flow is split by copying its tail.
+            self.add_payload(tail.len())?;
+        }
+        let new = self.plan.created.len();
+        self.plan.created.push(Created::Split);
         let (parent, index) = self.slot_of(node)?;
         self.kids(parent).insert(index + 1, Slot::New(new));
         self.plan.steps.push(Step::Split { node, at, new });
@@ -472,7 +494,10 @@ impl Model<'_> {
     ) -> Result<(), Reason> {
         self.add_payload(block.text.len())?;
         self.check_parent(parent)?;
-        let new = self.plan.blocks.len();
+        if block.text.contains(reprise_doc::text::BREAK) {
+            return Err(Reason::Store("U+FDD0 is not text".into()));
+        }
+        let new = self.plan.created.len();
         let kids = self.kids(parent);
         if index > kids.len() {
             return Err(Reason::BadIndex {
@@ -481,7 +506,9 @@ impl Model<'_> {
             });
         }
         kids.insert(index, Slot::New(new));
-        self.plan.blocks.push(block.clone());
+        self.plan
+            .created
+            .push(Created::Staged(Box::new(block.clone())));
         self.plan.steps.push(Step::Place { new, parent, index });
         Ok(())
     }
@@ -515,6 +542,42 @@ impl Model<'_> {
             // The transaction is refused whole, but keep the model honest.
             self.kids(old_parent).insert(at, Slot::Real(node));
             return Err(Reason::BadIndex { index, len });
+        }
+        let split_in_transaction = self.doc.in_flow(node)
+            && self.plan.steps.iter().any(|step| {
+                matches!(step, Step::Split { node: split, .. } if split.host() == node.host())
+            });
+        if self.doc.moves_by_copy(node) || split_in_transaction {
+            // A paragraph of a flow: its text moves as a copy, and the
+            // paragraph is deleted (see `docs/flow.md`).
+            let text = self.text(node)?.clone();
+            self.add_payload(text.len())?;
+            let block = self
+                .doc
+                .block(node)
+                .map_err(|_| Reason::NoSuchBlock(node))?;
+            let overrides = self
+                .overrides
+                .get(&node)
+                .cloned()
+                .unwrap_or(block.overrides);
+            let new = self.plan.created.len();
+            self.plan.created.push(Created::Staged(Box::new(NewBlock {
+                kind: block.kind,
+                style: block.style.unwrap_or_default(),
+                overrides,
+                text,
+            })));
+            self.kids(parent).insert(index, Slot::New(new));
+            self.killed.insert(node);
+            self.plan.steps.push(Step::MoveCopy {
+                node,
+                new,
+                parent,
+                index,
+            });
+            self.plan.effects.push(PlannedEffect::Moved { node, new });
+            return Ok(());
         }
         self.kids(parent).insert(index, Slot::Real(node));
         self.parents.insert(node, parent);

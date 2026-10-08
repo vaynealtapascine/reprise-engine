@@ -313,6 +313,8 @@ pub struct Document {
     lineage_pending: std::sync::Mutex<Vec<(NodeId, String, String)>>,
     /// Each flow host's paragraphs, per revision (see `flow`).
     flows: std::sync::Arc<std::sync::Mutex<flow::FlowCache>>,
+    /// Each node's lineage records by source character, per revision.
+    lineage: std::sync::Mutex<transfers::LineageCache>,
     /// Which editing step this replica's next commits belong to (see
     /// [`UndoStack`]).
     pub(crate) steps: std::sync::Arc<edit::StepLog>,
@@ -332,6 +334,7 @@ impl Document {
             shadow: std::sync::Mutex::new(None),
             lineage_pending: std::sync::Mutex::new(Vec::new()),
             flows,
+            lineage: Default::default(),
             steps: Default::default(),
         }
     }
@@ -468,6 +471,13 @@ impl Document {
         })
     }
 
+    /// Sets the name of a block's style. Does not commit.
+    pub fn set_style_name(&self, id: NodeId, name: &str) -> Result<(), DocError> {
+        self.block(id)?;
+        self.meta_of(id)?.insert("style", name)?;
+        Ok(())
+    }
+
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
         let meta = self.meta_of(id)?;
         let map = meta.insert_container("overrides", LoroMap::new())?;
@@ -593,7 +603,7 @@ impl Document {
             std::cmp::Ordering::Greater => s.offset(),
         };
         let bytes = s.offset()..end;
-        if bytes.is_empty() && !keep_empty {
+        if bytes.is_empty() && !keep_empty && self.flow_cmp(node, end_node).is_ge() {
             return RangeState::Missing { node: Some(node) };
         }
         if matches!((s, e), (Resolved::Live(_), Resolved::Live(_))) {
@@ -601,6 +611,31 @@ impl Document {
         } else {
             RangeState::Rebound { node, bytes }
         }
+    }
+
+    /// Both endpoints of a persistent range, including ranges that now cross
+    /// paragraph breaks. Crossed endpoints collapse to the start, consistently
+    /// with `resolve_range`; invalid and missing ranges return `None`.
+    pub fn range_extent(&self, id: RangeId) -> Option<RangeExtent> {
+        if matches!(self.resolve_range(id), RangeState::Missing { .. }) {
+            return None;
+        }
+        let meta = self.tree("ranges").get_meta(id.0).ok()?;
+        let node = NodeId::parse(&get_str(&meta, "node")?)?;
+        let anchor = |key| ranges::stored_anchor(meta.get(key)).and_then(|b| Anchor::decode(&b));
+        let (start_node, start) = self.locate(node, &anchor("start")?)?;
+        let (end_node, end) = self.locate(node, &anchor("end")?)?;
+        let crossed = self.flow_cmp(start_node, end_node).is_gt()
+            || (start_node == end_node && start.offset() > end.offset());
+        Some(RangeExtent {
+            start: (start_node, start.offset()),
+            end: if crossed {
+                (start_node, start.offset())
+            } else {
+                (end_node, end.offset())
+            },
+            rebound: !matches!((start, end), (Resolved::Live(_), Resolved::Live(_))),
+        })
     }
 
     /// Adds a relation after checking it against its schema.
@@ -645,6 +680,14 @@ impl Document {
             })
             .collect()
     }
+}
+
+/// Current paragraph-local endpoints of an authored range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RangeExtent {
+    pub start: (NodeId, usize),
+    pub end: (NodeId, usize),
+    pub rebound: bool,
 }
 
 /// Authored text never contains the break character (see `docs/flow.md`).

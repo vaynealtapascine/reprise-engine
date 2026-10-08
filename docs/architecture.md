@@ -153,6 +153,10 @@ caches may be stored, but only as optional caches (34).
 verses, stanzas and notes are tree nodes. Discontinuous groups, references and notes are
 relations.
 
+Consecutive paragraphs share one text: a paragraph node is a **flow host**, and the paragraphs
+after its first are breaks inside its text. Blocks placed between paragraphs of a flow are
+embedded in it at a break-like character. See [flow.md](flow.md).
+
 **Rationale:** The tree carries meaning without fixing appearance, and graphs carry anything that
 cuts across the tree.
 
@@ -164,10 +168,18 @@ cuts across the tree.
 undo, collaboration and relations can restore it or report it missing. Copying creates new IDs
 and remaps them (35). Moving keeps the ID.
 
-Split/join copies retain bidirectional character lineage. Like staged block IDs,
-identity history survives undo; successful undo/redo records aliases for recreated
-character IDs before later edits. Stable carets prefer live identities and search
-at most 256 distinct lineage identities. Authored ranges retain block-local policy.
+Ordinary splits and adjacent joins of a flow move no text: a split adds a break and a join
+drops one, so every character keeps its identity ([flow.md](flow.md)). A break paragraph's
+ID is its host and its break character's ID. Breaks and embeds are staged outside the undo
+history like blocks, so undo and redo keep paragraph IDs.
+
+Joins across flows and moves of a paragraph of a flow still copy text. So does splitting
+inside concurrent text inherited before a surviving paragraph's marker after head
+deletion: a new marker there would reverse paragraph identities. This exception preserves
+order but shares the concurrency limitation of other copies (see `flow.md`). Those copies retain
+bidirectional character lineage. Like staged block IDs, identity history survives undo;
+successful undo/redo records aliases for recreated character IDs before later edits. Stable
+carets prefer live identities and search at most 256 distinct lineage identities.
 
 **Rationale:** This fits the CRDT text store (09) and automatic rebinding (15), which both need
 to know what an ID used to be.
@@ -225,6 +237,10 @@ anything durable.
 **Choice:** Both. Authored line entities are used where line structure is meaningful, as in
 verse. Break markers are used inside ordinary paragraphs. Visual lines are always derived
 fragments.
+
+Paragraph breaks are markers too: U+FDD0 characters with a record each, in a flow host's
+text ([flow.md](flow.md)). The record carries the paragraph's kind, style and overrides, so
+any number of break kinds fit one character.
 
 The following are separate concepts:
 

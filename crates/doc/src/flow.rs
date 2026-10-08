@@ -501,7 +501,12 @@ impl Document {
         if self.flow(id.node).is_none() {
             return Err(DocError::Malformed(id, "not in a flow"));
         }
-        let pos = block.text.to_shared(at)?;
+        let pos = self
+            .flow_split_position(id, at)?
+            .ok_or(DocError::Malformed(
+                id,
+                "splitting inherited head text requires a copy",
+            ))?;
         self.stage_mark(id.node, pos, |rec| {
             rec.insert("kind", block.kind.as_str())?;
             rec.insert("style", block.style.clone().unwrap_or_default())?;
@@ -512,6 +517,35 @@ impl Document {
             }
             Ok(())
         })
+    }
+
+    /// A break must follow the current paragraph's own marker. After head
+    /// deletion, the first surviving paragraph may also own concurrent text
+    /// before that marker. Splitting inside that prefix requires the copying
+    /// path; inserting a marker there would reverse the paragraph identities.
+    fn flow_split_position(&self, id: NodeId, at: usize) -> Result<Option<usize>, DocError> {
+        let text = self.block(id)?.text;
+        let mut pos = text.to_shared(at)?;
+        if let Some(mark) = self
+            .flow(id.node)
+            .and_then(|f| f.para(id).and_then(|p| p.mark_at))
+            && pos <= mark
+        {
+            if text.from_shared(mark)?.is_some_and(|prefix| at < prefix) {
+                return Ok(None);
+            }
+            pos = mark + 1;
+        }
+        Ok(Some(pos))
+    }
+
+    /// Whether splitting here needs to copy text: non-flow blocks, or text
+    /// inherited before a surviving paragraph's marker after head deletion.
+    pub fn split_copies_text(&self, id: NodeId, at: usize) -> Result<bool, DocError> {
+        if !self.in_flow(id) {
+            return Ok(true);
+        }
+        Ok(self.flow_split_position(id, at)?.is_none())
     }
 
     /// Makes a staged or joined break a paragraph again. Does not commit.
@@ -674,6 +708,46 @@ impl Document {
         let flow = self.flow(host)?;
         flow.embed_of(node)
             .map(|(_, id, _)| NodeId::at_break(host, id))
+    }
+}
+
+impl Document {
+    /// Whether a block is a paragraph of a flow (see `docs/flow.md`): split
+    /// with a break, joined by dropping one.
+    pub fn in_flow(&self, id: NodeId) -> bool {
+        self.flow(id.node).is_some_and(|f| f.is_live(id))
+    }
+
+    /// Whether moving the block copies it: a paragraph of a flow, unless it
+    /// is the only thing in it.
+    pub fn moves_by_copy(&self, id: NodeId) -> bool {
+        self.check_movable(id).is_err()
+    }
+
+    /// The undoable half of moving a paragraph of a flow: `staged`, a
+    /// staged copy of it, is placed at `index` among `parent`'s children
+    /// (counted without `id`), stable carets in `id` follow to the copy,
+    /// `id` is recorded as superseded by it, and `id` is deleted.
+    pub fn move_by_copy(
+        &self,
+        id: NodeId,
+        staged: NodeId,
+        parent: Option<NodeId>,
+        index: usize,
+    ) -> Result<(), DocError> {
+        let len = self.block(id)?.text.len();
+        if !self.is_soft_deleted(staged) {
+            return Err(DocError::NoNode(staged));
+        }
+        let placement = self.placement(parent, index, Some(id))?;
+        // The copy is a distinct tree node. Placing it back in the source's
+        // own flow cannot create a tree cycle.
+        self.check_not_inside(staged, placement)?;
+        self.put(staged, placement)?;
+        self.restore_block(staged)?;
+        self.record_transfer(id, 0, staged, 0, len)?;
+        self.supersede(id, staged)?;
+        self.delete_block(id)
     }
 }
 

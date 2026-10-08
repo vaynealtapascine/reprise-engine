@@ -148,7 +148,8 @@ fn paste_twice_has_new_ids_single_undo_and_stable_redo() {
     ));
     assert!(editor.document().relations().is_empty());
     assert!(editor.redo().unwrap());
-    assert_eq!(editor.document().blocks(), a.applied.blocks);
+    assert_eq!(editor.document().blocks(), [host, a.applied.blocks[0]]);
+    assert_eq!(a.ids.nodes[&first], host);
     let b = editor.paste(&fragment.fragment, None, "target").unwrap();
     assert!(
         a.ids
@@ -567,7 +568,8 @@ fn command_paste_tables_at_a_caret_and_position_effects_roundtrip() {
     let host = target.blocks()[0];
     let mut editor = Editor::new(target, SchemaRegistry::builtin());
     let pasted = editor.paste(&plain, Some((host, 1)), "target").unwrap();
-    let new = pasted.applied.blocks[0];
+    assert!(pasted.applied.blocks.is_empty());
+    let new = host;
     assert_eq!(
         pasted
             .applied
@@ -609,7 +611,8 @@ fn host_ranges_keep_their_ids_and_affinities_through_single_block_paste() {
     let pasted = editor
         .paste(&fragment.fragment, Some((host, 3)), "target")
         .unwrap();
-    let new = pasted.applied.blocks[0];
+    assert!(pasted.applied.blocks.is_empty());
+    let new = host;
     assert!(
         pasted
             .notes
@@ -637,7 +640,7 @@ fn host_ranges_keep_their_ids_and_affinities_through_single_block_paste() {
 }
 
 #[test]
-fn multi_block_paste_moves_local_host_ranges_and_reports_unrepresentable_spans() {
+fn multi_block_paste_preserves_host_ranges_including_spanning_ranges() {
     let source = doc(5, "X");
     source.append_block(BlockKind::Paragraph, "", "Y").unwrap();
     let fragment = copy(&source);
@@ -652,21 +655,23 @@ fn multi_block_paste_moves_local_host_ranges_and_reports_unrepresentable_spans()
         .paste(&fragment.fragment, Some((host, 3)), "target")
         .unwrap();
     assert!(
-        matches!(editor.document().resolve_range(before), reprise_doc::RangeState::Valid { node, bytes } if node == pasted.applied.blocks[0] && bytes == (1..2))
+        matches!(editor.document().resolve_range(before), reprise_doc::RangeState::Valid { node, bytes } if node == host && bytes == (1..2))
     );
     assert!(
-        matches!(editor.document().resolve_range(after), reprise_doc::RangeState::Valid { node, bytes } if node == pasted.applied.blocks[1] && bytes == (2..4))
+        matches!(editor.document().resolve_range(after), reprise_doc::RangeState::Valid { node, bytes } if node == pasted.applied.blocks[0] && bytes == (2..4))
     );
     assert!(matches!(
         editor.document().resolve_range(crossing),
-        reprise_doc::RangeState::Missing { .. }
+        reprise_doc::RangeState::Valid { node, bytes } if node == host && bytes == (2..4)
     ));
+    let extent = editor.document().range_extent(crossing).unwrap();
+    assert_eq!(extent.start, (host, 2));
+    assert_eq!(extent.end, (pasted.applied.blocks[0], 3));
     assert!(
         pasted
             .notes
             .iter()
-            .any(|n| n.code == "clipboard.host-range-dropped"
-                && n.severity == reprise_diag::Severity::Error)
+            .all(|n| n.code != "clipboard.host-range-dropped")
     );
     editor.undo().unwrap();
     assert!(

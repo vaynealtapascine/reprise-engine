@@ -5,7 +5,7 @@ use reprise_doc::{ChangeReport, Document, NodeId, RelationId, SchemaRegistry, Un
 
 use crate::command::{Command, Effect};
 use crate::error::{EditError, Reason};
-use crate::plan::{self, Plan, PlannedEffect, Step};
+use crate::plan::{self, Created, Plan, PlannedEffect, Step};
 
 /// Commands applied together: one atomic Loro commit and one undo step.
 ///
@@ -121,6 +121,7 @@ impl Applied {
                     at = (first, join.saturating_add(at.1));
                 }
                 Effect::Deleted(n) if n == at.0 => return None,
+                Effect::Moved { node: n, new } if n == at.0 => at.0 = new,
                 _ => {}
             }
         }
@@ -194,11 +195,15 @@ impl Editor {
         if let Some(paste) = plan.paste {
             return crate::paste::write(&self.doc, &self.schemas, paste).map(|p| p.applied);
         }
-        // Staging commits, so all of it comes before the step's own changes.
-        let blocks = plan
-            .blocks
+        // Staging commits what was pending as part of the step; staging
+        // first keeps the step's own changes together.
+        let mut blocks = plan
+            .created
             .iter()
-            .map(|b| self.doc.stage_block(b))
+            .map(|c| match c {
+                Created::Staged(b) => self.doc.stage_block(b).map(Some),
+                Created::Split => Ok(None),
+            })
             .collect::<Result<Vec<_>, _>>()
             .map_err(store)?;
         let relations = plan
@@ -208,8 +213,12 @@ impl Editor {
             .collect::<Result<Vec<_>, _>>()
             .map_err(store)?;
         for step in &plan.steps {
-            self.step(step, &blocks, &relations).map_err(store)?;
+            self.step(step, &mut blocks, &relations).map_err(store)?;
         }
+        let blocks = blocks
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| store(reprise_doc::DocError::Store("a split made no block".into())))?;
         let new = |i: usize| blocks.get(i).copied();
         let effects = plan
             .effects
@@ -234,6 +243,7 @@ impl Editor {
                     },
                     PlannedEffect::Join { first, second, at } => Effect::Join { first, second, at },
                     PlannedEffect::Deleted(n) => Effect::Deleted(n),
+                    PlannedEffect::Moved { node, new: i } => Effect::Moved { node, new: new(i)? },
                 })
             })
             .collect();
@@ -247,10 +257,11 @@ impl Editor {
     fn step(
         &self,
         step: &Step,
-        blocks: &[NodeId],
+        blocks: &mut [Option<NodeId>],
         relations: &[RelationId],
     ) -> Result<(), reprise_doc::DocError> {
         let missing = || reprise_doc::DocError::Store("a staged item is missing".into());
+        let staged = |i: usize| blocks.get(i).copied().flatten().ok_or_else(missing);
         match step {
             Step::InsertText { node, at, text } => {
                 self.doc.block(*node)?.text.insert(*at, text)?;
@@ -259,13 +270,21 @@ impl Editor {
                 self.doc.block(*node)?.text.delete(range.clone())?;
             }
             Step::Split { node, at, new } => {
-                let new = blocks.get(*new).copied().ok_or_else(missing)?;
-                self.doc.split_block_into(*node, *at, new)?;
+                let made = self.doc.split_block(*node, *at)?;
+                *blocks.get_mut(*new).ok_or_else(missing)? = Some(made);
             }
             Step::Join { first, second } => self.doc.join_blocks(*first, *second)?,
             Step::Place { new, parent, index } => {
-                let new = blocks.get(*new).copied().ok_or_else(missing)?;
-                self.doc.activate_block_at(new, *parent, *index)?;
+                self.doc.activate_block_at(staged(*new)?, *parent, *index)?;
+            }
+            Step::MoveCopy {
+                node,
+                new,
+                parent,
+                index,
+            } => {
+                self.doc
+                    .move_by_copy(*node, staged(*new)?, *parent, *index)?;
             }
             Step::Delete { node } => self.doc.delete_block(*node)?,
             Step::Move {

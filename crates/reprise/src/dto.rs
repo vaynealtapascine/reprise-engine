@@ -193,6 +193,10 @@ pub enum Effect {
     Deleted {
         node: String,
     },
+    Moved {
+        node: String,
+        new: String,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Applied {

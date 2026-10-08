@@ -1,7 +1,10 @@
 //! Authored character lineage for split/join edits. Compact ID spans connect
 //! recreated characters to their originals, replicated and undone with the edit.
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
 use loro::cursor::{Cursor, PosType, Side};
-use loro::{LoroMap, LoroValue, ValueOrContainer};
+use loro::{Frontiers, ID, LoroMap, LoroValue, ValueOrContainer};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -22,7 +25,126 @@ struct Transfer {
     digest: Vec<u8>,
 }
 
+/// The most lineage records one lookup considers: those whose source spans
+/// start nearest at or before the character, then in numeric ID order. A peer can
+/// write any number of records; this bounds what each caret resolution reads.
+pub const MAX_LINEAGE_CANDIDATES: usize = 16;
+
+/// The most records of one node that are indexed, in numeric ID order.
+pub const MAX_LINEAGE_RECORDS: usize = 4096;
+
+#[derive(Default)]
+pub(crate) struct LineageCache {
+    frontiers: Option<Frontiers>,
+    nodes: HashMap<NodeId, Arc<LineageIndex>>,
+}
+
+/// A node's readable lineage records, by the ID of the first source
+/// character. A record whose key doesn't name its own source and target is
+/// not indexed.
+#[derive(Default)]
+pub(crate) struct LineageIndex {
+    by_source: BTreeMap<(u64, i32), Vec<(LineageKey, Transfer)>>,
+}
+
+type LineageKey = (u64, i32, u64, i32);
+
+/// The four IDs a record key names: source peer and counter, target peer
+/// and counter.
+fn key_ids(key: &str) -> Option<LineageKey> {
+    if key.len() > 63 {
+        return None;
+    }
+    let mut parts = key.split(':');
+    let ids = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    let (peer, counter, target_peer, target_counter) = ids;
+    (parts.next().is_none()
+        && counter >= 0
+        && target_counter >= 0
+        && key == format!("{peer}:{counter}:{target_peer}:{target_counter}"))
+    .then_some(ids)
+}
+
+impl LineageIndex {
+    fn build(entries: Vec<(String, String)>) -> LineageIndex {
+        let mut index = LineageIndex::default();
+        for (key, raw) in entries.into_iter().take(MAX_LINEAGE_RECORDS) {
+            let Some((peer, counter, to_peer, to_counter)) = key_ids(&key) else {
+                continue;
+            };
+            let Ok(record) = serde_json::from_str::<Transfer>(&raw) else {
+                continue;
+            };
+            let (Ok(from), Ok(to)) = (Cursor::decode(&record.from), Cursor::decode(&record.to))
+            else {
+                continue;
+            };
+            let named =
+                |c: &Cursor, p: u64, n: i32| c.id.is_some_and(|id| id.peer == p && id.counter == n);
+            if record.version != 1
+                || record.count == 0
+                || !named(&from, peer, counter)
+                || !named(&to, to_peer, to_counter)
+            {
+                continue;
+            }
+            index
+                .by_source
+                .entry((peer, counter))
+                .or_default()
+                .push(((peer, counter, to_peer, to_counter), record));
+        }
+        for records in index.by_source.values_mut() {
+            records.sort_by_key(|(key, _)| *key);
+        }
+        index
+    }
+
+    /// Records whose source span holds `id`, at most
+    /// [`MAX_LINEAGE_CANDIDATES`], in numeric ID order.
+    fn candidates(&self, id: ID) -> Vec<Transfer> {
+        let mut found: Vec<(LineageKey, Transfer)> = Vec::new();
+        for (&(peer, start), records) in self.by_source.range(..=(id.peer, id.counter)).rev() {
+            if peer != id.peer || found.len() >= MAX_LINEAGE_CANDIDATES {
+                break;
+            }
+            for (key, record) in records {
+                let end = i64::from(start) + i64::from(record.count);
+                if i64::from(id.counter) < end && found.len() < MAX_LINEAGE_CANDIDATES {
+                    found.push((*key, record.clone()));
+                }
+            }
+        }
+        found.sort_by_key(|a| a.0);
+        found.into_iter().map(|(_, r)| r).collect()
+    }
+}
+
 impl Document {
+    /// The lineage index of `node`, cached per revision.
+    fn lineage_index(&self, node: NodeId) -> Arc<LineageIndex> {
+        let node = node.host();
+        if self.doc.get_pending_txn_len() > 0 {
+            return Arc::new(LineageIndex::build(self.lineage_entries(node)));
+        }
+        let frontiers = self.doc.state_frontiers();
+        let mut cache = self.lineage.lock().unwrap_or_else(|e| e.into_inner());
+        if cache.frontiers.as_ref() != Some(&frontiers) {
+            cache.nodes.clear();
+            cache.frontiers = Some(frontiers);
+        }
+        cache
+            .nodes
+            .entry(node)
+            .or_insert_with(|| Arc::new(LineageIndex::build(self.lineage_entries(node))))
+            .clone()
+    }
+
     pub(crate) fn record_transfer(
         &self,
         source: NodeId,
@@ -36,12 +158,27 @@ impl Document {
         }
         // Lineage is kept in the underlying texts' coordinates; a paragraph
         // of a flow gives offsets in its view.
-        let (start, end, at) = (
+        let source_view = self.block(source)?.text;
+        // Copying a non-flow block stages its destination before activation.
+        // Live destinations need paragraph coordinates; staged ones use their
+        // entire text container.
+        let target_view = match self.block(target) {
+            Ok(block) => block.text,
+            Err(_) if self.is_soft_deleted(target) => {
+                self.text_of_any(target).ok_or(DocError::NoNode(target))?
+            }
+            Err(error) => return Err(error),
+        };
+        let copied = source_view.slice(start..start + bytes)?;
+        let source_skip = source_view.slice(0..start)?.chars().count();
+        let target_skip = target_view.slice(0..at)?.chars().count();
+        target_view.slice(at..at + bytes)?;
+        let source_segments = source_view.segments()?;
+        let target_segments = target_view.segments()?;
+        let (start, at) = (
             self.shared_byte(source, start)?,
-            self.shared_byte(source, start + bytes)?,
             self.shared_byte(target, at)?,
         );
-        let bytes = end.saturating_sub(start);
         let old = self.text_of_any(source).ok_or(DocError::NoNode(source))?;
         let new = self.text_of_any(target).ok_or(DocError::NoNode(target))?;
         let from = old.loro();
@@ -49,13 +186,10 @@ impl Document {
         let begin = from
             .convert_pos(start, PosType::Bytes, PosType::Unicode)
             .ok_or_else(|| DocError::Store("invalid transfer source".into()))?;
-        let end = from
-            .convert_pos(start + bytes, PosType::Bytes, PosType::Unicode)
-            .ok_or_else(|| DocError::Store("invalid transfer source end".into()))?;
         let dest = to
             .convert_pos(at, PosType::Bytes, PosType::Unicode)
             .ok_or_else(|| DocError::Store("invalid transfer destination".into()))?;
-        let meta = self.meta_of(source)?;
+        let meta = self.meta_of(source.host())?;
         let map = match meta.get("transfers1") {
             Some(ValueOrContainer::Container(loro::Container::Map(map))) => map,
             None => meta.insert_container("transfers1", LoroMap::new())?,
@@ -72,8 +206,8 @@ impl Document {
             .transpose()?
             .map(|a| a.encode());
         let target_string = new.to_string();
-        let mut span: Option<(Cursor, Cursor, u32, usize)> = None;
-        let write = |(a, b, count, offset): (Cursor, Cursor, u32, usize)| -> Result<(), DocError> {
+        let mut span: Option<(Cursor, Cursor, u32, usize, usize)> = None;
+        let write = |(a, b, count, source_offset, offset): (Cursor, Cursor, u32, usize, usize)| -> Result<(), DocError> {
             let start = to
                 .convert_pos(dest + offset, PosType::Unicode, PosType::Bytes)
                 .ok_or_else(|| DocError::Store("invalid transfer start".into()))?;
@@ -100,7 +234,7 @@ impl Document {
                 count,
                 base: base.clone(),
                 source_base: source_base.clone(),
-                source_offset: u32::try_from(offset)
+                source_offset: u32::try_from(source_offset)
                     .map_err(|_| DocError::Store("transfer offset limit".into()))?,
                 offset: u32::try_from(offset)
                     .map_err(|_| DocError::Store("transfer offset limit".into()))?,
@@ -128,37 +262,57 @@ impl Document {
             self.lineage_pending
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .push((target, reverse_key, reverse_raw));
+                .push((target.host(), reverse_key, reverse_raw));
             map.insert(&key, value.clone())?;
             self.lineage_pending
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .push((source, key, value));
+                .push((source.host(), key, value));
             Ok(())
         };
-        for index in begin..end {
+        let source_positions = source_segments
+            .iter()
+            .flat_map(|s| s.chars.clone())
+            .skip(source_skip);
+        let target_positions = target_segments
+            .iter()
+            .flat_map(|s| s.chars.clone())
+            .skip(target_skip);
+        for (index, target_index) in source_positions
+            .zip(target_positions)
+            .take(copied.chars().count())
+        {
+            // Paragraph coordinates omit inactive markers. Map each visible
+            // character on both sides; never create a lineage edge for a marker.
             let a = from
                 .get_cursor(index, Side::Left)
                 .ok_or_else(|| DocError::Store("missing source cursor".into()))?;
             let b = to
-                .get_cursor(dest + index - begin, Side::Left)
+                .get_cursor(target_index, Side::Left)
                 .ok_or_else(|| DocError::Store("missing target cursor".into()))?;
-            let contiguous = span.as_ref().is_some_and(|(x, y, n, _)| {
-                x.id.zip(a.id).is_some_and(|(x, a)| {
-                    x.peer == a.peer && i64::from(x.counter) + i64::from(*n) == i64::from(a.counter)
-                }) && y.id.zip(b.id).is_some_and(|(y, b)| {
-                    y.peer == b.peer && i64::from(y.counter) + i64::from(*n) == i64::from(b.counter)
-                })
-            });
+            let contiguous =
+                span.as_ref()
+                    .is_some_and(|(x, y, n, source_offset, target_offset)| {
+                        begin + source_offset + *n as usize == index
+                            && dest + target_offset + *n as usize == target_index
+                            && x.id.zip(a.id).is_some_and(|(x, a)| {
+                                x.peer == a.peer
+                                    && i64::from(x.counter) + i64::from(*n) == i64::from(a.counter)
+                            })
+                            && y.id.zip(b.id).is_some_and(|(y, b)| {
+                                y.peer == b.peer
+                                    && i64::from(y.counter) + i64::from(*n) == i64::from(b.counter)
+                            })
+                    });
             if contiguous {
-                if let Some((_, _, count, _)) = &mut span {
+                if let Some((_, _, count, _, _)) = &mut span {
                     *count += 1;
                 }
             } else {
                 if let Some(previous) = span.take() {
                     write(previous)?;
                 }
-                span = Some((a, b, 1, index - begin));
+                span = Some((a, b, 1, index - begin, target_index - dest));
             }
         }
         if let Some(last) = span {
@@ -218,17 +372,14 @@ impl Document {
         });
         nodes.sort_unstable();
         for node in nodes {
-            if !self.is_caret_block(node) {
+            if !self.live(&self.tree("content"), node.node) {
                 continue;
             }
             let Some(text) = self.text_of_any(node) else {
                 continue;
             };
             let s = text.to_string();
-            for (_, value) in self.lineage_entries(node) {
-                let Ok(record) = serde_json::from_str::<Transfer>(&value) else {
-                    continue;
-                };
+            for (_, record) in self.lineage_index(node).by_source.values().flatten() {
                 if record.version != 1 || record.count == 0 || record.node == node {
                     continue;
                 }
@@ -241,7 +392,7 @@ impl Document {
                 ) {
                     continue;
                 }
-                let Some(start) = Self::source_span(&text, &record, &s) else {
+                let Some(start) = Self::source_span(&text, record, &s) else {
                     continue;
                 };
                 let Ok(old) = Cursor::decode(&record.from) else {
@@ -363,13 +514,17 @@ impl Document {
                 map.for_each(|key, value| {
                     if let ValueOrContainer::Value(LoroValue::String(raw)) = value
                         && raw.len() <= 2048
+                        && let Some(ids) = key_ids(key)
                     {
-                        entries.insert(key.to_string(), raw.to_string());
+                        entries.insert(ids, (key.to_string(), raw.to_string()));
+                        if entries.len() > MAX_LINEAGE_RECORDS {
+                            entries.pop_last();
+                        }
                     }
                 });
             }
         }
-        entries.into_iter().collect()
+        entries.into_values().collect()
     }
 
     fn source_span(text: &crate::text::Text, record: &Transfer, s: &str) -> Option<usize> {
@@ -396,12 +551,8 @@ impl Document {
         let cursor = Cursor::decode(&anchor.cursor_bytes()).ok()?;
         let id = cursor.id?;
         let s = text.to_string();
-        for (_, value) in self.lineage_entries(node) {
+        for record in self.lineage_index(node).candidates(id) {
             let candidate = (|| {
-                let record: Transfer = serde_json::from_str(&value).ok()?;
-                if record.version != 1 || record.count == 0 {
-                    return None;
-                }
                 let from = Cursor::decode(&record.from).ok()?;
                 let source = from.id?;
                 let delta = i64::from(id.counter) - i64::from(source.counter);
@@ -446,17 +597,10 @@ impl Document {
         if anchor.text_id() != old.id() {
             return vec![];
         }
-        let entries = self.lineage_entries(node);
         let mut live = Vec::new();
         let mut rest = Vec::new();
-        for (_, raw) in entries {
+        for record in self.lineage_index(node).candidates(id) {
             let candidate = (|| {
-                let Ok(record) = serde_json::from_str::<Transfer>(&raw) else {
-                    return None;
-                };
-                if record.version != 1 || record.count == 0 {
-                    return None;
-                }
                 let (Ok(from), Ok(mut to)) =
                     (Cursor::decode(&record.from), Cursor::decode(&record.to))
                 else {
@@ -545,6 +689,114 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lineage_keys_have_one_canonical_spelling() {
+        assert_eq!(key_ids("2:3:10:4"), Some((2, 3, 10, 4)));
+        for key in [
+            "02:3:10:4",
+            "+2:3:10:4",
+            "2:-3:10:4",
+            "2:3:10:04",
+            "2:3:10:4:5",
+        ] {
+            assert_eq!(key_ids(key), None, "{key}");
+        }
+    }
+
+    #[test]
+    fn hostile_lineage_is_bounded_and_cache_tracks_edits() {
+        let doc = Document::new(1).unwrap();
+        let first = doc
+            .append_block(crate::BlockKind::Paragraph, "", "abc")
+            .unwrap();
+        let second = doc
+            .append_block(crate::BlockKind::Paragraph, "", "def")
+            .unwrap();
+        let anchor = doc
+            .block(second)
+            .unwrap()
+            .text
+            .anchor(1, crate::text::Affinity::After)
+            .unwrap();
+        doc.join_blocks(first, second).unwrap();
+        doc.commit();
+        let before = doc.lineage_index(second);
+        assert!(Arc::ptr_eq(&before, &doc.lineage_index(second)));
+        let entries = doc.lineage_entries(second);
+        let (valid_key, valid_raw) = entries.first().unwrap();
+        let meta = doc.meta_of(second).unwrap();
+        let Some(ValueOrContainer::Container(loro::Container::Map(map))) = meta.get("transfers1")
+        else {
+            panic!()
+        };
+        // Arbitrary key aliases must not crowd out a legitimate source span.
+        for n in 0..MAX_LINEAGE_RECORDS + 20 {
+            map.insert(&format!("!{n}"), valid_raw.as_str()).unwrap();
+        }
+        assert_eq!(doc.transfer_anchors(second, &anchor).len(), 1);
+        doc.commit();
+        assert!(!Arc::ptr_eq(&before, &doc.lineage_index(second)));
+        assert_eq!(doc.transferred_anchor(second, &anchor).unwrap().0, first);
+        // Canonical but forged keys are ignored when their cursor IDs disagree.
+        for n in 0..MAX_LINEAGE_RECORDS + 20 {
+            map.insert(&format!("99:{n}:99:0"), valid_raw.as_str())
+                .unwrap();
+        }
+        assert_eq!(doc.lineage_entries(second).len(), MAX_LINEAGE_RECORDS);
+        assert!(
+            doc.lineage_entries(second)
+                .iter()
+                .any(|(k, _)| k == valid_key)
+        );
+        assert_eq!(doc.transfer_anchors(second, &anchor).len(), 1);
+    }
+
+    #[test]
+    fn matching_lineage_candidates_are_capped_in_numeric_order() {
+        let doc = Document::new(1).unwrap();
+        let first = doc
+            .append_block(crate::BlockKind::Paragraph, "", "abc")
+            .unwrap();
+        let second = doc
+            .append_block(crate::BlockKind::Paragraph, "", "def")
+            .unwrap();
+        doc.join_blocks(first, second).unwrap();
+        let (_, raw) = doc.lineage_entries(second).remove(0);
+        let original: Transfer = serde_json::from_str(&raw).unwrap();
+        let source = Cursor::decode(&original.from).unwrap().id.unwrap();
+        let mut entries = Vec::new();
+        for peer in 2..42 {
+            let mut record = original.clone();
+            let mut target = Cursor::decode(&record.to).unwrap();
+            target.id.as_mut().unwrap().peer = peer;
+            record.to = target.encode();
+            let key = format!(
+                "{}:{}:{}:{}",
+                source.peer,
+                source.counter,
+                peer,
+                target.id.unwrap().counter
+            );
+            entries.push((key, serde_json::to_string(&record).unwrap()));
+        }
+        let index = LineageIndex::build(entries);
+        let candidates = index.candidates(source);
+        assert_eq!(candidates.len(), MAX_LINEAGE_CANDIDATES);
+        let peers: Vec<_> = candidates
+            .iter()
+            .map(|r| Cursor::decode(&r.to).unwrap().id.unwrap().peer)
+            .collect();
+        assert_eq!(peers, (2..18).collect::<Vec<_>>());
+        assert!(
+            index
+                .candidates(ID {
+                    peer: source.peer,
+                    counter: source.counter + 100
+                })
+                .is_empty()
+        );
+    }
     #[test]
     fn malformed_lineage_does_not_partially_fail_a_join() {
         let doc = Document::new(1).unwrap();

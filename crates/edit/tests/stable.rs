@@ -42,6 +42,42 @@ fn text(e: &Editor, n: NodeId) -> String {
 }
 
 #[test]
+fn caret_from_before_a_split_follows_a_later_copy_move_of_the_tail() {
+    let (doc, nodes) = base(&["abcd"]);
+    let original = StableCaret::anchor(&doc, caret(nodes[0], 3, Affinity::Downstream)).unwrap();
+    let mut e = Editor::new(doc, engine().schemas.clone());
+    let tail = e
+        .apply_command(Command::SplitBlock {
+            node: nodes[0],
+            at: 2,
+        })
+        .unwrap()
+        .blocks[0];
+    let moved = e
+        .apply_command(Command::MoveBlock {
+            node: tail,
+            parent: None,
+            index: 0,
+        })
+        .unwrap()
+        .blocks[0];
+    assert_eq!(
+        original.resolve(e.document()),
+        Resolution::Exact(caret(moved, 1, Affinity::Downstream))
+    );
+    e.undo().unwrap();
+    assert_eq!(
+        original.resolve(e.document()),
+        Resolution::Exact(caret(tail, 1, Affinity::Downstream))
+    );
+    e.redo().unwrap();
+    assert_eq!(
+        original.resolve(e.document()),
+        Resolution::Exact(caret(moved, 1, Affinity::Downstream))
+    );
+}
+
+#[test]
 fn carets_follow_remote_insertions_by_affinity() {
     let (doc, ids) = base(&["hello world"]);
     let (mut a, mut b) = (editor(PEER, &doc), editor(OTHER_PEER, &doc));

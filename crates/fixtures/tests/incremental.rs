@@ -7,6 +7,37 @@ fn check(session: &mut LayoutSession<'_>, engine: &Engine, doc: &Document, label
     doc.commit();
     assert_eq!(session.layout(doc).unwrap(), engine.layout(doc), "{label}");
 }
+
+#[test]
+fn shared_flow_typing_only_reshapes_the_changed_paragraph() {
+    let engine = reprise_fixtures::engine();
+    let doc = Document::new(1).unwrap();
+    let head = doc
+        .append_block(BlockKind::Paragraph, "", &"A short paragraph. ".repeat(24))
+        .unwrap();
+    let mut paragraphs = vec![head];
+    for _ in 1..24 {
+        let next = doc
+            .split_block(*paragraphs.last().unwrap(), "A short paragraph. ".len())
+            .unwrap();
+        paragraphs.push(next);
+    }
+    let mut session = LayoutSession::new(&engine);
+    check(&mut session, &engine, &doc, "shared flow initial");
+    doc.block(paragraphs[12])
+        .unwrap()
+        .text
+        .insert(2, "changed ")
+        .unwrap();
+    check(&mut session, &engine, &doc, "shared flow typing");
+    let work = session.counters();
+    assert_eq!(work.shapes, 1, "{work:?}");
+    assert_eq!(work.compositions, 1, "{work:?}");
+    let tail = doc.split_block(paragraphs[12], 10).unwrap();
+    check(&mut session, &engine, &doc, "shared flow split");
+    doc.join_blocks(paragraphs[12], tail).unwrap();
+    check(&mut session, &engine, &doc, "shared flow join");
+}
 fn edits(engine: &Engine, doc: &Document, label: &str) {
     let mut session = LayoutSession::new(engine);
     check(&mut session, engine, doc, label);

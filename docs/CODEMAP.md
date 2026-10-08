@@ -13,7 +13,8 @@ start with `docs/`, which names repository-level documentation.
 | `text` | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
 | `doc` | `src/lib.rs` | `Document`: content tree, versioned authored ranges (`add_range`, `range_policy`, resolution), styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas; legacy policies remain distinguishable from unreadable metadata | 05–07, 10, 12, 15, 29, 34, 35 |
 | `reprise` | `tests/soak.rs`, `tests/sync_delta.hex` | Structural partition/rejoin/undo soak, deterministic peer fixture and native/WASM packet-byte golden | 29, 34, 38 |
-| `doc` | `src/transfers.rs`, `src/persist.rs` | Retained split/join character lineage, undo/redo aliases and bounded columnar snapshot counts | 10, 12, 29, 34 |
+| `doc` | `src/flow.rs`, `src/flow_tests.rs`, `docs/flow.md` | Flow text: paragraphs as U+FDD0 breaks with records in `breaks1`, paragraph views, per-revision cache, staged breaks and embeds, `locate`, placement | 06, 07, 11, 12, 29 |
+| `doc` | `src/transfers.rs`, `src/persist.rs` | Retained copy lineage over visible characters, bounded per-revision source-ID index, undo/redo aliases and bounded columnar snapshot counts | 10, 12, 29, 34 |
 | `shape`, `layout` | `shape/src/lib.rs`, `layout/src/flow/stage.rs`, `layout/src/display.rs` | Upright vertical shaping, bounded combinations and display compensation | 20, 22, 38 |
 | `fixtures` | `tests/vertical.rs` | Both downward modes, combination, frame transitions, storage and export parity | 20, 33, 38 |
 | `doc` | `src/relation.rs` | `Relation`, `Target`, `StructuralQuery`, `LayoutQuery`, `SnapshotRef`, `RelationSchema`, `SchemaRegistry`, the built-in schemas (`reprise.follow`, `reprise.reference`, `reprise.reading-order`), `Dependency`, copy planning (`plan_copy`, `CopySet`, `IdMap`) | 13–15, 27, 35 |

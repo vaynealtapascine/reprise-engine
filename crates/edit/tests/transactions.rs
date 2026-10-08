@@ -40,6 +40,107 @@ fn texts(doc: &Document) -> Vec<String> {
     dump(doc).into_iter().map(|(_, _, t)| t).collect()
 }
 
+#[test]
+fn many_staging_commits_still_undo_as_one_step_with_a_one_step_limit() {
+    let doc = Document::new(1).unwrap();
+    let head = para(&doc, &"x".repeat(40));
+    let mut e = editor(doc);
+    e.set_undo_limit(1);
+    let mut tx = Transaction::new();
+    for at in (1..40).rev() {
+        tx = tx.with(Command::SplitBlock { node: head, at });
+    }
+    let made = e.apply(&tx).unwrap().blocks;
+    assert_eq!(texts(e.document()), vec!["x"; 40]);
+    assert_eq!(e.undo_count(), 1);
+    assert!(e.undo().unwrap());
+    assert_eq!(texts(e.document()), ["x".repeat(40)]);
+    assert!(!e.undo().unwrap());
+    assert!(e.redo().unwrap());
+    assert_eq!(texts(e.document()), vec!["x"; 40]);
+    assert!(made.iter().all(|id| e.document().is_live(*id)));
+}
+
+#[test]
+fn flow_validation_refuses_the_whole_transaction_before_writing() {
+    let doc = Document::new(1).unwrap();
+    let head = para(&doc, "abcd");
+    let tail = doc.split_block(head, 2).unwrap();
+    let mut e = editor(doc);
+    let first = Command::InsertText {
+        node: head,
+        at: 0,
+        text: "must not appear".into(),
+    };
+    refused(
+        &mut e,
+        Transaction::new()
+            .with(first.clone())
+            .with(Command::InsertText {
+                node: tail,
+                at: 0,
+                text: "\u{fdd0}".into(),
+            }),
+    );
+    refused(
+        &mut e,
+        Transaction::new().with(first).with(Command::InsertBlock {
+            parent: Some(tail),
+            index: 0,
+            block: NewBlock::new(BlockKind::Paragraph, "", "child"),
+        }),
+    );
+    assert!(!e.can_undo());
+}
+
+#[test]
+fn splitting_non_flow_text_after_an_edit_is_one_complete_step() {
+    let doc = Document::new(1).unwrap();
+    let head = para(&doc, "abc");
+    let image = doc.append_block(BlockKind::Image, "", "héllo").unwrap();
+    let mut e = editor(doc);
+    let applied = e
+        .apply(
+            &Transaction::new()
+                .with(Command::InsertText {
+                    node: head,
+                    at: 0,
+                    text: "X".into(),
+                })
+                .with(Command::SplitBlock { node: image, at: 3 }),
+        )
+        .unwrap();
+    assert_eq!(texts(e.document()), ["Xabc", "hé", "llo"]);
+    assert_eq!(e.undo_count(), 1);
+    assert!(e.undo().unwrap());
+    assert_eq!(texts(e.document()), ["abc", "héllo"]);
+    assert!(e.redo().unwrap());
+    assert_eq!(texts(e.document()), ["Xabc", "hé", "llo"]);
+    assert!(e.document().is_live(applied.blocks[0]));
+}
+
+#[test]
+fn moving_a_head_after_splitting_in_the_same_transaction_uses_a_copy() {
+    let doc = Document::new(1).unwrap();
+    let head = para(&doc, "abcd");
+    let mut e = editor(doc);
+    e.apply(
+        &Transaction::new()
+            .with(Command::SplitBlock { node: head, at: 2 })
+            .with(Command::MoveBlock {
+                node: head,
+                parent: None,
+                index: 1,
+            }),
+    )
+    .unwrap();
+    assert_eq!(texts(e.document()), ["cd", "ab"]);
+    assert!(e.undo().unwrap());
+    assert_eq!(texts(e.document()), ["abcd"]);
+    assert!(e.redo().unwrap());
+    assert_eq!(texts(e.document()), ["cd", "ab"]);
+}
+
 fn refused(editor: &mut Editor, tx: impl Into<Transaction>) -> EditError {
     let before = (dump(editor.document()), editor.document().revision());
     let err = editor.apply(&tx.into()).expect_err("must be refused");
@@ -808,9 +909,13 @@ fn random_transactions_never_corrupt_and_refusals_change_nothing() {
         let before = (dump(e.document()), e.document().revision());
         match e.apply(&tx) {
             Ok(_) => ok += 1,
-            Err(_) => {
+            Err(error) => {
                 bad += 1;
-                assert_eq!(before, (dump(e.document()), e.document().revision()));
+                assert_eq!(
+                    before,
+                    (dump(e.document()), e.document().revision()),
+                    "{tx:?}: {error:?}"
+                );
             }
         }
         check_tree(e.document());
@@ -830,9 +935,16 @@ fn undoing_everything_and_redoing_everything_restores_each_state() {
         for _ in 0..80 {
             let tx = random_transaction(&mut rng, e.document());
             let steps = e.undo_count();
+            let before = (dump(e.document()), e.document().revision());
             // A transaction that changes nothing is not a step.
-            if e.apply(&tx).is_ok() && e.undo_count() > steps {
-                states.push(dump(e.document()));
+            match e.apply(&tx) {
+                Ok(_) if e.undo_count() > steps => states.push(dump(e.document())),
+                Ok(_) => {}
+                Err(error) => assert_eq!(
+                    before,
+                    (dump(e.document()), e.document().revision()),
+                    "seed {seed}: {tx:?}: {error:?}"
+                ),
             }
         }
         let steps = states.len() - 1;

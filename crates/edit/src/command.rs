@@ -30,15 +30,17 @@ pub enum Command {
         node: NodeId,
         range: Range<usize>,
     },
-    /// The text from `at` on moves to a new block right after `node`, with
-    /// the same kind, style and overrides.
+    /// The text from `at` on becomes a new block right after `node`, with
+    /// the same kind, style and overrides. In a flow this is a break, so no
+    /// text moves (see `docs/flow.md`).
     SplitBlock {
         node: NodeId,
         at: usize,
     },
-    /// `second`'s text is appended to `first` and `second` is deleted.
-    /// Node targets follow the recorded succession only under `Rebind` policy;
-    /// persistent ranges and anchors stay in their original text container.
+    /// `second`'s text is appended to `first` and `second` is deleted. For
+    /// adjacent paragraphs of one flow only the break between them goes, so
+    /// no text moves and ranges and anchors stay valid. Node targets follow
+    /// the recorded succession only under `Rebind` policy.
     JoinBlocks {
         first: NodeId,
         second: NodeId,
@@ -52,7 +54,8 @@ pub enum Command {
     DeleteBlock {
         node: NodeId,
     },
-    /// Moves the block to `index` among `parent`'s other live children.
+    /// Moves the block to `index` among `parent`'s other live children. A
+    /// paragraph of a flow moves by copying: see [`Effect::Moved`].
     MoveBlock {
         node: NodeId,
         parent: Option<NodeId>,
@@ -97,4 +100,7 @@ pub enum Effect {
     },
     /// The block and its subtree were deleted.
     Deleted(NodeId),
+    /// A paragraph of a flow moved by copying: `node` was deleted, and its
+    /// text is now `new`'s, at the same offsets.
+    Moved { node: NodeId, new: NodeId },
 }

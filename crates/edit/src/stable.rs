@@ -110,6 +110,35 @@ impl StableCaret {
         let anchor = (self.anchor.len() <= MAX_ANCHOR_BYTES)
             .then(|| Anchor::decode(&self.anchor))
             .flatten();
+        let caret = |node, offset| Caret {
+            node,
+            offset,
+            affinity: self.affinity,
+        };
+        let text_of = |node| {
+            doc.block(node)
+                .map(|b| b.text.to_string())
+                .unwrap_or_default()
+        };
+        // The anchored character, wherever it is now: in a flow it may be in
+        // another paragraph after a split or a join (see `docs/flow.md`).
+        let mut tombstone = None;
+        if let Some(a) = &anchor {
+            match doc.locate(self.node, a) {
+                Some((node, Resolved::Live(o))) if doc.is_caret_block(node) => {
+                    let floored = floor_grapheme(&text_of(node), o);
+                    return if floored == o {
+                        Resolution::Exact(caret(node, o))
+                    } else {
+                        Resolution::Moved(caret(node, floored))
+                    };
+                }
+                Some((node, Resolved::Tombstoned(o))) if doc.is_caret_block(node) => {
+                    tombstone = Some((node, o));
+                }
+                _ => {}
+            }
+        }
         // Follow authored relocation only when the original character or
         // block is gone. Undo revives the original; concurrent competing
         // transfers have a deterministic order. Bound cycles and chain depth.
@@ -118,25 +147,18 @@ impl StableCaret {
             let mut queue = std::collections::VecDeque::from([(self.node, current)]);
             let mut queued = 1usize;
             while let Some((node, mut current)) = queue.pop_front() {
-                if doc.is_caret_block(node)
-                    && let Some(text) = doc.text_of_any(node)
-                    && matches!(text.resolve(&current), Ok(Resolved::Tombstoned(_)))
+                if let Some(text) = doc.text_of_any(node)
+                    && matches!(text.resolve_shared(&current), Ok(Resolved::Tombstoned(_)))
                     && let Some(restored) = doc.restored_transfer_anchor(node, &current)
                 {
                     current = restored;
                 }
-                if doc.is_caret_block(node)
-                    && let Some(text) = doc.text_of_any(node)
-                    && let Ok(Resolved::Live(offset)) = text.resolve(&current)
+                if let Some((found, Resolved::Live(offset))) = doc.locate(node, &current)
+                    && doc.is_caret_block(found)
                 {
-                    let s = text.to_string();
-                    let offset = floor_grapheme(&s, offset);
-                    if node != self.node || current.encode() != self.anchor {
-                        return Resolution::Exact(Caret {
-                            node,
-                            offset,
-                            affinity: self.affinity,
-                        });
+                    let offset = floor_grapheme(&text_of(found), offset);
+                    if found != self.node || current.encode() != self.anchor {
+                        return Resolution::Exact(caret(found, offset));
                     }
                     break;
                 }
@@ -151,11 +173,9 @@ impl StableCaret {
                 }
             }
         }
-        let caret = |node, offset| Caret {
-            node,
-            offset,
-            affinity: self.affinity,
-        };
+        if let Some((node, o)) = tombstone {
+            return Resolution::Moved(caret(node, floor_grapheme(&text_of(node), o)));
+        }
         let in_text = |text: &Text| -> Option<(usize, bool)> {
             let anchor = anchor.as_ref()?;
             match text.resolve(anchor).ok()? {

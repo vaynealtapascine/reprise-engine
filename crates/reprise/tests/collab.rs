@@ -37,6 +37,28 @@ fn paragraph(s: &mut DocumentSession, text: &str) -> String {
         .clone()
 }
 
+#[test]
+fn moving_a_flow_paragraph_reports_its_replacement_to_hosts() {
+    let mut s = create("18446744073709551614");
+    let head = paragraph(&mut s, "abcd");
+    let tail = tx(&mut s, vec![Command::SplitBlock { node: head, at: 2 }]).blocks[0].clone();
+    let moved = tx(
+        &mut s,
+        vec![Command::MoveBlock {
+            node: tail.clone(),
+            parent: None,
+            index: 0,
+        }],
+    );
+    assert_eq!(
+        moved.effects,
+        vec![Effect::Moved {
+            node: tail,
+            new: moved.blocks[0].clone()
+        }]
+    );
+}
+
 fn type_at(s: &mut DocumentSession, node: &str, at: u32, text: &str) {
     tx(
         s,

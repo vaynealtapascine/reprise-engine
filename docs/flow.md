@@ -14,8 +14,8 @@ a deleted word reappeared, a typo fix went to the old paragraph, a join discarde
 concurrent fix. Character lineage (`transfers.rs`) let carets follow the copy, but it can't
 move a collaborator's concurrent operations.
 
-With break markers, splitting and joining paragraphs never copies text. All paragraphs of a
-flow share one CRDT text, and a paragraph boundary is one character in it.
+With break markers, ordinary splits and adjacent joins preserve character identity. All
+paragraphs of a flow share one CRDT text, and a paragraph boundary is one character in it.
 
 ## Model
 
@@ -30,9 +30,10 @@ head text · M1 · text of paragraph 1 · M2 · text of paragraph 2 · ...
     host's `NodeId`, so a document written before this change reads exactly as before: a
     host with no breaks is one paragraph.
 -   A **break** is the character U+FDD0 (a noncharacter, never authored text) with a
-    record in the host's `breaks1` map, keyed by the character's Loro ID
-    (`counter@peer`). The paragraph after an active break has the identity
-    `NodeId::break(host, mark)`, displayed as `12@1/34@2`.
+    record in the root `breaks1` map, keyed by the host and character IDs
+    (`host/mark`). A root map prevents concurrent first breaks from overwriting
+    each other's record container. The paragraph after an active break has the
+    identity `NodeId::at_break(host, mark)`, displayed as `12@1/34@2`.
 -   A record is a map: `v` (1), `kind`, `style`, `overrides` (a style map), `active`
     (bool), optional `image`, and succession keys as on tree nodes. Every field is its own
     map entry, so concurrent edits to different fields both survive.
@@ -89,22 +90,33 @@ before the transaction's undoable commit. Hidden characters don't change any vie
 so staging is invisible. The undoable commit sets `active = true`. Undo and redo then only
 flip the flag, and the paragraph keeps its ID.
 
-Loro's undo manager can't merge one step across an excluded commit that touches the same
-text, so all markers of a transaction are staged **before** its first undoable change, at
-their positions in the text as it was before the transaction. A text the transaction inserts
-on both sides of a new break is written as two insertions, one on each side of the marker.
+Loro's undo manager can't merge one item across an excluded commit that touches the same
+text. The engine therefore groups undo items by editing step. Staging commits the pending
+part of that step, inserts the inactive marker in an excluded commit, then resumes the
+same step. `commit_step` ends the group. Undo replays all items of a group in reverse order;
+redo replays them forwards. This also supports a split inside text inserted earlier in the
+same transaction without changing the marker's identity.
 
 ### The operations
 
 | Operation | Effect |
 | --- | --- |
-| Split at `at` | Stage a marker at `at`, copy the paragraph's kind, style and overrides into its record, activate. No text moves. |
+| Split at `at` | Stage a marker at `at`, copy the paragraph's kind, style and overrides into its record, activate. No text moves, except for the inherited-prefix case below. |
 | Join `first`, `second` | If `second` is a break paragraph directly after `first` in the same host, deactivate its marker and record `second` superseded by `first`. Otherwise (different hosts): the old copying join, with lineage. |
 | Delete a break paragraph | Delete its visible text and deactivate its marker. |
 | Delete a head paragraph | If the host has live break paragraphs, delete the head's visible text and set `head = false`. Otherwise soft-delete the host as before. |
 | Insert or place a block between two paragraphs of a host | Stage the block as a child of the host and stage an embed marker at that boundary; activating both places it. |
 | Move a break paragraph | Copy it into a new staged block and delete the original, with lineage. Moving is a copy, as in other collaborative editors. |
 | Set overrides on a break paragraph | Write its record's `overrides`. |
+
+After the head is deleted, concurrent text before the first surviving break joins that
+paragraph. A split at or after that inherited prefix inserts after the paragraph's own
+marker. A split *inside* the prefix cannot insert a marker without reversing paragraph
+identities; `split_block` uses the existing copy-and-lineage path for that case.
+`split_copies_text(id, at)` reports this, and `stage_break` refuses it before writing.
+Paste uses the same split logic. This exceptional split has the same concurrent-copy
+intent limitation as cross-host joins and moves; removing that limitation requires a
+boundary representation that can move independently of paragraph identity.
 
 Concurrent outcomes:
 
@@ -147,3 +159,15 @@ A host's paragraph boundaries are computed once per document revision and host, 
 cached. Layout reads paragraphs by `NodeId` as before, and caches by the paragraph's text and
 style, so typing in one paragraph re-lays-out one paragraph even when its host holds the whole
 document (see `incremental.md`).
+
+## Character lineage for copies
+
+Cross-host joins and paragraph moves still copy characters. Their lineage index is derived
+and cached per document revision; pending edits bypass the cache. Only canonical keys
+whose numeric source and destination IDs match the encoded cursors are read. Retained
+records are limited to 4,096 per node in numeric ID order, with a 2,048-byte record limit.
+Each lookup considers at most 16 matching spans, starting with the nearest preceding source
+ID; ties use numeric destination IDs. Stable-caret traversal still visits at most 256
+identities. Excess or malformed records remain in the CRDT, so packet grouping cannot
+change convergence. These read limits can reduce recovery for exceptionally long copy
+histories; they never discard authored text or reject a peer's operations.

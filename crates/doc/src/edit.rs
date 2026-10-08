@@ -28,6 +28,10 @@ const STEP_ORIGIN: &str = "reprise:step";
 /// How many steps an [`UndoStack`] keeps unless told otherwise.
 pub const DEFAULT_UNDO_STEPS: usize = 1000;
 
+/// Underlying CRDT items retained. An oversized editing step is forgotten
+/// whole rather than becoming partially undoable.
+const MAX_UNDO_ITEMS: usize = 16_384;
+
 /// A block to be created: everything the document stores about one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewBlock {
@@ -95,7 +99,7 @@ impl Document {
         let mut inner = UndoManager::new(&self.doc);
         // Steps are decided by commits, not by the clock (purity).
         inner.set_merge_interval(0);
-        inner.set_max_undo_steps(loro_items(DEFAULT_UNDO_STEPS));
+        inner.set_max_undo_steps(MAX_UNDO_ITEMS);
         // Staging is how identity survives undo, so it is never undone.
         inner.add_exclude_origin_prefix(STAGE_ORIGIN);
         let log = Arc::new(Mutex::new(Log {
@@ -215,11 +219,13 @@ impl Document {
     ///
     /// A paragraph of a flow (see `docs/flow.md`) is split with a break: no
     /// text moves, so collaborators' concurrent edits stay where they were
-    /// made. The break is staged, which commits what was pending as part of
+    /// made. A split inside text inherited before its marker after head
+    /// deletion uses the copying path instead (see `split_copies_text`).
+    /// The break is staged, which commits what was pending as part of
     /// the current step. Other blocks are split by copying, see
     /// [`Document::split_block_into`].
     pub fn split_block(&self, id: NodeId, at: usize) -> Result<NodeId, DocError> {
-        if self.flow(id.node).is_some() {
+        if !self.split_copies_text(id, at)? {
             return self.split_flow(id, at);
         }
         let block = self.block(id)?;
@@ -295,13 +301,6 @@ impl Document {
     }
 }
 
-/// Loro undo items to keep for `steps` editing steps. A step is one item,
-/// plus one for each staging commit inside it; steps beyond the limit are
-/// never undone (see [`UndoStack`]), so this only bounds memory.
-fn loro_items(steps: usize) -> usize {
-    steps.saturating_mul(16)
-}
-
 /// The steps an [`UndoStack`] can undo and redo: each step's serial and how
 /// many Loro undo items it is, newest last.
 #[derive(Debug, Default)]
@@ -348,8 +347,23 @@ impl UndoStack {
         self.log.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Loro evicts individual items, whereas our public history consists of
+    /// complete editing steps. Remove any group whose oldest item was evicted.
+    fn prune(&self) {
+        let available = self.inner.undo_count();
+        let mut log = self.log();
+        let mut items: usize = log.undo.iter().map(|(_, n)| n).sum();
+        let mut drop = 0;
+        while items > available && drop < log.undo.len() {
+            items -= log.undo[drop].1;
+            drop += 1;
+        }
+        log.undo.drain(..drop);
+    }
+
     /// Undoes the last step. `false` when there was nothing to undo.
     pub fn undo(&mut self) -> Result<bool, DocError> {
+        self.prune();
         let Some((serial, items)) = self.log().undo.pop() else {
             return Ok(false);
         };
@@ -400,6 +414,7 @@ impl UndoStack {
     }
 
     pub fn can_undo(&self) -> bool {
+        self.prune();
         !self.log().undo.is_empty() && self.inner.can_undo()
     }
 
@@ -408,6 +423,7 @@ impl UndoStack {
     }
 
     pub fn undo_count(&self) -> usize {
+        self.prune();
         self.log().undo.len()
     }
 
@@ -425,7 +441,6 @@ impl UndoStack {
 
     /// Keeps at most `steps` undo steps.
     pub fn set_limit(&mut self, steps: usize) {
-        self.inner.set_max_undo_steps(loro_items(steps));
         let mut log = self.log();
         log.limit = steps;
         if log.undo.len() > steps {

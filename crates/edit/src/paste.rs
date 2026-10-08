@@ -300,6 +300,21 @@ pub(crate) fn write(
     let join_last = roots.last().is_some_and(can_join);
     let first = roots.first().map(|b| b.id);
     let last = roots.last().map(|b| b.id);
+    if let Some((node, offset)) = at
+        && doc.in_flow(node)
+    {
+        let plan = FlowPaste {
+            node,
+            offset,
+            parent,
+            join_first,
+            join_last,
+            first,
+            last,
+            single: roots.len() == 1,
+        };
+        return write_into_flow(doc, schemas, fragment, &names, styles, plan, result);
+    }
     let mut leading = None;
     let mut trailing = None;
     if !join_first && let Some(mut block) = host.clone() {
@@ -517,6 +532,226 @@ pub(crate) fn write(
             doc.supersede(node, head).map_err(store)?;
         }
         doc.delete_block(node).map_err(store)?;
+    }
+    Ok(result)
+}
+
+/// Where a paste into a paragraph of a flow goes.
+struct FlowPaste {
+    node: NodeId,
+    offset: usize,
+    parent: Option<NodeId>,
+    /// Whether the first and last pasted roots are plain paragraphs, whose
+    /// text joins the paragraph at the caret.
+    join_first: bool,
+    join_last: bool,
+    first: Option<NodeId>,
+    last: Option<NodeId>,
+    single: bool,
+}
+
+/// The block a fragment block becomes, with imported style names.
+fn new_block(
+    block: &reprise_doc::fragment::FragmentBlock,
+    names: &BTreeMap<String, String>,
+) -> NewBlock {
+    let mut overrides = block.overrides.clone();
+    if let Some(parent) = &mut overrides.parent
+        && let Some(new) = names.get(parent)
+    {
+        *parent = new.clone();
+    }
+    NewBlock {
+        kind: block.kind,
+        style: names
+            .get(&block.style)
+            .cloned()
+            .unwrap_or_else(|| block.style.clone()),
+        overrides,
+        text: block.text.clone(),
+    }
+}
+
+/// Pastes into a paragraph of a flow (see `docs/flow.md`) without copying
+/// any of its text, so a collaborator's concurrent edits to it are kept:
+/// the paragraph is split at the caret with a break, the first and last
+/// pasted paragraphs' text joins the two halves, and the other pasted
+/// blocks are staged and placed between them. A one-paragraph paste is a
+/// text insertion.
+fn write_into_flow(
+    doc: &Document,
+    schemas: &SchemaRegistry,
+    fragment: Fragment,
+    names: &BTreeMap<String, String>,
+    styles: BTreeMap<String, Style>,
+    plan: FlowPaste,
+    mut result: Pasted,
+) -> Result<Pasted, EditError> {
+    let FlowPaste {
+        node,
+        offset,
+        parent,
+        join_first,
+        join_last,
+        first,
+        last,
+        single,
+    } = plan;
+    let inline = single && join_first;
+    // The split comes first: it is staged, and everything after it may
+    // name the new paragraph.
+    let tail = if inline {
+        None
+    } else {
+        let tail = doc.split_block(node, offset).map_err(store)?;
+        result.applied.blocks.push(tail);
+        result.applied.effects.push(Effect::Split {
+            node,
+            at: offset,
+            new: tail,
+        });
+        Some(tail)
+    };
+    // Joined text goes into the halves now, so its ranges can be staged.
+    let mut joined = BTreeMap::new();
+    for block in &fragment.blocks {
+        let target = if join_first && Some(block.id) == first {
+            Some((node, offset))
+        } else if join_last && Some(block.id) == last {
+            tail.map(|t| (t, 0))
+        } else {
+            None
+        };
+        let Some((target, at)) = target else {
+            continue;
+        };
+        if !block.text.is_empty() {
+            doc.block(target)
+                .map_err(store)?
+                .text
+                .insert(at, &block.text)
+                .map_err(|e| store(e.into()))?;
+            result.applied.effects.push(Effect::Text {
+                node: target,
+                at,
+                removed: 0,
+                inserted: block.text.len(),
+            });
+        }
+        if Some(target) == tail {
+            let pasted = new_block(block, names);
+            doc.set_style_name(target, &pasted.style).map_err(store)?;
+            doc.set_overrides(target, &pasted.overrides)
+                .map_err(store)?;
+        }
+        result.ids.nodes.insert(block.id, target);
+        joined.insert(block.id, at);
+    }
+    for block in &fragment.blocks {
+        if joined.contains_key(&block.id) {
+            continue;
+        }
+        let new_block = new_block(block, names);
+        // Independent documents may use the same peer. Skip any colliding source
+        // label by retaining the candidate as an invisible staging tombstone.
+        let mut new = doc.stage_block(&new_block).map_err(store)?;
+        for _ in 0..=fragment.blocks.len() {
+            if !fragment.blocks.iter().any(|b| b.id == new) {
+                break;
+            }
+            new = doc.stage_block(&new_block).map_err(store)?;
+        }
+        if let Some(raw) = &block.table {
+            doc.stage_fragment_table(new, raw).map_err(store)?;
+        }
+        if let Some(raw) = &block.image {
+            doc.stage_fragment_image(new, raw).map_err(store)?;
+        }
+        result.ids.nodes.insert(block.id, new);
+        result.applied.blocks.push(new);
+    }
+    for range in &fragment.ranges {
+        let node = result
+            .ids
+            .nodes
+            .get(&range.node)
+            .copied()
+            .ok_or_else(|| invalid(FragmentError::Invalid("range node".into())))?;
+        let shift = joined.get(&range.node).copied().unwrap_or(0);
+        let bytes = range.bytes.start.saturating_add(shift)..range.bytes.end.saturating_add(shift);
+        let mut new = doc
+            .stage_fragment_range(node, bytes.clone(), range.policy)
+            .map_err(store)?;
+        for _ in 0..=fragment.ranges.len() {
+            if !fragment.ranges.iter().any(|r| r.id == new) {
+                break;
+            }
+            new = doc
+                .stage_fragment_range(node, bytes.clone(), range.policy)
+                .map_err(store)?;
+        }
+        result.ids.ranges.insert(range.id, new);
+    }
+    for relation in &fragment.relations {
+        let mut new = doc
+            .stage_relation(schemas, &relation.relation.remapped(&result.ids))
+            .map_err(store)?;
+        for _ in 0..=fragment.relations.len() {
+            if !fragment.relations.iter().any(|r| r.id == new) {
+                break;
+            }
+            new = doc
+                .stage_relation(schemas, &relation.relation.remapped(&result.ids))
+                .map_err(store)?;
+        }
+        result.relations.insert(relation.id, new);
+        result.applied.relations.push(new);
+    }
+    for (name, style) in styles {
+        doc.define_style(&name, &style).map_err(store)?;
+    }
+    // The staged roots go between the halves, in order.
+    let mut root_index = match tail {
+        Some(t) => doc
+            .children(parent)
+            .iter()
+            .position(|&n| n == t)
+            .ok_or_else(|| invalid(FragmentError::Invalid("split".into())))?,
+        None => 0,
+    };
+    let mut child_indices = BTreeMap::<NodeId, usize>::new();
+    for block in &fragment.blocks {
+        if joined.contains_key(&block.id) {
+            continue;
+        }
+        let new = result
+            .ids
+            .nodes
+            .get(&block.id)
+            .copied()
+            .ok_or_else(|| invalid(FragmentError::Invalid("staged node".into())))?;
+        if let Some(old_parent) = block.parent {
+            let new_parent = result
+                .ids
+                .nodes
+                .get(&old_parent)
+                .copied()
+                .ok_or_else(|| invalid(FragmentError::Invalid("staged parent".into())))?;
+            let child_index = child_indices.entry(new_parent).or_default();
+            doc.activate_block_at(new, Some(new_parent), *child_index)
+                .map_err(store)?;
+            *child_index += 1;
+        } else {
+            doc.activate_block_at(new, parent, root_index)
+                .map_err(store)?;
+            root_index += 1;
+        }
+    }
+    for new in result.ids.ranges.values() {
+        doc.activate_fragment_range(*new).map_err(store)?;
+    }
+    for new in result.relations.values() {
+        doc.restore_relation(*new).map_err(store)?;
     }
     Ok(result)
 }

@@ -21,6 +21,8 @@ pub const TREE_TOMBSTONE: Code = Code::new("collab.tree-tombstone");
 /// to have no live children, so a concurrent insertion is hidden with it.
 /// The output differs from what the inserting author asked: a `Warning`.
 pub const HIDDEN_CONTENT: Code = Code::new("collab.hidden-content");
+/// Embedded flow nesting beyond the reader's expansion limit.
+pub const FLOW_DEPTH: Code = Code::new("collab.flow-depth");
 
 /// One audit finding.
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +44,26 @@ impl Document {
         while let Some(id) = stack.pop() {
             let node = NodeId::tree(id);
             if self.live(&tree, id) {
+                let mut at = id;
+                let mut depth = 0;
+                while self.is_embedded(at) {
+                    depth += 1;
+                    if depth > crate::MAX_FLOW_DEPTH {
+                        out.push(Finding {
+                            node,
+                            note: Note::new(
+                                Severity::Warning,
+                                FLOW_DEPTH,
+                                "embedded content exceeds the flow expansion limit",
+                            ),
+                        });
+                        break;
+                    }
+                    let Some(TreeParentId::Node(parent)) = tree.parent(at) else {
+                        break;
+                    };
+                    at = parent;
+                }
                 if let Err(DocError::Malformed(_, what)) = self.block(node) {
                     out.push(Finding {
                         node,

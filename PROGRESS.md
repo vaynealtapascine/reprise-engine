@@ -2,6 +2,56 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-09: flow integration verified after the Opus checkpoint
+
+Worktree: `G:/reprise-wt/flow`, branch `flow/breaks`, based on the document-layer
+checkpoint `abc8ff5`. The parent application's unfinished scaffold is separate.
+
+The editing kernel now uses flow splits, copy moves, flow-aware paste and stable
+caret lookup. Follow-up fixes validate reserved markers and break parents before
+writing, handle split-then-move transactions, and permit copy moves within the
+source flow. Copy lineage maps visible characters rather than counting hidden
+markers, and lives at the shared-text host so pre-split anchors can follow later
+copies. Random transaction refusal and complete undo/redo regressions caught
+partial-write bugs in both paths. Copying non-flow splits can read their staged
+destination for lineage. Clipboard expectations now check retained host identity
+and spanning ranges. A split after head deletion cannot insert before its own
+paragraph marker: splits inside inherited concurrent prefix text use copy/lineage;
+the concurrency limitation of that exceptional path is explicit in `flow.md`.
+
+Lineage is indexed per revision and source ID, capped at 4,096 records per host
+and 16 candidates per lookup. Canonical numeric keys must match their cursors.
+Undo recovery uses the same validated index. Excess state is retained verbatim;
+normalization is read-only. Editing-step history discards an entire group if the
+16,384-item CRDT history cap evicts part of it, rather than partly undoing it.
+
+`range_extent` exposes both paragraph-local endpoints, including ranges whose
+first slice is empty. Copying a split tail includes ranges authored before the
+split. Excessive embed nesting is reported by `collab.flow-depth`. Native/WASM
+DTOs include the `moved` effect and accept compound paragraph IDs with large peer
+IDs. The design note now describes the actual root break-record map and grouped
+undo implementation.
+
+Verification completed on Windows: `cargo test --workspace -j 2 --no-fail-fast`
+passed 874 tests across 97 target results, with only the existing opt-in geometry
+preview exporter ignored. Hostile fixtures and layout snapshots passed unchanged.
+`cargo fmt --all --check`, workspace/all-target Clippy with warnings denied, and
+the required WASM target checks passed. Rebuilt WASM bindings passed native JSON
+parity, editor/sync/image/hostile-object smoke and worker smoke tests. Strict
+TypeScript checking and generated web declaration parity passed too. The completed
+integration is local to `flow/breaks`; it has not been merged into main or the app.
+
+**Remaining engine work from the original brief:** formatting as overlapping
+anchored ranges, resolved into mixed-style shaping/composition and exported through
+clipboard/PDF; true inline objects with metrics and caret geometry (the current
+embeds place blocks between paragraphs); delta-maintained boundary indexing for
+very long shared texts (the current derived flow cache rebuilds once per revision).
+Cross-host joins and explicit copy moves still have the documented concurrent
+copy-intent limitation, as do splits inside text inherited before a surviving
+paragraph's marker after head deletion. Ordinary Enter/Backspace retain character
+identity; a representation allowing boundary relocation is still needed to remove
+that exceptional split-copy path.
+
 ## 2026-10-08: tree positions checked, panics contained
 
 **Found in review:** a remote packet whose tree move carried an empty, all-`00` or

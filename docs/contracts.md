@@ -61,7 +61,7 @@ Codes in use:
 | pdf | `pdf.figure-alt-missing`, `pdf.reference-unlinked`, `pdf.heading-level`, `pdf.structure-depth`, `pdf.run-split`, `pdf.ua-not-met` |
 | export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure` |
 | bindings | `bindings.version`, `bindings.invalid`, `bindings.limit`, `bindings.id`, `bindings.stale`, `bindings.cancelled`, `bindings.layout-required`, `bindings.read-only`, `bindings.store`, `bindings.render`, `bindings.poisoned` |
-| sync (collaboration) | `sync.format`, `sync.feature`, `sync.invalid`, `sync.limit`, `sync.missing`, `sync.local-peer`, `sync.store`, `collab.malformed-node`, `collab.tree-tombstone`, `collab.hidden-content` |
+| sync (collaboration) | `sync.format`, `sync.feature`, `sync.invalid`, `sync.limit`, `sync.missing`, `sync.local-peer`, `sync.store`, `collab.malformed-node`, `collab.tree-tombstone`, `collab.hidden-content`, `collab.flow-depth` |
 
 ## Text store: `reprise-text`
 
@@ -595,12 +595,14 @@ here: through a dedicated `feat(contracts)` commit.
   of flagged nodes is deferred to a reference-aware replica compaction policy.
 - **Structural primitives (12):** `NewBlock`, `insert_block_at`, `move_block`,
   `split_block`, `split_block_into`, `join_blocks`, staging and activation are
-  reusable document operations for the kernel and future paste. Split copies the
-  tail into a new text container; join appends the second block's text and records
-  succession before flagging it. Blocks joined must have equal kinds, and the
-  second must have no live children. Persistent anchors/ranges remain attached to
-  their original text container and follow `RangePolicy`; they are not rehomed
-  across split/join. Node targets follow succession only under `Rebind` policy.
+  reusable document operations for the kernel and paste. In a flow (see
+  *Flow text* below) ordinary split adds a break and adjacent join drops one;
+  no text moves. The inherited-prefix exception is described below.
+  Outside a flow, split copies the tail into a new text container, and join
+  appends the second block's text and records succession before deleting it.
+  Blocks joined must have equal kinds, and the second must have no live
+  children. Ranges and anchors follow their characters (`Document::locate`).
+  Node targets follow succession only under `Rebind` policy.
 - **Position effects:** `Applied.effects` and `map_position(node, offset, Bias)`
   map UI byte positions through text edits, splits, joins and deletions. `Bias`
   chooses before/after inserted text. Descendants of a deleted block must also
@@ -660,6 +662,54 @@ here: through a dedicated `feat(contracts)` commit.
   from source text. The resolved base level controls transitions between visual
   lines and the inline edge of an empty line; run levels control intra-line cells.
 
+## Flow text (2026-10-08)
+
+Paragraphs as break markers; the design is [flow.md](flow.md).
+
+-   **`NodeId`** is a content-tree node (`12@1`) or a break paragraph
+    (`12@1/34@2`: host, then break character). `NodeId::parse` reads both;
+    `is_break` and `host` tell them apart. Hosts that read IDs as strings must accept
+    the `/` form.
+-   **`Text`** may be a paragraph view of a shared text. Its offsets are the
+    paragraph's. `Text::insert` refuses U+FDD0 (`TextError::Reserved`), as do
+    `append_block`, `stage_block` and `InsertBlock`. `Text::resolve` on a view
+    returns `TextError::Elsewhere` for an anchor now in another paragraph;
+    `Document::locate(node, anchor)` finds it.
+-   **`children`, `parent_of`, `document_order`** expand flows: a host contributes
+    its live paragraphs, each followed by the nodes embedded after it. Paragraphs
+    and embedded nodes of a flow have the host's parent. A break paragraph has no
+    children.
+-   **Operations:** `split_block` and `stage_break` stage a break, committing what was
+    pending as part of the current step. `join_blocks` of adjacent paragraphs of a
+    flow deactivates the second's break. `delete_block` of a flow paragraph deletes
+    its text and its break (or sets the host's `head` to `false`); a host with
+    nothing else in its flow is soft-deleted as before. `move_block` refuses a
+    paragraph of a flow (`moves_by_copy`); the kernel copies it
+    (`Document::move_by_copy`, `Effect::Moved`). Placing a block between two
+    paragraphs of a flow stages an embed.
+    A split inside concurrent text inherited before a surviving paragraph's own
+    marker after head deletion uses the copy-and-lineage path to preserve order
+    and the original paragraph's ID. `split_copies_text(id, at)` reports whether
+    copying is needed; `stage_break` refuses this case before writing. Splits at
+    the end of that prefix insert after the paragraph's own marker.
+-   **Steps:** `Document::commit` and `commit_step` end an editing step;
+    `UndoStack` undoes and redoes whole steps, however many commits they took.
+    `undo_count` and `redo_count` count steps. History retains at most 16,384
+    underlying CRDT items in addition to the configured step limit. If that item
+    cap cuts into a step, that whole step is forgotten; it is never partly undone.
+-   **Ranges:** both ends follow their characters across paragraphs. When the end
+    is in a later paragraph, `RangeState` reports the start's paragraph up to its end.
+    Range ends are written as text (`a1` and hex); readers also accept the bytes
+    written before and the list of numbers the JSON delta path made of them.
+    `Document::range_extent` returns `RangeExtent { start, end, rebound }` with
+    both paragraph-local endpoints, or `None` for a missing range. A nonempty
+    cross-paragraph range stays valid even when its first paragraph slice is empty.
+-   **Change reports** name the paragraphs a text edit touched, and both sides of a
+    break that appeared, went or changed (`structure` is then `true`).
+-   **Paste** into a paragraph of a flow uses `split_block` at the caret; the first
+    and last pasted paragraphs' text joins the two halves. A single plain
+    paragraph is inserted as text without creating a block.
+
 ## Plugins (additive ABI v1)
 
 `reprise-plugin` adds pinned core-WASM modules and adapters; existing extension
@@ -711,12 +761,18 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
 - `Command::Paste` is an additive standalone command, rejected if mixed with other
   commands. `Editor::paste` returns `Pasted` with the frozen node/range `IdMap`, a separate
   relation map, position effects and notes. The entire paste is validated before staging,
-  then activated in one commit/undo step. Invisible staged IDs survive undo and redo.
+  then written as one undo step, potentially spanning several staging/activation
+  commits. Invisible staged IDs survive undo and redo.
   Matching source IDs in independent documents using the same peer are skipped.
 - At a paragraph caret the prefix/first pasted paragraph and last paragraph/suffix join.
-  The pasted blocks retain new identities; the original host is tombstoned with a
-  succession link. Tables and annotation boundaries keep separate prefix/suffix blocks.
-  Existing host ranges migrate with the prefix/suffix while retaining IDs. A range that would span several pasted blocks remains missing, reported with `clipboard.host-range-dropped` Error; undo restores it.
+  In a flow the original paragraph retains its identity, joined fragment nodes map
+  to the existing paragraph or new tail, and `Applied.blocks` lists only created
+  blocks. Existing host ranges retain anchors and can span the split paragraphs.
+  Outside a flow, replacement blocks get fresh IDs and the original host is
+  tombstoned with a succession link. Tables and annotation boundaries keep separate
+  prefix/suffix blocks. In that replacement path existing host ranges migrate with
+  the prefix/suffix while retaining IDs; unrepresentable spans report
+  `clipboard.host-range-dropped` Error, and undo restores them.
   `at=None` appends; page setup is imported only into an empty document.
 - Missing styles are defined. If any named style clashes by content, the entire imported
   style graph is renamed deterministically to available `name (paste N)` names, retaining

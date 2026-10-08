@@ -686,6 +686,14 @@ impl Cx<'_, '_> {
                     redo,
                     "refused-edit-changes-nothing",
                 )
+                .map_err(|mut violation| {
+                    violation.detail = format!(
+                        "commands: {:?}; error: {error}; {}",
+                        tx.commands(),
+                        violation.detail
+                    );
+                    violation
+                })
             }
             Ok(applied) => {
                 self.count("edit.applied");
@@ -1178,7 +1186,10 @@ impl Cx<'_, '_> {
                     ensure!(
                         after == expected,
                         "paste-preserves-text",
-                        "target {target:?}: expected {expected:?} after paste, got {after:?}"
+                        "target {target:?}: expected {expected:?} after paste, got {after:?}; fragment: {:?}; before: {:?}; after: {:?}",
+                        native.fragment.blocks,
+                        pre.blocks,
+                        authored(self.w.peers[p].editor.document()).blocks
                     );
                 }
                 let created: Vec<NodeId> = pasted

@@ -29,7 +29,8 @@ pub(crate) fn document_id(s: &str) -> Result<reprise_format::DocumentId> {
     Ok(reprise_format::DocumentId(bytes))
 }
 pub(crate) fn id(s: &str) -> Result<reprise_doc::NodeId> {
-    if s.len() > 40 {
+    // A flow paragraph carries both host and marker IDs.
+    if s.len() > 80 {
         return Err(Error::InvalidId(s.into()));
     }
     let n = reprise_doc::NodeId::parse(s).ok_or_else(|| Error::InvalidId(s.into()))?;
@@ -169,6 +170,10 @@ pub(crate) fn applied(a: reprise_edit::Applied, notes: Vec<reprise_diag::Note>) 
                     },
                     E::Deleted(node) => Effect::Deleted {
                         node: node.to_string(),
+                    },
+                    E::Moved { node, new } => Effect::Moved {
+                        node: node.to_string(),
+                        new: new.to_string(),
                     },
                     _ => return None,
                 })
