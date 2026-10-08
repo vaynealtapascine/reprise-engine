@@ -19,6 +19,10 @@ pub enum Error {
     NoLayout,
     #[error("newer package is read-only")]
     ReadOnly,
+    /// The engine panicked. Discard the session and reopen it from the last
+    /// saved package; see [`crate::DocumentSession::contain`].
+    #[error("engine panicked: {0}")]
+    Poisoned(String),
     #[error("{code}: {message}")]
     Core {
         code: String,
@@ -39,6 +43,7 @@ impl Error {
             Self::Cancelled => "bindings.cancelled",
             Self::NoLayout => "bindings.layout-required",
             Self::ReadOnly => "bindings.read-only",
+            Self::Poisoned(_) => "bindings.poisoned",
             Self::Core { code, .. } => code,
         }
     }

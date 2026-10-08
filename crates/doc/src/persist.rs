@@ -51,6 +51,19 @@ impl Document {
         if status.pending.is_some() {
             return Err(DocError::Store("snapshot has missing dependencies".into()));
         }
+        // A position no kernel writes would abort the next local insertion
+        // beside it (see `sync::valid_tree_position`).
+        let positions_ok = doc
+            .doc
+            .get_tree("content")
+            .get_nodes(true)
+            .iter()
+            .all(|node| crate::sync::valid_tree_position(node.fractional_index.as_bytes()));
+        if !positions_ok {
+            return Err(DocError::Store(
+                "snapshot has an invalid content tree position".into(),
+            ));
+        }
         doc.doc.set_peer_id(peer)?;
         doc.doc.get_tree("content").enable_fractional_index(0);
         Ok(doc)

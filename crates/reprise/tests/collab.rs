@@ -729,3 +729,26 @@ fn delta_packet_bytes_are_pinned() {
     fresh.sync_import(&Payload::new(packet)).unwrap();
     assert_eq!(blocks(&fresh), blocks(&s));
 }
+
+#[test]
+fn a_contained_panic_poisons_the_session() {
+    let mut s = create("1");
+    paragraph(&mut s, "kept");
+    let poisoned: Result<()> = s.contain(|_| panic!("simulated engine fault"));
+    let error = poisoned.unwrap_err();
+    assert_eq!(error.code(), "bindings.poisoned");
+    assert!(error.to_string().contains("simulated engine fault"));
+    assert!(s.is_poisoned());
+    // Every later contained call is refused; the host must reopen.
+    let again = s.contain(|s| s.state());
+    assert_eq!(again.unwrap_err().code(), "bindings.poisoned");
+    // Without a panic, contain is transparent.
+    let mut fresh = create("2");
+    assert_eq!(fresh.contain(|s| s.state()).unwrap().data.blocks.len(), 0);
+    assert_eq!(
+        reprise::contain(|| -> Result<()> { panic!("no session") })
+            .unwrap_err()
+            .code(),
+        "bindings.poisoned"
+    );
+}

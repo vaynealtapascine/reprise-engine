@@ -389,3 +389,100 @@ fn a_tree_parent_created_later_in_the_packet_is_refused_before_import() {
     a.import_packet(&packet).unwrap();
     assert_eq!(dump(&a), dump(&b));
 }
+
+/// A delta that moves `q` before `p`, with its tree position rewritten.
+fn move_with_position(position: &str) -> (Document, Document, Vec<u8>, Vec<u8>) {
+    let (a, b, _) = pair();
+    let q = b.append_block(BlockKind::Paragraph, "", "second").unwrap();
+    b.commit();
+    a.import_packet(&b.export_delta(&a.version_vector()).unwrap())
+        .unwrap();
+    b.move_block(q, None, 0).unwrap();
+    b.commit();
+    let packet = b.export_delta(&a.version_vector()).unwrap();
+    let (header, body) = read_header(&packet).unwrap();
+    let mut json: serde_json::Value = serde_json::from_slice(body).unwrap();
+    let mut moved = 0;
+    for change in json["changes"].as_array_mut().unwrap() {
+        for op in change["ops"].as_array_mut().unwrap() {
+            if op["content"]["type"] == "move" {
+                op["content"]["fractional_index"] = position.into();
+                moved += 1;
+            }
+        }
+    }
+    assert_eq!(moved, 1);
+    let tampered = repack(&header, &serde_json::to_vec(&json).unwrap());
+    (a, b, packet, tampered)
+}
+
+#[test]
+fn tree_positions_loro_cannot_insert_beside_are_refused() {
+    // Each of these imported, then aborted the receiver's next local block
+    // insertion beside it inside Loro and poisoned its store.
+    let long = format!("{}80", "7F".repeat(MAX_TREE_POSITION_BYTES));
+    for position in ["", "00", "FF", "0000", "FFFF", "8000", long.as_str()] {
+        let (a, b, packet, tampered) = move_with_position(position);
+        let before = a.revision();
+        assert!(
+            matches!(a.import_packet(&tampered), Err(SyncError::Invalid(_))),
+            "position {position:?} was accepted"
+        );
+        assert_eq!(a.revision(), before);
+        a.import_packet(&packet).unwrap();
+        assert_eq!(dump(&a), dump(&b));
+    }
+}
+
+#[test]
+fn unusual_but_valid_tree_positions_keep_local_insertion_working() {
+    for position in ["80", "7F80", "0080", "FF80", "00000080", "FFFFFF80"] {
+        let (a, _, _, tampered) = move_with_position(position);
+        a.import_packet(&tampered).unwrap();
+        for index in 0..=3 {
+            a.insert_block_at(
+                None,
+                index,
+                &crate::NewBlock::new(BlockKind::Paragraph, "", "local"),
+            )
+            .unwrap();
+            a.commit();
+        }
+        assert_eq!(a.blocks().len(), 6, "position {position:?}");
+    }
+}
+
+#[test]
+fn non_ascii_tree_positions_are_refused_before_loro_reads_them() {
+    // Loro's reader slices position strings by byte offset: "€a" splits the
+    // euro sign and panicked inside serde_json, before any other check.
+    for position in ["€a", "a€", "éé"] {
+        let (a, _, _, tampered) = move_with_position(position);
+        assert!(matches!(
+            a.import_packet(&tampered),
+            Err(SyncError::Invalid(_))
+        ));
+    }
+    // The key is matched after JSON unescaping, as serde reads it.
+    let (a, _, _, tampered) = move_with_position("€a");
+    let (header, body) = read_header(&tampered).unwrap();
+    let escaped = String::from_utf8(body.to_vec())
+        .unwrap()
+        .replace("\"fractional_index\"", r#""fractional\u005findex""#);
+    assert!(escaped.contains(r"fractional\u005findex"));
+    assert!(matches!(
+        a.import_packet(&repack(&header, escaped.as_bytes())),
+        Err(SyncError::Invalid(_))
+    ));
+}
+
+#[test]
+fn saved_documents_with_invalid_tree_positions_are_refused() {
+    let (a, _, _, tampered) = move_with_position("00");
+    let (_, body) = read_header(&tampered).unwrap();
+    let json: loro::JsonSchema = serde_json::from_slice(body).unwrap();
+    // Bypass the packet boundary, as a crafted file would.
+    a.doc.import_json_updates(json).unwrap();
+    let bytes = a.try_export(crate::PersistenceMode::History).unwrap();
+    assert!(Document::import(&bytes, 9).is_err());
+}

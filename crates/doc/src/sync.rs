@@ -37,6 +37,13 @@ pub const MAX_VECTOR_ENTRIES: usize = 4096;
 /// Counters and Lamport timestamps stay below this, so that later local
 /// commits can never overflow them.
 pub const MAX_PACKET_COUNTER: i64 = 1 << 30;
+/// Longest tree position (fractional index) a packet may carry, in bytes.
+/// Positions grow by about one byte per few inserts at the same spot, so
+/// this leaves room for tens of thousands; a longer one would be copied
+/// into every block a replica later inserts beside it.
+pub const MAX_TREE_POSITION_BYTES: usize = 16 * 1024;
+/// The byte that ends every tree position Loro generates.
+const POSITION_TERMINATOR: u8 = 0x80;
 
 const MAGIC: &[u8; 4] = b"RSYN";
 const RESERVED_PEER: u64 = u64::MAX;
@@ -405,6 +412,7 @@ impl Document {
     }
 
     fn import_delta(&self, header: &PacketHeader, body: &[u8]) -> Result<ChangeReport, SyncError> {
+        check_position_strings(body)?;
         let json: JsonSchema =
             serde_json::from_slice(body).map_err(|e| SyncError::Invalid(e.to_string()))?;
         self.preflight_delta(header, &json)?;
@@ -640,7 +648,20 @@ fn check_op(content: &JsonOpContent) -> Result<(), SyncError> {
             let (pos, len) = (i64::from(*pos), i64::from(*len));
             ok(pos) && len != 0 && ok(len.abs()) && ok(pos + len.abs())
         }
-        JsonOpContent::Map(_) | JsonOpContent::Tree(_) => true,
+        JsonOpContent::Tree(
+            JsonTreeOp::Create {
+                fractional_index, ..
+            }
+            | JsonTreeOp::Move {
+                fractional_index, ..
+            },
+        ) => {
+            if !valid_tree_position(fractional_index.as_bytes()) {
+                return Err(invalid("tree position is not a valid fractional index"));
+            }
+            true
+        }
+        JsonOpContent::Map(_) | JsonOpContent::Tree(JsonTreeOp::Delete { .. }) => true,
         JsonOpContent::Text(JsonTextOp::Mark { .. } | JsonTextOp::MarkEnd)
         | JsonOpContent::List(_)
         | JsonOpContent::MovableList(_)
@@ -652,6 +673,85 @@ fn check_op(content: &JsonOpContent) -> Result<(), SyncError> {
         Ok(())
     } else {
         Err(SyncError::Limit("operation positions"))
+    }
+}
+
+/// Whether a tree position is one Loro can later insert beside. Loro writes
+/// every position with a trailing terminator byte and unwraps when it
+/// generates a position next to one without it: an empty, all-`00` or
+/// all-`FF` position passes import, then aborts the replica's next local
+/// block insertion there and poisons the store. With the terminator, every
+/// generation path terminates and two distinct neighbours always have a
+/// position between them.
+pub(crate) fn valid_tree_position(bytes: &[u8]) -> bool {
+    bytes.len() <= MAX_TREE_POSITION_BYTES && bytes.last() == Some(&POSITION_TERMINATOR)
+}
+
+/// Loro's JSON reader slices each `fractional_index` string by byte offset,
+/// so a non-ASCII one panics inside `serde_json` before any other check
+/// runs. Walk the body without building it, and refuse such strings first.
+fn check_position_strings(body: &[u8]) -> Result<(), SyncError> {
+    use serde::de::DeserializeSeed;
+    let mut de = serde_json::Deserializer::from_slice(body);
+    PositionWalk { position: false }
+        .deserialize(&mut de)
+        .and_then(|()| de.end())
+        .map_err(|e| SyncError::Invalid(e.to_string()))
+}
+
+/// Visits every JSON value; `position` marks the value of a
+/// `fractional_index` key.
+#[derive(Clone, Copy)]
+struct PositionWalk {
+    position: bool,
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for PositionWalk {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+        d.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for PositionWalk {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JSON")
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<(), E> {
+        if self.position && !v.is_ascii() {
+            return Err(E::custom("tree position is not ASCII hex"));
+        }
+        Ok(())
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        while seq
+            .next_element_seed(PositionWalk { position: false })?
+            .is_some()
+        {}
+        Ok(())
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        while let Some(key) = map.next_key::<std::borrow::Cow<'de, str>>()? {
+            let position = key == "fractional_index";
+            map.next_value_seed(PositionWalk { position })?;
+        }
+        Ok(())
     }
 }
 

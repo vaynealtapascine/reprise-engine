@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 // Compile as ES modules and deploy beside wasm-bindgen's web output.
-import init, { Workspace, DocumentSession } from "./reprise_wasm.js";
+import init, { Workspace, DocumentSession, setPanicHandler } from "./reprise_wasm.js";
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
   DisplayPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied } from "./types.js";
@@ -49,7 +49,15 @@ export type Response = Payload<{ id: string } & (
 )>;
 export type { Request };
 const scope = self as DedicatedWorkerGlobalScope;
-const ready = init();
+// Set by the engine's panic hook just before the instance traps. A panic=abort
+// instance cannot recover: every later request fails with bindings.poisoned,
+// and the host should terminate this worker, reopen the last saved package in
+// a new one and resynchronise.
+let panicked: string | undefined;
+const ready = init().then(() => setPanicHandler((message: string) => { panicked = message; }));
+function poisoned(id: string) {
+  post({ id, kind: "error", error: { version: 1, data: { code: "bindings.poisoned", severity: "error", message: `engine panicked: ${panicked}`, command: null } } });
+}
 let workspace: Workspace | undefined;
 let document: DocumentSession | undefined;
 let active: number | undefined;
@@ -65,6 +73,7 @@ scope.onmessage = (event: MessageEvent<Request>) => {
   queue = queue.then(async () => {
     const request = event.data;
     const id = request?.data?.id ?? "";
+    if (panicked !== undefined) { poisoned(id); return; }
     try {
       await ready;
       workspace ??= new Workspace();
@@ -133,6 +142,7 @@ scope.onmessage = (event: MessageEvent<Request>) => {
         default: throw new Error("Unknown worker request");
       }
     } catch (cause) {
+      if (panicked !== undefined) { document = undefined; workspace = undefined; poisoned(id); return; }
       const error = cause as Partial<Payload<ErrorPayload>>;
       post({ id, kind: "error", error: error?.version === 1 && error.data?.code ? error as Payload<ErrorPayload> : {
         version: 1, data: { code: "bindings.invalid", severity: "error", message: String(cause), command: null }

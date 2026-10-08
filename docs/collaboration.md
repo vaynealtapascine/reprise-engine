@@ -182,7 +182,9 @@ and the trusted v1 compatibility API remain binary; their separate limits are be
 `Document::import_packet` checks the following before anything reaches Loro:
 
 1.  The frame, as above. The body is at most `MAX_PACKET_BYTES` (32 MiB).
-2.  The JSON parses as Loro's `JsonSchema`, with `schema_version` 1.
+2.  The JSON parses as Loro's `JsonSchema`, with `schema_version` 1. Before that, a
+    walk over the body without building it refuses any non-ASCII `fractional_index`
+    string: Loro's reader slices those strings by byte offset and would panic.
 3.  There are at most `MAX_PACKET_CHANGES` changes, and their operations' total atom
     length is at most `MAX_PERSIST_OPS`. Each operation's length is at most
     `MAX_PACKET_OP_LEN`.
@@ -197,6 +199,15 @@ and the trusted v1 compatibility API remain binary; their separate limits are be
     refused with `sync.missing`.
 8.  **Local peer:** the packet carries nothing under the receiver's peer beyond `local[p]`
     (`sync.local-peer`).
+9.  **Tree positions:** every tree create and move carries a fractional index that ends
+    with Loro's terminator byte `0x80` and is at most `MAX_TREE_POSITION_BYTES` long.
+    Loro accepts any bytes on import, but it unwraps when it later generates a position
+    beside one without the terminator (an empty, all-`00` or all-`FF` index). That
+    aborted the receiver's next local block insertion and poisoned its store, so the
+    replica could never edit the document again. With the terminator, every generation
+    path terminates and two distinct neighbours always have a position between them.
+    `Document::import` applies the same check to every content node of a saved package
+    or v1 snapshot, and refuses the document.
 
 If any check fails, nothing is imported. When the checks pass, Loro imports the changes.
 `ImportStatus.pending` must then be `None`. If it is not, the checks above have a bug: the
@@ -386,6 +397,7 @@ What the Reprise side sends:
 | Single operation length | 16 Mi atoms (`MAX_PACKET_OP_LEN`) |
 | Counters and Lamport timestamps | below 2^30 |
 | Vector entries | 4,096 |
+| Tree position (fractional index) | 16 KiB (`MAX_TREE_POSITION_BYTES`) |
 | Presence metadata | 16 entries, 64-byte keys, 1 KiB values, 64 KiB in total |
 
 ## Known limits

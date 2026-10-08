@@ -2,6 +2,32 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-08: tree positions checked, panics contained
+
+**Found in review:** a remote packet whose tree move carried an empty, all-`00` or
+all-`FF` fractional index passed every preflight check and imported. The receiver's
+next local block insertion beside it then panicked inside `loro_fractional_index`
+and poisoned Loro's store. Because the index is CRDT state, it would also be saved
+and spread to every replica. The hostile fuzz never produced one, because it
+writes through a real `LoroDoc`. In addition, Loro's JSON reader slices
+`fractional_index` strings by byte offset, so a non-ASCII one panicked inside
+`serde_json` before any check ran.
+
+**Fixed:** preflight refuses tree positions that lack Loro's `0x80` terminator or
+exceed `MAX_TREE_POSITION_BYTES` (16 KiB). A non-allocating walk refuses
+non-ASCII position strings before Loro parses the body. `Document::import`
+refuses saved packages and v1 snapshots with such positions. Regression tests
+cover the crashing values, several unusual but valid ones followed by local
+insertion, escaped keys, and a crafted saved document. The saved-document test
+fails without the check.
+
+**Containment:** `DocumentSession::contain` and `reprise::contain` turn a panic into
+`bindings.poisoned`, and poison the session so that the host reopens it. WASM gains
+`setPanicHandler`, which reports the panic message before a `panic=abort` trap. The
+reference worker answers with `bindings.poisoned` from then on. See
+`docs/bindings.md`, "Panics". The native Tauri host should route its dispatch
+through `contain`.
+
 ## 2026-10-07: remaining robustness limits completed on main
 
 Recovered and integrated the vertical worktree's remaining geometry/template

@@ -107,6 +107,36 @@ extern "C" {
     #[wasm_bindgen(typescript_type = "Payload<number>")]
     pub type HandlePayload;
 }
+thread_local! {
+    static PANIC_HANDLER: std::cell::RefCell<Option<js_sys::Function>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Calls `handler(message)` when the engine panics, before the instance
+/// traps. A `panic=abort` build cannot recover: after the call every export
+/// fails, so the host should discard this instance (its worker), reopen the
+/// last saved package in a fresh one and resynchronise. The message names
+/// the panic and its location, for reporting.
+#[wasm_bindgen(js_name = setPanicHandler)]
+pub fn set_panic_handler(handler: js_sys::Function) {
+    PANIC_HANDLER.with(|h| *h.borrow_mut() = Some(handler));
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let message = JsValue::from_str(&info.to_string());
+            PANIC_HANDLER.with(|h| {
+                if let Ok(h) = h.try_borrow()
+                    && let Some(f) = h.as_ref()
+                {
+                    let _ = f.call1(&JsValue::NULL, &message);
+                }
+            });
+            previous(info);
+        }));
+    });
+}
+
 fn error(e: Error) -> JsValue {
     e.payload()
         .serialize(

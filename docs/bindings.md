@@ -241,6 +241,7 @@ returns an acknowledgement rather than an error.
 | `bindings.read-only` | Compatible newer package cannot be exposed as editable |
 | `bindings.store` | Document/store error without a more specific core note |
 | `bindings.render` | Backend could not render the requested page |
+| `bindings.poisoned` | The engine panicked; discard the session and reopen it (see below) |
 
 Important v1 bounds: JSON 20 MiB/depth 64; JS object graph 100,000 values,
 depth 64, 10,000 array entries, 1,024 own keys/object and 20 Mi UTF-16 units;
@@ -254,6 +255,31 @@ references in acyclic JS data are allowed; getters are read into a bounded,
 prototype-free snapshot before serde runs. Rust does not catch panics to turn
 bad content into success; the boundary validates content and uses fallible core
 APIs. Both facade crates forbid unsafe code.
+
+### Panics
+
+A panic is an engine bug, but the host must survive one. Native hosts route
+every session call through `DocumentSession::contain(|s| ...)`, and calls with no
+session, such as `Workspace::open`, through `reprise::contain`. A contained panic
+returns `bindings.poisoned` with the panic message. A panic can leave the store
+half-updated or its locks poisoned, so the session refuses every later contained
+call with the same code. The host drops the session, reopens the last saved
+package and resynchronises with its peers: the CRDT makes that recovery lossless
+for everything that was saved or sent.
+
+WASM builds use `panic=abort` on stable Rust, so a panic traps the instance and
+nothing can catch it. Call `setPanicHandler(message => ...)` once after `init`:
+the hook calls it with the message and location just before the trap. The
+reference worker records the message, answers that request and every later one
+with `bindings.poisoned`, and the host should terminate the worker and start a
+new one as above. Unwinding WASM (nightly `-Zbuild-std`, `-Cpanic=unwind` and the
+exception-handling proposal) would let wasm-bindgen 0.2.129 turn panics into JS
+exceptions; the wrappers would then also need to route through `contain`.
+
+Recovery only helps when the panic came from a request. A panic caused by
+document state recurs after reopening. For that reason the boundary refuses such
+state on import (for example, invalid tree positions), and does not rely on
+containment.
 
 ## Host ownership and supported scope
 

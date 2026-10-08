@@ -174,6 +174,15 @@ export class Workspace {
     open(request: Payload<Open>, content: Uint8Array): DocumentSession;
 }
 
+/**
+ * Calls `handler(message)` when the engine panics, before the instance
+ * traps. A `panic=abort` build cannot recover: after the call every export
+ * fails, so the host should discard this instance (its worker), reopen the
+ * last saved package in a fresh one and resynchronise. The message names
+ * the panic and its location, for reporting.
+ */
+export function setPanicHandler(handler: Function): void;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -229,6 +238,7 @@ export interface InitOutput {
     readonly documentsession_undo: (a: number) => [number, number, number];
     readonly documentsession_undo_report: (a: number) => [number, number, number];
     readonly documentsession_validate_awareness: (a: number, b: any) => [number, number, number];
+    readonly setPanicHandler: (a: any) => void;
     readonly workspace_create: (a: number, b: any) => [number, number, number];
     readonly workspace_new: () => number;
     readonly workspace_open: (a: number, b: any, c: any) => [number, number, number];

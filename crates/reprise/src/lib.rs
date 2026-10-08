@@ -9,6 +9,23 @@ pub mod typescript;
 pub use dto::*;
 pub use error::{Error, Result};
 pub use session::{DocumentSession, LayoutJob, Plugin, Workspace};
+
+/// Runs `f` and turns a panic inside it into [`Error::Poisoned`], for calls
+/// that have no session, such as opening a package. A session's own calls
+/// use [`DocumentSession::contain`], which also poisons the session.
+pub fn contain<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .unwrap_or_else(|payload| Err(Error::Poisoned(panic_message(payload.as_ref()))))
+}
+
+/// The text of a panic payload, when it has one.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-text panic payload".to_owned())
+}
 /// Largest JSON request (byte resources use their own explicit limits).
 pub const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;

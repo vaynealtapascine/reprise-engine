@@ -103,8 +103,36 @@ pub struct DocumentSession {
     /// The host's selection, anchored (see `set_selection`).
     selection: Option<reprise_edit::StableSelection>,
     workers: std::sync::Arc<dyn reprise_layout::workers::Workers>,
+    /// Set when a contained call panicked; see [`DocumentSession::contain`].
+    poisoned: Option<String>,
 }
 impl DocumentSession {
+    /// Runs `f` on this session and turns a panic inside it into
+    /// [`Error::Poisoned`] (`bindings.poisoned`) instead of unwinding into
+    /// the host. A panic can leave the store half-updated or its locks
+    /// poisoned, so the session refuses every later contained call with the
+    /// same error: the host should drop it, reopen the last saved package
+    /// and resynchronise. Hosts route every session call through this.
+    ///
+    /// Only an unwinding build can contain a panic. On `wasm32` with
+    /// `panic=abort` the instance traps instead; see `docs/bindings.md`.
+    pub fn contain<T>(&mut self, f: impl FnOnce(&mut DocumentSession) -> Result<T>) -> Result<T> {
+        if let Some(message) = &self.poisoned {
+            return Err(Error::Poisoned(message.clone()));
+        }
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self))) {
+            Ok(result) => result,
+            Err(payload) => {
+                let message = crate::panic_message(payload.as_ref());
+                self.poisoned = Some(message.clone());
+                Err(Error::Poisoned(message))
+            }
+        }
+    }
+    /// Whether a contained call panicked; the session must be reopened.
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned.is_some()
+    }
     fn new(
         doc: Document,
         package: reprise_format::Package,
@@ -127,6 +155,7 @@ impl DocumentSession {
             notes,
             selection: None,
             workers: std::sync::Arc::new(reprise_layout::workers::Serial),
+            poisoned: None,
         }
     }
     fn doc(&self) -> &Document {

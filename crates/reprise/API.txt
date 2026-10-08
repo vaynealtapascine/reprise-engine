@@ -2,6 +2,7 @@ lib
 pub use dto::*;
 pub use error::{Error, Result};
 pub use session::{DocumentSession, LayoutJob, Plugin, Workspace};
+pub fn contain<T>(f: impl FnOnce() -> Result<T>) -> Result<T>
 pub const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_AWARENESS_BYTES: usize = 64 * 1024;
@@ -11,6 +12,8 @@ session
 pub fn new() -> Self
 pub fn create(&self, request: &Payload<Create>) -> Result<DocumentSession>
 pub fn open(&self, request: &Payload<Open>, bytes: &[u8]) -> Result<DocumentSession>
+pub fn contain<T>(&mut self, f: impl FnOnce(&mut DocumentSession) -> Result<T>) -> Result<T>
+pub fn is_poisoned(&self) -> bool
 pub fn state(&self) -> Result<Payload<State>>
 pub fn set_layout_threads(&mut self, threads: usize) -> usize
 pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>>
