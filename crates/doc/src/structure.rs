@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use loro::{TreeID, TreeParentId};
+use loro::TreeParentId;
 
 use crate::relation::StructuralQuery;
 use crate::{BlockKind, DocError, Document, NodeId, get_str};
@@ -41,76 +41,89 @@ pub enum Succession {
 }
 
 impl Document {
-    /// Whether a block is alive.
+    /// Whether a block is alive. A paragraph of a flow is alive while its
+    /// host is and its break is active (or, for the head, while the head is
+    /// not deleted); see `docs/flow.md`.
     pub fn is_live(&self, id: NodeId) -> bool {
-        self.live(&self.tree("content"), id.0)
+        if !self.live(&self.tree("content"), id.node) {
+            return false;
+        }
+        match self.flow(id.node) {
+            Some(flow) => flow.is_live(id),
+            None => !id.is_break(),
+        }
     }
 
     /// The children of `of`, or of the document root for `None`, in order.
-    /// Empty when `of` isn't a live node.
+    /// Each flow host contributes its live paragraphs, each followed by the
+    /// nodes embedded after it. Empty when `of` isn't a live node; a break
+    /// paragraph has no children.
     pub fn children(&self, of: Option<NodeId>) -> Vec<NodeId> {
         let tree = self.tree("content");
         let parent = match of {
             None => TreeParentId::Root,
-            Some(n) if self.live(&tree, n.0) => TreeParentId::Node(n.0),
+            Some(n) if !n.is_break() && self.live(&tree, n.node) => TreeParentId::Node(n.node),
             Some(_) => return Vec::new(),
         };
-        tree.children(parent)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|&c| self.live(&tree, c))
-            .map(NodeId)
-            .collect()
+        let mut out = Vec::new();
+        for c in tree.children(parent).unwrap_or_default() {
+            if self.live(&tree, c) && !self.is_embedded(c) {
+                self.expand(c, 0, &mut out);
+            }
+        }
+        out
     }
 
     /// The parent of a live node: `Some(None)` for a top-level block,
-    /// `None` when `id` isn't a live node.
+    /// `None` when `id` isn't a live node. The paragraphs of a flow and the
+    /// nodes embedded in it all have the host's parent.
     pub fn parent_of(&self, id: NodeId) -> Option<Option<NodeId>> {
-        let tree = self.tree("content");
-        if !self.live(&tree, id.0) {
+        if !self.is_live(id) {
             return None;
         }
-        match tree.parent(id.0)? {
-            TreeParentId::Root => Some(None),
-            TreeParentId::Node(p) if self.live(&tree, p) => Some(Some(NodeId(p))),
-            _ => None,
+        let tree = self.tree("content");
+        // A break paragraph has its host's place, and an embedded node its
+        // host's; Loro's tree is acyclic, so this climbs and ends.
+        let mut at = id.node;
+        loop {
+            match tree.parent(at)? {
+                TreeParentId::Root => return Some(None),
+                TreeParentId::Node(p) if self.live(&tree, p) => {
+                    if self.is_embedded(at) {
+                        at = p;
+                        continue;
+                    }
+                    return Some(Some(NodeId::tree(p)));
+                }
+                _ => return None,
+            }
         }
     }
 
     /// A node's kind. `None` when the node isn't live or its kind isn't one
     /// this engine knows (a newer engine may have written it).
     pub fn kind_of(&self, id: NodeId) -> Option<BlockKind> {
-        let tree = self.tree("content");
-        if !self.live(&tree, id.0) {
+        if !self.is_live(id) {
             return None;
         }
-        let meta = tree.get_meta(id.0).ok()?;
+        let meta = self.meta_of(id).ok()?;
         get_str(&meta, "kind").and_then(|k| BlockKind::parse(&k))
     }
 
     /// Every live node in document order: a node before its children, a
-    /// node's children in order.
+    /// node's children in order. A flow's paragraphs are in text order.
     pub fn document_order(&self) -> Vec<NodeId> {
-        let tree = self.tree("content");
         let mut order = Vec::new();
-        let mut stack: Vec<TreeID> = tree
-            .children(TreeParentId::Root)
-            .unwrap_or_default()
-            .into_iter()
-            .rev()
-            .collect();
+        let mut stack: Vec<NodeId> = self.children(None);
+        stack.reverse();
         // Each node is pushed once, from its one parent, so this ends.
         while let Some(id) = stack.pop() {
-            if !self.live(&tree, id) {
-                continue;
+            order.push(id);
+            if !id.is_break() {
+                let mut kids = self.children(Some(id));
+                kids.reverse();
+                stack.extend(kids);
             }
-            order.push(NodeId(id));
-            stack.extend(
-                tree.children(TreeParentId::Node(id))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .rev(),
-            );
         }
         order
     }
@@ -215,15 +228,14 @@ impl Document {
         if old == new {
             return Err(DocError::Malformed(old, "a node can't succeed itself"));
         }
-        let tree = self.tree("content");
-        if !self.live(&tree, new.0) {
+        if !self.is_live(new) {
             return Err(DocError::NoNode(new));
         }
-        if self.live(&tree, old.0) {
-            tree.get_meta(old.0)?
+        if self.is_live(old) {
+            self.meta_of(old)?
                 .insert(&format!("{SUCCESSOR_PREFIX}{new}"), true)?;
-        } else if tree.contains(old.0) {
-            tree.get_meta(new.0)?
+        } else if self.meta_of(old).is_ok() {
+            self.meta_of(new)?
                 .insert(&format!("{PREDECESSOR_PREFIX}{old}"), true)?;
         } else {
             return Err(DocError::NoNode(old));
@@ -237,18 +249,28 @@ impl Document {
     fn successor_index(&self) -> BTreeMap<NodeId, BTreeSet<NodeId>> {
         let tree = self.tree("content");
         let mut index: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
-        for id in tree.nodes() {
-            let Ok(meta) = tree.get_meta(id) else {
-                continue;
-            };
+        let mut read = |id: NodeId, meta: &loro::LoroMap| {
             for key in meta.keys() {
                 if let Some(new) = key.strip_prefix(SUCCESSOR_PREFIX).and_then(NodeId::parse) {
-                    index.entry(NodeId(id)).or_default().insert(new);
+                    index.entry(id).or_default().insert(new);
                 } else if let Some(old) =
                     key.strip_prefix(PREDECESSOR_PREFIX).and_then(NodeId::parse)
                 {
-                    index.entry(old).or_default().insert(NodeId(id));
+                    index.entry(old).or_default().insert(id);
                 }
+            }
+        };
+        for id in tree.nodes() {
+            if let Ok(meta) = tree.get_meta(id) {
+                read(NodeId::tree(id), &meta);
+            }
+        }
+        // Break paragraphs keep their links in their records.
+        for key in self.break_records().keys() {
+            if let Some(id) = NodeId::parse(&key)
+                && let Some(meta) = self.break_record(id)
+            {
+                read(id, &meta);
             }
         }
         index

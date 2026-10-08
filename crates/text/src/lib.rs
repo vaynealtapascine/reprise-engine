@@ -19,8 +19,9 @@
 
 use std::fmt;
 use std::ops::Range;
+use std::sync::Arc;
 
-use loro::cursor::{Cursor, PosType, Side};
+use loro::cursor::{Cursor, Side};
 use loro::{ContainerTrait, LoroText};
 use serde::{Deserialize, Serialize};
 
@@ -137,8 +138,14 @@ pub enum TextError {
     BadRange(Range<usize>),
     #[error("the anchor belongs to another text")]
     OtherText,
+    /// The anchor is in the same flow but now in another paragraph of it
+    /// (see `docs/flow.md`). `reprise-doc` locates such anchors.
+    #[error("the anchor is in another paragraph of the same flow")]
+    Elsewhere,
     #[error("the text is not part of a document, or no longer exists")]
     TextGone,
+    #[error("U+FDD0 marks paragraph breaks and can't be inserted as text")]
+    Reserved,
     #[error("the text store refused the edit: {0}")]
     Store(String),
 }
@@ -149,38 +156,200 @@ impl From<loro::LoroError> for TextError {
     }
 }
 
+/// The character that marks a paragraph break inside a flow (see
+/// `docs/flow.md`). A noncharacter, so it is never authored text: views
+/// never show it and [`Text::insert`] refuses it.
+pub const BREAK: char = '\u{FDD0}';
+
+/// One visible stretch of a shared text, in UTF-8 bytes and in Unicode
+/// scalars (Loro's unit), both counted from the start of the shared text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Segment {
+    pub bytes: Range<usize>,
+    pub chars: Range<usize>,
+}
+
+/// Where a paragraph's text is inside a shared text. Implemented by
+/// `reprise-doc`, which knows where the breaks are.
+pub trait Span: Send + Sync {
+    /// The paragraph's visible stretches, in order and not overlapping. Never
+    /// empty: an empty paragraph is one empty segment at the place where text
+    /// typed into it goes. Characters between segments are hidden.
+    fn segments(&self) -> Result<Vec<Segment>, TextError>;
+}
+
 /// One text sequence, such as the text of a paragraph. Offsets are UTF-8 bytes.
 ///
 /// A `Text` is a handle: clones refer to the same text, and edits through any
 /// handle are visible through all of them.
-#[derive(Clone, Debug)]
+///
+/// A text is either a whole Loro text or a **view** of one paragraph of a
+/// shared flow text. A view's offsets count only that paragraph's visible
+/// characters; it finds its span again on every call, so it stays correct
+/// while the shared text changes.
+#[derive(Clone)]
 pub struct Text {
     text: LoroText,
+    span: Option<Arc<dyn Span>>,
+}
+
+impl fmt::Debug for Text {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Text")
+            .field("container", &self.text.id())
+            .field("view", &self.span.is_some())
+            .finish()
+    }
 }
 
 impl fmt::Display for Text {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.text.to_string())
+        match self.span {
+            None => f.write_str(&self.text.to_string()),
+            Some(_) => f.write_str(&self.view().map(|v| v.s).unwrap_or_default()),
+        }
+    }
+}
+
+/// A view's current visible text and where each piece of it is.
+struct View {
+    segs: Vec<Segment>,
+    s: String,
+}
+
+impl View {
+    fn len(&self) -> usize {
+        self.s.len()
+    }
+
+    /// The shared-text scalar index of the gap at view byte `at`. Where hidden
+    /// characters separate two segments, the gap is before them.
+    fn gap(&self, at: usize) -> usize {
+        let mut acc = 0;
+        for seg in &self.segs {
+            let n = seg.bytes.len();
+            if at <= acc + n {
+                return seg.chars.start + self.s[acc..at].chars().count();
+            }
+            acc += n;
+        }
+        self.segs.last().map_or(0, |s| s.chars.end)
+    }
+
+    /// The shared-text scalar index of the visible character at view byte `at`.
+    fn char_at(&self, at: usize) -> usize {
+        let mut acc = 0;
+        for seg in &self.segs {
+            let n = seg.bytes.len();
+            if at < acc + n {
+                return seg.chars.start + self.s[acc..at].chars().count();
+            }
+            acc += n;
+        }
+        self.segs.last().map_or(0, |s| s.chars.end)
+    }
+
+    /// The view byte offset of shared-text scalar index `u`, if it is inside
+    /// this view. A position among hidden characters maps to the end of the
+    /// segment before them.
+    fn offset_of(&self, u: usize) -> Option<usize> {
+        let (first, last) = (self.segs.first()?, self.segs.last()?);
+        if u < first.chars.start || u > last.chars.end {
+            return None;
+        }
+        let mut acc = 0;
+        for seg in &self.segs {
+            let n = seg.bytes.len();
+            if u < seg.chars.start {
+                return Some(acc);
+            }
+            if u <= seg.chars.end {
+                let local: usize = self.s[acc..acc + n]
+                    .chars()
+                    .take(u - seg.chars.start)
+                    .map(char::len_utf8)
+                    .sum();
+                return Some(acc + local);
+            }
+            acc += n;
+        }
+        Some(acc)
+    }
+
+    /// The shared-text scalar ranges a view byte range covers, without the
+    /// hidden characters between segments.
+    fn pieces(&self, range: Range<usize>) -> Vec<Range<usize>> {
+        let mut out = Vec::new();
+        let mut acc = 0;
+        for seg in &self.segs {
+            let n = seg.bytes.len();
+            let (a, b) = (range.start.max(acc), range.end.min(acc + n));
+            if a < b {
+                let start = seg.chars.start + self.s[acc..a].chars().count();
+                out.push(start..start + self.s[a..b].chars().count());
+            }
+            acc += n;
+        }
+        out
     }
 }
 
 impl Text {
     /// For `reprise-doc` only: wraps a Loro text it stores.
     pub fn from_loro(text: LoroText) -> Self {
-        Text { text }
+        Text { text, span: None }
     }
 
-    /// For `reprise-doc` only: the underlying Loro text.
+    /// For `reprise-doc` only: a view of one paragraph of a shared text.
+    pub fn paragraph(text: LoroText, span: Arc<dyn Span>) -> Self {
+        Text {
+            text,
+            span: Some(span),
+        }
+    }
+
+    /// For `reprise-doc` only: the underlying Loro text. For a view, this is
+    /// the whole shared text; see [`Text::segments`].
     pub fn loro(&self) -> &LoroText {
         &self.text
     }
 
+    /// Whether this is a view of one paragraph of a shared text.
+    pub fn is_view(&self) -> bool {
+        self.span.is_some()
+    }
+
+    /// For `reprise-doc` only: where this text's visible characters are in
+    /// the underlying Loro text.
+    pub fn segments(&self) -> Result<Vec<Segment>, TextError> {
+        Ok(self.view()?.segs)
+    }
+
+    /// For `reprise-doc` only: the scalar index in the underlying Loro text of
+    /// the gap at byte `at` of this text.
+    pub fn to_shared(&self, at: usize) -> Result<usize, TextError> {
+        let v = self.view()?;
+        check(&v.s, at)?;
+        Ok(v.gap(at))
+    }
+
+    /// For `reprise-doc` only: the byte offset in this text of scalar index
+    /// `u` of the underlying Loro text, if it is inside this text.
+    pub fn from_shared(&self, u: usize) -> Result<Option<usize>, TextError> {
+        Ok(self.view()?.offset_of(u))
+    }
+
+    /// The identity of the underlying Loro text. Every paragraph of one flow
+    /// shares it.
     pub fn id(&self) -> TextId {
         TextId(self.text.id().to_string())
     }
 
     pub fn len(&self) -> usize {
-        self.text.len_utf8()
+        match self.span {
+            None => self.text.len_utf8(),
+            Some(_) => self.view().map_or(0, |v| v.len()),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -196,29 +365,43 @@ impl Text {
     }
 
     pub fn insert(&self, at: usize, s: &str) -> Result<(), TextError> {
-        self.check_boundary(at)?;
-        Ok(self.text.insert_utf8(at, s)?)
+        if s.contains(BREAK) {
+            return Err(TextError::Reserved);
+        }
+        let v = self.view()?;
+        check(&v.s, at)?;
+        Ok(self.text.insert(v.gap(at), s)?)
     }
 
     pub fn delete(&self, range: Range<usize>) -> Result<(), TextError> {
         if range.start > range.end {
             return Err(TextError::BadRange(range));
         }
-        self.check_boundary(range.start)?;
-        self.check_boundary(range.end)?;
-        Ok(self
-            .text
-            .delete_utf8(range.start, range.end - range.start)?)
+        let v = self.view()?;
+        check(&v.s, range.start)?;
+        check(&v.s, range.end)?;
+        // Hidden characters inside the range stay: they are inactive breaks
+        // that undo may bring back.
+        for piece in v.pieces(range).into_iter().rev() {
+            self.text.delete(piece.start, piece.len())?;
+        }
+        Ok(())
     }
 
     /// Creates an anchor at a byte offset with the given affinity.
     pub fn anchor(&self, at: usize, affinity: Affinity) -> Result<Anchor, TextError> {
-        self.check_boundary(at)?;
-        let pos = self.to_unicode(at)?;
-        let cursor = if pos > 0 && affinity == Affinity::Before {
-            self.text.get_cursor(pos - 1, Side::Right)
+        let v = self.view()?;
+        check(&v.s, at)?;
+        let cursor = if at > 0 && affinity == Affinity::Before {
+            self.text.get_cursor(v.char_at(prev(&v.s, at)), Side::Right)
+        } else if at == 0 && affinity == Affinity::Before && v.gap(0) > 0 {
+            // A paragraph of a flow: stick to the break before it, so the
+            // anchor stays at this paragraph's start.
+            self.text.get_cursor(v.gap(0) - 1, Side::Right)
+        } else if at < v.len() {
+            self.text.get_cursor(v.char_at(at), Side::Left)
         } else {
-            self.text.get_cursor(pos, Side::Left)
+            self.text.get_cursor(v.gap(at), Side::Left)
         };
         cursor
             .map(|cursor| Anchor {
@@ -229,30 +412,57 @@ impl Text {
     }
 
     /// A UI caret anchor that retains character identity through structural
-    /// transfers, including EOF. Authored ranges use `anchor` and retain their
-    /// legacy raw-cursor representation and block-local policy.
+    /// transfers, including the end of the text. Authored ranges use `anchor`
+    /// and retain their raw-cursor representation and block-local policy.
     pub fn anchor_for_transfer(&self, at: usize, affinity: Affinity) -> Result<Anchor, TextError> {
-        self.check_boundary(at)?;
-        let pos = self.to_unicode(at)?;
+        let v = self.view()?;
+        check(&v.s, at)?;
+        let len = v.len();
         // A Loro cursor attaches to the character at `pos`. Side::Left sits before
         // it and Side::Right after it, so "stick to the previous character" is
-        // the character at pos - 1 with Side::Right.
-        let cursor = match affinity {
-            _ if pos > 0 && (affinity == Affinity::Before || pos == self.text.len_unicode()) => {
-                self.text.get_cursor(pos - 1, Side::Right)
-            }
-            _ => self.text.get_cursor(pos, Side::Left),
+        // the character before `at` with Side::Right.
+        let cursor = if at > 0 && (affinity == Affinity::Before || at == len) {
+            self.text.get_cursor(v.char_at(prev(&v.s, at)), Side::Right)
+        } else if at < len {
+            self.text.get_cursor(v.char_at(at), Side::Left)
+        } else {
+            self.text.get_cursor(v.gap(at), Side::Left)
         };
         cursor
             .map(|cursor| Anchor {
                 cursor,
-                end_after: pos == self.text.len_unicode() && affinity == Affinity::After,
+                end_after: at == len && affinity == Affinity::After,
             })
             .ok_or(TextError::BadOffset(at))
     }
 
     /// Resolves an anchor in this text to a byte offset in its current state.
+    /// For a view, [`TextError::Elsewhere`] when the anchor is now in another
+    /// paragraph of the same flow.
     pub fn resolve(&self, anchor: &Anchor) -> Result<Resolved, TextError> {
+        let unicode = self.resolve_shared(anchor)?;
+        let v = self.view()?;
+        let tombstoned = matches!(unicode, Resolved::Tombstoned(_));
+        let bytes = if self.span.is_none() {
+            // The whole text: positions past its end clamp to it.
+            let u = unicode.offset().min(self.text.len_unicode());
+            v.offset_of(u).unwrap_or(v.len())
+        } else {
+            v.offset_of(unicode.offset()).ok_or(TextError::Elsewhere)?
+        };
+        Ok(if anchor.end_after && !tombstoned {
+            Resolved::Live(v.len())
+        } else if tombstoned {
+            Resolved::Tombstoned(bytes)
+        } else {
+            Resolved::Live(bytes)
+        })
+    }
+
+    /// For `reprise-doc` only: where an anchor is in the underlying Loro
+    /// text, as a scalar index. A cursor on a character's right side is one
+    /// past it.
+    pub fn resolve_shared(&self, anchor: &Anchor) -> Result<Resolved, TextError> {
         if anchor.cursor.container != self.text.id() {
             return Err(TextError::OtherText);
         }
@@ -275,19 +485,10 @@ impl Text {
         // side sits one past it.
         let after = found.current.side == Side::Right && anchor.cursor.id.is_some() && !tombstoned;
         let unicode = found.current.pos + usize::from(after);
-        let bytes = if unicode >= self.text.len_unicode() {
-            self.text.len_utf8()
+        Ok(if tombstoned {
+            Resolved::Tombstoned(unicode)
         } else {
-            self.text
-                .convert_pos(unicode, PosType::Unicode, PosType::Bytes)
-                .ok_or(TextError::TextGone)?
-        };
-        Ok(if anchor.end_after && !tombstoned {
-            Resolved::Live(self.text.len_utf8())
-        } else if tombstoned {
-            Resolved::Tombstoned(bytes)
-        } else {
-            Resolved::Live(bytes)
+            Resolved::Live(unicode)
         })
     }
 
@@ -329,20 +530,46 @@ impl Text {
         segment::word_at(&self.to_string(), at)
     }
 
-    fn to_unicode(&self, at: usize) -> Result<usize, TextError> {
-        self.text
-            .convert_pos(at, PosType::Bytes, PosType::Unicode)
-            .ok_or(TextError::BadOffset(at))
-    }
-
-    fn check_boundary(&self, at: usize) -> Result<(), TextError> {
-        let s = self.to_string();
-        if s.is_char_boundary(at) {
-            Ok(())
-        } else {
-            Err(TextError::BadOffset(at))
+    fn view(&self) -> Result<View, TextError> {
+        match &self.span {
+            None => {
+                let s = self.text.to_string();
+                Ok(View {
+                    segs: vec![Segment {
+                        bytes: 0..s.len(),
+                        chars: 0..self.text.len_unicode(),
+                    }],
+                    s,
+                })
+            }
+            Some(span) => {
+                let segs = span.segments()?;
+                if segs.is_empty() {
+                    return Err(TextError::TextGone);
+                }
+                let mut s = String::new();
+                for seg in &segs {
+                    if !seg.chars.is_empty() {
+                        s.push_str(&self.text.slice(seg.chars.start, seg.chars.end)?);
+                    }
+                }
+                Ok(View { segs, s })
+            }
         }
     }
+}
+
+fn check(s: &str, at: usize) -> Result<(), TextError> {
+    if s.is_char_boundary(at) {
+        Ok(())
+    } else {
+        Err(TextError::BadOffset(at))
+    }
+}
+
+/// The start of the character before byte `at` (`at > 0`, on a boundary).
+fn prev(s: &str, at: usize) -> usize {
+    s[..at].char_indices().next_back().map_or(0, |(i, _)| i)
 }
 
 impl Anchor {

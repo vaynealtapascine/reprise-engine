@@ -50,15 +50,25 @@ impl Document {
         if !self.is_live(id) {
             return Err(DocError::NoNode(id));
         }
-        self.tree("content").get_meta(id.0)?.insert(DELETED, true)?;
+        if id.is_break() {
+            return self.set_record_active(id, false);
+        }
+        self.tree("content")
+            .get_meta(id.node)?
+            .insert(DELETED, true)?;
         Ok(())
     }
 
     /// Whether this node itself carries a soft tombstone. Descendants of a
     /// flagged parent are not live but do not acquire their own flag.
     pub fn is_soft_deleted(&self, id: NodeId) -> bool {
+        if id.is_break() {
+            return false;
+        }
         let tree = self.tree("content");
-        tree.contains(id.0) && !tree.is_node_deleted(&id.0).unwrap_or(true) && flagged(&tree, id.0)
+        tree.contains(id.node)
+            && !tree.is_node_deleted(&id.node).unwrap_or(true)
+            && flagged(&tree, id.node)
     }
 
     /// Clears this block's flag in place. Its ancestors must be live. Does not
@@ -68,17 +78,20 @@ impl Document {
         if !self.is_soft_deleted(id) {
             return Err(DocError::NoNode(id));
         }
-        if let Some(TreeParentId::Node(parent)) = tree.parent(id.0)
+        if let Some(TreeParentId::Node(parent)) = tree.parent(id.node)
             && !self.live(&tree, parent)
         {
-            return Err(DocError::NoNode(NodeId(parent)));
+            return Err(DocError::NoNode(NodeId::tree(parent)));
         }
-        tree.get_meta(id.0)?.insert(DELETED, false)?;
+        tree.get_meta(id.node)?.insert(DELETED, false)?;
         Ok(())
     }
 
-    /// Places a staged block at a live-child index and activates it. Neither
-    /// part commits; the move and flag clear belong to the caller's step.
+    /// Places a staged block at a live-child index and activates it. The
+    /// move and flag clear belong to the caller's step and are not
+    /// committed. A place between two paragraphs of a flow is an embed,
+    /// which is staged (see `docs/flow.md`): that commits what was pending,
+    /// as part of the step.
     pub fn activate_block_at(
         &self,
         id: NodeId,
@@ -88,47 +101,17 @@ impl Document {
         if !self.is_soft_deleted(id) {
             return Err(DocError::NoNode(id));
         }
-        let tree = self.tree("content");
-        self.place(&tree, id.0, parent, index)?;
+        let placement = self.placement(parent, index, Some(id))?;
+        self.check_not_inside(id, placement)?;
+        self.put(id, placement)?;
         self.restore_block(id)
-    }
-
-    pub(crate) fn place(
-        &self,
-        tree: &LoroTree,
-        id: TreeID,
-        parent: Option<NodeId>,
-        index: usize,
-    ) -> Result<(), DocError> {
-        let loro_parent = match parent {
-            None => TreeParentId::Root,
-            Some(p) if self.live(tree, p.0) => TreeParentId::Node(p.0),
-            Some(p) => return Err(DocError::NoNode(p)),
-        };
-        let siblings: Vec<TreeID> = tree
-            .children(loro_parent)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|&s| s != id && self.live(tree, s))
-            .collect();
-        match (siblings.get(index), siblings.last()) {
-            (Some(&next), _) => tree.mov_before(id, next)?,
-            (None, Some(&last)) if index == siblings.len() => tree.mov_after(id, last)?,
-            (None, None) if index == 0 => tree.mov(id, loro_parent)?,
-            _ => {
-                return Err(DocError::BadIndex {
-                    index,
-                    len: siblings.len(),
-                });
-            }
-        }
-        Ok(())
     }
 
     /// Creates an invisible flagged block outside undo history. Commits pending
     /// changes first; call before the transaction's own undoable operations.
     pub fn stage_block(&self, block: &NewBlock) -> Result<NodeId, DocError> {
-        self.commit();
+        crate::check_authored(&block.text)?;
+        self.commit_part();
         self.doc.set_next_commit_origin(STAGE_ORIGIN);
         let tree = self.tree("content");
         let id = tree.create(None)?;
@@ -144,7 +127,7 @@ impl Document {
                 .write(&meta.insert_container("overrides", LoroMap::new())?)?;
         }
         self.doc.commit();
-        Ok(NodeId(id))
+        Ok(NodeId::tree(id))
     }
 
     pub(crate) fn soft_delete_relation(&self, id: RelationId) -> Result<(), DocError> {
@@ -164,7 +147,7 @@ impl Document {
     ) -> Result<RelationId, DocError> {
         schemas.validate(relation)?;
         let json = serde_json::to_string(relation).map_err(|e| DocError::Store(e.to_string()))?;
-        self.commit();
+        self.commit_part();
         self.doc.set_next_commit_origin(STAGE_ORIGIN);
         let tree = self.tree("relations");
         let id = tree.create(None)?;

@@ -17,7 +17,9 @@
 use std::fmt;
 use std::ops::Range;
 
-use loro::{Container, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID, ValueOrContainer};
+use loro::{
+    Container, ID, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID, ValueOrContainer,
+};
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +28,9 @@ pub mod codes;
 pub mod context;
 mod edit;
 pub mod expr;
+mod flow;
+#[cfg(test)]
+mod flow_tests;
 pub mod fragment;
 pub mod function;
 mod history;
@@ -60,6 +65,7 @@ pub use changes::ChangeReport;
 pub use context::ResolutionContext;
 pub use edit::{DEFAULT_UNDO_STEPS, NewBlock, UndoStack};
 pub use expr::{ComputedLength, Dependency, Expr};
+pub use flow::MAX_FLOW_DEPTH;
 pub use function::FunctionRegistry;
 pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
@@ -133,13 +139,86 @@ macro_rules! tree_ids {
 }
 
 tree_ids!(
-    /// A block's identity in the content tree.
-    NodeId,
     /// A persistent range's identity.
     RangeId,
     /// A relation's identity.
     RelationId
 );
+
+/// A block's identity: a content-tree node, or a paragraph that starts at a
+/// break inside a host's flow text (see `docs/flow.md`). Displayed as `12@1`
+/// for a tree node and `12@1/34@2` for a break paragraph (host, then the
+/// break character's ID).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId {
+    pub(crate) node: TreeID,
+    pub(crate) mark: Option<ID>,
+}
+
+impl NodeId {
+    pub(crate) fn tree(node: TreeID) -> NodeId {
+        NodeId { node, mark: None }
+    }
+
+    pub(crate) fn at_break(host: TreeID, mark: ID) -> NodeId {
+        NodeId {
+            node: host,
+            mark: Some(mark),
+        }
+    }
+
+    /// Parses the form produced by `Display`, such as `12@1` or `12@1/34@2`.
+    pub fn parse(s: &str) -> Option<NodeId> {
+        match s.split_once('/') {
+            None => TreeID::try_from(s).ok().map(NodeId::tree),
+            Some((host, mark)) => {
+                let host = TreeID::try_from(host).ok()?;
+                let mark = ID::try_from(mark).ok()?;
+                Some(NodeId::at_break(host, mark))
+            }
+        }
+    }
+
+    /// Whether this is a paragraph that starts at a break in a flow, rather
+    /// than a content-tree node.
+    pub fn is_break(&self) -> bool {
+        self.mark.is_some()
+    }
+
+    /// The content-tree node: the node itself, or for a break paragraph the
+    /// host whose text holds it.
+    pub fn host(&self) -> NodeId {
+        NodeId::tree(self.node)
+    }
+}
+
+impl fmt::Debug for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl fmt::Display for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.mark {
+            None => write!(f, "{}", self.node),
+            Some(m) => write!(f, "{}/{}", self.node, m),
+        }
+    }
+}
+
+impl Serialize for NodeId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        NodeId::parse(&s).ok_or_else(|| serde::de::Error::custom("bad NodeId"))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -232,14 +311,28 @@ pub struct Document {
     /// its undo history.
     shadow: std::sync::Mutex<Option<LoroDoc>>,
     lineage_pending: std::sync::Mutex<Vec<(NodeId, String, String)>>,
+    /// Each flow host's paragraphs, per revision (see `flow`).
+    flows: std::sync::Arc<std::sync::Mutex<flow::FlowCache>>,
+    /// Which editing step this replica's next commits belong to (see
+    /// [`UndoStack`]).
+    pub(crate) steps: std::sync::Arc<edit::StepLog>,
 }
 
 impl Document {
     fn wrap(doc: LoroDoc) -> Document {
+        Document::wrap_with(doc, Default::default())
+    }
+
+    fn wrap_with(
+        doc: LoroDoc,
+        flows: std::sync::Arc<std::sync::Mutex<flow::FlowCache>>,
+    ) -> Document {
         Document {
             doc,
             shadow: std::sync::Mutex::new(None),
             lineage_pending: std::sync::Mutex::new(Vec::new()),
+            flows,
+            steps: Default::default(),
         }
     }
 
@@ -273,9 +366,12 @@ impl Document {
         Ok(())
     }
 
+    /// Commits what is pending and ends the current editing step (see
+    /// [`UndoStack`]).
     pub fn commit(&self) {
         self.doc.commit();
         self.commit_lineage();
+        self.steps.end();
     }
 
     pub fn revision(&self) -> Revision {
@@ -324,6 +420,7 @@ impl Document {
         style: &str,
         text: &str,
     ) -> Result<NodeId, DocError> {
+        check_authored(text)?;
         let tree = self.tree("content");
         let id = tree.create(None)?;
         let meta = tree.get_meta(id)?;
@@ -331,7 +428,7 @@ impl Document {
         meta.insert("style", style)?;
         let t = meta.insert_container("text", LoroText::new())?;
         t.insert_utf8(0, text)?;
-        Ok(NodeId(id))
+        Ok(NodeId::tree(id))
     }
 
     /// Top-level blocks in document order.
@@ -340,16 +437,22 @@ impl Document {
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
-        let tree = self.tree("content");
-        if !self.live(&tree, id.0) {
+        if !self.is_live(id) {
             return Err(DocError::NoNode(id));
         }
-        let meta = tree.get_meta(id.0)?;
+        let host = self.tree("content").get_meta(id.node)?;
+        let meta = self.meta_of(id)?;
         let kind = get_str(&meta, "kind")
             .and_then(|k| BlockKind::parse(&k))
             .ok_or(DocError::Malformed(id, "kind"))?;
-        let text = match meta.get("text") {
-            Some(ValueOrContainer::Container(Container::Text(t))) => Text::from_loro(t),
+        let text = match host.get("text") {
+            Some(ValueOrContainer::Container(Container::Text(t))) => {
+                if self.flow(id.node).is_some() {
+                    self.paragraph_text(id, t)
+                } else {
+                    Text::from_loro(t)
+                }
+            }
             _ => return Err(DocError::Malformed(id, "text")),
         };
         let overrides = match meta.get("overrides") {
@@ -366,17 +469,23 @@ impl Document {
     }
 
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
-        let meta = self.tree("content").get_meta(id.0)?;
+        let meta = self.meta_of(id)?;
         let map = meta.insert_container("overrides", LoroMap::new())?;
         style.write(&map)?;
         Ok(())
     }
 
-    /// Flags a block as deleted in place, including its subtree (07). Undo
-    /// restores the previous flag without changing identity or position.
-    /// Relation deletion policies are evaluated from this tombstone at query
-    /// time. Does not commit; deletion belongs to the caller's atomic step.
+    /// Deletes a block (07). A content-tree block is flagged as deleted in
+    /// place, including its subtree; undo restores the flag without
+    /// changing identity or position. A paragraph of a flow loses its text
+    /// and its break (see `docs/flow.md`); undo brings both back, and the
+    /// paragraph keeps its ID. Relation deletion policies are evaluated
+    /// from the tombstone at query time. Does not commit; deletion belongs
+    /// to the caller's atomic step.
     pub fn delete_block(&self, id: NodeId) -> Result<(), DocError> {
+        if self.delete_flow_para(id)? {
+            return Ok(());
+        }
         self.soft_delete_block(id)
     }
 
@@ -443,8 +552,8 @@ impl Document {
         let id = tree.create(None)?;
         let meta = tree.get_meta(id)?;
         meta.insert("node", node.to_string())?;
-        meta.insert("start", start.encode())?;
-        meta.insert("end", end.encode())?;
+        meta.insert("start", ranges::anchor_value(&start))?;
+        meta.insert("end", ranges::anchor_value(&end))?;
         ranges::write_policy(&meta, policy)?;
         Ok(RangeId(id))
     }
@@ -460,10 +569,7 @@ impl Document {
             return RangeState::Missing { node: None };
         };
         let node = get_str(&meta, "node").and_then(|s| NodeId::parse(&s));
-        let anchor = |key| match meta.get(key) {
-            Some(ValueOrContainer::Value(LoroValue::Binary(b))) => Anchor::decode(&b),
-            _ => None,
-        };
+        let anchor = |key| ranges::stored_anchor(meta.get(key)).and_then(|b| Anchor::decode(&b));
         let keep_empty = match self.range_policy(id) {
             Ok(Some(policy)) => policy.empty == Empty::Keep,
             Ok(None) => get_str(&meta, "empty").as_deref() == Some("keep"),
@@ -472,13 +578,21 @@ impl Document {
         let (Some(node), Some(start), Some(end)) = (node, anchor("start"), anchor("end")) else {
             return RangeState::Missing { node };
         };
-        let Ok(block) = self.block(node) else {
+        // Both ends follow their characters, into whichever paragraph of
+        // the flow they are in now (see `docs/flow.md`).
+        let (Some((node, s)), Some((end_node, e))) =
+            (self.locate(node, &start), self.locate(node, &end))
+        else {
             return RangeState::Missing { node: Some(node) };
         };
-        let (Ok(s), Ok(e)) = (block.text.resolve(&start), block.text.resolve(&end)) else {
-            return RangeState::Missing { node: Some(node) };
+        let end = match self.flow_cmp(node, end_node) {
+            std::cmp::Ordering::Equal => e.offset().max(s.offset()),
+            // The end is in a later paragraph: this paragraph's part.
+            std::cmp::Ordering::Less => self.block(node).map_or(s.offset(), |b| b.text.len()),
+            // Crossed ends: empty at the start.
+            std::cmp::Ordering::Greater => s.offset(),
         };
-        let bytes = s.offset()..e.offset().max(s.offset());
+        let bytes = s.offset()..end;
         if bytes.is_empty() && !keep_empty {
             return RangeState::Missing { node: Some(node) };
         }
@@ -531,6 +645,14 @@ impl Document {
             })
             .collect()
     }
+}
+
+/// Authored text never contains the break character (see `docs/flow.md`).
+pub(crate) fn check_authored(text: &str) -> Result<(), DocError> {
+    if text.contains(reprise_text::BREAK) {
+        return Err(reprise_text::TextError::Reserved.into());
+    }
+    Ok(())
 }
 
 fn get_bool(map: &LoroMap, key: &str) -> Option<bool> {

@@ -14,7 +14,10 @@
 //! created with a deletion flag outside the undo history. The undoable step
 //! places it and clears that flag. Undo and redo retain its ID. See `lifecycle.rs`.
 
-use loro::UndoManager;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use loro::{UndoItemMeta, UndoManager, UndoOrRedo};
 
 use crate::lifecycle::STAGE_ORIGIN;
 use crate::{BlockKind, DocError, Document, NodeId, Style};
@@ -47,10 +50,38 @@ impl NewBlock {
     }
 }
 
+/// Which editing step this replica's commits belong to. A step is usually
+/// one commit, but a step that stages breaks or embeds (see `docs/flow.md`)
+/// is several: staging commits what came before it, and its own commit is
+/// left out of the undo history. [`UndoStack`] undoes whole steps.
+#[derive(Debug, Default)]
+pub(crate) struct StepLog {
+    serial: AtomicI64,
+}
+
+impl StepLog {
+    fn current(&self) -> i64 {
+        self.serial.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn end(&self) {
+        self.serial.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 impl Document {
-    /// Ends the current editing step: everything done since the last commit
-    /// is one undo step and one Loro commit.
+    /// Ends the current editing step: everything done since the last step
+    /// ended is one undo step.
     pub fn commit_step(&self) {
+        self.doc.set_next_commit_origin(STEP_ORIGIN);
+        self.doc.commit();
+        self.commit_lineage();
+        self.steps.end();
+    }
+
+    /// Commits what is pending as part of the current step, without ending
+    /// it. Staging calls this before its own commit.
+    pub(crate) fn commit_part(&self) {
         self.doc.set_next_commit_origin(STEP_ORIGIN);
         self.doc.commit();
         self.commit_lineage();
@@ -64,12 +95,26 @@ impl Document {
         let mut inner = UndoManager::new(&self.doc);
         // Steps are decided by commits, not by the clock (purity).
         inner.set_merge_interval(0);
-        inner.set_max_undo_steps(DEFAULT_UNDO_STEPS);
+        inner.set_max_undo_steps(loro_items(DEFAULT_UNDO_STEPS));
         // Staging is how identity survives undo, so it is never undone.
         inner.add_exclude_origin_prefix(STAGE_ORIGIN);
+        let log = Arc::new(Mutex::new(Log {
+            limit: DEFAULT_UNDO_STEPS,
+            ..Log::default()
+        }));
+        let steps = self.steps.clone();
+        let pushed = log.clone();
+        inner.set_on_push(Some(Box::new(move |kind, _, _| {
+            let mut log = pushed.lock().unwrap_or_else(|e| e.into_inner());
+            if !log.processing && kind == UndoOrRedo::Undo {
+                log.pushed(steps.current());
+            }
+            UndoItemMeta::new()
+        })));
         UndoStack {
             inner,
             doc: self.doc.clone(),
+            log,
         }
     }
 
@@ -117,22 +162,66 @@ impl Document {
         if !self.is_live(id) {
             return Err(DocError::NoNode(id));
         }
-        let mut up = parent;
-        while let Some(p) = up {
-            if p == id {
-                return Err(DocError::Malformed(id, "can't move a block into itself"));
-            }
-            up = self.parent_of(p).flatten();
-        }
-        let tree = self.tree("content");
-        self.place(&tree, id.0, parent, index)
+        self.check_movable(id)?;
+        let placement = self.placement(parent, index, Some(id))?;
+        self.check_not_inside(id, placement)?;
+        self.put(id, placement)
     }
 
-    /// Splits a block at byte `at`: the text from `at` on moves to a new
+    /// A paragraph of a flow other than a lone head moves by copying, which
+    /// the editing kernel does; only whole content-tree nodes move here.
+    pub(crate) fn check_movable(&self, id: NodeId) -> Result<(), DocError> {
+        if id.is_break() || self.flow(id.node).is_some_and(|f| f.has_more_than_head()) {
+            return Err(DocError::Malformed(
+                id,
+                "a paragraph of a flow moves by copying",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Refuses a placement whose tree parent is `id` or inside it.
+    pub(crate) fn check_not_inside(
+        &self,
+        id: NodeId,
+        placement: crate::flow::Placement,
+    ) -> Result<(), DocError> {
+        let tree = self.tree("content");
+        let mut up = match placement {
+            crate::flow::Placement::Tree {
+                parent: loro::TreeParentId::Node(p),
+                ..
+            } => Some(p),
+            crate::flow::Placement::Embed { host, .. } => Some(host),
+            _ => None,
+        };
+        // Loro's tree is acyclic, so this climbs to the root and ends.
+        while let Some(p) = up {
+            if p == id.node {
+                return Err(DocError::Malformed(id, "can't move a block into itself"));
+            }
+            up = match tree.parent(p) {
+                Some(loro::TreeParentId::Node(n)) => Some(n),
+                _ => None,
+            };
+        }
+        Ok(())
+    }
+
+    /// Splits a block at byte `at`: the text from `at` on becomes a new
     /// block just after it, with the same kind, style and overrides.
     /// Returns the new block. The original keeps its ID and the text before
-    /// `at`. See [`Document::split_block_into`] for what happens to ranges.
+    /// `at`.
+    ///
+    /// A paragraph of a flow (see `docs/flow.md`) is split with a break: no
+    /// text moves, so collaborators' concurrent edits stay where they were
+    /// made. The break is staged, which commits what was pending as part of
+    /// the current step. Other blocks are split by copying, see
+    /// [`Document::split_block_into`].
     pub fn split_block(&self, id: NodeId, at: usize) -> Result<NodeId, DocError> {
+        if self.flow(id.node).is_some() {
+            return self.split_flow(id, at);
+        }
         let block = self.block(id)?;
         let tail = block.text.slice(at..block.text.len())?;
         let new = self.stage_block(&NewBlock {
@@ -171,8 +260,9 @@ impl Document {
         self.activate_block_at(new, parent, index + 1)
     }
 
-    /// Joins `second` onto the end of `first`: its text is appended, and it
-    /// is deleted. `second` is recorded as superseded by `first`, so relations
+    /// Joins `second` onto the end of `first`. When `second` is the
+    /// paragraph after `first` in one flow, its break is dropped and no text
+    /// moves. Otherwise its text is copied onto `first`, and it is deleted. `second` is recorded as superseded by `first`, so relations
     /// that targeted it follow the text (15). The blocks must have the same
     /// kind, and `second` must have no children.
     pub fn join_blocks(&self, first: NodeId, second: NodeId) -> Result<(), DocError> {
@@ -192,11 +282,48 @@ impl Document {
                 "a block with children can't be joined",
             ));
         }
+        // Adjacent paragraphs of one flow: drop the break. No text moves.
+        if self.flow_predecessor(second) == Some(first) {
+            self.set_record_active(second, false)?;
+            return self.supersede(second, first);
+        }
         let at = a.text.len();
         a.text.insert(at, &b.text.to_string())?;
         self.record_transfer(second, 0, first, at, b.text.len())?;
         self.supersede(second, first)?;
-        self.soft_delete_block(second)
+        self.delete_block(second)
+    }
+}
+
+/// Loro undo items to keep for `steps` editing steps. A step is one item,
+/// plus one for each staging commit inside it; steps beyond the limit are
+/// never undone (see [`UndoStack`]), so this only bounds memory.
+fn loro_items(steps: usize) -> usize {
+    steps.saturating_mul(16)
+}
+
+/// The steps an [`UndoStack`] can undo and redo: each step's serial and how
+/// many Loro undo items it is, newest last.
+#[derive(Debug, Default)]
+struct Log {
+    undo: Vec<(i64, usize)>,
+    redo: Vec<(i64, usize)>,
+    /// Set while undoing or redoing, whose own items are counted here.
+    processing: bool,
+    limit: usize,
+}
+
+impl Log {
+    fn pushed(&mut self, serial: i64) {
+        match self.undo.last_mut() {
+            Some((s, n)) if *s == serial => *n += 1,
+            _ => self.undo.push((serial, 1)),
+        }
+        self.redo.clear();
+        if self.undo.len() > self.limit {
+            let excess = self.undo.len() - self.limit;
+            self.undo.drain(..excess);
+        }
     }
 }
 
@@ -207,53 +334,103 @@ impl Document {
 /// text edits are transformed around it. Because deletion changes a flag,
 /// undoing a deleted block reveals the **same node** again, so its
 /// relations, ranges and anchors work again.
+///
+/// One undo is one editing step (see [`Document::commit_step`]), even when
+/// the step is several commits because it staged breaks or embeds.
 pub struct UndoStack {
     inner: UndoManager,
     doc: loro::LoroDoc,
+    log: Arc<Mutex<Log>>,
 }
 
 impl UndoStack {
+    fn log(&self) -> std::sync::MutexGuard<'_, Log> {
+        self.log.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Undoes the last step. `false` when there was nothing to undo.
     pub fn undo(&mut self) -> Result<bool, DocError> {
-        let changed = self.inner.undo()?;
-        if changed {
+        let Some((serial, items)) = self.log().undo.pop() else {
+            return Ok(false);
+        };
+        let done = self.replay(items, true)?;
+        if done > 0 {
+            self.log().redo.push((serial, done));
             Document::wrap(self.doc.clone()).capture_restored_lineage();
         }
-        Ok(changed)
+        Ok(done > 0)
     }
 
     /// Redoes the last undone step. `false` when there was nothing to redo.
     pub fn redo(&mut self) -> Result<bool, DocError> {
-        let changed = self.inner.redo()?;
-        if changed {
+        let Some((serial, items)) = self.log().redo.pop() else {
+            return Ok(false);
+        };
+        let done = self.replay(items, false)?;
+        if done > 0 {
+            self.log().undo.push((serial, done));
             Document::wrap(self.doc.clone()).capture_restored_lineage();
         }
-        Ok(changed)
+        Ok(done > 0)
+    }
+
+    /// Undoes or redoes `items` Loro items: the parts of one step.
+    fn replay(&mut self, items: usize, undo: bool) -> Result<usize, DocError> {
+        self.log().processing = true;
+        let mut done = 0;
+        let mut result = Ok(());
+        for _ in 0..items {
+            let step = if undo {
+                self.inner.undo()
+            } else {
+                self.inner.redo()
+            };
+            match step {
+                Ok(true) => done += 1,
+                Ok(false) => break,
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            }
+        }
+        self.log().processing = false;
+        result?;
+        Ok(done)
     }
 
     pub fn can_undo(&self) -> bool {
-        self.inner.can_undo()
+        !self.log().undo.is_empty() && self.inner.can_undo()
     }
 
     pub fn can_redo(&self) -> bool {
-        self.inner.can_redo()
+        !self.log().redo.is_empty() && self.inner.can_redo()
     }
 
     pub fn undo_count(&self) -> usize {
-        self.inner.undo_count()
+        self.log().undo.len()
     }
 
     pub fn redo_count(&self) -> usize {
-        self.inner.redo_count()
+        self.log().redo.len()
     }
 
     /// Forgets all steps.
     pub fn clear(&self) {
         self.inner.clear();
+        let mut log = self.log();
+        log.undo.clear();
+        log.redo.clear();
     }
 
     /// Keeps at most `steps` undo steps.
     pub fn set_limit(&mut self, steps: usize) {
-        self.inner.set_max_undo_steps(steps);
+        self.inner.set_max_undo_steps(loro_items(steps));
+        let mut log = self.log();
+        log.limit = steps;
+        if log.undo.len() > steps {
+            let excess = log.undo.len() - steps;
+            log.undo.drain(..excess);
+        }
     }
 }

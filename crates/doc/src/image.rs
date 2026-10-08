@@ -74,7 +74,7 @@ impl Document {
     /// Raw records remain available even when a newer version cannot be read.
     pub fn image_record(&self, node: NodeId) -> Result<Option<String>, DocError> {
         self.block(node)?;
-        Ok(get_str(&self.tree("content").get_meta(node.0)?, "image1"))
+        Ok(get_str(&self.meta_of(node)?, "image1"))
     }
     pub fn image(&self, node: NodeId) -> Result<ImageData, DocError> {
         let raw = self
@@ -87,9 +87,7 @@ impl Document {
         if self.block(node)?.kind != BlockKind::Image {
             return Err(DocError::Malformed(node, "not an image"));
         }
-        self.tree("content")
-            .get_meta(node.0)?
-            .insert("image1", raw)?;
+        self.meta_of(node)?.insert("image1", raw)?;
         Ok(())
     }
     /// Paste metadata on an invisible staged block, outside the undo history.
@@ -100,7 +98,7 @@ impl Document {
         self.doc
             .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
         self.tree("content")
-            .get_meta(node.0)?
+            .get_meta(node.node)?
             .insert("image1", raw)?;
         self.doc.commit();
         Ok(())

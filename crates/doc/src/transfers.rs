@@ -34,6 +34,14 @@ impl Document {
         if bytes == 0 {
             return Ok(());
         }
+        // Lineage is kept in the underlying texts' coordinates; a paragraph
+        // of a flow gives offsets in its view.
+        let (start, end, at) = (
+            self.shared_byte(source, start)?,
+            self.shared_byte(source, start + bytes)?,
+            self.shared_byte(target, at)?,
+        );
+        let bytes = end.saturating_sub(start);
         let old = self.text_of_any(source).ok_or(DocError::NoNode(source))?;
         let new = self.text_of_any(target).ok_or(DocError::NoNode(target))?;
         let from = old.loro();
@@ -47,7 +55,7 @@ impl Document {
         let dest = to
             .convert_pos(at, PosType::Bytes, PosType::Unicode)
             .ok_or_else(|| DocError::Store("invalid transfer destination".into()))?;
-        let meta = self.tree("content").get_meta(source.0)?;
+        let meta = self.meta_of(source)?;
         let map = match meta.get("transfers1") {
             Some(ValueOrContainer::Container(loro::Container::Map(map))) => map,
             None => meta.insert_container("transfers1", LoroMap::new())?,
@@ -181,7 +189,7 @@ impl Document {
             if index.get(&node_key).is_none() {
                 let _ = index.insert(&node_key, true);
             }
-            let Ok(meta) = self.tree("content").get_meta(node.0) else {
+            let Ok(meta) = self.meta_of(node) else {
                 continue;
             };
             let map = match meta.get("transfer-history1") {
@@ -326,8 +334,27 @@ impl Document {
         self.commit_lineage();
     }
 
+    /// The byte offset in `node`'s underlying text of byte `at` of its
+    /// current text (they differ for a paragraph of a flow).
+    fn shared_byte(&self, node: NodeId, at: usize) -> Result<usize, DocError> {
+        let Ok(block) = self.block(node) else {
+            return Ok(at);
+        };
+        if !block.text.is_view() {
+            return Ok(at);
+        }
+        let u = block.text.to_shared(at)?;
+        let raw = block.text.loro();
+        Ok(if u >= raw.len_unicode() {
+            raw.len_utf8()
+        } else {
+            raw.convert_pos(u, PosType::Unicode, PosType::Bytes)
+                .ok_or_else(|| DocError::Store("invalid transfer offset".into()))?
+        })
+    }
+
     fn lineage_entries(&self, node: NodeId) -> Vec<(String, String)> {
-        let Ok(meta) = self.tree("content").get_meta(node.0) else {
+        let Ok(meta) = self.meta_of(node) else {
             return vec![];
         };
         let mut entries = std::collections::BTreeMap::new();
@@ -528,7 +555,7 @@ mod tests {
             .append_block(crate::BlockKind::Paragraph, "", "def")
             .unwrap();
         doc.tree("content")
-            .get_meta(second.0)
+            .get_meta(second.node)
             .unwrap()
             .insert("transfers1", "future")
             .unwrap();
@@ -552,7 +579,7 @@ mod tests {
             .anchor(1, crate::text::Affinity::After)
             .unwrap();
         doc.join_blocks(first, second).unwrap();
-        let meta = doc.tree("content").get_meta(second.0).unwrap();
+        let meta = doc.tree("content").get_meta(second.node).unwrap();
         let Some(ValueOrContainer::Container(loro::Container::Map(map))) = meta.get("transfers1")
         else {
             panic!()
@@ -564,7 +591,7 @@ mod tests {
             }
         });
         let mut record: Transfer = serde_json::from_str(&raw.unwrap()).unwrap();
-        record.node = NodeId(loro::TreeID {
+        record.node = NodeId::tree(loro::TreeID {
             peer: 99,
             counter: 999,
         });

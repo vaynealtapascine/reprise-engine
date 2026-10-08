@@ -30,7 +30,7 @@ fn note(doc: &Document, text: &str) -> NodeId {
 /// queries must already work once something does.
 fn child(doc: &Document, parent: NodeId, text: &str) -> NodeId {
     let tree = doc.tree("content");
-    let id = tree.create(parent.0).unwrap();
+    let id = tree.create(parent.node).unwrap();
     let meta = tree.get_meta(id).unwrap();
     meta.insert("kind", "paragraph").unwrap();
     meta.insert("style", "body").unwrap();
@@ -38,7 +38,7 @@ fn child(doc: &Document, parent: NodeId, text: &str) -> NodeId {
         .insert_container("text", loro::LoroText::new())
         .unwrap();
     t.insert_utf8(0, text).unwrap();
-    NodeId(id)
+    NodeId::tree(id)
 }
 
 fn resolve(doc: &Document, target: &Target, policy: OnTargetDeleted) -> Outcome {
@@ -812,7 +812,7 @@ fn an_undone_deletion_is_the_same_node() {
 #[test]
 fn legacy_physical_tree_tombstones_stay_deleted() {
     let p = policies();
-    p.doc.doc.get_tree("content").delete(p.target.0).unwrap();
+    p.doc.doc.get_tree("content").delete(p.target.node).unwrap();
     p.doc.commit();
     assert!(!p.doc.is_live(p.target));
     assert!(p.doc.block(p.target).is_err());

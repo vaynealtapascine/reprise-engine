@@ -89,7 +89,11 @@ impl Document {
         if !self.is_live(node) {
             return Err(DocError::NoNode(node));
         }
-        let meta = self.tree("content").get_meta(node.0)?;
+        if node.is_break() {
+            // A paragraph of a flow is never a table container.
+            return Ok(None);
+        }
+        let meta = self.tree("content").get_meta(node.node)?;
         if meta.get("table1").is_none() {
             return Ok(None);
         }
@@ -177,7 +181,7 @@ impl Document {
         let raw = serde_json::to_string(&Stored { version: 1, role })
             .map_err(|_| DocError::Malformed(node, "table1"))?;
         self.tree("content")
-            .get_meta(node.0)?
+            .get_meta(node.node)?
             .insert("table1", raw)?;
         Ok(())
     }
@@ -209,14 +213,15 @@ impl Document {
         style: &str,
         text: &str,
     ) -> Result<NodeId, DocError> {
+        crate::check_authored(text)?;
         let tree = self.tree("content");
-        let id = tree.create(parent.map(|n| n.0))?;
+        let id = tree.create(parent.map(|n| n.node))?;
         let meta = tree.get_meta(id)?;
         meta.insert("kind", kind.as_str())?;
         meta.insert("style", style)?;
         meta.insert_container("text", LoroText::new())?
             .insert_utf8(0, text)?;
-        Ok(NodeId(id))
+        Ok(NodeId::tree(id))
     }
 }
 
@@ -247,7 +252,7 @@ mod tests {
     fn unknown_and_malformed_metadata_remain_authored() {
         let doc = Document::new(1).unwrap();
         let node = doc.append_block(BlockKind::Paragraph, "", "rest").unwrap();
-        let meta = doc.tree("content").get_meta(node.0).unwrap();
+        let meta = doc.tree("content").get_meta(node.node).unwrap();
         for raw in ["{", "{\"version\":2,\"role\":\"future\"}"] {
             meta.insert("table1", raw).unwrap();
             assert!(doc.table_role(node).is_err());

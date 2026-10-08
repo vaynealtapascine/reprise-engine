@@ -321,8 +321,8 @@ pub fn scripted(
     removed: crate::NodeId,
 ) -> loro::LoroResult<()> {
     let tree = doc.doc.get_tree("content");
-    tree.get_meta(malformed.0)?.insert("kind", 42)?;
-    tree.delete(removed.0)?;
+    tree.get_meta(malformed.node)?.insert("kind", 42)?;
+    tree.delete(removed.node)?;
     doc.doc
         .get_map("zz-unknown-root")
         .insert("from-the-future", "kept")?;

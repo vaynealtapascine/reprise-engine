@@ -174,7 +174,7 @@ impl Document {
         })
         .map_err(|e| DocError::Store(e.to_string()))?;
         self.tree("content")
-            .get_meta(node.0)?
+            .get_meta(node.node)?
             .insert("table1", raw)?;
         Ok(())
     }
@@ -218,8 +218,7 @@ impl Document {
                 .slice(bytes.clone())
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
             let meta = self
-                .tree("content")
-                .get_meta(node.0)
+                .meta_of(node)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
             let style = block.style.unwrap_or_default();
             for name in [Some(style.clone()), block.overrides.parent.clone()]
@@ -299,9 +298,7 @@ impl Document {
                 .get_meta(id)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
             let affinity = |key| -> Option<Affinity> {
-                let Some(ValueOrContainer::Value(LoroValue::Binary(b))) = meta.get(key) else {
-                    return None;
-                };
+                let b = crate::ranges::stored_anchor(meta.get(key))?;
                 let cursor = loro::cursor::Cursor::decode(&b).ok()?;
                 Some(
                     if cursor.side == loro::cursor::Side::Right && cursor.id.is_some() {
@@ -392,7 +389,7 @@ impl Document {
         self.doc
             .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
         self.tree("content")
-            .get_meta(node.0)?
+            .get_meta(node.node)?
             .insert("table1", raw)?;
         self.doc.commit();
         Ok(())
@@ -408,14 +405,14 @@ impl Document {
         if bytes.start > bytes.end {
             return Err(crate::text::TextError::BadRange(bytes).into());
         }
-        let meta = self.tree("content").get_meta(node.0)?;
+        let meta = self.tree("content").get_meta(node.node)?;
         let Some(ValueOrContainer::Container(Container::Text(text))) = meta.get("text") else {
             return Err(DocError::Malformed(node, "text"));
         };
         let text = crate::text::Text::from_loro(text);
         let start = text.anchor(bytes.start, policy.start)?;
         let end = text.anchor(bytes.end, policy.end)?;
-        self.commit();
+        self.commit_part();
         self.doc
             .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
         let tree = self.tree("ranges");
@@ -423,8 +420,8 @@ impl Document {
         let meta = tree.get_meta(id)?;
         meta.insert("deleted", true)?;
         meta.insert("node", node.to_string())?;
-        meta.insert("start", start.encode())?;
-        meta.insert("end", end.encode())?;
+        meta.insert("start", crate::ranges::anchor_value(&start))?;
+        meta.insert("end", crate::ranges::anchor_value(&end))?;
         crate::ranges::write_policy(&meta, policy)?;
         self.doc.commit();
         Ok(RangeId(id))
@@ -460,8 +457,8 @@ impl Document {
         let end = text.anchor(bytes.end, policy.end)?;
         let meta = tree.get_meta(id.0)?;
         meta.insert("node", node.to_string())?;
-        meta.insert("start", start.encode())?;
-        meta.insert("end", end.encode())?;
+        meta.insert("start", crate::ranges::anchor_value(&start))?;
+        meta.insert("end", crate::ranges::anchor_value(&end))?;
         crate::ranges::write_policy(&meta, policy)?;
         Ok(())
     }

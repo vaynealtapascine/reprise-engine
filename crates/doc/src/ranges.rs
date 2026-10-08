@@ -14,6 +14,54 @@ struct PolicyEnvelope {
     empty: Empty,
 }
 
+/// The longest stored anchor read back. A Loro cursor is a few dozen bytes.
+const MAX_STORED_ANCHOR: usize = 256;
+
+/// How a range end is stored: hex text, so that it survives every sync path
+/// unchanged. (Bytes, as written before, turn into a list of numbers in the
+/// JSON delta encoding, so the receiver held a different value.)
+pub(crate) fn anchor_value(anchor: &crate::text::Anchor) -> String {
+    use std::fmt::Write;
+    let bytes = anchor.encode();
+    let mut out = String::with_capacity(2 + 2 * bytes.len());
+    out.push_str("a1");
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// The bytes of a stored range end, from any form it has been stored in:
+/// hex text, bytes, or a list of byte values (what the JSON delta encoding
+/// made of bytes).
+pub(crate) fn stored_anchor(value: Option<ValueOrContainer>) -> Option<Vec<u8>> {
+    match value? {
+        ValueOrContainer::Value(LoroValue::String(s)) => {
+            let hex = s.strip_prefix("a1")?;
+            if hex.len() % 2 != 0 || hex.len() > 2 * MAX_STORED_ANCHOR {
+                return None;
+            }
+            (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+                .collect()
+        }
+        ValueOrContainer::Value(LoroValue::Binary(b)) if b.len() <= MAX_STORED_ANCHOR => {
+            Some(b.to_vec())
+        }
+        ValueOrContainer::Value(LoroValue::List(items)) if items.len() <= MAX_STORED_ANCHOR => {
+            items
+                .iter()
+                .map(|v| match v {
+                    LoroValue::I64(n) => u8::try_from(*n).ok(),
+                    _ => None,
+                })
+                .collect()
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn write_policy(meta: &LoroMap, policy: RangePolicy) -> Result<(), DocError> {
     let raw = serde_json::to_string(&PolicyEnvelope {
         version: 1,

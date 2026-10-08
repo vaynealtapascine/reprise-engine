@@ -31,9 +31,11 @@ impl Document {
     }
 
     /// The text container of a node whether or not it is live, for resolving
-    /// anchors left in deleted blocks. `None` if it has none.
+    /// anchors left in deleted blocks. `None` if it has none. For a paragraph
+    /// of a flow this is the whole shared text of its host, with offsets in
+    /// that text; [`Document::locate`] gives paragraph offsets.
     pub fn text_of_any(&self, id: NodeId) -> Option<Text> {
-        let meta = self.tree("content").get_meta(id.0).ok()?;
+        let meta = self.tree("content").get_meta(id.node).ok()?;
         match meta.get("text")? {
             ValueOrContainer::Container(Container::Text(t)) => Some(Text::from_loro(t)),
             _ => None,
@@ -52,40 +54,41 @@ impl Document {
             return Fallback::Successor(first);
         }
         let order = self.full_order();
-        let Some(at) = order.iter().position(|&n| n == id.0) else {
+        let Some(at) = order.iter().position(|&n| n == id) else {
             // Removed from the tree: no position to search from.
             return order
                 .iter()
-                .map(|&n| NodeId(n))
+                .copied()
                 .find(|&n| self.is_caret_block(n))
                 .map_or(Fallback::Nowhere, Fallback::StartOf);
         };
         let before = order.get(..at).unwrap_or_default();
-        if let Some(&n) = before
-            .iter()
-            .rev()
-            .find(|&&n| self.is_caret_block(NodeId(n)))
-        {
-            return Fallback::EndOf(NodeId(n));
+        if let Some(&n) = before.iter().rev().find(|&&n| self.is_caret_block(n)) {
+            return Fallback::EndOf(n);
         }
         let after = order.get(at + 1..).unwrap_or_default();
         after
             .iter()
-            .map(|&n| NodeId(n))
+            .copied()
             .find(|&n| self.is_caret_block(n))
             .map_or(Fallback::Nowhere, Fallback::StartOf)
     }
 
     /// Every node in the content tree, live or not, in document order.
     /// Physically deleted nodes are not in the tree and are left out.
-    fn full_order(&self) -> Vec<TreeID> {
+    /// A flow's break paragraphs, live or not, follow their host in text
+    /// order.
+    fn full_order(&self) -> Vec<NodeId> {
         let tree = self.tree("content");
         let mut order = Vec::new();
         let mut stack: Vec<TreeID> = tree.children(TreeParentId::Root).unwrap_or_default();
         stack.reverse();
         // Each node is pushed once, from its one parent, so this ends.
         while let Some(id) = stack.pop() {
-            order.push(id);
+            order.push(NodeId::tree(id));
+            if let Some(flow) = self.flow(id) {
+                order.extend(flow.marks.iter().map(|&(m, _)| m));
+            }
             let mut kids = tree.children(TreeParentId::Node(id)).unwrap_or_default();
             kids.reverse();
             stack.extend(kids);

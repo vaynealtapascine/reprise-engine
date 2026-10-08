@@ -40,7 +40,7 @@ impl Document {
         stack.reverse();
         // Each node is pushed once, from its one parent, so this ends.
         while let Some(id) = stack.pop() {
-            let node = NodeId(id);
+            let node = NodeId::tree(id);
             if self.live(&tree, id) {
                 if let Err(DocError::Malformed(_, what)) = self.block(node) {
                     out.push(Finding {
@@ -54,9 +54,9 @@ impl Document {
                 }
             } else if self.is_soft_deleted(node) && !self.successors(node).is_empty() {
                 for child in children(&tree, TreeParentId::Node(id)) {
-                    if !self.is_soft_deleted(NodeId(child)) {
+                    if !self.is_soft_deleted(NodeId::tree(child)) {
                         out.push(Finding {
-                            node: NodeId(child),
+                            node: NodeId::tree(child),
                             note: Note::new(
                                 Severity::Warning,
                                 HIDDEN_CONTENT,
@@ -78,7 +78,7 @@ impl Document {
             .collect();
         gone.sort();
         for id in gone {
-            let node = NodeId(id);
+            let node = NodeId::tree(id);
             if !self.is_flagged_raw(&tree, id) {
                 out.push(Finding {
                     node,
