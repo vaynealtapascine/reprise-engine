@@ -272,7 +272,7 @@ impl Exporter for PlainText {
                 "transforms and spirals are omitted",
                 "notes and floats become ordinary paragraphs",
                 "cells use tabs; rows use newlines; paragraphs use two newlines; authored breaks stay literal; header rows and cell spans are flattened and repeated header copies are omitted",
-                "style metadata is omitted",
+                "style metadata and character formatting are omitted",
                 "logical Unicode text and bidi controls are retained",
                 "font bytes and identities are omitted",
                 "non-text assets are omitted",
@@ -359,8 +359,74 @@ fn paragraph(
             points(style.line_height)
         ),
     )?;
-    append(out, &escape(&text).replace(['\n', '\u{2028}'], "<br>"))?;
+    let formats = doc
+        .text_formats(node)
+        .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+    for run in formats.runs {
+        let mut css = String::new();
+        if let Some(families) = &run.style.families {
+            let families: Vec<_> = families.iter().map(|f| css_string(f)).collect();
+            css.push_str(&format!("font-family: {};", families.join(", ")));
+        }
+        if let Some(size) = run.style.size {
+            css.push_str(&format!("font-size: {}pt;", points(size)));
+        }
+        if let Some(features) = &run.style.features {
+            let settings: Vec<_> = features
+                .iter()
+                .map(|f| {
+                    format!(
+                        "{} {}",
+                        css_string(&String::from_utf8_lossy(&f.tag)),
+                        f.value
+                    )
+                })
+                .collect();
+            css.push_str(&format!(
+                "font-feature-settings: {};",
+                if settings.is_empty() {
+                    "normal".into()
+                } else {
+                    settings.join(", ")
+                }
+            ));
+        }
+        let span = !css.is_empty() || run.style.language.is_some();
+        if span {
+            let lang = run
+                .style
+                .language
+                .as_ref()
+                .map(|s| format!(" lang=\"{}\"", escape(s)))
+                .unwrap_or_default();
+            append(out, &format!("<span{lang} style=\"{}\">", escape(&css)))?;
+        }
+        append(
+            out,
+            &escape(&text[run.bytes]).replace(['\n', '\u{2028}'], "<br>"),
+        )?;
+        if span {
+            append(out, "</span>")?;
+        }
+    }
     append(out, "</p>")
+}
+
+/// A CSS quoted string, subsequently escaped for its HTML attribute context.
+fn css_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for c in value.chars() {
+        if c.is_control() {
+            out.push_str(&format!("\\{:x} ", c as u32));
+        } else {
+            if matches!(c, '\\' | '"') {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+    }
+    out.push('"');
+    out
 }
 fn html_node(
     doc: &Document,
@@ -483,7 +549,7 @@ impl Exporter for Html {
                 "transforms and spirals are omitted",
                 "notes and floats become paragraphs",
                 "table/row/cell semantics retained; header rows (th) and spans (colspan/rowspan, as laid out) retained; column constraints and repeated header copies are omitted",
-                "computed family, size and line height retained; symbolic values and named inheritance omitted",
+                "computed family, size and line height retained; character formatting (family, size, language, OpenType features) as inline spans; symbolic values and named inheritance omitted",
                 "logical Unicode plus paragraph dir retained",
                 "CSS family names retained; pinned identities and font bytes omitted",
                 "assets have no HTML representation",

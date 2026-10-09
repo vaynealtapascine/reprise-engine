@@ -36,6 +36,11 @@ pub const MAX_ANCESTORS: usize = 1024;
 
 #[derive(Debug)]
 pub(crate) enum Step {
+    FormatText {
+        node: NodeId,
+        range: Range<usize>,
+        style: reprise_doc::formatting::TextStyle,
+    },
     InsertText {
         node: NodeId,
         at: usize,
@@ -330,6 +335,7 @@ impl Model<'_> {
             Command::Paste { .. } => Err(Reason::MixedPaste),
             Command::InsertText { node, at, text } => self.insert_text(*node, *at, text),
             Command::DeleteText { node, range } => self.delete_text(*node, range),
+            Command::FormatText { node, range, style } => self.format_text(*node, range, style),
             Command::SplitBlock { node, at } => self.split(*node, *at),
             Command::JoinBlocks { first, second } => self.join(*first, *second),
             Command::InsertBlock {
@@ -399,6 +405,47 @@ impl Model<'_> {
             at,
             removed: 0,
             inserted: text.len(),
+        });
+        Ok(())
+    }
+
+    fn format_text(
+        &mut self,
+        node: NodeId,
+        range: &Range<usize>,
+        style: &reprise_doc::formatting::TextStyle,
+    ) -> Result<(), Reason> {
+        use reprise_doc::formatting::{MAX_FORMAT_ORDER, MAX_FORMATS_PER_HOST};
+        let text = self.text(node)?;
+        if range.is_empty() || text.get(range.clone()).is_none() {
+            return Err(Reason::BadRange {
+                node,
+                range: range.clone(),
+            });
+        }
+        style.validate().map_err(Reason::from)?;
+        let payload = serde_json::to_vec(style).map_err(|e| Reason::Store(e.to_string()))?;
+        self.add_payload(payload.len())?;
+        let (count, order) = self.doc.text_format_capacity(node).map_err(Reason::from)?;
+        let pending: Vec<_> = self
+            .plan
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::FormatText { node, .. } => Some(*node),
+                _ => None,
+            })
+            .collect();
+        if count + pending.iter().filter(|n| n.host() == node.host()).count()
+            >= MAX_FORMATS_PER_HOST
+            || order.saturating_add(pending.len() as u64) >= MAX_FORMAT_ORDER
+        {
+            return Err(Reason::Store("text formatting limit".into()));
+        }
+        self.plan.steps.push(Step::FormatText {
+            node,
+            range: range.clone(),
+            style: style.clone(),
         });
         Ok(())
     }

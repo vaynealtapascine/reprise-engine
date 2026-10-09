@@ -19,9 +19,11 @@ use crate::container::FeatureFlags;
 
 pub const OPTIONAL_TABLE_HEADERS: u64 = 1 << 8;
 pub const REQUIRED_TABLE_SPANS: u64 = 1 << 8;
+/// Older readers must not silently discard anchored character formatting.
+pub const REQUIRED_TEXT_FORMATTING: u64 = 1 << 9;
 
 /// Required bits this version understands. Any other required bit refuses.
-pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS;
+pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -32,13 +34,16 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_text_formatting() {
+        flags.required |= REQUIRED_TEXT_FORMATTING;
+    }
     let mut stack: Vec<NodeId> = document.blocks();
     let mut visited = 0usize;
     while let Some(node) = stack.pop() {
         visited += 1;
         if visited > MAX_SCANNED_NODES {
             return FeatureFlags {
-                required: REQUIRED_TABLE_SPANS,
+                required: REQUIRED_TABLE_SPANS | flags.required,
                 optional: OPTIONAL_TABLE_HEADERS,
             };
         }
@@ -58,7 +63,7 @@ pub fn table_features(document: &Document) -> FeatureFlags {
             // Metadata this version cannot read may be anything newer.
             Err(_) => flags.required |= REQUIRED_TABLE_SPANS,
         }
-        if flags.required != 0 && flags.optional != 0 {
+        if flags.required & REQUIRED_TABLE_SPANS != 0 && flags.optional != 0 {
             break;
         }
         stack.extend(document.children(Some(node)));

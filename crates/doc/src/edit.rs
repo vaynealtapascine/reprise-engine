@@ -230,6 +230,7 @@ impl Document {
         }
         let block = self.block(id)?;
         let tail = block.text.slice(at..block.text.len())?;
+        self.prepare_format_copy(id, at..block.text.len(), None)?;
         let new = self.stage_block(&NewBlock {
             kind: block.kind,
             style: block.style.unwrap_or_default(),
@@ -261,9 +262,11 @@ impl Document {
             .iter()
             .position(|&c| c == id)
             .ok_or(DocError::NoNode(id))?;
+        let formatting = self.prepare_format_copy(id, at..end, Some(new))?;
         self.record_transfer(id, at, new, 0, end - at)?;
         block.text.delete(at..end)?;
-        self.activate_block_at(new, parent, index + 1)
+        self.activate_block_at(new, parent, index + 1)?;
+        self.write_format_copy(new, 0, formatting)
     }
 
     /// Joins `second` onto the end of `first`. When `second` is the
@@ -294,10 +297,12 @@ impl Document {
             return self.supersede(second, first);
         }
         let at = a.text.len();
+        let formatting = self.prepare_format_copy(second, 0..b.text.len(), Some(first))?;
         a.text.insert(at, &b.text.to_string())?;
         self.record_transfer(second, 0, first, at, b.text.len())?;
         self.supersede(second, first)?;
-        self.delete_block(second)
+        self.delete_block(second)?;
+        self.write_format_copy(first, at, formatting)
     }
 }
 

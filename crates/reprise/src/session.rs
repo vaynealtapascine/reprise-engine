@@ -215,6 +215,8 @@ impl DocumentSession {
                     reprise_doc::BlockKind::Image => BlockKind::Image,
                 },
                 text: block.text.to_string(),
+                // Unreadable formatting is reported by layout diagnostics.
+                formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
             });
         }
         let mut diagnostics = self.diagnostics().data;
@@ -814,6 +816,41 @@ impl DocumentSession {
                 .content_only(),
         )
     }
+    /// Glyph outlines for drawing display lists without the engine (canvas,
+    /// WebGL). See [`GlyphOutlines`].
+    pub fn glyph_outlines(
+        &self,
+        request: &Payload<GlyphRequest>,
+    ) -> Result<Payload<GlyphOutlines>> {
+        let r = validate(request)?;
+        if r.glyphs.len() > 4096 {
+            return Err(Error::Limit("glyphs per outline request".into()));
+        }
+        let face = self
+            .engine
+            .fonts
+            .get(&reprise_font::FaceId {
+                family: r.face.family.clone(),
+                hash: r.face.hash.clone(),
+            })
+            .map_err(|e| Error::Core {
+                code: "bindings.missing-font".into(),
+                severity: Severity::Error,
+                message: e.to_string(),
+                command: None,
+            })?;
+        Ok(Payload::new(GlyphOutlines {
+            units_per_em: u32::from(face.metrics().units_per_em),
+            glyphs: r
+                .glyphs
+                .iter()
+                .map(|&id| GlyphOutline {
+                    id,
+                    path: outline_path(&face.outline(id)),
+                })
+                .collect(),
+        }))
+    }
     pub fn svg(&self, page: u32) -> Result<Payload<String>> {
         let list = self.display_core(page)?;
         Ok(Payload::new(
@@ -1232,4 +1269,21 @@ impl LayoutJob {
             )?,
         }))
     }
+}
+
+/// SVG path data for a glyph outline, in font units with y up.
+fn outline_path(commands: &[reprise_font::PathCmd]) -> String {
+    use reprise_font::PathCmd;
+    use std::fmt::Write;
+    let mut out = String::new();
+    for c in commands {
+        let _ = match *c {
+            PathCmd::Move(x, y) => write!(out, "M{x} {y}"),
+            PathCmd::Line(x, y) => write!(out, "L{x} {y}"),
+            PathCmd::Quad(a, b, x, y) => write!(out, "Q{a} {b} {x} {y}"),
+            PathCmd::Cubic(a, b, c, d, x, y) => write!(out, "C{a} {b} {c} {d} {x} {y}"),
+            PathCmd::Close => write!(out, "Z"),
+        };
+    }
+    out
 }

@@ -135,6 +135,70 @@ pub(crate) fn command(c: &Command) -> Result<reprise_edit::Command> {
             node: id(node)?,
             style: style(s)?,
         },
+        Command::FormatText {
+            node,
+            start,
+            end,
+            style,
+        } => C::FormatText {
+            node: id(node)?,
+            range: *start as usize..*end as usize,
+            style: text_style(style)?,
+        },
+    })
+}
+fn text_style(s: &TextStyle) -> Result<reprise_doc::formatting::TextStyle> {
+    let features = s
+        .features
+        .as_ref()
+        .map(|features| {
+            features
+                .iter()
+                .map(|f| {
+                    let tag: [u8; 4] = f.tag.as_bytes().try_into().map_err(|_| {
+                        Error::Invalid(
+                            "OpenType feature tag must contain four ASCII characters".into(),
+                        )
+                    })?;
+                    Ok(reprise_doc::formatting::TextFeature {
+                        tag,
+                        value: f.value,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?;
+    Ok(reprise_doc::formatting::TextStyle {
+        families: s.families.clone(),
+        size: s.size.map(Length),
+        language: s.language.clone(),
+        features,
+        reset: s.reset,
+    })
+}
+pub(crate) fn text_runs(f: reprise_doc::formatting::TextFormats) -> Option<Vec<TextRun>> {
+    f.has_formatting.then(|| {
+        f.runs
+            .into_iter()
+            .map(|run| TextRun {
+                start: u32::try_from(run.bytes.start).unwrap_or(u32::MAX),
+                end: u32::try_from(run.bytes.end).unwrap_or(u32::MAX),
+                style: TextStyle {
+                    families: run.style.families,
+                    size: run.style.size.map(|l| l.0),
+                    language: run.style.language,
+                    features: run.style.features.map(|fs| {
+                        fs.into_iter()
+                            .map(|f| TextFeature {
+                                tag: String::from_utf8_lossy(&f.tag).into_owned(),
+                                value: f.value,
+                            })
+                            .collect()
+                    }),
+                    reset: false,
+                },
+            })
+            .collect()
     })
 }
 pub(crate) fn applied(a: reprise_edit::Applied, notes: Vec<reprise_diag::Note>) -> Applied {

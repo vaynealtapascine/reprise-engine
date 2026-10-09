@@ -31,6 +31,7 @@ pub mod expr;
 mod flow;
 #[cfg(test)]
 mod flow_tests;
+pub mod formatting;
 pub mod fragment;
 pub mod function;
 mod history;
@@ -315,6 +316,8 @@ pub struct Document {
     flows: std::sync::Arc<std::sync::Mutex<flow::FlowCache>>,
     /// Each node's lineage records by source character, per revision.
     lineage: std::sync::Mutex<transfers::LineageCache>,
+    /// Formatting records by flow host, per revision (see `formatting`).
+    formats: std::sync::Mutex<formatting::FormatCache>,
     /// Which editing step this replica's next commits belong to (see
     /// [`UndoStack`]).
     pub(crate) steps: std::sync::Arc<edit::StepLog>,
@@ -335,6 +338,7 @@ impl Document {
             lineage_pending: std::sync::Mutex::new(Vec::new()),
             flows,
             lineage: Default::default(),
+            formats: Default::default(),
             steps: Default::default(),
         }
     }

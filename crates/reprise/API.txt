@@ -37,6 +37,7 @@ pub fn save(&mut self) -> Result<Payload<Bytes>>
 pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>>
 pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>>
 pub fn display_json(&self, page: u32) -> Result<Payload<String>>
+pub fn glyph_outlines( &self, request: &Payload<GlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
 pub fn svg(&self, page: u32) -> Result<Payload<String>>
 pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>>
 pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>>

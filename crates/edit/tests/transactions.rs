@@ -41,6 +41,62 @@ fn texts(doc: &Document) -> Vec<String> {
 }
 
 #[test]
+fn formatting_validates_against_prior_text_edits_and_undoes_as_one_step() {
+    use reprise_doc::formatting::TextStyle;
+    let doc = Document::new(1).unwrap();
+    let node = para(&doc, "abc");
+    let mut e = editor(doc);
+    let style = TextStyle {
+        size: Some(Length::from_pt(24)),
+        ..TextStyle::default()
+    };
+    e.apply(
+        &Transaction::new()
+            .with(Command::InsertText {
+                node,
+                at: 3,
+                text: "def".into(),
+            })
+            .with(Command::FormatText {
+                node,
+                range: 2..6,
+                style: style.clone(),
+            }),
+    )
+    .unwrap();
+    assert_eq!(e.undo_count(), 1);
+    assert_eq!(e.document().text_formats(node).unwrap().runs[1].bytes, 2..6);
+    assert!(e.undo().unwrap());
+    assert_eq!(texts(e.document()), ["abc"]);
+    assert_eq!(
+        e.document().text_formats(node).unwrap().runs[0].style,
+        TextStyle::default()
+    );
+    assert!(e.redo().unwrap());
+    assert_eq!(
+        e.document().text_formats(node).unwrap().runs[1].style,
+        style
+    );
+    refused(
+        &mut e,
+        Transaction::new()
+            .with(Command::InsertText {
+                node,
+                at: 0,
+                text: "not written".into(),
+            })
+            .with(Command::FormatText {
+                node,
+                range: 0..1,
+                style: TextStyle {
+                    size: Some(Length::ZERO),
+                    ..TextStyle::default()
+                },
+            }),
+    );
+}
+
+#[test]
 fn many_staging_commits_still_undo_as_one_step_with_a_one_step_limit() {
     let doc = Document::new(1).unwrap();
     let head = para(&doc, &"x".repeat(40));

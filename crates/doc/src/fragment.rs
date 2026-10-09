@@ -32,6 +32,9 @@ pub struct FragmentBlock {
     /// Versioned image metadata, kept verbatim even when unreadable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Effective paragraph-local text overrides, flattened from anchored actions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub formatting: Vec<crate::formatting::FormatRun>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,7 +99,27 @@ impl Fragment {
             return Err(FragmentError::Limit("items"));
         }
         let mut nodes = BTreeMap::new();
+        let mut formatting_count = 0usize;
         for block in &self.blocks {
+            let mut previous = 0;
+            for run in &block.formatting {
+                formatting_count = formatting_count.saturating_add(1);
+                if formatting_count > crate::formatting::MAX_FORMATS_PER_HOST {
+                    return Err(FragmentError::Limit("text formatting runs"));
+                }
+                if run.bytes.is_empty()
+                    || run.bytes.start < previous
+                    || block.text.get(run.bytes.clone()).is_none()
+                {
+                    return Err(FragmentError::Invalid(
+                        "invalid text formatting range".into(),
+                    ));
+                }
+                run.style
+                    .validate()
+                    .map_err(|e| FragmentError::Invalid(e.to_string()))?;
+                previous = run.bytes.end;
+            }
             if block.text.contains(crate::text::BREAK) {
                 return Err(FragmentError::Invalid(
                     "reserved flow marker in authored text".into(),
@@ -249,6 +272,25 @@ impl Document {
                     return Err(FragmentError::Limit("style chain"));
                 }
             }
+            let formats = self.text_formats(node).map_err(bad)?;
+            fragment.notes.extend(formats.notes);
+            let formatting = if formats.has_formatting {
+                formats
+                    .runs
+                    .into_iter()
+                    .filter_map(|run| {
+                        let start = run.bytes.start.max(bytes.start);
+                        let end = run.bytes.end.min(bytes.end);
+                        (start < end).then_some(crate::formatting::FormatRun {
+                            bytes: start.saturating_sub(bytes.start)
+                                ..end.saturating_sub(bytes.start),
+                            style: run.style,
+                        })
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             fragment.blocks.push(FragmentBlock {
                 id: node,
                 parent,
@@ -258,6 +300,7 @@ impl Document {
                 text,
                 table: get_str(&meta, "table1"),
                 image: get_str(&meta, "image1"),
+                formatting,
             });
             cuts.insert(node, bytes);
             if cut.is_none() {
@@ -280,6 +323,11 @@ impl Document {
             let meta = tree
                 .get_meta(id)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
+            // Formatting actions travel flattened in `FragmentBlock::formatting`;
+            // copying their records too would duplicate them as bare ranges.
+            if meta.get("format1").is_some() {
+                continue;
+            }
             let node = get_str(&meta, "node").and_then(|n| NodeId::parse(&n));
             let resolved = self.resolve_range(range_id);
             let resolved_node = match &resolved {

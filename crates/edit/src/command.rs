@@ -66,6 +66,13 @@ pub enum Command {
         node: NodeId,
         style: Style,
     },
+    /// Adds anchored text formatting. A reset patch reveals paragraph defaults.
+    /// Boundaries expand when typing at either end; empty selections are refused.
+    FormatText {
+        node: NodeId,
+        range: Range<usize>,
+        style: reprise_doc::formatting::TextStyle,
+    },
     AddRelation {
         relation: Relation,
     },

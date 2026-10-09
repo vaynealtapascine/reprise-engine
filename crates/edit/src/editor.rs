@@ -293,6 +293,14 @@ impl Editor {
                 index,
             } => self.doc.move_block(*node, *parent, *index)?,
             Step::SetOverrides { node, style } => self.doc.set_overrides(*node, style)?,
+            Step::FormatText { node, range, style } => {
+                self.doc.format_text(
+                    *node,
+                    range.clone(),
+                    style,
+                    reprise_doc::text::RangePolicy::EXPANDING,
+                )?;
+            }
             Step::AddRelation { new } => {
                 let id = relations.get(*new).copied().ok_or_else(missing)?;
                 self.doc.restore_relation(id)?;

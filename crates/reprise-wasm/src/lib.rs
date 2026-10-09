@@ -30,6 +30,10 @@ extern "C" {
     #[wasm_bindgen(typescript_type = "Payload<PresenceView>")]
     pub type PresenceViewPayload;
 
+    #[wasm_bindgen(typescript_type = "Payload<GlyphRequest>")]
+    pub type GlyphRequestPayload;
+    #[wasm_bindgen(typescript_type = "Payload<GlyphOutlines>")]
+    pub type GlyphOutlinesPayload;
     #[wasm_bindgen(typescript_type = "Payload<CopyAs>")]
     pub type CopyAsPayload;
     #[wasm_bindgen(typescript_type = "Payload<Array<Resource>>")]
@@ -543,6 +547,12 @@ impl WasmDocument {
     }
     pub fn display_json(&self, page: u32) -> Result<StringPayload, JsValue> {
         Ok(encode(self.inner.display_json(page))?.unchecked_into())
+    }
+    pub fn glyph_outlines(
+        &self,
+        request: &GlyphRequestPayload,
+    ) -> Result<GlyphOutlinesPayload, JsValue> {
+        Ok(encode(self.inner.glyph_outlines(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn svg(&self, page: u32) -> Result<StringPayload, JsValue> {
         Ok(encode(self.inner.svg(page))?.unchecked_into())

@@ -39,6 +39,18 @@ it and returns `{ kind: "moved", node, new }` in `Applied.effects`; hosts must m
 positions from `node` to `new`. Whole-tree moves retain their ID. This additive
 effect is declared in the Rust DTO and generated TypeScript union.
 
+Character formatting is authored with `Command::FormatText { node, start, end,
+style }` (byte offsets; empty ranges are refused). `TextStyle` fields are
+optional patches: `families`, `size` (1/1024 pt, positive), `language`, and
+OpenType `features` (`{ tag, value }`, four ASCII characters). `reset: true`
+clears earlier formatting under the range before applying its own fields. Each
+action is a separate undoable range whose boundaries expand when typing at
+either end; overlaps resolve by action order, field by field (see
+`docs/text-formatting.md`). `State.blocks[].formatting`, present only when some
+action covers the block, lists the resolved disjoint runs over the whole text;
+a run's absent fields inherit the paragraph style. Weight, slant, decoration and
+paint are not yet supported, and are refused rather than ignored.
+
 Geometry uses signed integer units of **1/1024 point**. Display matrices use
 signed integer **16.16** coefficients and integer length translations. Caret
 positions and glyph source ranges are **UTF-8 byte offsets**, not UTF-16 indexes.
@@ -115,9 +127,16 @@ releases it; WASM clients call `release_job` after completion/cancellation.
 | Navigation | `move_cursor`, `caret_rect`, `hit_test`, `selection_rects` |
 | Clipboard | `copy` (native fragment bytes), `copy_as` (plain/HTML selection with loss reports), `paste`, `import_text` |
 | Export/persistence | `save`, `export` (plain/HTML/native/PDF) |
-| Presentation | `display_page`, `display_json`, `svg`, `png`, `reading_order`, `diagnostics` |
+| Presentation | `display_page`, `display_json`, `svg`, `png`, `glyph_outlines`, `reading_order`, `diagnostics` |
 | Extensions | `load_plugin`, `install_plugin`, `run_plugin_edit`; WASM `release_plugin` |
 | Collaboration | `sync_info`, `export_updates`, `import_updates`, `awareness`, `validate_awareness` |
+
+`glyph_outlines(Payload<GlyphRequest>)` returns, for one face and at most 4,096
+glyph IDs, each glyph's outline as absolute SVG path data in font design units
+with y up, plus `units_per_em`. A canvas or WebGL renderer caches these (for
+example as `Path2D`) and draws display-list glyph runs by scaling with
+`size / units_per_em` and flipping y. IDs the face lacks give empty paths; an
+unknown face is `bindings.missing-font`. Outlines are for rendering only.
 
 Transactions expose the kernel's text/block/style/relation commands. Native
 paste and plain/HTML import use the kernel's standalone paste transaction.
@@ -247,6 +266,7 @@ returns an acknowledgement rather than an error.
 | `bindings.read-only` | Compatible newer package cannot be exposed as editable |
 | `bindings.store` | Document/store error without a more specific core note |
 | `bindings.render` | Backend could not render the requested page |
+| `bindings.missing-font` | `glyph_outlines` named a face the session doesn't have |
 | `bindings.poisoned` | The engine panicked; discard the session and reopen it (see below) |
 
 Important v1 bounds: JSON 20 MiB/depth 64; JS object graph 100,000 values,

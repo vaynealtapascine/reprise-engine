@@ -329,3 +329,14 @@ pub fn scripted(
     doc.commit();
     Ok(())
 }
+
+/// Overwrites a formatting action's envelope with `raw`, as a peer that
+/// bypasses the kernel could. Commits.
+pub fn corrupt_format(doc: &Document, range: crate::RangeId, raw: &str) -> loro::LoroResult<()> {
+    doc.doc
+        .get_tree("ranges")
+        .get_meta(range.0)?
+        .insert("format1", raw)?;
+    doc.commit();
+    Ok(())
+}

@@ -136,6 +136,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         incremental_long_paragraph_and_table()?,
         font_legacy_missing()?,
         collab_hostile_peer()?,
+        format_overlap_storm()?,
         table_header_repeats()?,
         table_header_taller_than_frame()?,
         table_spans_whole_table()?,
@@ -2575,5 +2576,84 @@ pub fn collab_hostile_peer() -> Result<Fixture, DocError> {
     Ok(Fixture {
         replica: Some(replica),
         ..Fixture::new("collab_hostile_peer", doc, &["layout.malformed-block"])
+    })
+}
+
+/// Character formatting under attack (docs/text-formatting.md): a mixed-script
+/// paragraph with combining marks gets hundreds of overlapping size, language
+/// and feature actions, some starting inside grapheme clusters, a reset, a
+/// concurrent peer's competing action, and one envelope a hostile peer
+/// overwrites with garbage. A split then carries formatting into a new
+/// paragraph. Every replica resolves the same runs; the garbage is reported
+/// and kept, never applied.
+pub fn format_overlap_storm() -> Result<Fixture, DocError> {
+    use reprise_doc::formatting::{TextFeature, TextStyle};
+    let doc = document()?;
+    let text = "Hallway e\u{301}\u{301} \u{5e9}\u{5dc}\u{5d5}\u{5dd} grows 1234 \
+                \u{1f469}\u{200d}\u{1f467} longer";
+    let p = doc.append_block(BlockKind::Paragraph, "body", text)?;
+    doc.commit();
+    let len = text.len();
+    let size = |pt| TextStyle {
+        size: Some(Length::from_pt(pt)),
+        ..TextStyle::default()
+    };
+    for i in 0..300usize {
+        // Char boundaries only; grapheme clusters may still be split.
+        let mut start = (i * 7) % len;
+        while !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        let mut end = (start + 1 + (i * 13) % 17).min(len);
+        while !text.is_char_boundary(end) {
+            end += 1;
+        }
+        let style = match i % 3 {
+            0 => size(8 + (i % 20) as i32),
+            1 => TextStyle {
+                language: Some(if i % 2 == 0 { "he" } else { "en" }.into()),
+                ..TextStyle::default()
+            },
+            _ => TextStyle {
+                features: Some(vec![TextFeature {
+                    tag: *b"liga",
+                    value: (i % 2) as u32,
+                }]),
+                ..TextStyle::default()
+            },
+        };
+        doc.format_text(p, start..end, &style, RangePolicy::EXPANDING)?;
+    }
+    doc.format_text(
+        p,
+        0..9,
+        &TextStyle {
+            reset: true,
+            ..TextStyle::default()
+        },
+        RangePolicy::FIXED,
+    )?;
+    doc.commit();
+    let since = doc.version_vector();
+    let replica = doc.fork(OTHER_PEER)?;
+    replica.format_text(p, 2..len - 2, &size(14), RangePolicy::EXPANDING)?;
+    replica.commit();
+    let attacker = doc.fork(66)?;
+    let victim = attacker.format_text(p, 0..len, &size(40), RangePolicy::FIXED)?;
+    attacker.commit();
+    reprise_doc::hostile::corrupt_format(&attacker, victim, r#"{"version":1,"order":-1}"#)
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    let sync = |e: reprise_doc::sync::SyncError| DocError::Store(e.to_string());
+    let attack = attacker.export_delta(&since).map_err(sync)?;
+    let edit = replica.export_delta(&since).map_err(sync)?;
+    doc.import_packet(&attack).map_err(sync)?;
+    doc.import_packet(&edit).map_err(sync)?;
+    replica.import_packet(&attack).map_err(sync)?;
+    doc.split_block(p, text.find("grows").unwrap_or(0))?;
+    doc.commit();
+    replica.merge(&doc)?;
+    Ok(Fixture {
+        replica: Some(replica),
+        ..Fixture::new("format_overlap_storm", doc, &["style.format-unreadable"])
     })
 }

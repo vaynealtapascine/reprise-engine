@@ -245,6 +245,20 @@ pub(crate) fn prepare(
     if total > crate::MAX_TRANSACTION_BYTES {
         return Err(invalid(FragmentError::Limit("paste text bytes")));
     }
+    let formats: usize = fragment.blocks.iter().map(|b| b.formatting.len()).sum();
+    if formats > 0 {
+        let probe = at
+            .map(|(n, _)| n)
+            .or_else(|| fragment.blocks.first().map(|b| b.id))
+            .ok_or_else(|| invalid(FragmentError::Invalid("formatting without blocks".into())))?;
+        let (existing, order) = doc.text_format_capacity(probe).map_err(store)?;
+        let existing = if at.is_some() { existing } else { 0 };
+        if existing.saturating_add(formats) > reprise_doc::formatting::MAX_FORMATS_PER_HOST
+            || order.saturating_add(formats as u64) > reprise_doc::formatting::MAX_FORMAT_ORDER
+        {
+            return Err(invalid(FragmentError::Limit("text formatting")));
+        }
+    }
     Ok(prepared)
 }
 
@@ -533,7 +547,45 @@ pub(crate) fn write(
         }
         doc.delete_block(node).map_err(store)?;
     }
+    let shifts = if join_first {
+        first.map(|id| (id, prefix.len())).into_iter().collect()
+    } else {
+        BTreeMap::new()
+    };
+    write_formats(doc, &fragment, &result.ids, &shifts)?;
     Ok(result)
+}
+
+fn write_formats(
+    doc: &Document,
+    fragment: &Fragment,
+    ids: &IdMap,
+    shifts: &BTreeMap<NodeId, usize>,
+) -> Result<(), EditError> {
+    for block in &fragment.blocks {
+        // Every fragment block was written above; a missing one is a bug,
+        // not something document content may turn into a panic.
+        let node = *ids.nodes.get(&block.id).ok_or_else(|| {
+            invalid(FragmentError::Invalid(
+                "formatted block was not written".into(),
+            ))
+        })?;
+        let shift = shifts.get(&block.id).copied().unwrap_or(0);
+        for run in &block.formatting {
+            let mut style = run.style.clone();
+            // A flattened source run replaces inherited inline overrides at
+            // the paste position, then inherits unspecified paragraph styling.
+            style.reset = true;
+            doc.format_text(
+                node,
+                run.bytes.start + shift..run.bytes.end + shift,
+                &style,
+                reprise_doc::text::RangePolicy::EXPANDING,
+            )
+            .map_err(store)?;
+        }
+    }
+    Ok(())
 }
 
 /// Where a paste into a paragraph of a flow goes.
@@ -753,6 +805,7 @@ fn write_into_flow(
     for new in result.relations.values() {
         doc.restore_relation(*new).map_err(store)?;
     }
+    write_formats(doc, &fragment, &result.ids, &joined)?;
     Ok(result)
 }
 

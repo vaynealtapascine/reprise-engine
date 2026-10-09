@@ -743,11 +743,13 @@ impl Document {
         // The copy is a distinct tree node. Placing it back in the source's
         // own flow cannot create a tree cycle.
         self.check_not_inside(staged, placement)?;
+        let formatting = self.prepare_format_copy(id, 0..len, Some(staged))?;
         self.put(staged, placement)?;
         self.restore_block(staged)?;
         self.record_transfer(id, 0, staged, 0, len)?;
         self.supersede(id, staged)?;
-        self.delete_block(id)
+        self.delete_block(id)?;
+        self.write_format_copy(staged, 0, formatting)
     }
 }
 

@@ -5,6 +5,7 @@ mod html;
 mod image_export;
 mod native;
 mod pdf_tags;
+mod text_css;
 pub use image_export::{NativeWithAssets, PdfWithAssets};
 pub use pdf_tags::{PdfMetadata, cell_role, heading_level};
 

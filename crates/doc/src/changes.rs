@@ -234,6 +234,21 @@ impl Document {
             }
         }
         let tree = self.tree("content");
+        for id in &report.ranges {
+            let Ok(meta) = self.tree("ranges").get_meta(id.0) else {
+                continue;
+            };
+            if meta.get("format1").is_none() {
+                continue;
+            }
+            let Some(node) = crate::get_str(&meta, "node").and_then(|n| NodeId::parse(&n)) else {
+                continue;
+            };
+            report.blocks.insert(node);
+            if let Some(flow) = self.flow(node.node) {
+                report.blocks.extend(flow.paras.iter().map(|p| p.id));
+            }
+        }
         for id in subtrees {
             report.blocks.insert(NodeId::tree(id));
             descendants(self, &tree, id, &mut report.blocks);

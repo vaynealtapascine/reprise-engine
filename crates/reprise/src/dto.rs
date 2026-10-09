@@ -88,6 +88,19 @@ pub struct Block {
     pub parent: Option<String>,
     pub kind: BlockKind,
     pub text: String,
+    /// Resolved character formatting as disjoint byte runs covering `text`,
+    /// present only when some formatting action covers this block. A run's
+    /// absent fields inherit the paragraph style.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub formatting: Option<Vec<TextRun>>,
+}
+/// Character formatting over `start..end`, UTF-8 byte offsets into the block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct TextRun {
+    pub start: u32,
+    pub end: u32,
+    pub style: TextStyle,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -165,6 +178,29 @@ pub enum Command {
         node: String,
         style: Style,
     },
+    FormatText {
+        node: String,
+        start: u32,
+        end: u32,
+        style: TextStyle,
+    },
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct TextStyle {
+    pub families: Option<Vec<String>>,
+    /// Positive font size in 1/1024 pt.
+    pub size: Option<i32>,
+    pub language: Option<String>,
+    pub features: Option<Vec<TextFeature>>,
+    pub reset: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct TextFeature {
+    /// Exactly four ASCII graphic characters.
+    pub tag: String,
+    pub value: u32,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
@@ -589,6 +625,26 @@ pub struct DisplayList {
     pub width: i32,
     pub height: i32,
     pub items: Vec<DisplayItem>,
+}
+/// Glyph outlines a renderer needs for one face: at most 4,096 IDs per request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct GlyphRequest {
+    pub face: Face,
+    pub glyphs: Vec<u32>,
+}
+/// Outlines in font design units, y up, as SVG path data (`M`, `L`, `Q`, `C`,
+/// `Z`, absolute). Scale by `size / units_per_em` and flip y to draw. An ID the
+/// face lacks has an empty path. Rendering only: never feeds layout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GlyphOutlines {
+    pub units_per_em: u32,
+    pub glyphs: Vec<GlyphOutline>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GlyphOutline {
+    pub id: u32,
+    pub path: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DisplayPage {

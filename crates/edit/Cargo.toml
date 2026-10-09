@@ -12,6 +12,7 @@ reprise-doc.workspace = true
 reprise-layout.workspace = true
 reprise-diag.workspace = true
 thiserror.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 reprise-fixtures.workspace = true

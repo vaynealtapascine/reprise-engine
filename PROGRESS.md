@@ -2,6 +2,36 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-09: anchored character formatting; glyph outlines for web renderers
+
+Completed Astra's uncommitted formatting slice (`docs/text-formatting.md`) after
+review. Formatting actions are `format1` envelopes on persistent ranges; overlaps
+resolve by action order, field by field, with reset; runs are grapheme-aligned.
+They flow through the kernel (`FormatText`), layout style runs and cache keys,
+native fragments, HTML `<span>` export/import, the `REQUIRED_TEXT_FORMATTING`
+package bit, and the facade (`Command::FormatText`, `State.blocks[].formatting`,
+omitted when a block has none, so existing JSON is unchanged).
+
+**Review fixes:** resolution scanned the whole range tree for every paragraph,
+and incremental layout's input capture called it for every node on every
+revision (O(paragraphs × ranges) per layout). A per-revision index built in one
+pass now serves `text_formats` and `text_format_capacity`, following the lineage
+cache. Paste indexed its ID map with `[]`; a missing block is now a typed error.
+
+**Glyph outlines:** `glyph_outlines(Payload<GlyphRequest>)` returns SVG path
+data in font units per glyph (≤ 4,096 per request) so a canvas renderer can draw
+display lists without the SVG backend. New code `bindings.missing-font`.
+
+**New hostile fixture:** `format_overlap_storm`: 300 overlapping size, language
+and feature actions, some starting inside graphemes, a reset, a concurrent peer's
+action and a corrupted envelope from a hostile peer, then a split. The replica
+converges; the garbage is reported (`style.format-unreadable`) and never applied.
+Two new snapshots; nothing else changed.
+
+**Not yet supported:** weight, slant, decoration and colour (refused, not
+ignored); per-line metrics for mixed sizes (the strut grows to 1.2× the largest
+inline size). Workstream brief: `F:/reprise-wt/briefs/ws-emphasis.md`.
+
 ## 2026-10-09: flow integration verified after the Opus checkpoint
 
 Worktree: `G:/reprise-wt/flow`, branch `flow/breaks`, based on the document-layer

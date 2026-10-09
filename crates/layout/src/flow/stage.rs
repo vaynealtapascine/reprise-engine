@@ -27,6 +27,7 @@ pub(crate) struct Staged {
     vertical: bool,
     text: String,
     styles: Vec<StyleRun>,
+    family_chains: bool,
     fallback: Option<(FaceId, Length)>,
     shape_key: Option<crate::incremental::ShapingKey>,
     /// Every note so far, in the order `prepare_with` would report them.
@@ -80,7 +81,7 @@ pub(crate) fn begin(
     if let Some(e) = evaluation {
         e.style_resolution();
     }
-    let style = match doc.computed_style_with(node, ctx, &engine.functions) {
+    let mut style = match doc.computed_style_with(node, ctx, &engine.functions) {
         Ok(s) => s,
         Err(e) => {
             notes.push(Diagnostic::new(
@@ -131,7 +132,7 @@ pub(crate) fn begin(
             notes,
         );
     }
-    let styles = vec![StyleRun {
+    let base_run = StyleRun {
         range: 0..text.len(),
         families: if style.families.is_empty() {
             vec![style.family.clone()]
@@ -141,7 +142,61 @@ pub(crate) fn begin(
         size: style.size,
         language: None,
         features: Vec::new(),
-    }];
+    };
+    let formatting = match doc.text_formats(node) {
+        Ok(value) => value,
+        Err(error) => {
+            notes.push(Diagnostic::new(
+                Severity::Error,
+                codes::STYLE,
+                subject,
+                error.to_string(),
+            ));
+            return Begin::Done(None, notes);
+        }
+    };
+    notes.extend(
+        formatting
+            .notes
+            .into_iter()
+            .map(|n| Diagnostic::from_note(n, subject.clone())),
+    );
+    let family_chains =
+        !style.families.is_empty() || formatting.runs.iter().any(|r| r.style.families.is_some());
+    // The current composer has a paragraph-wide strut. Enlarge it for larger
+    // inline text so mixed sizes do not overlap adjacent lines.
+    if let Some(size) = formatting.runs.iter().filter_map(|r| r.style.size).max()
+        && size > style.size
+    {
+        style.line_height = style.line_height.max(size.mul_ratio(6, 5));
+    }
+    let styles = if formatting.runs.is_empty() {
+        vec![base_run.clone()]
+    } else {
+        formatting
+            .runs
+            .into_iter()
+            .map(|run| StyleRun {
+                range: run.bytes,
+                families: run
+                    .style
+                    .families
+                    .unwrap_or_else(|| base_run.families.clone()),
+                size: run.style.size.unwrap_or(base_run.size),
+                language: run.style.language,
+                features: run
+                    .style
+                    .features
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|f| reprise_shape::Feature {
+                        tag: f.tag,
+                        value: f.value,
+                    })
+                    .collect(),
+            })
+            .collect()
+    };
     let fallback = if style.families.is_empty() {
         engine
             .fonts
@@ -174,7 +229,7 @@ pub(crate) fn begin(
                 );
             }
         }
-        if !style.families.is_empty() {
+        if family_chains {
             for run in &mut key_styles {
                 run.families.insert(0, "\0reprise-font-chain1".into());
             }
@@ -210,6 +265,7 @@ pub(crate) fn begin(
         style,
         text,
         styles,
+        family_chains,
         fallback,
         shape_key,
         notes,
@@ -248,7 +304,7 @@ impl Staged {
             styles: &self.styles,
             direction: None,
         };
-        let mut itemized = if self.style.families.is_empty() {
+        let mut itemized = if !self.family_chains {
             itemize(&input, fonts)
         } else {
             itemize_families(&input, fonts)

@@ -14,6 +14,7 @@ start with `docs/`, which names repository-level documentation.
 | `doc` | `src/lib.rs` | `Document`: content tree, versioned authored ranges (`add_range`, `range_policy`, resolution), styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas; legacy policies remain distinguishable from unreadable metadata | 05–07, 10, 12, 15, 29, 34, 35 |
 | `reprise` | `tests/soak.rs`, `tests/sync_delta.hex` | Structural partition/rejoin/undo soak, deterministic peer fixture and native/WASM packet-byte golden | 29, 34, 38 |
 | `doc` | `src/flow.rs`, `src/flow_tests.rs`, `docs/flow.md` | Flow text: paragraphs as U+FDD0 breaks with records in `breaks1`, paragraph views, per-revision cache, staged breaks and embeds, `locate`, placement | 06, 07, 11, 12, 29 |
+| `doc` | `src/formatting.rs`, `docs/text-formatting.md` | Anchored character formatting: versioned `format1` range envelopes, per-revision host index, ordered overlap resolution with reset, grapheme-aligned runs, copy/split/join carry-over and read-time limits | 05, 07, 12, 34, 37 |
 | `doc` | `src/transfers.rs`, `src/persist.rs` | Retained copy lineage over visible characters, bounded per-revision source-ID index, undo/redo aliases and bounded columnar snapshot counts | 10, 12, 29, 34 |
 | `shape`, `layout` | `shape/src/lib.rs`, `layout/src/flow/stage.rs`, `layout/src/display.rs` | Upright vertical shaping, bounded combinations and display compensation | 20, 22, 38 |
 | `fixtures` | `tests/vertical.rs` | Both downward modes, combination, frame transitions, storage and export parity | 20, 33, 38 |
@@ -117,6 +118,7 @@ start with `docs/`, which names repository-level documentation.
 | `clipboard` | `src/lib.rs` | Copy-all, block and kernel-selection entry points, full-table promotion, partial-table flattening diagnostics and resource collection | 24, 33, 35 |
 | `clipboard` | `src/native.rs` | Deterministic versioned NativeFragment encoding, validation and SHA-256-addressed font/asset bundles with frontend declarations keyed by face | 21, 34, 35, 38 |
 | `clipboard` | `src/html.rs` | Bounded plain/HTML import, malformed tag recovery, attribute/CSS limits, pre-wrap whitespace, proportional nonnested table columns and explicit-direction conflict diagnostics; direction inference uses shaping's pinned ICU Unicode 17 properties | 09, 24, 35, 37, 38 |
+| `clipboard` | `src/text_css.rs`, `tests/formatting.rs` | Bounded inline-CSS subset for `<span>` formatting (family, size, language, OpenType features); HTML/native round trips and hostile CSS | 35, 37 |
 | `clipboard` | `src/export.rs` | Extensible Exporter trait, per-feature LossReport and plain/HTML/native/PDF exporters; plain reading order retains page-limited tails | 32, 33, 35 |
 | `clipboard` | `src/codes.rs` | Stable clipboard and export diagnostic codes | 35, 37 |
 | `clipboard` | `tests/paste_undo_walk.rs` | Twenty pastes (end and mid-paragraph) of an encoded and decoded fragment, then each undone and redone exactly, with the same IDs | 07, 29, 35 |

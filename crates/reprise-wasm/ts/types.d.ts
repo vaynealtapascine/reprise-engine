@@ -8,11 +8,28 @@ export type Create = { document_id: string, peer_id: string, };
 export type Open = { peer_id: string, };
 export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, blocks: Array<Block>, diagnostics: Array<Diagnostic>, };
 export type Clock = { peer: string, counter: number, };
-export type Block = { id: string, parent: string | null, kind: BlockKind, text: string, };
+export type Block = { id: string, parent: string | null, kind: BlockKind, text: string, 
+/**
+ * Resolved character formatting as disjoint byte runs covering `text`,
+ * present only when some formatting action covers this block. A run's
+ * absent fields inherit the paragraph style.
+ */
+formatting?: Array<TextRun>, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
 export type Style = { families: Array<string> | null, size: string | null, line_height: string | null, };
-export type Command = { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, };
+export type TextStyle = { families: Array<string> | null, 
+/**
+ * Positive font size in 1/1024 pt.
+ */
+size: number | null, language: string | null, features: Array<TextFeature> | null, reset: boolean, };
+export type TextFeature = { 
+/**
+ * Exactly four ASCII graphic characters.
+ */
+tag: string, value: number, };
+export type TextRun = { start: number, end: number, style: TextStyle, };
+export type Command = { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
 export type Transaction = { commands: Array<Command>, };
 export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
 export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
@@ -65,6 +82,9 @@ export type Stroke = { color: [number, number, number, number], width: number, }
 export type DisplayItem = { "type": "glyphs" } & GlyphRun | { "type": "image", asset: string, rect: DisplayRect, alt: string, layer: Layer, } | { "type": "path", path: Array<Segment>, fill: [number, number, number, number] | null, stroke: Stroke | null, layer: Layer, } | { "type": "group", transform: Matrix, clip: Array<Segment> | null, items: Array<DisplayItem>, };
 export type DisplayList = { width: number, height: number, items: Array<DisplayItem>, };
 export type DisplayPage = { token: LayoutToken, page: number, settled: boolean, complete: boolean, display: DisplayList, };
+export type GlyphRequest = { face: Face, glyphs: Array<number>, };
+export type GlyphOutlines = { units_per_em: number, glyphs: Array<GlyphOutline>, };
+export type GlyphOutline = { id: number, path: string, };
 export type Relation = { schema: string, owner: string | null, targets: { [key in string]: Array<Target> }, params: { [key in string]: Param }, };
 export type Target = { "node": string } | { "range": string } | { "structural": StructuralQuery } | { "layout": LayoutQuery } | { "snapshot": SnapshotReference };
 export type StructuralQuery = { "query": "next-sibling", from: string, kind: BlockKind | null, } | { "query": "previous-sibling", from: string, kind: BlockKind | null, } | { "query": "nth-child", of: string | null, index: number, from_end: boolean, kind: BlockKind | null, } | { "query": "first-child", of: string | null, kind: BlockKind | null, } | { "query": "last-child", of: string | null, kind: BlockKind | null, } | { "query": "parent", of: string, } | { "query": "children", of: string | null, kind: BlockKind | null, };

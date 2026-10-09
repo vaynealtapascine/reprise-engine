@@ -137,7 +137,7 @@ fn attributes(raw: &str) -> Result<BTreeMap<String, String>, ClipboardError> {
     Ok(out)
 }
 
-fn css_length(text: &str) -> Option<Length> {
+pub(crate) fn css_length(text: &str) -> Option<Length> {
     let text = text.trim().strip_suffix("pt")?.trim();
     let negative = text.starts_with('-');
     let text = text.strip_prefix(['-', '+']).unwrap_or(text);
@@ -242,6 +242,9 @@ struct Reader {
     notes: Vec<Note>,
     text: String,
     style: Style,
+    inline: Vec<(usize, reprise_doc::formatting::TextStyle)>,
+    formats: Vec<reprise_doc::formatting::FormatRun>,
+    format_count: usize,
     preserve_space: bool,
     direction: Option<u8>,
     cell: Option<NodeId>,
@@ -371,10 +374,28 @@ impl Reader {
         }
         .map_err(store)?;
         self.doc.set_overrides(node, &self.style).map_err(store)?;
+        for run in self.formats.drain(..) {
+            if run.style == reprise_doc::formatting::TextStyle::default() {
+                continue;
+            }
+            self.format_count += 1;
+            if self.format_count > reprise_doc::formatting::MAX_FORMATS_PER_HOST {
+                return Err(ClipboardError::Limit("HTML formatting"));
+            }
+            self.doc
+                .format_text(
+                    node,
+                    run.bytes,
+                    &run.style,
+                    reprise_doc::text::RangePolicy::EXPANDING,
+                )
+                .map_err(store)?;
+        }
         self.text.clear();
         Ok(())
     }
     fn text(&mut self, raw: &str) -> Result<(), ClipboardError> {
+        let start = self.text.len();
         // HTML whitespace collapses. A single pending space survives token seams.
         for c in entities(raw).chars() {
             if c.is_ascii_whitespace() && !self.preserve_space {
@@ -388,6 +409,32 @@ impl Reader {
         if self.text.len() > self.limits.bytes.min(8 << 20) {
             return Err(ClipboardError::Limit("HTML text"));
         }
+        self.record_style(start)?;
+        Ok(())
+    }
+    fn record_style(&mut self, start: usize) -> Result<(), ClipboardError> {
+        if start == self.text.len() {
+            return Ok(());
+        }
+        let style = self
+            .inline
+            .last()
+            .map(|(_, s)| s.clone())
+            .unwrap_or_default();
+        if let Some(last) = self.formats.last_mut()
+            && last.bytes.end == start
+            && last.style == style
+        {
+            last.bytes.end = self.text.len();
+            return Ok(());
+        }
+        if self.formats.len() >= reprise_doc::formatting::MAX_FORMATS_PER_HOST {
+            return Err(ClipboardError::Limit("HTML formatting"));
+        }
+        self.formats.push(reprise_doc::formatting::FormatRun {
+            bytes: start..self.text.len(),
+            style,
+        });
         Ok(())
     }
     fn tag(
@@ -397,8 +444,12 @@ impl Reader {
         attrs: &BTreeMap<String, String>,
     ) -> Result<(), ClipboardError> {
         let cell = matches!(name, "td" | "th");
-        let known =
-            |k: &String| k == "dir" || k == "style" || (cell && (k == "colspan" || k == "rowspan"));
+        let known = |k: &String| {
+            k == "dir"
+                || k == "style"
+                || (name == "span" && k == "lang")
+                || (cell && (k == "colspan" || k == "rowspan"))
+        };
         if !attrs.keys().all(known) {
             once(
                 &mut self.notes,
@@ -408,7 +459,12 @@ impl Reader {
             );
         }
         match (name, closing) {
-            ("br", false) => self.text.push('\n'),
+            ("br", false) => {
+                let start = self.text.len();
+                self.text.push('\n');
+                self.record_style(start)?;
+            }
+            ("span", _) => {}
             ("p" | "div" | "li" | "h1" | "h2" | "h3" | "blockquote", false) => {
                 self.flush(false)?;
                 self.style = css(attrs, &mut self.notes)?;
@@ -577,6 +633,9 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         notes: Vec::new(),
         text: String::new(),
         style: Style::default(),
+        inline: Vec::new(),
+        formats: Vec::new(),
+        format_count: 0,
         preserve_space: false,
         direction: None,
         cell: None,
@@ -710,11 +769,18 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
             }
             stack.push(name.clone());
         }
-        reader.tag(
-            &name,
-            closing,
-            &attributes(raw.get(name_end..).unwrap_or_default())?,
-        )?;
+        reader.inline.retain(|(depth, _)| *depth <= stack.len());
+        let attrs = attributes(raw.get(name_end..).unwrap_or_default())?;
+        if name == "span" && !closing && !void {
+            let parent = reader
+                .inline
+                .last()
+                .map(|(_, s)| s.clone())
+                .unwrap_or_default();
+            let style = crate::text_css::inline(&attrs, &parent, &mut reader.notes)?;
+            reader.inline.push((stack.len(), style));
+        }
+        reader.tag(&name, closing, &attrs)?;
     }
     if !stack.is_empty() {
         once(

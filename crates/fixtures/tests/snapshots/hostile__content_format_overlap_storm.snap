@@ -1,0 +1,647 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: "serde_json::to_string_pretty(&content).unwrap()"
+---
+[
+  {
+    "width": 430080,
+    "height": 307200,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 65536,
+          "yx": 0,
+          "xy": 0,
+          "yy": 65536,
+          "tx": 36864,
+          "ty": 36864
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "Ha",
+            "glyphs": [
+              {
+                "id": 9,
+                "x": 0,
+                "y": 13626,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 28,
+                "x": 8662,
+                "y": 13626,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "llway é́",
+            "glyphs": [
+              {
+                "id": 39,
+                "x": 14395,
+                "y": 13626,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 39,
+                "x": 18667,
+                "y": 13626,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "id": 50,
+                "x": 22796,
+                "y": 13626,
+                "text": {
+                  "start": 2,
+                  "end": 3
+                }
+              },
+              {
+                "id": 28,
+                "x": 33519,
+                "y": 13626,
+                "text": {
+                  "start": 3,
+                  "end": 4
+                }
+              },
+              {
+                "id": 52,
+                "x": 40673,
+                "y": 13626,
+                "text": {
+                  "start": 4,
+                  "end": 5
+                }
+              },
+              {
+                "id": 1,
+                "x": 48013,
+                "y": 13626,
+                "text": {
+                  "start": 5,
+                  "end": 6
+                }
+              },
+              {
+                "id": 263,
+                "x": 51353,
+                "y": 13626,
+                "text": {
+                  "start": 6,
+                  "end": 11
+                }
+              },
+              {
+                "id": 775,
+                "x": 58664,
+                "y": 13626,
+                "text": {
+                  "start": 6,
+                  "end": 11
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
+              {
+                "id": 1,
+                "x": 58664,
+                "y": 13626,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "שלום",
+            "glyphs": [
+              {
+                "id": 0,
+                "x": 62004,
+                "y": 13626,
+                "text": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "id": 0,
+                "x": 71179,
+                "y": 13626,
+                "text": {
+                  "start": 4,
+                  "end": 6
+                }
+              },
+              {
+                "id": 0,
+                "x": 80354,
+                "y": 13626,
+                "text": {
+                  "start": 2,
+                  "end": 4
+                }
+              },
+              {
+                "id": 0,
+                "x": 89529,
+                "y": 13626,
+                "text": {
+                  "start": 0,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
+              {
+                "id": 1,
+                "x": 98704,
+                "y": 13626,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "gr",
+            "glyphs": [
+              {
+                "id": 34,
+                "x": 0,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 45,
+                "x": 7426,
+                "y": 49728,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "o",
+            "glyphs": [
+              {
+                "id": 42,
+                "x": 13490,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "ws 1234",
+            "glyphs": [
+              {
+                "id": 50,
+                "x": 21360,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 46,
+                "x": 32169,
+                "y": 49728,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "id": 1,
+                "x": 38391,
+                "y": 49728,
+                "text": {
+                  "start": 2,
+                  "end": 3
+                }
+              },
+              {
+                "id": 422,
+                "x": 41731,
+                "y": 49728,
+                "text": {
+                  "start": 3,
+                  "end": 4
+                }
+              },
+              {
+                "id": 423,
+                "x": 48899,
+                "y": 49728,
+                "text": {
+                  "start": 4,
+                  "end": 5
+                }
+              },
+              {
+                "id": 424,
+                "x": 56067,
+                "y": 49728,
+                "text": {
+                  "start": 5,
+                  "end": 6
+                }
+              },
+              {
+                "id": 425,
+                "x": 63235,
+                "y": 49728,
+                "text": {
+                  "start": 6,
+                  "end": 7
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
+              {
+                "id": 1,
+                "x": 70403,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "👩‍👧",
+            "glyphs": [
+              {
+                "id": 0,
+                "x": 73743,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 11
+                }
+              },
+              {
+                "id": 1,
+                "x": 82918,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 11
+                }
+              },
+              {
+                "id": 0,
+                "x": 82918,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 11
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
+              {
+                "id": 1,
+                "x": 92093,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "l",
+            "glyphs": [
+              {
+                "id": 39,
+                "x": 95433,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "o",
+            "glyphs": [
+              {
+                "id": 42,
+                "x": 99705,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 14336,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "ng",
+            "glyphs": [
+              {
+                "id": 41,
+                "x": 107575,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 34,
+                "x": 116263,
+                "y": 49728,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 10240,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "e",
+            "glyphs": [
+              {
+                "id": 32,
+                "x": 123689,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "face": {
+              "family": "Source Serif Pro",
+              "hash": "199c8adc83479480d9aa5d942afe8f52"
+            },
+            "size": 25600,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "r",
+            "glyphs": [
+              {
+                "id": 45,
+                "x": 128911,
+                "y": 49728,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  }
+]

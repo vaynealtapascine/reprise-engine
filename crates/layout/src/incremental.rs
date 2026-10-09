@@ -184,6 +184,7 @@ struct Inputs {
     image: Option<String>,
     text: String,
     overrides: Style,
+    formatting: reprise_doc::formatting::TextFormats,
     styles: Vec<(String, Option<Style>)>,
 }
 impl Inputs {
@@ -208,6 +209,7 @@ impl Inputs {
             image: doc.image_record(node).ok().flatten(),
             text: block.text.to_string(),
             overrides: block.overrides,
+            formatting: doc.text_formats(node).ok()?,
             styles,
         })
     }
@@ -243,7 +245,11 @@ impl Inputs {
         if self.text != old.text {
             out.insert(Dependency::Text(node));
         }
-        if self.kind != old.kind || self.overrides != old.overrides || self.image != old.image {
+        if self.kind != old.kind
+            || self.overrides != old.overrides
+            || self.image != old.image
+            || self.formatting != old.formatting
+        {
             out.insert(Dependency::Node(node));
         }
         for (name, value) in self.styles.iter().chain(&old.styles) {
