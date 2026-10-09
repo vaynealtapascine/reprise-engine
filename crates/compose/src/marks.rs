@@ -79,11 +79,22 @@ pub fn compose_marks(
     };
     if out.rest.is_none()
         && request.text.chars().next_back().is_some_and(is_line_break)
-        && out.lines.last().is_some_and(|l| !l.text.is_empty())
+        && (out.lines.last().is_some_and(|l| !l.text.is_empty())
+            || (request.start >= request.text.len() && out.lines.is_empty()))
     {
+        // Compose a genuinely empty paragraph, then rebase its caret line.
+        // Ordinary composers keep their frozen end-of-text resume semantics.
+        let empty = ShapedText::default();
         let tail_request = ComposeRequest {
-            start: request.text.len(),
-            block_start: out.block_end,
+            text: "",
+            shaped: &empty,
+            breaks: &[],
+            start: 0,
+            block_start: if out.lines.is_empty() {
+                request.block_start
+            } else {
+                out.block_end
+            },
             ..request
         };
         let tail_para = Para::new(&tail_request);
@@ -96,9 +107,12 @@ pub fn compose_marks(
             &mut tail,
             FirstFit::default(),
         );
+        for line in &mut tail.lines {
+            line.text = request.text.len()..request.text.len();
+        }
         out.lines.extend(tail.lines);
         out.notes.extend(tail.notes);
-        out.rest = tail.rest;
+        out.rest = tail.rest.map(|_| request.text.len());
         out.block_end = tail.block_end;
     }
     out
@@ -248,5 +262,29 @@ mod tests {
         let out = compose_marks(&request, &tabs, &Greedy);
         assert_eq!(out.rest, Some(0));
         assert!(out.notes.iter().any(|n| n.code == codes::TAB_LIMIT));
+    }
+
+    #[test]
+    fn empty_breaks_and_tabs_with_extreme_geometry_still_terminate() {
+        for raw in ["", "\n", "\t", "\t\n\t"] {
+            let text = Shaped::new(raw);
+            let shaper = text.shaper();
+            let shaped = shaper.shape();
+            for size in [Length::MIN, Length::ZERO, Length::MAX] {
+                let request = ComposeRequest {
+                    text: &text.text,
+                    shaped: &shaped,
+                    reshape: &shaper,
+                    breaks: &break_opportunities(&text.text),
+                    line_height: size,
+                    geometry: &Measure(size),
+                    start: 0,
+                    block_start: Length::MAX,
+                };
+                let out = compose_marks(&request, &TabStops::default(), &Greedy);
+                assert!(out.lines.len() <= raw.len().saturating_add(1));
+                assert!(out.rest.is_none_or(|at| at <= raw.len()));
+            }
+        }
     }
 }

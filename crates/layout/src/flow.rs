@@ -1127,7 +1127,9 @@ fn line_layout(
     let surplus = (fragment.available.width() - width).max(Length::ZERO);
     let shift = match alignment {
         Some(reprise_doc::marks::Alignment::Centre) => surplus.mul_ratio(1, 2),
-        Some(reprise_doc::marks::Alignment::End) if prepared.base_level % 2 == 0 => surplus,
+        Some(reprise_doc::marks::Alignment::End) if prepared.base_level.is_multiple_of(2) => {
+            surplus
+        }
         Some(reprise_doc::marks::Alignment::Start) if prepared.base_level % 2 == 1 => surplus,
         _ => Length::ZERO,
     };

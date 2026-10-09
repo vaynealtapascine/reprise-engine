@@ -188,7 +188,10 @@ impl LayoutSnapshot {
                         out.push(mark(MarkKind::LineBreak, at, point(at), None));
                     }
                 }
-                if line.text.end == block.text.len() && index.saturating_add(1) == block.lines.len()
+                if line.text.end == block.text.len()
+                    && index.saturating_add(1) == block.lines.len()
+                    && (line.text.is_empty()
+                        || !block.text.chars().next_back().is_some_and(is_line_break))
                 {
                     out.push(mark(
                         MarkKind::ParagraphEnd,

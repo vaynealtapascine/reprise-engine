@@ -322,7 +322,8 @@ impl Document {
         let LoroValue::Map(roots) = self.doc.get_value() else {
             return true;
         };
-        if roots.contains_key(PATCHES) && !self.doc.get_map(PATCHES).is_empty() {
+        // Even an empty root retains the new property operations in history.
+        if roots.contains_key(PATCHES) {
             return true;
         }
         let style = |map: &loro::LoroMap| {

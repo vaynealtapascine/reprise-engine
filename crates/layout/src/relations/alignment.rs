@@ -222,7 +222,7 @@ pub(crate) fn run(engine: &Engine, doc: &Document, snapshot: &mut LayoutSnapshot
                 let surplus = (l.available.width() - l.width).max(Length::ZERO);
                 let offset = match alignment {
                     Alignment::Centre => surplus.mul_ratio(1, 2),
-                    Alignment::End if b.base_level % 2 == 0 => surplus,
+                    Alignment::End if b.base_level.is_multiple_of(2) => surplus,
                     Alignment::Start if b.base_level % 2 == 1 => surplus,
                     _ => Length::ZERO,
                 };

@@ -81,6 +81,8 @@ Required package bit 11 (`REQUIRED_MARKS`) covers retained breaks/tabs, paragrap
 alignment, tab stops and alignment relations, including tombstones and unknown
 stored style forms. Older readers refuse the package. No derived positions or
 guide geometry enters Loro. No new third-party dependency is needed.
+An emptied `marks1` root still declares the bit because its operations remain
+in CRDT history.
 
 ## Query and boundary
 
@@ -101,7 +103,7 @@ Marks never enter the content/debug display list, rerun layout, mutate document
 state or alter rendering. Caret-like points subdivide ligatures by grapheme count
 with integer rounding, and use the following cluster at bidi junctions.
 `lines_in` includes an empty trailing caret line when its selected range ends
-at a paragraph's trailing hard break; an empty selection remains empty.
+at a paragraph's trailing hard break; a collapsed query still finds its caret line.
 
 Commands: insert-line-break, insert-tab, set-alignment, set-tab-stops, add-anchor
 and remove-anchor; the latter uses the existing relation tombstone operation.

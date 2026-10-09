@@ -125,7 +125,7 @@ pub(crate) fn first_fit(
     let len = para.len;
     // Empty text still gets one line; otherwise stop when the text runs out.
     let unfinished =
-        |out: &Composition, pos: usize| pos < len || (para.start == len && out.lines.is_empty());
+        |out: &Composition, pos: usize| pos < len || (len == 0 && out.lines.is_empty());
     while unfinished(out, pos) {
         let intervals = match walk.next_line(request, &out.lines) {
             Step::Room(intervals) => intervals,
