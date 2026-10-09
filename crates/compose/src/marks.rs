@@ -287,4 +287,37 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn tab_materialization_cannot_silently_exhaust_the_budget() {
+        let text = Shaped::new("\tx");
+        let shaper = text.shaper();
+        let mut shaped = shaper.shape();
+        hide_controls(&text.text, &mut shaped.runs);
+        let request = ComposeRequest {
+            text: &text.text,
+            shaped: &shaped,
+            reshape: &shaper,
+            breaks: &break_opportunities(&text.text),
+            line_height: Length::from_pt(12),
+            geometry: &Measure(Length::MAX),
+            start: 0,
+            block_start: Length::ZERO,
+        };
+        let mut para = Para::new(&request);
+        para.tabs = Some(TabStops::default());
+        para.tab_positions = vec![0];
+        para.tab_work.set(MAX_TAB_WORK - 2);
+        let mut out = Composition::default();
+        first_fit(
+            &para,
+            &mut Walk::new(Length::ZERO),
+            0,
+            &mut out,
+            FirstFit::default(),
+        );
+        assert!(out.lines.is_empty());
+        assert_eq!(out.rest, Some(0));
+        assert!(out.notes.iter().any(|n| n.code == codes::TAB_LIMIT));
+    }
 }
