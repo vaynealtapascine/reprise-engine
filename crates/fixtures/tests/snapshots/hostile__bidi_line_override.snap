@@ -242,7 +242,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 47547,
-              "width": 17709
+              "width": 10500
             }
           ]
         },
@@ -415,7 +415,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 1,
               "x": 0,
-              "width": 41961
+              "width": 34752
             },
             {
               "range": {
@@ -428,7 +428,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 41961,
+              "x": 34752,
               "width": 16896
             },
             {
@@ -442,7 +442,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 58857,
+              "x": 51648,
               "width": 24252
             }
           ]

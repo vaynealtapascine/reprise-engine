@@ -159,17 +159,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               255
             ],
             "text": "\n",
-            "glyphs": [
-              {
-                "id": 0,
-                "x": 60411,
-                "y": 10707,
-                "text": {
-                  "start": 0,
-                  "end": 1
-                }
-              }
-            ],
+            "glyphs": [],
             "layer": "content"
           },
           {

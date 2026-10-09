@@ -178,6 +178,19 @@ Other files:
 
 Every crate has a `Cargo.toml` manifest; shared dependencies live in the root manifest.
 
+| Crate | Files | Purpose | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/marks.rs`, `src/style.rs`, `src/relation.rs`, `src/lib.rs`, `src/changes.rs` | LF/TAB characters, merge-safe marks1 property patches, inherited alignment/tabs1, staged POINT-based defaults and pins, feature detection and change reporting | 05–07, 11–15, 19, 29, 34 |
+| `compose` | `src/marks.rs`, `src/para.rs`, `src/greedy.rs`, `src/lib.rs`, `Cargo.toml` | Bounded first-fit tab-field fitting, invisible advance cells, unreachable-stop/work diagnostics and empty-tail continuation; additive request entry point | 11, 19, 20, 23, 37 |
+| `layout` | `src/marks.rs`, `src/relations/alignment.rs`, `src/relations/mod.rs`, `src/flow.rs`, `src/snapshot.rs`, `src/display.rs`, `src/codes.rs`, `src/lib.rs` | Read-only page marks, bounded line-translation domain, alignment and leader positioning, unpainted control advances; snapshots retain derived interval/guide data | 05, 13–15, 20, 24–28, 30, 37 |
+| `edit` | `src/command.rs`, `src/plan.rs`, `src/editor.rs`, `src/error.rs` | Atomic marks commands, property-only style patches and staged anchor/default identity through undo | 07, 12, 29, 31, 37 |
+| `format` | `src/features.rs`, `SPEC.md` | Required bit 11 refuses older readers for retained authored marks | 34 |
+| `clipboard` | `src/html.rs`, `src/export.rs`, `tests/pdf_ua.rs` | HTML paragraph alignment, plain/BR/TAB semantics and explicit marks fidelity loss; invisible note-reference regression | 35, 37 |
+| `display` | `src/pdf.rs` | Retain a break-only reference's Link annotation in the structure tree, preventing an untagged-annotation panic | 32, 37 |
+| `reprise`, `reprise-wasm` | `reprise/src/dto.rs`, `reprise/src/convert.rs`, `reprise/src/session.rs`, `reprise/src/typescript.rs`, `reprise/tests/marks.rs`, `reprise/API.txt`, `reprise-wasm/src/lib.rs`, `reprise-wasm/ts/{types.d.ts,reprise_wasm.d.ts,worker.ts,smoke.cjs,worker-smoke.cjs}` | Owned marks/command DTOs, current-layout marks query and worker response, generated declarations and actual WASM smokes | 02, 04, 28–31, 38 |
+| `fixtures` | `src/marks.rs`, `src/hostile.rs`, `src/lib.rs`, `tests/marks.rs`, `tests/hostile.rs`, `tests/geometry.rs`, `examples/marks_poem.rs` | Poem and cyclic/unreachable-tab goldens, concurrency, empty tails, geometric hits, reflow, RTL/vertical and storm attacks; reproducible visual export | 11–15, 20, 29, 30, 37–39 |
+| docs | `docs/marks.md`, `docs/bindings.md`, `docs/contracts.md`, `docs/CODEMAP.md` | Authored/query vocabulary, bounded fallback rules and target fidelity | 05, 11–15, 34, 37–39 |
+
 ## Recipes
 
 -   **Add a relation type:**

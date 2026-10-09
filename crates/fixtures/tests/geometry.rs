@@ -347,6 +347,7 @@ fn excessive_reading_constraints_report_and_preserve_every_step() {
     for (i, &a) in nodes.iter().enumerate() {
         for &b in nodes.iter().skip(i + 1) {
             s.relations.push(RelationLayout {
+                anchor: None,
                 id,
                 schema: reprise_doc::reading::READING_ORDER,
                 owner: None,

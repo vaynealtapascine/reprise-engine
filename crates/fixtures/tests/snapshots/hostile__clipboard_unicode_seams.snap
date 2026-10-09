@@ -162,7 +162,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 60411,
-              "width": 7209
+              "width": 0
             }
           ]
         },

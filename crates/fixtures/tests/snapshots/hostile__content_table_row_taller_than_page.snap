@@ -51,15 +51,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 10424,
-                "y": 9733,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -95,15 +86,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 11714,
-                "y": 22021,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -141,15 +123,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 9994,
-                "y": 34309,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -185,15 +158,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 11612,
-                "y": 46597,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -231,15 +195,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 10444,
-                "y": 58885,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -275,15 +230,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 61624,
-                "y": 9733,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -321,15 +267,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 62914,
-                "y": 22021,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -365,15 +302,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 61194,
-                "y": 34309,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -411,15 +339,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 62812,
-                "y": 46597,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -455,15 +374,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 61644,
-                "y": 58885,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -512,15 +422,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 0,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 6738,
-                "y": 9733,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -556,15 +457,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 10506,
-                "y": 22021,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -602,15 +494,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 12308,
-                "y": 34309,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -646,15 +529,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 6104,
-                "y": 46597,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -692,15 +566,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 5672,
-                "y": 58885,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -727,15 +592,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 0,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 57938,
-                "y": 9733,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -773,15 +629,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 61706,
-                "y": 22021,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -817,15 +664,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 63508,
-                "y": 34309,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],
@@ -863,15 +701,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 1,
                   "end": 2
                 }
-              },
-              {
-                "id": 0,
-                "x": 57304,
-                "y": 46597,
-                "text": {
-                  "start": 2,
-                  "end": 3
-                }
               }
             ],
             "layer": "content"
@@ -907,15 +736,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                 "text": {
                   "start": 1,
                   "end": 2
-                }
-              },
-              {
-                "id": 0,
-                "x": 56872,
-                "y": 58885,
-                "text": {
-                  "start": 2,
-                  "end": 3
                 }
               }
             ],

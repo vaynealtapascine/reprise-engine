@@ -230,7 +230,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 11766
+              "width": 5212
             }
           ]
         },
@@ -273,7 +273,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 12462
+              "width": 5908
             }
           ]
         },
@@ -316,7 +316,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 11551
+              "width": 4997
             }
           ]
         },
@@ -359,7 +359,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 12360
+              "width": 5806
             }
           ]
         },
@@ -402,7 +402,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 11776
+              "width": 5222
             }
           ]
         },
@@ -445,7 +445,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 10179
+              "width": 3625
             }
           ]
         },
@@ -488,7 +488,7 @@ expression: snapshot.to_json()
               "size": 10240,
               "level": 0,
               "x": 0,
-              "width": 11858
+              "width": 5304
             }
           ]
         },
