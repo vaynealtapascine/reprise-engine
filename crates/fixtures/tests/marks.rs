@@ -462,3 +462,56 @@ fn incremental_marks_match_reference_after_property_and_anchor_changes() {
     assert_eq!(incremental, reference);
     assert_eq!(incremental.marks(0), reference.marks(0));
 }
+
+#[test]
+fn pins_publish_rebound_positions_and_missing_deleted_gap_edges() {
+    let (doc, source) = make_doc("source");
+    let target = doc
+        .append_block(BlockKind::Paragraph, "", "abcdef")
+        .unwrap();
+    let id = doc
+        .pin_line(source, 0, LineEdge::Start, target, 3, AnchorEdge::Position)
+        .unwrap();
+    doc.commit();
+    doc.block(target).unwrap().text.delete(1..5).unwrap();
+    doc.commit();
+    let snapshot = reprise_fixtures::engine().layout(&doc);
+    assert_eq!(
+        snapshot.relation(id).unwrap().status,
+        RelationStatus::Rebound
+    );
+    assert!(snapshot.relation(id).unwrap().applied);
+    assert!(
+        snapshot
+            .marks(0)
+            .iter()
+            .any(|m| m.relation == Some(id) && m.state == Some(RelationStatus::Rebound))
+    );
+
+    let (doc, source) = make_doc("source");
+    let target = doc.append_block(BlockKind::Paragraph, "", "a\tb").unwrap();
+    let id = doc
+        .pin_line(source, 0, LineEdge::Start, target, 1, AnchorEdge::GapEnd)
+        .unwrap();
+    doc.commit();
+    doc.block(target).unwrap().text.delete(1..2).unwrap();
+    doc.commit();
+    let snapshot = reprise_fixtures::engine().layout(&doc);
+    assert_eq!(
+        snapshot.relation(id).unwrap().status,
+        RelationStatus::Missing
+    );
+    assert!(!snapshot.relation(id).unwrap().applied);
+    assert!(
+        snapshot
+            .diagnostics_with("relation.alignment-invalid")
+            .next()
+            .is_some()
+    );
+    assert!(
+        snapshot
+            .marks(0)
+            .iter()
+            .any(|m| m.relation == Some(id) && m.to.is_none())
+    );
+}
