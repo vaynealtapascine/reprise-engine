@@ -57,7 +57,34 @@ pub(crate) fn style(s: &Style) -> Result<reprise_doc::Style> {
                 .map_err(|e| Error::Invalid(e.to_string()))?;
         }
     }
+    if s.weight.is_some_and(|w| !(1..=1000).contains(&w)) {
+        return Err(Error::Invalid("weight must be in 1..1000".into()));
+    }
+    out.weight = s.weight;
+    out.slant = s.slant.map(slant);
+    out.decoration = decoration(s.decoration);
+    out.color = s.color;
     Ok(out)
+}
+fn slant(s: FontStyle) -> reprise_doc::TextSlant {
+    match s {
+        FontStyle::Normal => reprise_doc::TextSlant::Normal,
+        FontStyle::Italic => reprise_doc::TextSlant::Italic,
+        FontStyle::Oblique => reprise_doc::TextSlant::Oblique,
+    }
+}
+fn slant_out(s: reprise_doc::TextSlant) -> FontStyle {
+    match s {
+        reprise_doc::TextSlant::Normal => FontStyle::Normal,
+        reprise_doc::TextSlant::Italic => FontStyle::Italic,
+        reprise_doc::TextSlant::Oblique => FontStyle::Oblique,
+    }
+}
+fn decoration(s: Decoration) -> reprise_doc::Decoration {
+    reprise_doc::Decoration {
+        underline: s.underline,
+        strike: s.strike,
+    }
 }
 pub(crate) fn kind(k: BlockKind) -> reprise_doc::BlockKind {
     match k {
@@ -173,6 +200,10 @@ fn text_style(s: &TextStyle) -> Result<reprise_doc::formatting::TextStyle> {
         size: s.size.map(Length),
         language: s.language.clone(),
         features,
+        weight: s.weight,
+        slant: s.slant.map(slant),
+        decoration: decoration(s.decoration),
+        color: s.color,
         reset: s.reset,
     })
 }
@@ -195,6 +226,13 @@ pub(crate) fn text_runs(f: reprise_doc::formatting::TextFormats) -> Option<Vec<T
                             })
                             .collect()
                     }),
+                    weight: run.style.weight,
+                    slant: run.style.slant.map(slant_out),
+                    decoration: Decoration {
+                        underline: run.style.decoration.underline,
+                        strike: run.style.decoration.strike,
+                    },
+                    color: run.style.color,
                     reset: false,
                 },
             })

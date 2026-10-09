@@ -149,6 +149,26 @@ pub(crate) fn inline(
                     patch.features = features(value);
                     patch.features.is_some()
                 }
+                "font-weight" => {
+                    patch.weight = weight(value);
+                    patch.weight.is_some()
+                }
+                "font-style" => {
+                    patch.slant = slant(value);
+                    patch.slant.is_some()
+                }
+                "text-decoration" | "text-decoration-line" => {
+                    if let Some(d) = decoration(value) {
+                        patch.decoration = d;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                "color" => {
+                    patch.color = color(value);
+                    patch.color.is_some()
+                }
                 _ => false,
             };
             if !valid || patch.validate().is_err() {
@@ -161,6 +181,16 @@ pub(crate) fn inline(
             if patch.size.is_some() {
                 style.size = patch.size;
             }
+            if patch.weight.is_some() {
+                style.weight = patch.weight;
+            }
+            if patch.slant.is_some() {
+                style.slant = patch.slant;
+            }
+            if patch.color.is_some() {
+                style.color = patch.color;
+            }
+            style.decoration.overlay(patch.decoration);
             if patch.features.is_some() {
                 style.features = patch.features;
             }
@@ -179,4 +209,150 @@ fn omitted(notes: &mut Vec<reprise_diag::Note>) {
             "unsupported inline CSS or language omitted",
         ));
     }
+}
+
+pub(crate) fn weight(value: &str) -> Option<u16> {
+    let value = value.to_ascii_lowercase();
+    match value.as_str() {
+        "normal" => Some(400),
+        "bold" => Some(700),
+        _ => value.parse().ok().filter(|w| (1..=1000).contains(w)),
+    }
+}
+pub(crate) fn slant(value: &str) -> Option<reprise_doc::TextSlant> {
+    let value = value.to_ascii_lowercase();
+    match value.as_str() {
+        "normal" => Some(reprise_doc::TextSlant::Normal),
+        "italic" => Some(reprise_doc::TextSlant::Italic),
+        "oblique" => Some(reprise_doc::TextSlant::Oblique),
+        _ => None,
+    }
+}
+pub(crate) fn decoration(value: &str) -> Option<reprise_doc::Decoration> {
+    let value = value.to_ascii_lowercase();
+    let mut out = reprise_doc::Decoration {
+        underline: Some(false),
+        strike: Some(false),
+    };
+    let tokens: Vec<_> = value.split_ascii_whitespace().collect();
+    if tokens.is_empty() || tokens.len() > 2 {
+        return None;
+    }
+    if tokens == ["none"] {
+        return Some(out);
+    }
+    for token in tokens {
+        match token {
+            "underline" => out.underline = Some(true),
+            "line-through" => out.strike = Some(true),
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+fn alpha(value: &str) -> Option<u8> {
+    let (whole, fractional) = value.split_once('.').unwrap_or((value, ""));
+    if fractional.len() > 6 || !fractional.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let denom = 10u32.checked_pow(fractional.len() as u32)?;
+    let whole: u32 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse().ok()?
+    };
+    let frac: u32 = if fractional.is_empty() {
+        0
+    } else {
+        fractional.parse().ok()?
+    };
+    let n = whole.checked_mul(denom)?.checked_add(frac)?;
+    if n > denom {
+        return None;
+    }
+    u8::try_from(n.checked_mul(255)?.checked_add(denom / 2)? / denom).ok()
+}
+pub(crate) fn color(value: &str) -> Option<[u8; 4]> {
+    if value.len() > 128 {
+        return None;
+    }
+    let value = value.to_ascii_lowercase();
+    if let Some(hex) = value.strip_prefix('#') {
+        let mut out = [0, 0, 0, 255];
+        match hex.len() {
+            3 | 4 => {
+                for (slot, c) in out.iter_mut().zip(hex.bytes()) {
+                    *slot = (c as char).to_digit(16)? as u8 * 17;
+                }
+            }
+            6 | 8 => {
+                for (slot, pair) in out.iter_mut().zip(hex.as_bytes().as_chunks::<2>().0) {
+                    *slot = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+                }
+            }
+            _ => return None,
+        }
+        return Some(out);
+    }
+    match value.as_str() {
+        "transparent" => return Some([0, 0, 0, 0]),
+        "black" => return Some([0, 0, 0, 255]),
+        "white" => return Some([255, 255, 255, 255]),
+        "red" => return Some([255, 0, 0, 255]),
+        "green" => return Some([0, 128, 0, 255]),
+        "blue" => return Some([0, 0, 255, 255]),
+        _ => {}
+    }
+    let (body, rgba) = if let Some(b) = value.strip_prefix("rgba(") {
+        (b, true)
+    } else {
+        (value.strip_prefix("rgb(")?, false)
+    };
+    let parts: Vec<_> = body.strip_suffix(')')?.split(',').map(str::trim).collect();
+    if parts.len() != if rgba { 4 } else { 3 } {
+        return None;
+    }
+    let mut out = [0, 0, 0, 255];
+    for (slot, text) in out.iter_mut().take(3).zip(&parts) {
+        *slot = text.parse().ok()?;
+    }
+    if rgba {
+        out[3] = alpha(parts.get(3)?)?;
+    }
+    Some(out)
+}
+pub(crate) fn emphasis_css(
+    weight: Option<u16>,
+    slant: Option<reprise_doc::TextSlant>,
+    decoration: reprise_doc::Decoration,
+    color: Option<[u8; 4]>,
+) -> String {
+    let mut out = String::new();
+    if let Some(w) = weight {
+        out.push_str(&format!("font-weight: {w};"));
+    }
+    if let Some(s) = slant {
+        out.push_str(&format!("font-style: {};", s.keyword()));
+    }
+    if !decoration.is_empty() {
+        let mut lines = Vec::new();
+        if decoration.underline == Some(true) {
+            lines.push("underline");
+        }
+        if decoration.strike == Some(true) {
+            lines.push("line-through");
+        }
+        out.push_str(&format!(
+            "text-decoration: {};",
+            if lines.is_empty() {
+                "none".into()
+            } else {
+                lines.join(" ")
+            }
+        ));
+    }
+    if let Some([r, g, b, a]) = color {
+        out.push_str(&format!("color: #{r:02x}{g:02x}{b:02x}{a:02x};"));
+    }
+    out
 }

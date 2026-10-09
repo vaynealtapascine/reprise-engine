@@ -144,6 +144,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         table_rowspan_vertical_break()?,
         table_concurrent_overlapping_spans()?,
         pdf_structure_storm()?,
+        emphasis_overlap()?,
     ])
 }
 
@@ -2655,5 +2656,51 @@ pub fn format_overlap_storm() -> Result<Fixture, DocError> {
     Ok(Fixture {
         replica: Some(replica),
         ..Fixture::new("format_overlap_storm", doc, &["style.format-unreadable"])
+    })
+}
+
+/// Concurrent overlapping emphasis, invisible paint, combining and RTL clusters.
+pub fn emphasis_overlap() -> Result<Fixture, DocError> {
+    use reprise_doc::{Decoration, TextSlant, formatting::TextStyle};
+    let doc = document()?;
+    let text = "e\u{301} office אבג \u{200b} zero invisible";
+    let p = doc.append_block(BlockKind::Paragraph, "body", text)?;
+    doc.commit();
+    let replica = doc.fork(OTHER_PEER)?;
+    doc.format_text(
+        p,
+        0..text.len(),
+        &TextStyle {
+            families: Some(vec!["serif".into()]),
+            weight: Some(700),
+            decoration: Decoration {
+                underline: Some(true),
+                strike: None,
+            },
+            ..Default::default()
+        },
+        RangePolicy::EXPANDING,
+    )?;
+    replica.format_text(
+        p,
+        3..text.len(),
+        &TextStyle {
+            slant: Some(TextSlant::Italic),
+            decoration: Decoration {
+                underline: None,
+                strike: Some(true),
+            },
+            color: Some([160, 20, 80, 0]),
+            ..Default::default()
+        },
+        RangePolicy::EXPANDING,
+    )?;
+    doc.commit();
+    replica.commit();
+    doc.merge(&replica)?;
+    replica.merge(&doc)?;
+    Ok(Fixture {
+        replica: Some(replica),
+        ..Fixture::new("emphasis_overlap", doc, &["font.nearest", "font.missing"])
     })
 }

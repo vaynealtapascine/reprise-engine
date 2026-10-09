@@ -5,10 +5,43 @@ styles. A range's `format1` envelope contains version 1, an ordering number, and
 text-style patch. The range uses the existing anchor/policy storage, so ordinary
 flow splits and joins retain formatting without copying text.
 
-The first implementation supports font-family chains, absolute font size,
-language, and OpenType feature settings. Paragraph geometry and writing mode stay
-paragraph properties. Weight/slant selection, decoration and paint are separate
-extensions; unsupported properties must not be accepted and silently ignored.
+Supported fields are font-family chains, absolute size, language, OpenType
+features, weight (1–1000), slant (normal/italic/oblique), independent underline
+and strike patches, and RGBA colour (four bytes). Paragraph styles also provide
+weight, slant, decoration and colour defaults. A missing decoration member
+inherits; false explicitly removes just that line. Reset reveals paragraph
+properties. Alpha zero preserves text and geometry for selection/accessibility.
+Paragraph geometry and writing mode stay paragraph properties.
+
+The envelope remains format1 with deny_unknown_fields, including decoration.
+Packages using emphasis set REQUIRED_TEXT_EMPHASIS (required bit 10) as well as
+bit 9 when anchored formatting is retained. Bit 9 alone is insufficient: its
+older reader diagnoses an unknown envelope but continues layout without it.
+Named styles, break overrides, tombstones and unreadable formatting conservatively
+retain bit 10. Legacy styling keeps its stored/output form.
+
+Descriptor-aware itemisation uses CSS stretch/style/weight order and pinned
+identity ties within each family; unavailable descriptors report font.nearest
+Warning. Generics search registered variants of the configured default family
+alongside its pinned regular face. Legacy entry points remain unchanged. No
+synthetic bold/oblique or variable-axis instancing is performed.
+
+Decorations are filled content Path rectangles over each visual run's inline
+extent, including spaces. Integer post underline and OS/2 strike metrics scale
+by the selected face and size; missing positions use -0.1/0.3 em and missing or
+nonpositive thickness uses 0.05 em (minimum one layout unit after scaling).
+Zero-size/zero-width runs draw no line. Vertical underlines sit on the physical
+right; upright and combined glyph compensation does not rotate decoration paths.
+PDF reading addresses account for paths between glyph items, including repeated
+headers. Glyphs and paths share colour, including zero alpha.
+
+HTML emits font-weight, font-style, text-decoration and exact #RRGGBBAA colour
+on effective spans. Import accepts b/strong, i/em, u/s and the bounded CSS
+subset: absolute numeric weights plus normal/bold, keyword slants, underline/
+line-through/none, hex colours, comma rgb/rgba (integer RGB and alpha with at
+most six decimal places), transparent and black/white/red/green/blue. Unsupported
+relative weights, slant angles, decoration variants and colour syntax are
+reported with clipboard.html-approximated. Native fragments retain patches.
 
 Each formatting action adds an independent range. Its order is one greater than
 the largest readable formatting order observed in the document. Overlaps apply

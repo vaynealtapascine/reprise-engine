@@ -19,8 +19,9 @@ export type Block = { id: string, parent: string | null, kind: BlockKind, text: 
 formatting?: Array<TextRun>, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
-export type Style = { families: Array<string> | null, size: string | null, line_height: string | null, };
-export type TextStyle = { families: Array<string> | null,
+export type Style = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, };
+export type Decoration = { underline?: boolean | null, strike?: boolean | null, };
+export type TextStyle = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null,
 /**
  * Positive font size in 1/1024 pt.
  */

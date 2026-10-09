@@ -46,6 +46,8 @@ pub fn declarations() -> String {
     text.push_str(&Style::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
+    text.push_str(&Decoration::decl(&cfg));
+    text.push_str("\nexport ");
     text.push_str(&TextStyle::decl(&cfg));
     text.push('\n');
     text.push_str("export ");

@@ -124,6 +124,19 @@ pub struct ImageInsert {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub slant: Option<FontStyle>,
+    #[serde(default, skip_serializing_if = "Decoration::is_empty")]
+    #[ts(as = "Option<Decoration>", optional)]
+    pub decoration: Decoration,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub color: Option<[u8; 4]>,
+
     pub families: Option<Vec<String>>,
     pub size: Option<String>,
     pub line_height: Option<String>,
@@ -188,12 +201,40 @@ pub enum Command {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default, deny_unknown_fields)]
 pub struct TextStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub slant: Option<FontStyle>,
+    #[serde(default, skip_serializing_if = "Decoration::is_empty")]
+    #[ts(as = "Option<Decoration>", optional)]
+    pub decoration: Decoration,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub color: Option<[u8; 4]>,
+
     pub families: Option<Vec<String>>,
     /// Positive font size in 1/1024 pt.
     pub size: Option<i32>,
     pub language: Option<String>,
     pub features: Option<Vec<TextFeature>>,
     pub reset: bool,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct Decoration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub underline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub strike: Option<bool>,
+}
+impl Decoration {
+    fn is_empty(&self) -> bool {
+        self.underline.is_none() && self.strike.is_none()
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]

@@ -215,6 +215,54 @@ fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Result<Style,
                         );
                     }
                 }
+                "font-weight" => {
+                    if let Some(v) = crate::text_css::weight(value) {
+                        style.weight = Some(v);
+                    } else {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported weight omitted",
+                            false,
+                        );
+                    }
+                }
+                "font-style" => {
+                    if let Some(v) = crate::text_css::slant(value) {
+                        style.slant = Some(v);
+                    } else {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported slant omitted",
+                            false,
+                        );
+                    }
+                }
+                "text-decoration" | "text-decoration-line" => {
+                    if let Some(v) = crate::text_css::decoration(value) {
+                        style.decoration = v;
+                    } else {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported decoration omitted",
+                            false,
+                        );
+                    }
+                }
+                "color" => {
+                    if let Some(v) = crate::text_css::color(value) {
+                        style.color = Some(v);
+                    } else {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported colour omitted",
+                            false,
+                        );
+                    }
+                }
                 "white-space" if matches!(value, "pre-wrap" | "normal") => {}
                 _ => once(
                     notes,
@@ -464,7 +512,7 @@ impl Reader {
                 self.text.push('\n');
                 self.record_style(start)?;
             }
-            ("span", _) => {}
+            ("span" | "b" | "strong" | "i" | "em" | "u" | "s", _) => {}
             ("p" | "div" | "li" | "h1" | "h2" | "h3" | "blockquote", false) => {
                 self.flush(false)?;
                 self.style = css(attrs, &mut self.notes)?;
@@ -771,12 +819,25 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         }
         reader.inline.retain(|(depth, _)| *depth <= stack.len());
         let attrs = attributes(raw.get(name_end..).unwrap_or_default())?;
-        if name == "span" && !closing && !void {
+        if matches!(
+            name.as_str(),
+            "span" | "b" | "strong" | "i" | "em" | "u" | "s"
+        ) && !closing
+            && !void
+        {
             let parent = reader
                 .inline
                 .last()
                 .map(|(_, s)| s.clone())
                 .unwrap_or_default();
+            let mut parent = parent;
+            match name.as_str() {
+                "b" | "strong" => parent.weight = Some(700),
+                "i" | "em" => parent.slant = Some(reprise_doc::TextSlant::Italic),
+                "u" => parent.decoration.underline = Some(true),
+                "s" => parent.decoration.strike = Some(true),
+                _ => {}
+            }
             let style = crate::text_css::inline(&attrs, &parent, &mut reader.notes)?;
             reader.inline.push((stack.len(), style));
         }

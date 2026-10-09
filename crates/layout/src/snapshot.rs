@@ -174,6 +174,12 @@ pub struct LineLayout {
 /// A run of glyphs placed on a line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PositionedRun {
+    #[serde(skip_serializing_if = "is_black")]
+    pub color: [u8; 4],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underline: Option<DecorationLine>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strike: Option<DecorationLine>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub upright: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -192,6 +198,16 @@ pub struct PositionedRun {
     /// list snapshot covers.
     #[serde(skip)]
     pub glyphs: Vec<ShapedGlyph>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct DecorationLine {
+    /// Signed distance below the baseline, along the logical block axis.
+    pub offset: Length,
+    pub thickness: Length,
+}
+fn is_black(color: &[u8; 4]) -> bool {
+    *color == [0, 0, 0, 255]
 }
 
 /// A line within a snapshot: a block and the index of one of its lines.

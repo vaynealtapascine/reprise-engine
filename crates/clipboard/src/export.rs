@@ -391,6 +391,14 @@ fn paragraph(
                 }
             ));
         }
+        let mut decoration = style.decoration;
+        decoration.overlay(run.style.decoration);
+        css.push_str(&crate::text_css::emphasis_css(
+            run.style.weight.or(style.weight),
+            run.style.slant.or(style.slant),
+            decoration,
+            run.style.color.or(style.color),
+        ));
         let span = !css.is_empty() || run.style.language.is_some();
         if span {
             let lang = run
@@ -549,7 +557,7 @@ impl Exporter for Html {
                 "transforms and spirals are omitted",
                 "notes and floats become paragraphs",
                 "table/row/cell semantics retained; header rows (th) and spans (colspan/rowspan, as laid out) retained; column constraints and repeated header copies are omitted",
-                "computed family, size and line height retained; character formatting (family, size, language, OpenType features) as inline spans; symbolic values and named inheritance omitted",
+                "computed family, size and line height retained; character formatting (family, size, language, OpenType features, weight, slant, decorations, RGBA colour) as inline spans; symbolic values and named inheritance omitted",
                 "logical Unicode plus paragraph dir retained",
                 "CSS family names retained; pinned identities and font bytes omitted",
                 "assets have no HTML representation",

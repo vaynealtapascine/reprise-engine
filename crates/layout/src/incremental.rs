@@ -267,12 +267,32 @@ impl Inputs {
 /// forces future request fields to be considered rather than silently omitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ShapingKey {
+    emphasis: Option<EmphasisKey>,
     text: String,
     styles: Vec<reprise_shape::StyleRun>,
     direction: Option<reprise_geom::InlineDirection>,
     fallback: Option<(reprise_font::FaceId, reprise_geom::Length)>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EmphasisKey {
+    matching: bool,
+    descriptors: Vec<reprise_font::Descriptors>,
+    paint: Vec<crate::flow::PaintRun>,
+}
 impl ShapingKey {
+    pub(crate) fn with_emphasis(
+        mut self,
+        matching: bool,
+        descriptors: Vec<reprise_font::Descriptors>,
+        paint: Vec<crate::flow::PaintRun>,
+    ) -> Self {
+        self.emphasis = Some(EmphasisKey {
+            matching,
+            descriptors,
+            paint,
+        });
+        self
+    }
     pub(crate) fn new(
         input: &reprise_shape::ParagraphInput<'_>,
         fallback: Option<(reprise_font::FaceId, reprise_geom::Length)>,
@@ -285,6 +305,7 @@ impl ShapingKey {
         Self {
             text: (*text).to_owned(),
             styles: styles.to_vec(),
+            emphasis: None,
             direction: *direction,
             fallback,
         }

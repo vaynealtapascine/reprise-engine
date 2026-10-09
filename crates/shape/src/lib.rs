@@ -31,7 +31,9 @@ mod paragraph;
 mod unicode;
 
 pub use line::reorder_line;
-pub use paragraph::{Itemized, ParagraphInput, Shaper, StyleRun, codes, itemize, itemize_families};
+pub use paragraph::{
+    Itemized, ParagraphInput, Shaper, StyleRun, codes, itemize, itemize_emphasis, itemize_families,
+};
 pub use unicode::UNICODE_VERSION;
 
 /// Who shaped a run, recorded with the output.

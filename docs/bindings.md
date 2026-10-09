@@ -49,7 +49,11 @@ either end; overlaps resolve by action order, field by field (see
 `docs/text-formatting.md`). `State.blocks[].formatting`, present only when some
 action covers the block, lists the resolved disjoint runs over the whole text;
 a run's absent fields inherit the paragraph style. Weight, slant, decoration and
-paint are not yet supported, and are refused rather than ignored.
+paint are supported as `weight` (1..1000), `slant` (normal/italic/oblique),
+`decoration: { underline?: boolean, strike?: boolean }`, and `color: [r,g,b,a]`
+with byte channels. These also exist on paragraph `Style`. Decoration members
+compose independently; null/absent inherits and false removes that line.
+Missing faces use CSS matching and report `font.nearest` Warning.
 
 Geometry uses signed integer units of **1/1024 point**. Display matrices use
 signed integer **16.16** coefficients and integer length translations. Caret

@@ -22,8 +22,11 @@ pub const REQUIRED_TABLE_SPANS: u64 = 1 << 8;
 /// Older readers must not silently discard anchored character formatting.
 pub const REQUIRED_TEXT_FORMATTING: u64 = 1 << 9;
 
+/// Older format1 readers must refuse packages retaining emphasis or text paint.
+pub const REQUIRED_TEXT_EMPHASIS: u64 = 1 << 10;
 /// Required bits this version understands. Any other required bit refuses.
-pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING;
+pub const KNOWN_REQUIRED: u64 =
+    REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING | REQUIRED_TEXT_EMPHASIS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -36,6 +39,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if document.has_text_formatting() {
         flags.required |= REQUIRED_TEXT_FORMATTING;
+    }
+    if document.has_text_emphasis() {
+        flags.required |= REQUIRED_TEXT_EMPHASIS;
     }
     let mut stack: Vec<NodeId> = document.blocks();
     let mut visited = 0usize;

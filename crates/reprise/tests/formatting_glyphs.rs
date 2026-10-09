@@ -227,3 +227,79 @@ fn glyph_outlines_draw_every_glyph_the_layout_uses() {
         .is_err()
     );
 }
+
+#[test]
+fn emphasis_facade_save_reopen_html_and_pdf_preserve_colour_and_paths() {
+    let mut s = session();
+    let node = paragraph(&mut s, "abc אבג");
+    let patch = TextStyle {
+        weight: Some(700),
+        slant: Some(FontStyle::Italic),
+        decoration: Decoration {
+            underline: Some(true),
+            strike: Some(true),
+        },
+        color: Some([1, 2, 3, 0]),
+        ..Default::default()
+    };
+    format(&mut s, &node, 0, 10, patch.clone()).unwrap();
+    assert_eq!(
+        s.state().unwrap().data.blocks[0]
+            .formatting
+            .as_ref()
+            .unwrap()[0]
+            .style,
+        patch
+    );
+    let mut job = s
+        .start_layout(&Payload::new(LayoutOptions::default()))
+        .unwrap();
+    while !job.step(&mut s, 64).unwrap().data.complete {}
+    let display = s.display_json(0).unwrap().data;
+    assert!(display.contains("[1,2,3,0]"));
+    assert!(display.contains("\"type\":\"path\""));
+    assert!(
+        s.diagnostics()
+            .data
+            .iter()
+            .any(|d| d.code == "font.nearest" && d.severity == Severity::Warning)
+    );
+    let html = s.export(&Payload::new(ExportFormat::Html)).unwrap();
+    assert!(
+        String::from_utf8(html.data.content.bytes)
+            .unwrap()
+            .contains("color: #01020300")
+    );
+    let pdf = s.export(&Payload::new(ExportFormat::Pdf)).unwrap();
+    assert!(pdf.data.content.bytes.starts_with(b"%PDF"));
+    let saved = s.save().unwrap().data.bytes;
+    let reopened = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "2".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    assert_eq!(
+        reopened.state().unwrap().data.blocks[0].formatting,
+        s.state().unwrap().data.blocks[0].formatting
+    );
+    let before = s.state().unwrap();
+    for weight in [0, 1001, u16::MAX] {
+        assert!(
+            format(
+                &mut s,
+                &node,
+                0,
+                1,
+                TextStyle {
+                    weight: Some(weight),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(before, s.state().unwrap());
+    }
+}

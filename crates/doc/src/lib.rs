@@ -88,6 +88,9 @@ pub use reprise_geom::{TextCombineUpright, TextOrientation};
 pub use reprise_text as text;
 pub use resolve::{Binding, Cause, Found, Gone, Outcome, ResolvedRelation, ResolvedTarget};
 pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
+pub mod emphasis;
+pub use emphasis::{Decoration, TextSlant};
+
 pub use style::{
     Authored, Computed, ComputedStyle, LengthExpr, Property, Specified, StageExplanation, Style,
     StyleResolution, TEXT_COMBINE_UPRIGHT, TEXT_ORIENTATION, default_style,

@@ -27,6 +27,9 @@ pub(crate) struct Staged {
     vertical: bool,
     text: String,
     styles: Vec<StyleRun>,
+    descriptors: Vec<reprise_font::Descriptors>,
+    paint: Vec<PaintRun>,
+    emphasis: bool,
     family_chains: bool,
     fallback: Option<(FaceId, Length)>,
     shape_key: Option<crate::incremental::ShapingKey>,
@@ -117,6 +120,7 @@ pub(crate) fn begin(
         let image = crate::image::prepare(engine, doc, node, style.size, width, &mut notes);
         return Begin::Done(
             Some(Box::new(Prepared {
+                paint: Vec::new(),
                 node,
                 kind: block.kind,
                 style,
@@ -143,7 +147,7 @@ pub(crate) fn begin(
         language: None,
         features: Vec::new(),
     };
-    let formatting = match doc.text_formats(node) {
+    let mut formatting = match doc.text_formats(node) {
         Ok(value) => value,
         Err(error) => {
             notes.push(Diagnostic::new(
@@ -170,6 +174,45 @@ pub(crate) fn begin(
     {
         style.line_height = style.line_height.max(size.mul_ratio(6, 5));
     }
+    let emphasis = style.weight.is_some()
+        || style.slant.is_some()
+        || formatting
+            .runs
+            .iter()
+            .any(|r| r.style.weight.is_some() || r.style.slant.is_some());
+    // Empty paragraphs still have a style/face for their caret and strut.
+    if formatting.runs.is_empty() {
+        formatting.runs.push(reprise_doc::formatting::FormatRun {
+            bytes: 0..text.len(),
+            style: Default::default(),
+        });
+    }
+    let descriptors: Vec<_> = formatting
+        .runs
+        .iter()
+        .map(|r| reprise_font::Descriptors {
+            weight: r.style.weight.or(style.weight).unwrap_or(400),
+            style: match r.style.slant.or(style.slant).unwrap_or_default() {
+                reprise_doc::TextSlant::Normal => reprise_font::FontStyle::Normal,
+                reprise_doc::TextSlant::Italic => reprise_font::FontStyle::Italic,
+                reprise_doc::TextSlant::Oblique => reprise_font::FontStyle::Oblique,
+            },
+            stretch: 1000,
+        })
+        .collect();
+    let paint: Vec<_> = formatting
+        .runs
+        .iter()
+        .map(|r| {
+            let mut decoration = style.decoration;
+            decoration.overlay(r.style.decoration);
+            PaintRun {
+                range: r.bytes.clone(),
+                color: r.style.color.or(style.color).unwrap_or([0, 0, 0, 255]),
+                decoration,
+            }
+        })
+        .collect();
     let styles = if formatting.runs.is_empty() {
         vec![base_run.clone()]
     } else {
@@ -197,7 +240,37 @@ pub(crate) fn begin(
             })
             .collect()
     };
-    let fallback = if style.families.is_empty() {
+    let fallback = if emphasis {
+        let wanted = reprise_font::Descriptors {
+            weight: style.weight.unwrap_or(400),
+            style: match style.slant.unwrap_or_default() {
+                reprise_doc::TextSlant::Normal => reprise_font::FontStyle::Normal,
+                reprise_doc::TextSlant::Italic => reprise_font::FontStyle::Italic,
+                reprise_doc::TextSlant::Oblique => reprise_font::FontStyle::Oblique,
+            },
+            stretch: 1000,
+        };
+        let generic = style
+            .families
+            .last()
+            .and_then(|f| reprise_font::GenericFamily::parse(f))
+            .or_else(|| reprise_font::GenericFamily::parse(&style.family))
+            .unwrap_or(reprise_font::GenericFamily::Serif);
+        let matched = engine
+            .fonts
+            .match_family(&style.family, wanted)
+            .unwrap_or_else(|| engine.fonts.match_generic(generic, wanted));
+        if text.is_empty() {
+            notes.extend(
+                matched
+                    .notes
+                    .iter()
+                    .cloned()
+                    .map(|n| Diagnostic::from_note(n, subject.clone())),
+            );
+        }
+        Some((matched.face.id().clone(), style.size))
+    } else if style.families.is_empty() {
         engine
             .fonts
             .by_family(&style.family)
@@ -239,7 +312,11 @@ pub(crate) fn begin(
             styles: &key_styles,
             direction: None,
         };
-        crate::incremental::ShapingKey::new(&key_input, fallback.clone())
+        crate::incremental::ShapingKey::new(&key_input, fallback.clone()).with_emphasis(
+            emphasis,
+            descriptors.clone(),
+            paint.clone(),
+        )
     });
     let shape_notes = notes.len();
     if let (Some(e), Some(key)) = (evaluation, shape_key.as_ref())
@@ -265,6 +342,9 @@ pub(crate) fn begin(
         style,
         text,
         styles,
+        descriptors,
+        paint,
+        emphasis,
         family_chains,
         fallback,
         shape_key,
@@ -304,7 +384,9 @@ impl Staged {
             styles: &self.styles,
             direction: None,
         };
-        let mut itemized = if !self.family_chains {
+        let mut itemized = if self.emphasis {
+            reprise_shape::itemize_emphasis(&input, fonts, self.family_chains, &self.descriptors)
+        } else if !self.family_chains {
             itemize(&input, fonts)
         } else {
             itemize_families(&input, fonts)
@@ -473,6 +555,7 @@ impl Staged {
             .collect();
         let shaped = shaping::assemble(self.text.len(), &itemized.items, &self.requests, glyphs);
         let prepared = Prepared {
+            paint: self.paint,
             node: self.node,
             kind: self.kind,
             breaks: self.breaks.unwrap_or_default(),

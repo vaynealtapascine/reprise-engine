@@ -221,7 +221,9 @@ impl LayoutSnapshot {
                             line: at,
                             bytes: Some(run.range.clone()),
                         });
-                        child = child.saturating_add(1);
+                        child = child.saturating_add(
+                            1 + decoration_paths(run, line, frame.writing_mode).len(),
+                        );
                     }
                 }
             }
@@ -233,22 +235,25 @@ impl LayoutSnapshot {
                 .flat_map(|h| h.blocks.iter())
             {
                 for line in block.lines.iter().filter(|l| l.frame == frame_index) {
-                    let items = usize::from(block.image.is_some()) + line.runs.len();
-                    for item in 0..items {
+                    if block.image.is_some() {
+                        copies.push(reprise_display::pdf::ReadingRun {
+                            page: frame.page,
+                            path: vec![*group, child],
+                        });
+                        child = child.saturating_add(1);
+                    }
+                    for run in &line.runs {
                         let mut path = vec![*group, child];
-                        if let Some(run) = line
-                            .runs
-                            .get(item.saturating_sub(usize::from(block.image.is_some())))
-                            && (block.image.is_none() || item > 0)
-                            && glyph_transform(frame.writing_mode, run.upright).is_some()
-                        {
+                        if glyph_transform(frame.writing_mode, run.upright).is_some() {
                             path.push(0);
                         }
                         copies.push(reprise_display::pdf::ReadingRun {
                             page: frame.page,
                             path,
                         });
-                        child = child.saturating_add(1);
+                        child = child.saturating_add(
+                            1 + decoration_paths(run, line, frame.writing_mode).len(),
+                        );
                     }
                 }
             }
@@ -357,6 +362,7 @@ impl LayoutSnapshot {
                         } else {
                             children.push(Item::Glyphs(glyphs));
                         }
+                        children.extend(decoration_paths(run, line, frame.writing_mode));
                     }
                 }
             }
@@ -606,6 +612,36 @@ fn diagnostic_overlay(
     }
 }
 
+fn decoration_paths(run: &PositionedRun, line: &LineLayout, mode: WritingMode) -> Vec<Item> {
+    if run.width <= Length::ZERO || run.size <= Length::ZERO {
+        return Vec::new();
+    }
+    [run.underline, run.strike]
+        .into_iter()
+        .flatten()
+        .map(|metric| {
+            // Vertical underline sits on the physical right in both column directions.
+            let offset = if mode == WritingMode::VerticalRl {
+                -metric.offset
+            } else {
+                metric.offset
+            };
+            let y = line.baseline + offset - metric.thickness.mul_ratio(1, 2);
+            Item::Path {
+                path: Path::rect(Rect::new(Point::new(run.x, y), run.width, metric.thickness)),
+                fill: Some(Color(
+                    run.color[0],
+                    run.color[1],
+                    run.color[2],
+                    run.color[3],
+                )),
+                stroke: None,
+                layer: Layer::Content,
+            }
+        })
+        .collect()
+}
+
 /// A run's glyphs at their pen positions, with the source text they draw.
 fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
     let source = text.get(run.range.clone()).unwrap_or_default();
@@ -639,7 +675,7 @@ fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
     GlyphRun {
         face: run.face.clone(),
         size: run.size,
-        color: Color::BLACK,
+        color: Color(run.color[0], run.color[1], run.color[2], run.color[3]),
         text: source.to_string(),
         glyphs,
         layer: Layer::Content,

@@ -257,6 +257,16 @@ impl Authored {
 /// Style properties as authored, in a named style or as direct overrides.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Style {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slant: Option<crate::TextSlant>,
+    #[serde(default, skip_serializing_if = "crate::Decoration::is_empty")]
+    pub decoration: crate::Decoration,
+    /// Red, green, blue and alpha, each in 0..=255.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 4]>,
+
     pub parent: Option<String>,
     pub family: Option<String>,
     /// Explicit CSS-like chain. This replaces `family` in the same layer.
@@ -342,6 +352,25 @@ impl Style {
                 map.insert("families", format!("families1:{encoded}").as_str())?;
             }
         }
+        for (name, value) in [
+            ("weight", self.weight.map(|v| v.to_string())),
+            ("slant", self.slant.map(|v| v.keyword().to_string())),
+            (
+                "underline",
+                self.decoration.underline.map(|v| v.to_string()),
+            ),
+            ("strike", self.decoration.strike.map(|v| v.to_string())),
+            (
+                "color",
+                self.color.and_then(|v| serde_json::to_string(&v).ok()),
+            ),
+        ] {
+            if let Some(raw) = self.unparsed_keywords.get(name) {
+                map.insert(name, raw.as_str())?;
+            } else if let Some(value) = value {
+                map.insert(name, value)?;
+            }
+        }
         for p in Property::ALL {
             if let Some(v) = self.get(p) {
                 map.insert(p.name(), v.to_stored().as_str())?;
@@ -373,6 +402,41 @@ impl Style {
             family: get_str(map, "family"),
             ..Style::default()
         };
+        for name in ["weight", "slant", "underline", "strike", "color"] {
+            if let Some(raw) = get_str(map, name) {
+                let valid = match name {
+                    "weight" => {
+                        style.weight = raw.parse().ok().filter(|w| (1..=1000).contains(w));
+                        style.weight.is_some()
+                    }
+                    "slant" => {
+                        style.slant =
+                            serde_json::from_value(serde_json::Value::String(raw.clone())).ok();
+                        style.slant.is_some()
+                    }
+                    "underline" => {
+                        style.decoration.underline = raw.parse().ok();
+                        style.decoration.underline.is_some()
+                    }
+                    "strike" => {
+                        style.decoration.strike = raw.parse().ok();
+                        style.decoration.strike.is_some()
+                    }
+                    "color" => {
+                        style.color = if raw.len() <= 64 {
+                            serde_json::from_str(&raw).ok()
+                        } else {
+                            None
+                        };
+                        style.color.is_some()
+                    }
+                    _ => false,
+                };
+                if !valid {
+                    style.unparsed_keywords.insert(name.into(), raw);
+                }
+            }
+        }
         if let Some(raw) = get_str(map, "families") {
             match raw
                 .strip_prefix("families1:")
@@ -412,6 +476,16 @@ impl Style {
 /// Used values after inheritance and overrides (08), with where each came from (39).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slant: Option<crate::TextSlant>,
+    #[serde(default, skip_serializing_if = "crate::Decoration::is_empty")]
+    pub decoration: crate::Decoration,
+    /// Red, green, blue and alpha, each in 0..=255.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 4]>,
+
     pub family: String,
     /// Empty for legacy single-family documents, preserving their stored/output form.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -451,18 +525,10 @@ fn is_no_combination(c: &TextCombineUpright) -> bool {
 /// Engine defaults, the bottom of every style chain.
 pub fn default_style() -> Style {
     Style {
-        parent: None,
-        families: None,
-        unparsed_families: None,
         family: Some("Source Serif Pro".into()),
         size: Some(LengthExpr::Pt(Length::from_pt(10))),
         line_height: Some(LengthExpr::Em(1200)),
-        values: BTreeMap::new(),
-        // Left unset, so `explain` names only layers that author them; the
-        // computed defaults are `mixed` and `none`.
-        text_orientation: None,
-        text_combine_upright: None,
-        unparsed_keywords: BTreeMap::new(),
+        ..Style::default()
     }
 }
 
@@ -577,6 +643,10 @@ pub struct PropertyChain {
 /// Stage 3 (08): the style with everything context-free worked out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Computed {
+    pub weight: Option<u16>,
+    pub slant: Option<crate::TextSlant>,
+    pub decoration: crate::Decoration,
+    pub color: Option<[u8; 4]>,
     pub family: String,
     pub families: Vec<String>,
     family_layer: Option<String>,
@@ -626,6 +696,10 @@ impl Specified {
         // keeps what it inherited.
         let mut text_orientation = TextOrientation::default();
         let mut text_combine_upright = TextCombineUpright::default();
+        let mut weight = None;
+        let mut slant = None;
+        let mut decoration = crate::Decoration::default();
+        let mut color = None;
         let mut keyword_layers = BTreeMap::new();
         for layer in &self.layers {
             let unparsed = &layer.style.unparsed_keywords;
@@ -638,6 +712,43 @@ impl Specified {
                         layer.name
                     ),
                 ));
+            }
+            if !unparsed.contains_key("weight")
+                && let Some(w) = layer.style.weight
+            {
+                if (1..=1000).contains(&w) {
+                    weight = Some(w);
+                    keyword_layers.insert("weight", layer.name.clone());
+                } else {
+                    notes.push(Note::warning(
+                        codes::STYLE_UNPARSED,
+                        "weight outside 1..1000; inherited weight retained",
+                    ));
+                }
+            }
+            if !unparsed.contains_key("slant")
+                && let Some(v) = layer.style.slant
+            {
+                slant = Some(v);
+                keyword_layers.insert("slant", layer.name.clone());
+            }
+            if !unparsed.contains_key("color")
+                && let Some(v) = layer.style.color
+            {
+                color = Some(v);
+                keyword_layers.insert("color", layer.name.clone());
+            }
+            if !unparsed.contains_key("underline")
+                && let Some(v) = layer.style.decoration.underline
+            {
+                decoration.underline = Some(v);
+                keyword_layers.insert("underline", layer.name.clone());
+            }
+            if !unparsed.contains_key("strike")
+                && let Some(v) = layer.style.decoration.strike
+            {
+                decoration.strike = Some(v);
+                keyword_layers.insert("strike", layer.name.clone());
             }
             if !unparsed.contains_key(TEXT_ORIENTATION)
                 && let Some(o) = layer.style.text_orientation
@@ -656,6 +767,10 @@ impl Specified {
         let size = chain(Property::Size);
         let line_height = chain(Property::LineHeight);
         Computed {
+            weight,
+            slant,
+            decoration,
+            color,
             family,
             families,
             family_layer,
@@ -888,6 +1003,10 @@ impl Computed {
         }
         StyleResolution {
             style: ComputedStyle {
+                weight: self.weight,
+                slant: self.slant,
+                decoration: self.decoration,
+                color: self.color,
                 family: self.family.clone(),
                 families: self.families.clone(),
                 size: size_used,

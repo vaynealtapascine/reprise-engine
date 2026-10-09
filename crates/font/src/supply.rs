@@ -163,6 +163,37 @@ impl FontStore {
         .map(|g| (g, self.generic(g).id().clone()))
         .collect()
     }
+    pub fn match_generic(&self, generic: GenericFamily, wanted: Descriptors) -> FontMatch<'_> {
+        let base = self.generic(generic);
+        let face = self
+            .faces
+            .values()
+            .filter(|f| f.id().family.eq_ignore_ascii_case(&base.id().family))
+            .chain(std::iter::once(base))
+            .min_by_key(|f| {
+                let d = f.declaration().descriptors;
+                (
+                    stretch_rank(d.stretch, wanted.stretch),
+                    style_rank(d.style, wanted.style),
+                    weight_rank(d.weight, wanted.weight),
+                    f.id().clone(),
+                )
+            })
+            .unwrap_or(base);
+        let notes = if face.declaration().descriptors == wanted {
+            Vec::new()
+        } else {
+            vec![Note::warning(
+                codes::NEAREST,
+                format!(
+                    "requested {wanted:?} in {}; used {:?}",
+                    generic.name(),
+                    face.declaration().descriptors
+                ),
+            )]
+        };
+        FontMatch { face, notes }
+    }
     /// CSS order: stretch first, then style, then weight. Directional stretch
     /// preference follows CSS; weight 400..500 searches toward 500 before lower
     /// weights, then above 500. Other weights search lower first below 400 and

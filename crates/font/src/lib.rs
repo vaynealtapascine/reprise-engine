@@ -158,6 +158,36 @@ impl Face {
         self.metrics
     }
 
+    /// Underline/strike centre positions (y up) and thicknesses, in design units.
+    /// Missing/nonpositive thickness uses 1/20 em; positions default to -1/10 and 3/10 em.
+    pub fn decoration_metrics(&self) -> [(i32, i32); 2] {
+        let font = self.font_ref();
+        let em = i32::from(self.metrics.units_per_em);
+        let thickness = (em.saturating_add(10) / 20).max(1);
+        let underline = font
+            .post()
+            .ok()
+            .map(|p| {
+                (
+                    i32::from(p.underline_position().to_i16()),
+                    i32::from(p.underline_thickness().to_i16()),
+                )
+            })
+            .unwrap_or((-(em.saturating_add(5) / 10), thickness));
+        let strike = font
+            .os2()
+            .ok()
+            .map(|p| {
+                (
+                    i32::from(p.y_strikeout_position()),
+                    i32::from(p.y_strikeout_size()),
+                )
+            })
+            .unwrap_or((em.saturating_mul(3).saturating_add(5) / 10, thickness));
+        [underline, strike]
+            .map(|(position, width)| (position, if width > 0 { width } else { thickness }))
+    }
+
     /// One immutable adapter-data object per live face, released with the face.
     /// The first type to initialize the slot owns it; other types get `None`
     /// and must build their data locally. No font bytes are copied here.

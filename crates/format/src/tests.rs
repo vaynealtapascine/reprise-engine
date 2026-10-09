@@ -431,10 +431,10 @@ fn table_features_are_declared_from_content_and_refused_by_old_readers() {
     let bytes = package.save().unwrap();
     assert!(open(&bytes).is_ok());
     let mut unknown = package.container().clone();
-    unknown.header.features.required |= 1 << 10;
+    unknown.header.features.required |= 1 << 11;
     assert!(matches!(
         open(&encoded(&unknown)),
-        Err(FormatError::RequiredFeatures(m)) if m == 1 << 10
+        Err(FormatError::RequiredFeatures(m)) if m == 1 << 11
     ));
 
     // Saving after the last span is removed clears the required bit and keeps

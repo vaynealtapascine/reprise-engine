@@ -812,6 +812,7 @@ impl Flow<'_> {
 /// A block shaped and ready to compose into one or more regions.
 #[derive(Clone)]
 pub(crate) struct Prepared {
+    paint: Vec<PaintRun>,
     node: NodeId,
     kind: BlockKind,
     pub(crate) style: ComputedStyle,
@@ -824,6 +825,13 @@ pub(crate) struct Prepared {
     /// Empty lines take their vertical metrics from the style's own face.
     fallback: Option<(FaceId, Length)>,
     image: Option<crate::ImageLayout>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaintRun {
+    range: std::ops::Range<usize>,
+    color: [u8; 4],
+    decoration: reprise_doc::Decoration,
 }
 
 /// What composing a block into one region produced.
@@ -1094,7 +1102,31 @@ fn line_layout(
         .into_iter()
         .map(|run| {
             let width = run.width();
+            let paint = prepared
+                .paint
+                .iter()
+                .find(|p| p.range.contains(&run.range.start));
+            let decorations = engine.fonts.get(&run.face).ok().map(|face| {
+                face.decoration_metrics().map(|(position, thickness)| {
+                    crate::snapshot::DecorationLine {
+                        offset: -run
+                            .size
+                            .mul_ratio(position, i32::from(face.metrics().units_per_em)),
+                        thickness: run
+                            .size
+                            .mul_ratio(thickness, i32::from(face.metrics().units_per_em))
+                            .max(Length(1)),
+                    }
+                })
+            });
             let placed = PositionedRun {
+                color: paint.map_or([0, 0, 0, 255], |p| p.color),
+                underline: paint
+                    .filter(|p| p.decoration.underline == Some(true))
+                    .and(decorations.map(|d| d[0])),
+                strike: paint
+                    .filter(|p| p.decoration.strike == Some(true))
+                    .and(decorations.map(|d| d[1])),
                 upright: run.upright,
                 horizontal_scale: run.horizontal_scale,
                 combined: run.combined,

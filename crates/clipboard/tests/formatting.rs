@@ -47,6 +47,7 @@ fn style(families: &[&str], pt: i32, language: &str) -> TextStyle {
             value: 1,
         }]),
         reset: false,
+        ..TextStyle::default()
     }
 }
 
@@ -106,7 +107,7 @@ fn hostile_inline_css_is_reported_not_applied() {
         "font-family: 'unterminated",
         "font-feature-settings: 'toolong' 1",
         "font-feature-settings: 'liga' 1, 'liga' 0",
-        "color: red",
+        "color: var(--red)",
         "font-size: calc(1pt + 2pt)",
     ] {
         let html = format!("<p>x<span style=\"{css}\">y</span></p>");
@@ -196,4 +197,162 @@ fn native_copy_carries_effective_formatting_across_paragraphs() {
             .collect();
         assert_eq!(sized, vec![expected]);
     }
+}
+
+#[test]
+fn emphasis_html_and_native_roundtrip_independent_lines_and_alpha() {
+    use reprise_doc::{Decoration, TextSlant};
+    let doc = Document::new(1).unwrap();
+    let node = doc
+        .append_block(BlockKind::Paragraph, "", "both partial hidden")
+        .unwrap();
+    doc.set_overrides(
+        node,
+        &reprise_doc::Style {
+            decoration: Decoration {
+                underline: None,
+                strike: Some(true),
+            },
+            color: Some([30, 60, 90, 128]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let patch = TextStyle {
+        weight: Some(700),
+        slant: Some(TextSlant::Oblique),
+        decoration: Decoration {
+            underline: Some(true),
+            strike: None,
+        },
+        color: Some([1, 2, 3, 0]),
+        ..Default::default()
+    };
+    doc.format_text(node, 0..4, &patch, RangePolicy::FIXED)
+        .unwrap();
+    doc.format_text(
+        node,
+        5..12,
+        &TextStyle {
+            decoration: Decoration {
+                underline: Some(false),
+                strike: None,
+            },
+            ..Default::default()
+        },
+        RangePolicy::FIXED,
+    )
+    .unwrap();
+    doc.commit();
+    let html = html(&doc);
+    assert!(html.contains("font-weight: 700;"));
+    assert!(html.contains("font-style: oblique;"));
+    assert!(html.contains("text-decoration: underline line-through;"));
+    assert!(html.contains("color: #01020300;"));
+    let result = import_html(&html, ImportLimits::default()).unwrap();
+    assert!(
+        !result
+            .notes
+            .iter()
+            .any(|n| n.code == reprise_clipboard::codes::HTML_APPROXIMATED)
+    );
+    let blocks = &result.fragment.fragment.blocks;
+    let first = blocks[0]
+        .formatting
+        .iter()
+        .find(|r| r.bytes.contains(&0))
+        .unwrap();
+    assert_eq!(first.style.weight, patch.weight);
+    assert_eq!(first.style.slant, patch.slant);
+    assert_eq!(first.style.color, patch.color);
+    assert_eq!(
+        first.style.decoration,
+        Decoration {
+            underline: Some(true),
+            strike: Some(true)
+        }
+    );
+    let fragment = copy_all(&doc, "source", &SchemaRegistry::builtin(), None, None).unwrap();
+    let encoded = fragment.encode().unwrap();
+    let decoded = reprise_clipboard::NativeFragment::decode(&encoded).unwrap();
+    let target = Document::new(2).unwrap();
+    let mut editor = reprise_edit::Editor::new(target, SchemaRegistry::builtin());
+    editor
+        .apply_command(reprise_edit::Command::Paste {
+            fragment: Box::new(decoded.fragment),
+            at: None,
+            target_namespace: "target".into(),
+        })
+        .unwrap();
+    let pasted = editor.document().blocks()[0];
+    let source = doc.text_formats(node).unwrap();
+    let target = editor.document().text_formats(pasted).unwrap();
+    assert_eq!(source.runs, target.runs);
+    assert_eq!(
+        doc.computed_style(node).unwrap().color,
+        editor.document().computed_style(pasted).unwrap().color
+    );
+}
+#[test]
+fn semantic_html_tags_and_bounded_colour_parser() {
+    use reprise_doc::TextSlant;
+    let result = imported(
+        "<p><b>A<strong>B</strong></b><i>C<em>D</em></i><u>E<s>F</s></u><span style='font-weight: 1000;font-style: italic;text-decoration:none;color:rgba(4,5,6,0.5)'>G</span></p>",
+    );
+    let runs = &result[0].1;
+    assert_eq!(result[0].0, "ABCDEFG");
+    let at = |i| &runs.iter().find(|r| r.bytes.contains(&i)).unwrap().style;
+    assert_eq!(at(0).weight, Some(700));
+    assert_eq!(at(2).slant, Some(TextSlant::Italic));
+    assert_eq!(at(5).decoration.underline, Some(true));
+    assert_eq!(at(5).decoration.strike, Some(true));
+    assert_eq!(at(6).color, Some([4, 5, 6, 128]));
+    for color in [
+        "#abcd",
+        "#11223300",
+        "transparent",
+        "rgb(1,2,3)",
+        "rgba(1,2,3,.25)",
+    ] {
+        assert!(
+            imported(&format!("<p><span style='color:{color}'>x</span></p>"))[0].1[0]
+                .style
+                .color
+                .is_some()
+        );
+    }
+    for value in [
+        "rgba(1,2,3,999999999999999999999)",
+        "rgba(1,2,3,-1)",
+        "rgba(1,2,3,0.1234567)",
+        "#12345",
+        "rgb(1,2,256)",
+        "var(--colour)",
+    ] {
+        let imported = import_html(
+            &format!("<span style='color:{value}'>x</span>"),
+            ImportLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            imported
+                .notes
+                .iter()
+                .any(|n| n.code == reprise_clipboard::codes::HTML_APPROXIMATED)
+        );
+    }
+    assert!(
+        import_html(
+            &format!("{}x{}", "<u>".repeat(65), "</u>".repeat(65)),
+            ImportLimits::default()
+        )
+        .is_err()
+    );
+    let unbalanced = import_html("<b><i>x</b></s>", ImportLimits::default()).unwrap();
+    assert!(
+        unbalanced
+            .notes
+            .iter()
+            .any(|n| n.code == reprise_clipboard::codes::HTML_APPROXIMATED)
+    );
 }

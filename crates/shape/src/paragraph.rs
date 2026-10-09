@@ -74,7 +74,7 @@ pub struct Itemized {
 /// L1/L2 with [`crate::reorder_line`] after composition. Scripts follow UAX #24
 /// contextual runs; all-Common/Inherited text uses ISO 15924 `Zyyy`.
 pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
-    itemize_inner(input, fonts, false)
+    itemize_inner(input, fonts, false, None)
 }
 
 /// Explicit family chains ending in a generic default. Serif is appended if
@@ -83,13 +83,25 @@ pub fn itemize(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
 /// default with .notdef and a diagnostic. Legacy itemize uses one available
 /// face for the whole style run, falling back to serif when none is registered.
 pub fn itemize_families(input: &ParagraphInput<'_>, fonts: &FontStore) -> Itemized {
-    itemize_inner(input, fonts, true)
+    itemize_inner(input, fonts, true, None)
+}
+
+/// Descriptor-aware itemisation, preserving the legacy/family-chain fallback choice.
+/// Descriptors are parallel to styles; absent entries use normal 400/1000.
+pub fn itemize_emphasis(
+    input: &ParagraphInput<'_>,
+    fonts: &FontStore,
+    family_chains: bool,
+    descriptors: &[Descriptors],
+) -> Itemized {
+    itemize_inner(input, fonts, family_chains, Some(descriptors))
 }
 
 fn itemize_inner(
     input: &ParagraphInput<'_>,
     fonts: &FontStore,
     generic_defaults: bool,
+    emphasis: Option<&[Descriptors]>,
 ) -> Itemized {
     let text = input.text;
     let bidi = unicode::bidi(
@@ -126,7 +138,11 @@ fn itemize_inner(
     };
     let ignorable = CodePointSetData::new::<DefaultIgnorableCodePoint>();
     let mut end_of_previous = 0;
-    for run in input.styles {
+    for (run_index, run) in input.styles.iter().enumerate() {
+        let wanted = emphasis
+            .and_then(|d| d.get(run_index))
+            .copied()
+            .unwrap_or_default();
         let r = run.range.clone();
         let valid = r.start <= r.end
             && r.start >= end_of_previous
@@ -191,21 +207,38 @@ fn itemize_inner(
             .filter_map(|(index, family)| {
                 let face = if generic_defaults {
                     if let Some(generic) = GenericFamily::parse(family) {
-                        Some(fonts.generic(generic))
+                        Some(if emphasis.is_some() {
+                            let matched = fonts.match_generic(generic, wanted);
+                            nearest.insert(index, matched.notes);
+                            matched.face
+                        } else {
+                            fonts.generic(generic)
+                        })
                     } else {
-                        fonts
-                            .match_family(family, Descriptors::default())
-                            .map(|matched| {
-                                nearest.insert(index, matched.notes);
-                                matched.face
-                            })
+                        fonts.match_family(family, wanted).map(|matched| {
+                            nearest.insert(index, matched.notes);
+                            matched.face
+                        })
                     }
                 } else if let Some(generic) = GenericFamily::parse(family) {
                     // An authored generic is an intentional engine default,
                     // not a substitution for an unavailable named family.
-                    Some(fonts.generic(generic))
+                    Some(if emphasis.is_some() {
+                        let matched = fonts.match_generic(generic, wanted);
+                        nearest.insert(index, matched.notes);
+                        matched.face
+                    } else {
+                        fonts.generic(generic)
+                    })
                 } else {
-                    fonts.by_family(family)
+                    if emphasis.is_some() {
+                        fonts.match_family(family, wanted).map(|matched| {
+                            nearest.insert(index, matched.notes);
+                            matched.face
+                        })
+                    } else {
+                        fonts.by_family(family)
+                    }
                 };
                 face.map(|face| (index, face))
             })
@@ -213,7 +246,18 @@ fn itemize_inner(
         if !generic_defaults && candidates.is_empty() {
             let index = families.len();
             families.push(GenericFamily::Serif.name());
-            candidates.push((index, fonts.generic(GenericFamily::Serif)));
+            let matched = fonts.match_generic(GenericFamily::Serif, wanted);
+            if emphasis.is_some() {
+                nearest.insert(index, matched.notes);
+            }
+            candidates.push((
+                index,
+                if emphasis.is_some() {
+                    matched.face
+                } else {
+                    fonts.generic(GenericFamily::Serif)
+                },
+            ));
             // Empty legacy chains also substitute the engine default.
             if index == 0 {
                 out.notes.push(
@@ -247,6 +291,11 @@ fn itemize_inner(
                 )
                 .at(r.clone()),
             );
+        }
+        if !generic_defaults {
+            for note in nearest.remove(&initial_index).unwrap_or_default() {
+                out.notes.push(note.at(r.clone()));
+            }
         }
         let mut chosen = (initial_index, initial_face);
         let mut cluster_end = r.start;

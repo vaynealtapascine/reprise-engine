@@ -229,3 +229,13 @@ store. `missing_fonts` lists unavailable pins and `format.font-missing` warns
 that frontend resolution is required. Layout substitutes through explicit chains.
 Generic overrides are engine configuration; peers must use the same configuration
 (the package does not infer overrides from which defaults happened to be used).
+
+
+### Emphasis capability (required bit 10)
+
+REQUIRED_TEXT_EMPHASIS declares weight/slant, independent underline/strike and
+RGBA colour in paragraph styles or format1 patches. Bit 9 continues to declare
+anchored formatting. Readers predating emphasis know bit 9 but ignore diagnosed
+unreadable patches; bit 10 makes them refuse the package. Detection includes
+retained/tombstoned authored state and named styles; unreadable envelopes safely
+over-declare. Legacy records set no new bit.

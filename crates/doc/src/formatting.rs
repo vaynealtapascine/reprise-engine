@@ -38,6 +38,15 @@ pub struct TextStyle {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub features: Option<Vec<TextFeature>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slant: Option<crate::TextSlant>,
+    #[serde(skip_serializing_if = "crate::Decoration::is_empty")]
+    pub decoration: crate::Decoration,
+    /// Red, green, blue and alpha, each in 0..=255.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 4]>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reset: bool,
 }
@@ -49,7 +58,8 @@ impl TextStyle {
                 && f.len() <= 64
                 && f.iter()
                     .all(|s| !s.is_empty() && s.len() <= 256 && !s.contains('\0'))
-        }) && self.size.is_none_or(|s| s > Length::ZERO)
+        }) && self.weight.is_none_or(|w| (1..=1000).contains(&w))
+            && self.size.is_none_or(|s| s > Length::ZERO)
             && self.language.as_ref().is_none_or(|s| {
                 !s.is_empty() && s.len() <= 128 && s.is_ascii() && !s.chars().any(char::is_control)
             })
@@ -391,7 +401,7 @@ impl Document {
             events.entry(bytes.start).or_default().push((i, true));
             events.entry(bytes.end).or_default().push((i, false));
         }
-        let mut active: [BTreeSet<usize>; 5] = std::array::from_fn(|_| BTreeSet::new());
+        let mut active: [BTreeSet<usize>; 10] = std::array::from_fn(|_| BTreeSet::new());
         let cuts: Vec<_> = cuts.into_iter().collect();
         for pair in cuts.windows(2) {
             let bytes = pair[0]..pair[1];
@@ -402,6 +412,11 @@ impl Document {
                     patch.size.is_some(),
                     patch.language.is_some(),
                     patch.features.is_some(),
+                    patch.weight.is_some(),
+                    patch.slant.is_some(),
+                    patch.decoration.underline.is_some(),
+                    patch.decoration.strike.is_some(),
+                    patch.color.is_some(),
                     patch.reset,
                 ];
                 for (set, present) in active.iter_mut().zip(present) {
@@ -414,7 +429,7 @@ impl Document {
                     }
                 }
             }
-            let reset = active[4].last().copied();
+            let reset = active[9].last().copied();
             let winner = |property: usize| {
                 active[property]
                     .last()
@@ -427,6 +442,13 @@ impl Document {
                 size: winner(1).and_then(|s| s.size),
                 language: winner(2).and_then(|s| s.language.clone()),
                 features: winner(3).and_then(|s| s.features.clone()),
+                weight: winner(4).and_then(|s| s.weight),
+                slant: winner(5).and_then(|s| s.slant),
+                decoration: crate::Decoration {
+                    underline: winner(6).and_then(|s| s.decoration.underline),
+                    strike: winner(7).and_then(|s| s.decoration.strike),
+                },
+                color: winner(8).and_then(|s| s.color),
                 reset: false,
             };
             if let Some(last) = out.runs.last_mut()
