@@ -19,7 +19,7 @@ export type Block = { id: string, parent: string | null, kind: BlockKind, text: 
 formatting?: Array<TextRun>, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
-export type Style = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, };
+export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, };
 export type Decoration = { underline?: boolean | null, strike?: boolean | null, };
 export type TextStyle = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null,
 /**
@@ -32,7 +32,7 @@ export type TextFeature = {
      */
     tag: string, value: number, };
     export type TextRun = { start: number, end: number, style: TextStyle, };
-    export type Command = { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
+    export type Command = { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
     export type Transaction = { commands: Array<Command>, };
     export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
     export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
@@ -129,6 +129,15 @@ export type TextFeature = {
     export type StableSelection = { anchor: StableCaret, focus: StableCaret, };
     export type Presence = { selection: Selection | null, meta: { [key in string]: string }, };
     export type PresenceView = { peer_id: string, meta: { [key in string]: string }, selection: Selection | null, caret: PageRect | null, rects: Array<PageRect>, };
+    export type Alignment = "start" | "centre" | "end";
+    export type LineEdge = "start" | "end";
+    export type AnchorEdge = "position" | "gap-start" | "gap-end" | "line-start" | "line-end";
+    export type TabStop = { position: number | null, alignment: Alignment, leader: string | null, };
+    export type TabStops = { interval: number, stops: Array<TabStop>, };
+    export type MarkKind = "paragraph-end" | "line-break" | "gap" | "alignment" | "anchor";
+    export type RelationState = "valid" | "rebound" | "ambiguous" | "missing" | "owner-deleted" | "deleted";
+    export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean, };
+    export type MarksPage = { token: LayoutToken, page: number, marks: Array<Mark>, };
 
 
 
@@ -157,6 +166,7 @@ export type TextFeature = {
         install_plugin(plugin: number, request: Payload<PluginInstall>): Payload<boolean>;
         load_plugin(request: Payload<PluginSpec>, content: Uint8Array): Payload<number>;
         local_selection(): Payload<Selection | null>;
+        marks(page: number): Payload<MarksPage>;
         move_cursor(request: Payload<Move>): Payload<Cursor>;
         partial_page(job: number, page: number): Payload<DisplayPage>;
         paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
@@ -232,6 +242,7 @@ export type TextFeature = {
         readonly documentsession_install_plugin: (a: number, b: number, c: any) => [number, number, number];
         readonly documentsession_load_plugin: (a: number, b: any, c: any) => [number, number, number];
         readonly documentsession_local_selection: (a: number) => [number, number, number];
+        readonly documentsession_marks: (a: number, b: number) => [number, number, number];
         readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
         readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
         readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];

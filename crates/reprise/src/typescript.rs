@@ -323,5 +323,32 @@ pub fn declarations() -> String {
     text.push_str("export ");
     text.push_str(&PresenceView::decl(&cfg));
     text.push('\n');
+    text.push_str("export ");
+    text.push_str(&Alignment::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&LineEdge::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&AnchorEdge::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&TabStop::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&TabStops::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&MarkKind::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&RelationState::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&Mark::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&MarksPage::decl(&cfg));
+    text.push('\n');
     text
 }

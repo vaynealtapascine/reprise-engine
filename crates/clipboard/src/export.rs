@@ -352,11 +352,22 @@ fn paragraph(
     append(
         out,
         &format!(
-            "<p dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap\">",
+            "<p dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
             if base % 2 == 1 { "rtl" } else { "ltr" },
             escape(&family),
             points(style.size),
-            points(style.line_height)
+            points(style.line_height),
+            style
+                .alignment
+                .map(|a| format!(
+                    "; text-align: {}",
+                    match a {
+                        reprise_doc::marks::Alignment::Centre => "center",
+                        reprise_doc::marks::Alignment::Start => "start",
+                        reprise_doc::marks::Alignment::End => "end",
+                    }
+                ))
+                .unwrap_or_default()
         ),
     )?;
     let formats = doc
@@ -557,7 +568,7 @@ impl Exporter for Html {
                 "transforms and spirals are omitted",
                 "notes and floats become paragraphs",
                 "table/row/cell semantics retained; header rows (th) and spans (colspan/rowspan, as laid out) retained; column constraints and repeated header copies are omitted",
-                "computed family, size and line height retained; character formatting (family, size, language, OpenType features, weight, slant, decorations, RGBA colour) as inline spans; symbolic values and named inheritance omitted",
+                "computed family, size, line height and paragraph alignment retained; custom tab stops/leaders and per-line alignment are omitted (tab characters retained); character formatting (family, size, language, OpenType features, weight, slant, decorations, RGBA colour) as inline spans; symbolic values and named inheritance omitted",
                 "logical Unicode plus paragraph dir retained",
                 "CSS family names retained; pinned identities and font bytes omitted",
                 "assets have no HTML representation",

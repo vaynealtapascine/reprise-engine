@@ -60,6 +60,8 @@ pub(crate) fn style(s: &Style) -> Result<reprise_doc::Style> {
     if s.weight.is_some_and(|w| !(1..=1000).contains(&w)) {
         return Err(Error::Invalid("weight must be in 1..1000".into()));
     }
+    out.alignment = s.alignment.map(alignment);
+    out.tabs = s.tabs.as_ref().map(tabs).transpose()?;
     out.weight = s.weight;
     out.slant = s.slant.map(slant);
     out.decoration = decoration(s.decoration);
@@ -96,6 +98,54 @@ pub(crate) fn kind(k: BlockKind) -> reprise_doc::BlockKind {
 pub(crate) fn command(c: &Command) -> Result<reprise_edit::Command> {
     use reprise_edit::Command as C;
     Ok(match c {
+        Command::InsertLineBreak { node, at } => C::InsertLineBreak {
+            node: id(node)?,
+            at: *at as usize,
+        },
+        Command::InsertTab { node, at } => C::InsertTab {
+            node: id(node)?,
+            at: *at as usize,
+        },
+        Command::SetAlignment {
+            node,
+            at,
+            alignment: a,
+        } => C::SetAlignment {
+            node: id(node)?,
+            at: at.map(|v| v as usize),
+            alignment: alignment(*a),
+        },
+        Command::SetTabStops { node, tabs: t } => C::SetTabStops {
+            node: id(node)?,
+            tabs: tabs(t)?,
+        },
+        Command::AddAnchor {
+            node,
+            at,
+            edge,
+            target,
+            target_at,
+            target_edge,
+        } => C::AddAnchor {
+            node: id(node)?,
+            at: *at as usize,
+            target: id(target)?,
+            target_at: *target_at as usize,
+            edge: match edge {
+                LineEdge::Start => reprise_doc::marks::LineEdge::Start,
+                LineEdge::End => reprise_doc::marks::LineEdge::End,
+            },
+            target_edge: match target_edge {
+                AnchorEdge::Position => reprise_doc::marks::AnchorEdge::Position,
+                AnchorEdge::GapStart => reprise_doc::marks::AnchorEdge::GapStart,
+                AnchorEdge::GapEnd => reprise_doc::marks::AnchorEdge::GapEnd,
+                AnchorEdge::LineStart => reprise_doc::marks::AnchorEdge::LineStart,
+                AnchorEdge::LineEnd => reprise_doc::marks::AnchorEdge::LineEnd,
+            },
+        },
+        Command::RemoveAnchor { id: s } => C::RemoveRelation {
+            id: relation_id(s)?,
+        },
         Command::InsertImage { .. } => {
             return Err(Error::Invalid(
                 "image insertion must be its own transaction".into(),
@@ -541,5 +591,87 @@ pub(crate) fn exported(result: reprise_clipboard::ExportResult) -> Exported {
             .into_iter()
             .map(crate::error::diagnostic)
             .collect(),
+    }
+}
+
+pub(crate) fn alignment(a: Alignment) -> reprise_doc::marks::Alignment {
+    match a {
+        Alignment::Start => reprise_doc::marks::Alignment::Start,
+        Alignment::Centre => reprise_doc::marks::Alignment::Centre,
+        Alignment::End => reprise_doc::marks::Alignment::End,
+    }
+}
+fn alignment_out(a: reprise_doc::marks::Alignment) -> Alignment {
+    match a {
+        reprise_doc::marks::Alignment::Start => Alignment::Start,
+        reprise_doc::marks::Alignment::Centre => Alignment::Centre,
+        reprise_doc::marks::Alignment::End => Alignment::End,
+    }
+}
+pub(crate) fn tabs(t: &TabStops) -> Result<reprise_doc::marks::TabStops> {
+    if t.stops.len() > reprise_doc::marks::MAX_TAB_STOPS {
+        return Err(Error::Limit("tab stops".into()));
+    }
+    let stops = t
+        .stops
+        .iter()
+        .map(|s| {
+            let leader = s
+                .leader
+                .as_ref()
+                .map(|raw| {
+                    let mut chars = raw.chars();
+                    let c = chars
+                        .next()
+                        .ok_or_else(|| Error::Invalid("empty tab leader".into()))?;
+                    if chars.next().is_some() {
+                        return Err(Error::Invalid("tab leader must be one character".into()));
+                    }
+                    Ok(c)
+                })
+                .transpose()?;
+            Ok(reprise_doc::marks::TabStop {
+                position: s.position.map(Length),
+                alignment: alignment(s.alignment),
+                leader,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let out = reprise_doc::marks::TabStops {
+        interval: Length(t.interval),
+        stops,
+    };
+    out.validate().map_err(|e| Error::Invalid(e.to_string()))?;
+    Ok(out)
+}
+pub(crate) fn mark(m: reprise_layout::marks::Mark) -> Mark {
+    Mark {
+        kind: match m.kind {
+            reprise_layout::marks::MarkKind::ParagraphEnd => MarkKind::ParagraphEnd,
+            reprise_layout::marks::MarkKind::LineBreak => MarkKind::LineBreak,
+            reprise_layout::marks::MarkKind::Gap => MarkKind::Gap,
+            reprise_layout::marks::MarkKind::Alignment => MarkKind::Alignment,
+            reprise_layout::marks::MarkKind::Anchor => MarkKind::Anchor,
+        },
+        node: m.node.to_string(),
+        offset: u32::try_from(m.offset).unwrap_or(u32::MAX),
+        line: u32::try_from(m.line).unwrap_or(u32::MAX),
+        from: Point {
+            x: m.from.x.0,
+            y: m.from.y.0,
+        },
+        to: m.to.map(|p| Point { x: p.x.0, y: p.y.0 }),
+        target_page: m.target_page.map(|p| u32::try_from(p).unwrap_or(u32::MAX)),
+        alignment: m.alignment.map(alignment_out),
+        relation: m.relation.map(|id| id.to_string()),
+        state: m.state.map(|s| match s {
+            reprise_layout::RelationStatus::Valid => RelationState::Valid,
+            reprise_layout::RelationStatus::Rebound => RelationState::Rebound,
+            reprise_layout::RelationStatus::Ambiguous => RelationState::Ambiguous,
+            reprise_layout::RelationStatus::Missing => RelationState::Missing,
+            reprise_layout::RelationStatus::OwnerDeleted => RelationState::OwnerDeleted,
+            reprise_layout::RelationStatus::Deleted => RelationState::Deleted,
+        }),
+        applied: m.applied,
     }
 }

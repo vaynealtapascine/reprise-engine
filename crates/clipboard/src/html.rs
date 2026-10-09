@@ -186,6 +186,22 @@ fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Result<Style,
             let key = key.trim().to_ascii_lowercase();
             let value = value.trim();
             match key.as_str() {
+                "text-align" => {
+                    style.alignment = match value {
+                        "start" | "left" => Some(reprise_doc::marks::Alignment::Start),
+                        "center" => Some(reprise_doc::marks::Alignment::Centre),
+                        "end" | "right" => Some(reprise_doc::marks::Alignment::End),
+                        _ => None,
+                    };
+                    if style.alignment.is_none() {
+                        once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported paragraph alignment omitted",
+                            false,
+                        );
+                    }
+                }
                 "font-family" => {
                     let value = value.trim_matches(['\'', '"']);
                     if !value.contains(['\\', ',']) {

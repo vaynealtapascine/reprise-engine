@@ -2,7 +2,7 @@
 // Compile as ES modules and deploy beside wasm-bindgen's web output.
 import init, { Workspace, DocumentSession, setPanicHandler } from "./reprise_wasm.js";
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
-  DisplayPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
+  DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied } from "./types.js";
 
 type Request = Payload<{ id: string } & (
@@ -15,6 +15,7 @@ type Request = Payload<{ id: string } & (
   | { kind: "start"; request: Payload<LayoutOptions> }
   | { kind: "step"; job: number; budget: number }
   | { kind: "cancel"; job: number }
+  | { kind: "marks"; page: number }
   | { kind: "save" }
   | { kind: "sync-export"; request?: Payload<SyncRequest> }
   | { kind: "sync-info" }
@@ -33,6 +34,7 @@ export type Response = Payload<{ id: string } & (
   | { kind: "edited"; applied: Payload<Applied>; state: Payload<State> }
   | { kind: "started"; job: number }
   | { kind: "layout"; job: number; progress: Payload<LayoutProgress>; pages: Payload<DisplayPage>[] }
+  | { kind: "marks"; page: Payload<MarksPage> }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
   | { kind: "sync-packet"; packet: Payload<SyncPacket> }
@@ -105,6 +107,7 @@ scope.onmessage = (event: MessageEvent<Request>) => {
           break;
         }
         case "cancel": current().cancel(data.job); if (data.job === active) release(); post({ id, kind: "ack" }); break;
+        case "marks": post({ id, kind: "marks", page: current().marks(data.page) }); break;
         case "save": { release(); const content = current().save(); post({ id, kind: "saved", content }, [content.data.bytes.buffer]); break; }
         case "sync-export": {
           if (data.request) {

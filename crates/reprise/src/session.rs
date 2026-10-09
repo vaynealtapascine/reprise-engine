@@ -783,6 +783,18 @@ impl DocumentSession {
                 .collect(),
         }))
     }
+    /// Separate read-only geometry; requires a complete layout at this revision.
+    pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>> {
+        let s = self.current()?;
+        if s.pages.get(page as usize).is_none() {
+            return Err(Error::Invalid("page out of bounds".into()));
+        }
+        Ok(Payload::new(MarksPage {
+            token: self.token(),
+            page,
+            marks: s.marks(page as usize).into_iter().map(cv::mark).collect(),
+        }))
+    }
     pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>> {
         let s = self.current()?;
         if page as usize >= s.pages.len() {
