@@ -121,14 +121,27 @@ parity.apply(p({ commands: [{ kind: "insert-text", node: parityNode, at: 6, text
 const parityPacket = parity.sync_export(p({ since: [] }));
 assert.equal(Buffer.from(parityPacket.data.content.bytes).toString("hex"), fs.readFileSync(path.join(__dirname, "../../reprise/tests/sync_delta.hex"), "utf8").trim());
 // Character formatting crosses the boundary as runs; glyph outlines draw what layout placed.
-parity.apply(p({ commands: [{ kind: "format-text", node: parityNode, start: 0, end: 3, style: { families: null, size: 20 * 1024, language: null, features: null, reset: false } }] }));
+parity.apply(p({ commands: [{ kind: "format-text", node: parityNode, start: 0, end: 3, style: { families: null, size: 20 * 1024, language: null, features: null, reset: false, weight: 700, slant: "italic", decoration: { underline: true, strike: true }, color: [1, 2, 3, 0] } }] }));
 const runs = parity.state().data.blocks.find(b => b.id === parityNode).formatting;
 assert.deepEqual(runs.map(r => [r.start, r.end]), [[0, 3], [3, 11]]);
 assert.equal(runs[0].style.size, 20 * 1024);
+assert.equal(runs[0].style.weight, 700);
+assert.equal(runs[0].style.slant, "italic");
+assert.deepEqual(runs[0].style.decoration, { underline: true, strike: true });
+assert.deepEqual(runs[0].style.color, [1, 2, 3, 0]);
+assert.throws(() => parity.apply(p({ commands: [{ kind: "format-text", node: parityNode, start: 0, end: 1, style: { weight: 1001 } }] })));
 finish(parity);
 const glyphRuns = [];
 (function collect(items) { for (const item of items) { if (item.type === "glyphs") glyphRuns.push(item); else if (item.type === "group") collect(item.items); } })(parity.display_page(0).data.display.items);
 assert.ok(glyphRuns.length > 0);
+assert.ok(glyphRuns.some(run => run.color.join(",") === "1,2,3,0"));
+const decoratedDisplay = parity.display_json(0).data;
+assert.ok(decoratedDisplay.includes('"type":"path"'));
+assert.ok(parity.diagnostics().data.some(d => d.code === "font.nearest" && d.severity === "warning"));
+const emphasisSave = parity.save().data.bytes;
+const emphasisReopen = ws.open(p({ peer_id: "3" }), emphasisSave);
+assert.deepEqual(emphasisReopen.state().data.blocks[0].formatting, parity.state().data.blocks[0].formatting);
+emphasisReopen.free();
 for (const run of glyphRuns) {
   const ids = run.glyphs.map(g => g.id);
   const outlines = parity.glyph_outlines(p({ face: run.face, glyphs: ids })).data;
@@ -138,4 +151,4 @@ for (const run of glyphRuns) {
 assert.throws(() => parity.glyph_outlines(p({ face: { family: "Nope", hash: "00".repeat(32) }, glyphs: [1] })), e => e.data.code === "bindings.missing-font");
 parity.free();
 second.free();doc.free();ws.free();
-console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, glyph outlines, bytes, and hostile objects passed");
+console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, glyph outlines, bytes, and hostile objects passed");

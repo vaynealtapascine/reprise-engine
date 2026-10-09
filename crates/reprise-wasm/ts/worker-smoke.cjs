@@ -28,12 +28,19 @@ function send(data) {
   assert.equal(inserted.kind, "edited");
   const node = inserted.applied.data.blocks[0];
   assert.equal(inserted.state.data.blocks[0].id, node);
+  const formatted = await send({ kind: "edit", request: p({ commands: [{ kind: "format-text", node, start: 0, end: 6, style: { weight: 700, slant: "oblique", decoration: { underline: true, strike: true }, color: [20, 40, 60, 0] } }] }) });
+  assert.equal(formatted.kind, "edited");
+  const styled = formatted.state.data.blocks[0].formatting[0].style;
+  assert.equal(styled.weight, 700); assert.equal(styled.slant, "oblique");
+  assert.equal(styled.decoration.underline, true); assert.equal(styled.decoration.strike, true);
+  assert.deepEqual(Array.from(styled.color), [20, 40, 60, 0]);
   const split = await send({ kind: "edit", request: p({ commands: [{ kind: "split-block", node, at: 3 }] }) });
   assert.equal(split.kind, "edited");
   const effect = split.applied.data.effects.find(e => e.kind === "split");
   assert.equal(effect.node, node);
   assert.equal(effect.at, 3);
   assert.equal(split.state.data.blocks.find(b => b.id === effect.new).text, "def");
+  assert.equal(split.state.data.blocks.find(b => b.id === effect.new).formatting[0].style.weight, 700);
   // A UI transforms a caret at offset 5 over the split, then anchors it.
   const caret = { node: effect.new, offset: 5 - effect.at, affinity: "downstream" };
   const selection = await send({ kind: "selection", request: p({ anchor: caret, focus: caret }) });
@@ -44,5 +51,5 @@ function send(data) {
   assert.equal(image.kind, "edited");
   assert.ok(image.state.data.blocks.some(b => b.id === image.applied.data.blocks[0]));
   assert.equal((await send({ kind: "close" })).kind, "ack");
-  console.log("Worker smoke: edit effects, created IDs, split selection and image results passed");
+  console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });
