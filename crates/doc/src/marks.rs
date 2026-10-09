@@ -181,7 +181,9 @@ impl Document {
         Ok(())
     }
     fn has_mark_patches(&self) -> bool {
-        matches!(self.doc.get_value(), loro::LoroValue::Map(roots) if roots.contains_key(PATCHES))
+        // A whole-document root listing materializes every root to test its
+        // emptiness, including the growing range tree. Look up just this root.
+        self.doc.get_by_str_path(PATCHES).is_some()
     }
     pub(crate) fn clear_mark_patches(&self, node: NodeId) -> Result<(), DocError> {
         if self.has_mark_patches() {
@@ -429,6 +431,7 @@ mod tests {
             },
         )
         .unwrap();
+        assert!(a.doc.get_by_str_path(PATCHES).is_none());
         a.commit();
         let b = a.fork(2).unwrap();
         a.set_alignment(node, Alignment::End).unwrap();
