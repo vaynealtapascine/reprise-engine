@@ -25,8 +25,9 @@ pub const REQUIRED_TEXT_FORMATTING: u64 = 1 << 9;
 /// Older format1 readers must refuse packages retaining emphasis or text paint.
 pub const REQUIRED_TEXT_EMPHASIS: u64 = 1 << 10;
 /// Required bits this version understands. Any other required bit refuses.
+pub const REQUIRED_MARKS: u64 = 1 << 11;
 pub const KNOWN_REQUIRED: u64 =
-    REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING | REQUIRED_TEXT_EMPHASIS;
+    REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING | REQUIRED_TEXT_EMPHASIS | REQUIRED_MARKS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -37,6 +38,9 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_marks() {
+        flags.required |= REQUIRED_MARKS;
+    }
     if document.has_text_formatting() {
         flags.required |= REQUIRED_TEXT_FORMATTING;
     }

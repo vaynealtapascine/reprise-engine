@@ -661,7 +661,7 @@ fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
     let glyphs = run
         .glyphs
         .iter()
-        .map(|g| {
+        .filter_map(|g| {
             let glyph = Glyph {
                 id: g.id,
                 x: x + g.x_offset,
@@ -669,7 +669,7 @@ fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
                 text: g.cluster.saturating_sub(start)..end_of(g.cluster).saturating_sub(start),
             };
             x += g.advance;
-            glyph
+            (g.id != reprise_compose::INVISIBLE_GLYPH).then_some(glyph)
         })
         .collect();
     GlyphRun {

@@ -15,6 +15,33 @@ use reprise_doc::{NewBlock, NodeId, Relation, RelationId, Style};
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Command {
+    InsertLineBreak {
+        node: NodeId,
+        at: usize,
+    },
+    InsertTab {
+        node: NodeId,
+        at: usize,
+    },
+    /// None changes the paragraph; Some pins the default of the containing visual line.
+    SetAlignment {
+        node: NodeId,
+        at: Option<usize>,
+        alignment: reprise_doc::marks::Alignment,
+    },
+    SetTabStops {
+        node: NodeId,
+        tabs: reprise_doc::marks::TabStops,
+    },
+    AddAnchor {
+        node: NodeId,
+        at: usize,
+        edge: reprise_doc::marks::LineEdge,
+        target: NodeId,
+        target_at: usize,
+        target_edge: reprise_doc::marks::AnchorEdge,
+    },
+
     /// A complete paste transaction. Must be the only command in its transaction.
     Paste {
         fragment: Box<reprise_doc::fragment::Fragment>,

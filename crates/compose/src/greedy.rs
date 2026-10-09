@@ -57,7 +57,7 @@ fn fill(
         .enumerate()
         .skip(para.first_break_after(pos))
     {
-        let need = para.natural_width(pos, i);
+        let need = para.fitted_width(pos, i, width);
         let forced = b.kind == BreakKind::Forced;
         if need <= width {
             if forced || b.at == len {
@@ -125,7 +125,7 @@ pub(crate) fn first_fit(
     let len = para.len;
     // Empty text still gets one line; otherwise stop when the text runs out.
     let unfinished =
-        |out: &Composition, pos: usize| pos < len || (len == 0 && out.lines.is_empty());
+        |out: &Composition, pos: usize| pos < len || (para.start == len && out.lines.is_empty());
     while unfinished(out, pos) {
         let intervals = match walk.next_line(request, &out.lines) {
             Step::Room(intervals) => intervals,
@@ -160,6 +160,18 @@ pub(crate) fn first_fit(
             else {
                 continue;
             };
+            if para.tab_limited() {
+                out.notes.push(
+                    Note::error(
+                        codes::TAB_LIMIT,
+                        "tab fitting exceeded its explicit work budget",
+                    )
+                    .at(pos..len),
+                );
+                out.rest = Some(pos);
+                out.block_end = walk.y;
+                return;
+            }
             out.lines.push(para.fragment(
                 pos..end,
                 interval,
@@ -169,6 +181,7 @@ pub(crate) fn first_fit(
                 None,
                 Adjustment::default(),
             ));
+            out.notes.extend(para.tab_notes(pos..end, interval.width()));
             pos = end;
             if ends_line {
                 break;

@@ -42,6 +42,7 @@ mod hostile_tests;
 pub mod image;
 pub mod invariants;
 mod lifecycle;
+pub mod marks;
 mod page;
 mod persist;
 mod position;
@@ -465,10 +466,11 @@ impl Document {
             }
             _ => return Err(DocError::Malformed(id, "text")),
         };
-        let overrides = match meta.get("overrides") {
+        let mut overrides = match meta.get("overrides") {
             Some(ValueOrContainer::Container(Container::Map(m))) => Style::read(&m),
             _ => Style::default(),
         };
+        self.read_mark_patches(id, &mut overrides);
         Ok(Block {
             id,
             kind,
@@ -486,6 +488,7 @@ impl Document {
     }
 
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
+        self.clear_mark_patches(id)?;
         let meta = self.meta_of(id)?;
         let map = meta.insert_container("overrides", LoroMap::new())?;
         style.write(&map)?;

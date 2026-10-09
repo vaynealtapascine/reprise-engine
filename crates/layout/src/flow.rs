@@ -943,6 +943,8 @@ impl Prepared {
             );
             return Composed {
                 lines: vec![LineLayout {
+                    available: interval,
+                    alignment: None,
                     frame,
                     text: 0..self.text.len(),
                     preview: self.text.clone(),
@@ -970,7 +972,7 @@ impl Prepared {
             fonts: &engine.fonts,
             adapter: engine.shaper.as_ref(),
         };
-        let composition = engine.composer.compose(&ComposeRequest {
+        let request = ComposeRequest {
             text: &self.text,
             shaped: &self.shaped,
             reshape: &shaper,
@@ -979,7 +981,20 @@ impl Prepared {
             geometry,
             start,
             block_start,
-        });
+        };
+        let composition = if self
+            .text
+            .chars()
+            .any(|c| c == '\t' || reprise_doc::marks::is_line_break(c))
+        {
+            reprise_compose::compose_marks(
+                &request,
+                &self.style.tabs.clone().unwrap_or_default(),
+                engine.composer.as_ref(),
+            )
+        } else {
+            engine.composer.compose(&request)
+        };
         diagnostics.extend(
             composition
                 .notes
@@ -1068,6 +1083,14 @@ fn line_layout(
                 .collect()
         }
     };
+    tab_leaders(
+        engine,
+        prepared,
+        &mut visual_runs,
+        fragment.available.width(),
+        subject,
+        diagnostics,
+    );
     let adjustment = fragment.explanation.adjustment;
     let adjusted = adjustment != Adjustment::default();
     let content_end = fragment.text.start.saturating_add(
@@ -1097,7 +1120,18 @@ fn line_layout(
     } else {
         Length::ZERO
     };
-    let mut x = fragment.available.start - hanging_left;
+    let alignment = prepared.style.alignment.or_else(|| {
+        text.contains('\t')
+            .then_some(reprise_doc::marks::Alignment::Start)
+    });
+    let surplus = (fragment.available.width() - width).max(Length::ZERO);
+    let shift = match alignment {
+        Some(reprise_doc::marks::Alignment::Centre) => surplus.mul_ratio(1, 2),
+        Some(reprise_doc::marks::Alignment::End) if prepared.base_level % 2 == 0 => surplus,
+        Some(reprise_doc::marks::Alignment::Start) if prepared.base_level % 2 == 1 => surplus,
+        _ => Length::ZERO,
+    };
+    let mut x = fragment.available.start + shift - hanging_left;
     let runs = visual_runs
         .into_iter()
         .map(|run| {
@@ -1143,11 +1177,17 @@ fn line_layout(
         })
         .collect();
     let rect: Rect<FrameSpace> = Rect::new(
-        Point::new(fragment.available.start, fragment.block_offset),
-        fragment.available.width(),
+        Point::new(fragment.available.start + shift, fragment.block_offset),
+        if alignment.is_some() {
+            width
+        } else {
+            fragment.available.width()
+        },
         fragment.height,
     );
     LineLayout {
+        available: fragment.available,
+        alignment: prepared.style.alignment,
         frame,
         preview: text
             .get(fragment.text.clone())
@@ -1160,6 +1200,124 @@ fn line_layout(
         width,
         explanation: fragment.explanation,
         runs,
+    }
+}
+
+/// Tab leader glyphs occupy the existing tab cell; they add no source positions.
+fn tab_leaders(
+    engine: &Engine,
+    prepared: &Prepared,
+    runs: &mut [ShapedRun],
+    measure: Length,
+    subject: &Subject,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(tabs) = &prepared.style.tabs else {
+        return;
+    };
+    if !tabs.stops.iter().any(|s| s.leader.is_some()) {
+        return;
+    }
+    let mut widths = std::collections::BTreeMap::<usize, Length>::new();
+    for g in runs.iter().flat_map(|r| &r.glyphs) {
+        *widths.entry(g.cluster as usize).or_default() += g.advance;
+    }
+    let mut cursor = Length::ZERO;
+    let mut leaders = std::collections::BTreeMap::new();
+    for (&at, &width) in &widths {
+        if prepared.text.get(at..).is_some_and(|s| s.starts_with('\t'))
+            && let Some(leader) = tabs
+                .stops
+                .iter()
+                .find(|s| s.position.unwrap_or(measure) > cursor)
+                .and_then(|s| s.leader)
+        {
+            leaders.insert(at, leader);
+        }
+        cursor += width;
+    }
+    let mut remaining = 8192usize;
+    let mut limited = false;
+    let mut missing = false;
+    for run in runs {
+        let mut glyphs = Vec::new();
+        for glyph in &run.glyphs {
+            let Some(&leader) = leaders
+                .get(&(glyph.cluster as usize))
+                .filter(|_| glyph.advance > Length::ZERO)
+            else {
+                glyphs.push(*glyph);
+                continue;
+            };
+            let raw = leader.to_string();
+            let Some(mut item) = prepared
+                .items
+                .iter()
+                .find(|i| i.range.contains(&(glyph.cluster as usize)))
+                .cloned()
+            else {
+                glyphs.push(*glyph);
+                continue;
+            };
+            item.range = 0..raw.len();
+            item.combined = false;
+            let leader_runs = Shaper {
+                text: &raw,
+                items: &[item],
+                fonts: &engine.fonts,
+                adapter: engine.shaper.as_ref(),
+            }
+            .shape();
+            let width: Length = leader_runs
+                .runs
+                .iter()
+                .flat_map(|r| &r.glyphs)
+                .map(|g| g.advance)
+                .sum();
+            if width <= Length::ZERO
+                || leader_runs
+                    .runs
+                    .iter()
+                    .flat_map(|r| &r.glyphs)
+                    .any(|g| g.id == 0)
+            {
+                missing = true;
+                glyphs.push(*glyph);
+                continue;
+            }
+            let want = (glyph.advance.0 / width.0) as usize;
+            let per = leader_runs
+                .runs
+                .iter()
+                .map(|r| r.glyphs.len())
+                .sum::<usize>()
+                .max(1);
+            let count = want.min(256).min(remaining / per);
+            limited |= count < want;
+            remaining = remaining.saturating_sub(count.saturating_mul(per));
+            for _ in 0..count {
+                for g in leader_runs.runs.iter().flat_map(|r| &r.glyphs) {
+                    let mut g = *g;
+                    g.cluster = glyph.cluster;
+                    glyphs.push(g);
+                }
+            }
+            let mut rest = *glyph;
+            rest.advance -= width.mul_ratio(i32::try_from(count).unwrap_or(i32::MAX), 1);
+            glyphs.push(rest);
+        }
+        run.glyphs = glyphs;
+    }
+    if limited {
+        diagnostics.push(Diagnostic::new(Severity::Warning, codes::TAB_LEADER_LIMIT, subject.clone(), "tab leaders capped at 256 repeats per gap and 8192 glyphs per fragment; remaining gap stays blank"));
+    }
+    if missing {
+        diagnostics.push(Diagnostic::new(
+            Severity::Warning,
+            codes::TAB_LEADER_MISSING,
+            subject.clone(),
+            "tab leader unavailable in its font; gap stays blank",
+        ));
     }
 }
 

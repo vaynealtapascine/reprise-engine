@@ -1838,6 +1838,7 @@ version = "0.0.0"
 dependencies = [
  "icu_segmenter",
  "reprise-diag",
+ "reprise-doc",
  "reprise-font",
  "reprise-geom",
  "reprise-shape",

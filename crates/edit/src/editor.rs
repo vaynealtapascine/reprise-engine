@@ -212,8 +212,34 @@ impl Editor {
             .map(|r| self.doc.stage_relation(&self.schemas, r))
             .collect::<Result<Vec<_>, _>>()
             .map_err(store)?;
+        let mut made_relations = Vec::new();
         for step in &plan.steps {
-            self.step(step, &mut blocks, &relations).map_err(store)?;
+            match step {
+                Step::AlignLine {
+                    node,
+                    at,
+                    alignment,
+                } => {
+                    made_relations.push(self.doc.align_line(*node, *at, *alignment).map_err(store)?)
+                }
+                Step::PinLine {
+                    node,
+                    at,
+                    edge,
+                    target,
+                    target_at,
+                    target_edge,
+                } => made_relations.push(
+                    self.doc
+                        .pin_line(*node, *at, *edge, *target, *target_at, *target_edge)
+                        .map_err(store)?,
+                ),
+                Step::AddRelation { new } => {
+                    self.step(step, &mut blocks, &relations).map_err(store)?;
+                    made_relations.extend(relations.get(*new).copied());
+                }
+                _ => self.step(step, &mut blocks, &relations).map_err(store)?,
+            }
         }
         let blocks = blocks
             .into_iter()
@@ -249,7 +275,7 @@ impl Editor {
             .collect();
         Ok(Applied {
             blocks,
-            relations,
+            relations: made_relations,
             effects,
         })
     }
@@ -263,6 +289,11 @@ impl Editor {
         let missing = || reprise_doc::DocError::Store("a staged item is missing".into());
         let staged = |i: usize| blocks.get(i).copied().flatten().ok_or_else(missing);
         match step {
+            Step::SetAlignment { node, alignment } => self.doc.set_alignment(*node, *alignment)?,
+            Step::SetTabs { node, tabs } => self.doc.set_tab_stops(*node, tabs)?,
+            Step::AlignLine { .. } | Step::PinLine { .. } => {
+                return Err(missing());
+            }
             Step::InsertText { node, at, text } => {
                 self.doc.block(*node)?.text.insert(*at, text)?;
             }

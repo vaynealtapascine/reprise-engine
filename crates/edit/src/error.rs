@@ -30,7 +30,8 @@ impl EditError {
             Reason::TooManyCommands { .. }
             | Reason::TextTooLong { .. }
             | Reason::TransactionTooLarge { .. }
-            | Reason::TreeDepthLimit { .. } => crate::codes::LIMIT,
+            | Reason::TreeDepthLimit { .. }
+            | Reason::MarksLimit => crate::codes::LIMIT,
             Reason::Store(_) => crate::codes::STORE,
             _ => crate::codes::INVALID_COMMAND,
         };
@@ -49,6 +50,8 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error("alignment relation limit exceeded")]
+    MarksLimit,
     #[error(transparent)]
     Fragment(reprise_doc::fragment::FragmentError),
     #[error("paste must be the only command in its transaction")]

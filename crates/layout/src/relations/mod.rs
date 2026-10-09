@@ -12,6 +12,7 @@ use reprise_doc::relation::{Ownership, builtin};
 use crate::flow::Pending;
 use crate::{Diagnostic, Engine, LayoutSnapshot, RelationLayout, RelationStatus, Subject, codes};
 
+mod alignment;
 mod follow;
 pub(crate) mod resolve;
 
@@ -52,6 +53,7 @@ pub(crate) fn begin(
             }
         };
         let mut result = RelationLayout {
+            anchor: None,
             id,
             schema: relation.schema.clone(),
             owner: relation.owner,
@@ -82,6 +84,9 @@ pub(crate) fn begin(
             snapshot.relations.push(result);
             continue;
         };
+        if relation.schema == reprise_doc::marks::ALIGNMENT {
+            continue;
+        }
         if relation.schema == builtin::FOLLOW {
             follow.apply(
                 engine,
@@ -145,6 +150,7 @@ pub(crate) fn begin(
             .unwrap_or(result.status);
         snapshot.relations.push(result);
     }
+    alignment::run(engine, doc, snapshot);
     pending
 }
 

@@ -5,7 +5,7 @@
 //! from a break that was checked to be on a character boundary, or is the
 //! start (snapped to one) or the end of the text.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::ops::Range;
 
@@ -28,6 +28,9 @@ pub fn is_word_space(c: char) -> bool {
 
 pub(crate) struct Para<'r, 'a> {
     pub request: &'r ComposeRequest<'a>,
+    pub(crate) tabs: Option<reprise_doc::marks::TabStops>,
+    pub(crate) tab_positions: Vec<usize>,
+    pub(crate) tab_work: Cell<usize>,
     pub text: &'a str,
     pub len: usize,
     /// `request.start`, clamped to the text and snapped down to a character
@@ -157,6 +160,9 @@ impl<'r, 'a> Para<'r, 'a> {
 
         Para {
             request,
+            tabs: None,
+            tab_positions: Vec::new(),
+            tab_work: Cell::new(0),
             text,
             len,
             start,
@@ -183,7 +189,7 @@ impl<'r, 'a> Para<'r, 'a> {
     }
 
     /// Where a line from `pos` to `end` stops having content, for any `end`.
-    fn content_end_at(&self, pos: usize, end: usize) -> usize {
+    pub(crate) fn content_end_at(&self, pos: usize, end: usize) -> usize {
         let i = self.breaks.partition_point(|b| b.at < end);
         match self.breaks.get(i) {
             Some(b) if b.at == end => self.content_end(pos, i),
@@ -311,13 +317,16 @@ impl<'r, 'a> Para<'r, 'a> {
     ) -> LineFragment {
         let reshaped = self.needs_reshape(text.clone());
         let content = text.start..self.content_end_at(text.start, text.end);
-        let (runs, width) = if reshaped {
+        let (mut runs, mut width) = if reshaped {
             let runs = self.request.reshape.reshape(text.clone());
-            let width = reshaped_width(&runs, content);
+            let width = reshaped_width(&runs, content.clone());
             (runs, width)
         } else {
-            (self.slice(text.clone()), self.width(content))
+            (self.slice(text.clone()), self.width(content.clone()))
         };
+        if self.tabs.is_some() {
+            width = self.adjust_tabs(&mut runs, content.clone(), available.width());
+        }
         LineFragment {
             text,
             runs,

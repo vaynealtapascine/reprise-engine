@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 mod authored;
 mod greedy;
+mod marks;
 mod optimal;
 mod para;
 mod polygon;
@@ -25,6 +26,7 @@ mod walk;
 
 pub use authored::{AuthoredBreak, Turnover};
 pub use greedy::{Greedy, MAX_CONSECUTIVE_SKIPS};
+pub use marks::{INVISIBLE_GLYPH, MAX_TAB_WORK, compose_marks};
 pub use optimal::{Limits, Mode, Optimal};
 pub use para::is_word_space;
 pub use polygon::{Polygon, Runaround};
@@ -38,6 +40,10 @@ pub mod codes {
     /// The geometry provider made no progress down the block axis, so
     /// composition stopped. The rest of the text is reported as unplaced.
     pub const GEOMETRY_STALLED: Code = Code::new("compose.geometry-stalled");
+    /// A tab's requested stop cannot be reached inside the composing interval.
+    pub const TAB_UNREACHABLE: Code = Code::new("compose.tab-unreachable");
+    /// Tab candidate fitting exhausted its explicit work bound; a tail remains.
+    pub const TAB_LIMIT: Code = Code::new("compose.tab-limit");
     /// An optimising composer set some or all lines first-fit instead: its
     /// search hit a limit, or geometry answered differently once earlier
     /// lines were known. Every composer guarantee still holds, and the lines

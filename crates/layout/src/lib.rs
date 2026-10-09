@@ -23,6 +23,7 @@ mod flow;
 pub mod geometry;
 mod image;
 pub mod incremental;
+pub mod marks;
 mod notes;
 pub mod plugins;
 mod query;
