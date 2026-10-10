@@ -332,6 +332,23 @@ pub struct FontDeclaration {
     pub stretch: u16,
     pub face_index: u32,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum GenericFamily {
+    Serif,
+    SansSerif,
+    Monospace,
+    Script,
+}
+/// Host configuration; omitted mappings keep engine defaults. No document state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct FontSettings {
+    #[ts(type = "Partial<Record<GenericFamily, string>>")]
+    pub generics: std::collections::BTreeMap<GenericFamily, String>,
+    pub fallbacks: Vec<String>,
+    pub synthetic_oblique: bool,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Face {
     pub family: String,
@@ -652,6 +669,9 @@ pub struct Glyph {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct GlyphRun {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub synthetic_oblique: Option<bool>,
     pub face: Face,
     pub size: i32,
     pub color: [u8; 4],
@@ -708,6 +728,14 @@ pub struct GlyphRequest {
     pub face: Face,
     pub glyphs: Vec<u32>,
 }
+/// The renderer passes the display run's synthetic flag when fetching outlines.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StyledGlyphRequest {
+    pub face: Face,
+    pub glyphs: Vec<u32>,
+    pub synthetic_oblique: bool,
+}
 /// Outlines in font design units, y up, as SVG path data (`M`, `L`, `Q`, `C`,
 /// `Z`, absolute). Scale by `size / units_per_em` and flip y to draw. An ID the
 /// face lacks has an empty path. Rendering only: never feeds layout.
@@ -720,6 +748,17 @@ pub struct GlyphOutlines {
 pub struct GlyphOutline {
     pub id: u32,
     pub path: String,
+    // Conservative integer design-unit envelope, y up. Styled requests only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ink_bounds: Option<GlyphBounds>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GlyphBounds {
+    pub x_min: i32,
+    pub y_min: i32,
+    pub x_max: i32,
+    pub y_max: i32,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DisplayPage {

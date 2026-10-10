@@ -259,6 +259,38 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_oblique_moves_ink_inside_its_integer_envelope() {
+        let (mut list, fonts) = sample::list();
+        list.items.truncate(1);
+        let plain = render(&list, &fonts, 2.0).unwrap();
+        let Item::Glyphs(run) = &mut list.items[0] else {
+            panic!("fixture glyph run")
+        };
+        run.synthetic_oblique = true;
+        let bounds = run.ink_bounds(&fonts).unwrap();
+        let sheared = render(&list, &fonts, 2.0).unwrap();
+        assert_ne!(plain, sheared);
+        let image = Pixmap::decode_png(&sheared).unwrap();
+        let mut ink = 0;
+        for y in 0..image.height() {
+            for x in 0..image.width() {
+                if image.pixel(x, y).unwrap().red() < 128 {
+                    ink += 1;
+                    let x = i64::from(x) * 512;
+                    let y = i64::from(y) * 512;
+                    assert!(
+                        x + 512 >= i64::from(bounds.origin.x.0) && x <= i64::from(bounds.max_x().0)
+                    );
+                    assert!(
+                        y + 512 >= i64::from(bounds.origin.y.0) && y <= i64::from(bounds.max_y().0)
+                    );
+                }
+            }
+        }
+        assert!(ink > 0);
+    }
+
+    #[test]
     fn groups_are_transformed_and_clipped() {
         let (list, fonts) = sample::list();
         let img = Pixmap::decode_png(&render(&list, &fonts, 2.0).unwrap()).unwrap();

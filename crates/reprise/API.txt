@@ -21,6 +21,7 @@ pub fn insert_image(&mut self, request: &Payload<ImageInsert>) -> Result<Payload
 pub fn undo(&mut self) -> Result<Payload<bool>>
 pub fn redo(&mut self) -> Result<Payload<bool>>
 pub fn declare_font( &mut self, request: &Payload<FontDeclaration>, bytes: &[u8], ) -> Result<Payload<Face>>
+pub fn set_font_settings(&mut self, request: &Payload<FontSettings>) -> Result<Payload<()>>
 pub fn register_asset( &mut self, request: &Payload<AssetDeclaration>, bytes: &[u8], ) -> Result<Payload<String>>
 pub fn start_layout(&mut self, request: &Payload<LayoutOptions>) -> Result<LayoutJob>
 pub fn move_cursor(&self, request: &Payload<Move>) -> Result<Payload<Cursor>>
@@ -39,6 +40,7 @@ pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>>
 pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>>
 pub fn display_json(&self, page: u32) -> Result<Payload<String>>
 pub fn glyph_outlines( &self, request: &Payload<GlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
+pub fn glyph_outlines_styled( &self, request: &Payload<StyledGlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
 pub fn svg(&self, page: u32) -> Result<Payload<String>>
 pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>>
 pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>>

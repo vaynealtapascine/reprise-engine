@@ -75,6 +75,12 @@ pub fn declarations() -> String {
     text.push_str(&FontDeclaration::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
+    text.push_str(&GenericFamily::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&FontSettings::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
     text.push_str(&Face::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
@@ -199,6 +205,12 @@ pub fn declarations() -> String {
     text.push('\n');
     text.push_str("export ");
     text.push_str(&GlyphRun::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&StyledGlyphRequest::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&GlyphBounds::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
     text.push_str(&Segment::decl(&cfg));

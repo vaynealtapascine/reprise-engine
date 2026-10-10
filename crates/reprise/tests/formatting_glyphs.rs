@@ -229,6 +229,131 @@ fn glyph_outlines_draw_every_glyph_the_layout_uses() {
 }
 
 #[test]
+fn host_fonts_invalidate_jobs_and_styled_outlines_match_the_display() {
+    let mut s = session();
+    let node = paragraph(&mut s, "aéb");
+    let face = s
+        .declare_font(
+            &Payload::new(FontDeclaration {
+                family: "Paper Mono".into(),
+                weight: 400,
+                style: FontStyle::Normal,
+                stretch: 1000,
+                face_index: 0,
+            }),
+            include_bytes!("../../../fixtures/fonts/PaperMono-TestSubset.ttf"),
+        )
+        .unwrap()
+        .data;
+    s.declare_font(
+        &Payload::new(FontDeclaration {
+            family: "Universal".into(),
+            weight: 400,
+            style: FontStyle::Normal,
+            stretch: 1000,
+            face_index: 0,
+        }),
+        include_bytes!("../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf"),
+    )
+    .unwrap();
+    format(
+        &mut s,
+        &node,
+        0,
+        4,
+        TextStyle {
+            families: Some(vec!["monospace".into()]),
+            slant: Some(FontStyle::Italic),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let revision = s.state().unwrap().data.revision;
+    let mut old = s
+        .start_layout(&Payload::new(LayoutOptions::default()))
+        .unwrap();
+    s.set_font_settings(&Payload::new(FontSettings {
+        generics: [(GenericFamily::Monospace, "Paper Mono".into())].into(),
+        fallbacks: vec!["Universal".into()],
+        synthetic_oblique: true,
+    }))
+    .unwrap();
+    assert_eq!(s.state().unwrap().data.revision, revision);
+    assert!(old.step(&mut s, 1).is_err());
+    let mut job = s
+        .start_layout(&Payload::new(LayoutOptions::default()))
+        .unwrap();
+    let mut complete = false;
+    for _ in 0..10000 {
+        if job.step(&mut s, 1).unwrap().data.complete {
+            complete = true;
+            break;
+        }
+    }
+    assert!(complete);
+    let json = s.display_json(0).unwrap().data;
+    assert!(json.contains("\"synthetic_oblique\":true"));
+    assert!(json.contains("Universal"));
+    assert!(json.contains("Paper Mono"));
+    let diagnostics = s.diagnostics().data;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == "font.synthetic" && d.severity == Severity::Info)
+    );
+    assert!(diagnostics.iter().any(|d| d.code == "font.fallback"));
+    let request = StyledGlyphRequest {
+        face: face.clone(),
+        glyphs: vec![2, 3, 4, 5, 6],
+        synthetic_oblique: true,
+    };
+    let normal = s
+        .glyph_outlines(&Payload::new(GlyphRequest {
+            face,
+            glyphs: request.glyphs.clone(),
+        }))
+        .unwrap()
+        .data;
+    let styled = s
+        .glyph_outlines_styled(&Payload::new(request))
+        .unwrap()
+        .data;
+    assert_eq!(normal.units_per_em, styled.units_per_em);
+    assert_eq!(
+        normal.glyphs.iter().map(|g| g.id).collect::<Vec<_>>(),
+        styled.glyphs.iter().map(|g| g.id).collect::<Vec<_>>()
+    );
+    assert_ne!(normal.glyphs, styled.glyphs);
+    assert!(normal.glyphs.iter().all(|g| g.ink_bounds.is_none()));
+    assert!(
+        styled
+            .glyphs
+            .iter()
+            .filter(|g| !g.path.is_empty())
+            .all(|g| g.ink_bounds.is_some())
+    );
+    assert!(
+        normal
+            .glyphs
+            .iter()
+            .zip(&styled.glyphs)
+            .any(|(a, b)| a.path != b.path)
+    );
+    let before = s.display_json(0).unwrap().data;
+    let error = s
+        .set_font_settings(&Payload::new(FontSettings {
+            fallbacks: vec!["bad".into(); 65],
+            ..Default::default()
+        }))
+        .unwrap_err();
+    assert_eq!(error.payload().data.code, "font.config");
+    assert_eq!(s.display_json(0).unwrap().data, before);
+    s.set_font_settings(&Payload::new(FontSettings::default()))
+        .unwrap();
+    assert!(s.display_json(0).is_err());
+}
+
+#[test]
 fn emphasis_facade_save_reopen_html_and_pdf_preserve_colour_and_paths() {
     let mut s = session();
     let node = paragraph(&mut s, "abc אבג");

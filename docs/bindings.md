@@ -208,11 +208,13 @@ The main thread drives explicit steps, leaving room for edits/cancellation betwe
 messages. There are no hidden threads, timers or unbounded pump loops.
 
 Every message is `{ version: 1, data: { id, kind, ... } }`. `id` is a caller
-correlation string. Request kinds are `create`, `open`, `font`, `asset`, `image`, `edit`, `start`,
+correlation string. Request kinds are `create`, `open`, `font`, `font-settings`, `asset`, `image`, `edit`, `start`,
 `step`, `cancel`, `save`, `sync-export`, `sync-import`, and `close`. Responses are
 `state`, `asset`, `started`, `layout`, `saved`, `sync`, `ack`, or `error`.
 An `asset` request carries declaration and bytes; its `asset` response returns
 the content hash for the following `image` insertion request.
+`font-settings` carries `Payload<FontSettings>` and acknowledges a successful
+replacement; the host starts a new layout job after that acknowledgement.
 
 1. `open` carries `Payload<Open>` and package `Uint8Array` (or use `create`).
 2. `start` carries `Payload<LayoutOptions>` and returns a monotone `job` handle.
@@ -224,7 +226,7 @@ the content hash for the following `image` insertion request.
    and `sync` transfer owned output buffers; the sender no longer owns them.
 6. `cancel` acknowledges and releases the active job. `close` frees the session.
 
-Failed open/edit/font/asset/image/sync requests preserve the existing valid session/job.
+Failed open/edit/font/font-settings/asset/image/sync requests preserve the existing valid session/job.
 The example sends all covered pages on each step for clarity; a production host
 may choose dirty-page transport. It releases superseded/complete handles. The
 WASM class permits at most eight retained jobs and 64 loaded plugin handles;
@@ -354,6 +356,31 @@ DOCX/EPUB and PDF/UA remain the core's documented follow-ups. Compatible future
 packages are safely refused rather than exposed through an editable session;
 a future read-only facade needs a core `DocumentAt` layout entry point. None of
 these require modifying an existing frozen contract in this workstream.
+
+## Host font configuration
+
+Host font choices are configured with
+`DocumentSession::set_font_settings(Payload<FontSettings>)` / WASM
+`set_font_settings`. `generics` is a partial map from `serif`, `sans-serif`,
+`monospace`, `script` to declared aliases; `fallbacks` is an ordered list (max
+64); `synthetic_oblique` defaults to false in native `FontSettings::default()`.
+Supply all three fields on the wire. Names may precede font declarations and
+are limited to 1024 UTF-8 bytes. Updates invalidate jobs/results and clear
+configuration-bound caches, without modifying authored state or sync/package
+bytes. Hosts reapply settings after opening a session; configured snapshots
+record them. Generic mappings resolve declared weight/style variants.
+
+Display glyph runs expose optional `synthetic_oblique` (absent means false).
+`glyph_outlines` retains its original upright behavior and request type;
+`glyph_outlines_styled(Payload<StyledGlyphRequest>)` accepts the same face and
+glyph IDs plus that boolean, and returns paths already sheared by `x += y/4`
+in y-up design units. A renderer must not shear these paths a second time.
+Cache outlines by face, glyph and synthetic flag. SVG, PNG and PDF apply the
+same transformation; PDF retains font text and extraction/accessibility tags.
+Styled outline responses also expose `glyphs[].ink_bounds` for nonempty paths:
+a conservative integer design-unit envelope (`x_min`, `y_min`, `x_max`,
+`y_max`, y up), including outward-rounded shear. Hosts can size outline-cache
+textures without clipping. The legacy outline method omits these new fields.
 
 ## Build, packaging and verification
 

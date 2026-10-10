@@ -207,6 +207,29 @@ fn codes(t: &pdf::Tagged) -> Vec<String> {
 }
 
 #[test]
+fn synthetic_oblique_keeps_accessible_text_when_tagging_splits_a_run() {
+    let source = "office aé";
+    let (mut runs, fonts) = runs(&[source]);
+    for run in &mut runs {
+        run.synthetic_oblique = true;
+    }
+    let tagged = render(
+        &[page(glyphs(runs))],
+        &fonts,
+        &reprise_display::AssetStore::default(),
+        vec![node(
+            Role::P,
+            vec![part(0, 0, 0..1), part(0, 0, 1..source.len())],
+        )],
+    )
+    .unwrap();
+    assert!(tagged.ua, "{:?}", tagged.notes);
+    let report = common::checker::check(&tagged.bytes);
+    assert_eq!(report.text, source);
+    assert_eq!(report.leaves, 2);
+}
+
+#[test]
 fn headings_notes_tables_and_figures_get_their_elements() {
     let (runs, fonts) = runs(&["Title", "See note", "The note", "a", "b", "c"]);
     let mut assets = reprise_display::AssetStore::default();

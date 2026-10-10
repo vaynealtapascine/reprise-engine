@@ -360,6 +360,34 @@ impl DocumentSession {
             hash: id.hash,
         }))
     }
+    /// Replace host font settings and invalidate revision-bound layout jobs.
+    pub fn set_font_settings(&mut self, request: &Payload<FontSettings>) -> Result<Payload<()>> {
+        let r = validate(request)?;
+        let settings = reprise_font::FontSettings {
+            generics: r
+                .generics
+                .iter()
+                .map(|(g, name)| {
+                    let g = match g {
+                        GenericFamily::Serif => reprise_font::GenericFamily::Serif,
+                        GenericFamily::SansSerif => reprise_font::GenericFamily::SansSerif,
+                        GenericFamily::Monospace => reprise_font::GenericFamily::Monospace,
+                        GenericFamily::Script => reprise_font::GenericFamily::Script,
+                    };
+                    (g, name.clone())
+                })
+                .collect(),
+            fallbacks: r.fallbacks.clone(),
+            synthetic_oblique: r.synthetic_oblique,
+        };
+        settings.validate().map_err(Error::note)?;
+        self.reconfigure()?;
+        self.engine
+            .fonts
+            .set_settings(settings)
+            .map_err(Error::note)?;
+        Ok(Payload::new(()))
+    }
     /// Bundle an immutable resource and install image bytes in the engine store.
     pub fn register_asset(
         &mut self,
@@ -835,15 +863,31 @@ impl DocumentSession {
         request: &Payload<GlyphRequest>,
     ) -> Result<Payload<GlyphOutlines>> {
         let r = validate(request)?;
-        if r.glyphs.len() > 4096 {
+        self.outlines(&r.face, &r.glyphs, false, false)
+    }
+    pub fn glyph_outlines_styled(
+        &self,
+        request: &Payload<StyledGlyphRequest>,
+    ) -> Result<Payload<GlyphOutlines>> {
+        let r = validate(request)?;
+        self.outlines(&r.face, &r.glyphs, r.synthetic_oblique, true)
+    }
+    fn outlines(
+        &self,
+        face: &Face,
+        glyphs: &[u32],
+        synthetic_oblique: bool,
+        include_bounds: bool,
+    ) -> Result<Payload<GlyphOutlines>> {
+        if glyphs.len() > 4096 {
             return Err(Error::Limit("glyphs per outline request".into()));
         }
         let face = self
             .engine
             .fonts
             .get(&reprise_font::FaceId {
-                family: r.face.family.clone(),
-                hash: r.face.hash.clone(),
+                family: face.family.clone(),
+                hash: face.hash.clone(),
             })
             .map_err(|e| Error::Core {
                 code: "bindings.missing-font".into(),
@@ -853,12 +897,37 @@ impl DocumentSession {
             })?;
         Ok(Payload::new(GlyphOutlines {
             units_per_em: u32::from(face.metrics().units_per_em),
-            glyphs: r
-                .glyphs
+            glyphs: glyphs
                 .iter()
-                .map(|&id| GlyphOutline {
-                    id,
-                    path: outline_path(&face.outline(id)),
+                .map(|&id| {
+                    let path = outline_path(&face.outline_oblique(id, synthetic_oblique));
+                    let ink_bounds = (include_bounds && !path.is_empty())
+                        .then(|| {
+                            face.design_bounds().map(|[x_min, y_min, x_max, y_max]| {
+                                let min_shear = if synthetic_oblique {
+                                    y_min.div_euclid(4)
+                                } else {
+                                    0
+                                };
+                                let max_shear = if synthetic_oblique {
+                                    y_max.saturating_add(3).div_euclid(4)
+                                } else {
+                                    0
+                                };
+                                GlyphBounds {
+                                    x_min: x_min.saturating_add(min_shear),
+                                    y_min,
+                                    x_max: x_max.saturating_add(max_shear),
+                                    y_max,
+                                }
+                            })
+                        })
+                        .flatten();
+                    GlyphOutline {
+                        id,
+                        path,
+                        ink_bounds,
+                    }
                 })
                 .collect(),
         }))

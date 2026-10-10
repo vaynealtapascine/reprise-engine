@@ -64,6 +64,12 @@ extern "C" {
     pub type FacePayload;
     #[wasm_bindgen(typescript_type = "Payload<FontDeclaration>")]
     pub type FontDeclarationPayload;
+    #[wasm_bindgen(typescript_type = "Payload<FontSettings>")]
+    pub type FontSettingsPayload;
+    #[wasm_bindgen(typescript_type = "Payload<null>")]
+    pub type UnitPayload;
+    #[wasm_bindgen(typescript_type = "Payload<StyledGlyphRequest>")]
+    pub type StyledGlyphRequestPayload;
     #[wasm_bindgen(typescript_type = "Payload<Hit>")]
     pub type HitPayload;
     #[wasm_bindgen(typescript_type = "Payload<HitTest>")]
@@ -479,6 +485,12 @@ impl WasmDocument {
         )?
         .unchecked_into())
     }
+    pub fn set_font_settings(
+        &mut self,
+        request: &FontSettingsPayload,
+    ) -> Result<UnitPayload, JsValue> {
+        Ok(encode(self.inner.set_font_settings(&decode(request.as_ref())?))?.unchecked_into())
+    }
     pub fn register_asset(
         &mut self,
         request: &AssetDeclarationPayload,
@@ -558,6 +570,12 @@ impl WasmDocument {
         request: &GlyphRequestPayload,
     ) -> Result<GlyphOutlinesPayload, JsValue> {
         Ok(encode(self.inner.glyph_outlines(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn glyph_outlines_styled(
+        &self,
+        request: &StyledGlyphRequestPayload,
+    ) -> Result<GlyphOutlinesPayload, JsValue> {
+        Ok(encode(self.inner.glyph_outlines_styled(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn svg(&self, page: u32) -> Result<StringPayload, JsValue> {
         Ok(encode(self.inner.svg(page))?.unchecked_into())

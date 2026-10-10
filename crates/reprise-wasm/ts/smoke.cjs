@@ -149,6 +149,35 @@ for (const run of glyphRuns) {
   assert.deepEqual(outlines.glyphs.map(g => g.id), ids);
 }
 assert.throws(() => parity.glyph_outlines(p({ face: { family: "Nope", hash: "00".repeat(32) }, glyphs: [1] })), e => e.data.code === "bindings.missing-font");
+// Host configuration is separate from document state and invalidates old jobs.
+parity.apply(p({ commands: [{ kind: "insert-text", node: parityNode, at: 1, text: "é" }] }));
+const fontRevision = parity.state().data.revision;
+const oldFontJob = parity.start_layout(options).data;
+const fontDir = path.join(__dirname, "../../../fixtures/fonts");
+parity.declare_font(p({ family: "Paper Mono", weight: 400, style: "normal", stretch: 1000, face_index: 0 }), new Uint8Array(fs.readFileSync(path.join(fontDir, "PaperMono-TestSubset.ttf"))));
+parity.declare_font(p({ family: "Universal", weight: 400, style: "normal", stretch: 1000, face_index: 0 }), new Uint8Array(fs.readFileSync(path.join(fontDir, "AtkinsonHyperlegibleNext-Regular.ttf"))));
+parity.set_font_settings(p({ generics: { serif: "Paper Mono" }, fallbacks: ["Universal"], synthetic_oblique: true }));
+assert.deepEqual(parity.state().data.revision, fontRevision);
+assert.throws(() => parity.step(oldFontJob, 1)); parity.release_job(oldFontJob);
+finish(parity);
+assert.ok(parity.display_json(0).data.includes('"synthetic_oblique":true'));
+assert.ok(parity.display_json(0).data.includes('"family":"Universal"'));
+assert.ok(parity.diagnostics().data.some(d => d.code === "font.synthetic" && d.severity === "info"));
+assert.ok(parity.diagnostics().data.some(d => d.code === "font.fallback"));
+const styledRuns = [];
+(function collect(items) { for (const item of items) { if (item.type === "glyphs" && item.synthetic_oblique) styledRuns.push(item); else if (item.type === "group") collect(item.items); } })(parity.display_page(0).data.display.items);
+for (const run of styledRuns) {
+  const glyphs = run.glyphs.map(g => g.id);
+  const plain = parity.glyph_outlines(p({ face: run.face, glyphs })).data;
+  const styled = parity.glyph_outlines_styled(p({ face: run.face, glyphs, synthetic_oblique: true })).data;
+  assert.equal(styled.units_per_em, plain.units_per_em);
+  assert.notDeepEqual(styled.glyphs, plain.glyphs);
+  assert.ok(styled.glyphs.filter(g => g.path).every(g => g.ink_bounds && g.ink_bounds.x_min <= g.ink_bounds.x_max));
+}
+assert.throws(() => parity.set_font_settings(p({ generics: {}, fallbacks: Array(65).fill("bad"), synthetic_oblique: true })), e => e.data.code === "font.config");
+assert.throws(() => parity.set_font_settings(p({ generics: { unknown: "bad" }, fallbacks: [], synthetic_oblique: false })));
+parity.set_font_settings(p({ generics: {}, fallbacks: [], synthetic_oblique: false }));
+finish(parity); assert.ok(!parity.display_json(0).data.includes('"synthetic_oblique"'));
 parity.free();
 // Authored positions survive the real WASM command, query and package paths.
 const marksDoc = ws.create(p({ document_id: "50112233445566778899aabbccddeeff", peer_id: "61" }));
@@ -179,4 +208,4 @@ marksDoc.undo(); finish(marksDoc);
 assert.ok(marksDoc.marks(0).data.marks.some(m => m.relation === pin && m.applied));
 marksOpen.free(); marksDoc.free();
 second.free();doc.free();ws.free();
-console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, glyph outlines, authored marks, bytes, and hostile objects passed");
+console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, host fonts, synthetic glyph outlines and ink bounds, authored marks, bytes, and hostile objects passed");

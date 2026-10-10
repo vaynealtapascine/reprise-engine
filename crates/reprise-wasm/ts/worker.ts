@@ -2,13 +2,14 @@
 // Compile as ES modules and deploy beside wasm-bindgen's web output.
 import init, { Workspace, DocumentSession, setPanicHandler } from "./reprise_wasm.js";
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
-  DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
+  DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, FontSettings, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
   | { kind: "open"; request: Payload<Open>; bytes: Uint8Array }
   | { kind: "font"; request: Payload<FontDeclaration>; bytes: Uint8Array }
+  | { kind: "font-settings"; request: Payload<FontSettings> }
   | { kind: "asset"; request: Payload<AssetDeclaration>; bytes: Uint8Array }
   | { kind: "image"; request: Payload<ImageInsert> }
   | { kind: "edit"; request: Payload<Transaction> }
@@ -89,6 +90,7 @@ scope.onmessage = (event: MessageEvent<Request>) => {
           release(); document?.free(); document = candidate;
           post({ id, kind: "state", state: document.state() }); break;
         case "font": current().declare_font(data.request, data.bytes); release(); post({ id, kind: "ack" }); break;
+        case "font-settings": current().set_font_settings(data.request); release(); post({ id, kind: "ack" }); break;
         case "asset": {
           const hash = current().register_asset(data.request, data.bytes); release();
           post({ id, kind: "asset", hash }); break;

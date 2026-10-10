@@ -62,8 +62,17 @@ function send(data) {
   ] }) });
   assert.equal(marksEdit.kind, "edited");
   assert.equal(marksEdit.state.data.blocks[0].text, "a\tb\n");
-  const started = await send({ kind: "start", request: p({ width: 420 * 1024, height: 300 * 1024, max_pages: 1000, viewport_start: 0, viewport_end: 1 }) });
+  const options = p({ width: 420 * 1024, height: 300 * 1024, max_pages: 1000, viewport_start: 0, viewport_end: 1 });
+  const obsolete = await send({ kind: "start", request: options });
+  assert.equal(obsolete.kind, "started");
+  const configured = await send({ kind: "font-settings", request: p({ generics: { monospace: "host-mono" }, fallbacks: ["host-universal"], synthetic_oblique: true }) });
+  assert.equal(configured.kind, "ack");
+  assert.equal((await send({ kind: "step", job: obsolete.job, budget: 1 })).kind, "error");
+  const started = await send({ kind: "start", request: options });
   assert.equal(started.kind, "started");
+  const refused = await send({ kind: "font-settings", request: p({ generics: {}, fallbacks: Array(65).fill("host-universal"), synthetic_oblique: false }) });
+  assert.equal(refused.kind, "error");
+  assert.equal(refused.error.data.code, "font.config");
   let complete = false;
   for (let i = 0; i < 1000; i++) {
     const step = await send({ kind: "step", job: started.job, budget: 1000 });
@@ -78,5 +87,5 @@ function send(data) {
   assert.ok(marksResponse.page.data.marks.some(m => m.kind === "anchor" && m.applied && m.state === "valid"));
   assert.equal((await send({ kind: "marks", page: 99 })).kind, "error");
   assert.equal((await send({ kind: "close" })).kind, "ack");
-  console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks and image results passed");
+  console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });
