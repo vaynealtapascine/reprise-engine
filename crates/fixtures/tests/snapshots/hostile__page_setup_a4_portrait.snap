@@ -31,7 +31,7 @@ expression: snapshot.to_json()
   "pages": [
     {
       "width": 609562,
-      "height": 862125
+      "height": 862095
     }
   ],
   "frames": [
@@ -55,7 +55,7 @@ expression: snapshot.to_json()
           "y": 0
         },
         "width": 486682,
-        "height": 769965
+        "height": 769935
       }
     },
     {

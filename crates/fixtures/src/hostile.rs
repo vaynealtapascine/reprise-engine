@@ -2780,10 +2780,18 @@ fn page_setup_paper(
     Ok(Fixture::new(name, doc, &[]))
 }
 pub fn page_setup_a4_portrait() -> Result<Fixture, DocError> {
-    page_setup_paper("page_setup_a4_portrait", Length(609562), Length(862125))
+    page_setup_paper(
+        "page_setup_a4_portrait",
+        Length::from_pt(72).mul_ratio(2100, 254),
+        Length::from_pt(72).mul_ratio(2970, 254),
+    )
 }
 pub fn page_setup_a4_landscape() -> Result<Fixture, DocError> {
-    page_setup_paper("page_setup_a4_landscape", Length(862125), Length(609562))
+    page_setup_paper(
+        "page_setup_a4_landscape",
+        Length::from_pt(72).mul_ratio(2970, 254),
+        Length::from_pt(72).mul_ratio(2100, 254),
+    )
 }
 pub fn page_setup_letter_portrait() -> Result<Fixture, DocError> {
     page_setup_paper(

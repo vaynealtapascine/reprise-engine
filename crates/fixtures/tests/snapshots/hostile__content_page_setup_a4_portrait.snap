@@ -5,7 +5,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
 [
   {
     "width": 609562,
-    "height": 862125,
+    "height": 862095,
     "items": [
       {
         "type": "group",

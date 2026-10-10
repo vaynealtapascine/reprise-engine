@@ -459,7 +459,7 @@ keeping physical margins. Standalone calls are individually undoable. Commands
 may share a transaction with text edits, with normal atomic validation.
 
 All values are integer 1/1024 pt. Letter is 626688 by 811008 units; ISO A4 is
-609562 by 862125 units, rounded from 210 by 297 mm. Landscape swaps these pairs.
+609562 by 862095 units, rounded from 210 by 297 mm. Landscape swaps these pairs.
 Dimensions must be positive and at most 14745600 units (200 inches); margins
 must be nonnegative and leave at least one unit of width and height. Invalid
 requests return `edit.page-setup-invalid` Error without changing the document,

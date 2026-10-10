@@ -30,7 +30,7 @@ expression: snapshot.to_json()
   },
   "pages": [
     {
-      "width": 862125,
+      "width": 862095,
       "height": 609562
     }
   ],
@@ -54,7 +54,7 @@ expression: snapshot.to_json()
           "x": 0,
           "y": 0
         },
-        "width": 739245,
+        "width": 739215,
         "height": 517402
       }
     },
@@ -107,7 +107,7 @@ expression: snapshot.to_json()
               "x": 0,
               "y": 0
             },
-            "width": 739245,
+            "width": 739215,
             "height": 13517
           },
           "baseline": 10707,

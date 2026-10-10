@@ -4,7 +4,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
 ---
 [
   {
-    "width": 862125,
+    "width": 862095,
     "height": 609562,
     "items": [
       {
