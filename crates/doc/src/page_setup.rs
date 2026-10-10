@@ -67,11 +67,20 @@ mod tests {
         assert_eq!(doc.page_setup_patch(), Err(PageSetupError::Unreadable));
         assert_eq!(revision, doc.revision());
         let doc = Document::new(1).unwrap();
-        doc.doc
+        let mut nested = doc
+            .doc
             .get_map(ROOT)
             .insert_container("width", loro::LoroMap::new())
             .unwrap();
+        for _ in 0..256 {
+            nested = nested
+                .insert_container("child", loro::LoroMap::new())
+                .unwrap();
+        }
+        // Interpretation rejects the container without traversing its depth.
+        let revision = doc.revision();
         assert_eq!(doc.page_setup_patch(), Err(PageSetupError::Unreadable));
+        assert_eq!(revision, doc.revision());
         let doc = Document::new(1).unwrap();
         doc.doc.get_map(ROOT).insert("future", 1).unwrap();
         assert_eq!(doc.page_setup_patch(), Err(PageSetupError::Unreadable));
