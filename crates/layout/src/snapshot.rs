@@ -154,6 +154,10 @@ fn is_zero(level: &u8) -> bool {
 /// One line fragment: a line's text in one interval of one frame.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LineLayout {
+    #[serde(skip)]
+    pub available: reprise_compose::Interval,
+    #[serde(skip)]
+    pub alignment: Option<reprise_doc::marks::Alignment>,
     /// Index into [`LayoutSnapshot::frames`].
     pub frame: usize,
     /// Source bytes of the block's text, including trailing whitespace.
@@ -271,6 +275,8 @@ pub struct TargetLayout {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RelationLayout {
+    #[serde(skip)]
+    pub anchor: Option<crate::marks::AnchorGuide>,
     pub id: RelationId,
     pub schema: SchemaId,
     pub owner: Option<NodeId>,
@@ -407,7 +413,13 @@ impl LayoutSnapshot {
             .lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| l.text.start < bytes.end && bytes.start < l.text.end)
+            .filter(|(_, l)| {
+                (l.text.start < bytes.end && bytes.start < l.text.end)
+                    || (l.text.is_empty()
+                        && l.text.start == block.text.len()
+                        && bytes.end >= block.text.len()
+                        && bytes.start < block.text.len())
+            })
             .map(|(line, _)| LineRef { node, line })
             .collect()
     }

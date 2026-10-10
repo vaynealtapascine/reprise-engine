@@ -465,15 +465,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 3,
                   "end": 4
                 }
-              },
-              {
-                "id": 0,
-                "x": 58047,
-                "y": 24224,
-                "text": {
-                  "start": 4,
-                  "end": 5
-                }
               }
             ],
             "layer": "content"
@@ -953,17 +944,8 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
             "text": " אבג    \n",
             "glyphs": [
               {
-                "id": 0,
-                "x": 0,
-                "y": 72967,
-                "text": {
-                  "start": 11,
-                  "end": 12
-                }
-              },
-              {
                 "id": 1,
-                "x": 7209,
+                "x": 0,
                 "y": 72967,
                 "text": {
                   "start": 10,
@@ -972,7 +954,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 1,
-                "x": 9834,
+                "x": 2625,
                 "y": 72967,
                 "text": {
                   "start": 9,
@@ -981,7 +963,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 1,
-                "x": 12459,
+                "x": 5250,
                 "y": 72967,
                 "text": {
                   "start": 8,
@@ -990,7 +972,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 1,
-                "x": 15084,
+                "x": 7875,
                 "y": 72967,
                 "text": {
                   "start": 7,
@@ -999,7 +981,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 0,
-                "x": 17709,
+                "x": 10500,
                 "y": 72967,
                 "text": {
                   "start": 5,
@@ -1008,7 +990,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 0,
-                "x": 24918,
+                "x": 17709,
                 "y": 72967,
                 "text": {
                   "start": 3,
@@ -1017,7 +999,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 0,
-                "x": 32127,
+                "x": 24918,
                 "y": 72967,
                 "text": {
                   "start": 1,
@@ -1026,7 +1008,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 1,
-                "x": 39336,
+                "x": 32127,
                 "y": 72967,
                 "text": {
                   "start": 0,
@@ -1053,7 +1035,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
             "glyphs": [
               {
                 "id": 422,
-                "x": 41961,
+                "x": 34752,
                 "y": 72967,
                 "text": {
                   "start": 0,
@@ -1062,7 +1044,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 423,
-                "x": 47593,
+                "x": 40384,
                 "y": 72967,
                 "text": {
                   "start": 1,
@@ -1071,7 +1053,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 424,
-                "x": 53225,
+                "x": 46016,
                 "y": 72967,
                 "text": {
                   "start": 2,
@@ -1098,7 +1080,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
             "glyphs": [
               {
                 "id": 1,
-                "x": 58857,
+                "x": 51648,
                 "y": 72967,
                 "text": {
                   "start": 6,
@@ -1107,7 +1089,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 0,
-                "x": 61482,
+                "x": 54273,
                 "y": 72967,
                 "text": {
                   "start": 4,
@@ -1116,7 +1098,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 0,
-                "x": 68691,
+                "x": 61482,
                 "y": 72967,
                 "text": {
                   "start": 2,
@@ -1125,7 +1107,7 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
               },
               {
                 "id": 0,
-                "x": 75900,
+                "x": 68691,
                 "y": 72967,
                 "text": {
                   "start": 0,

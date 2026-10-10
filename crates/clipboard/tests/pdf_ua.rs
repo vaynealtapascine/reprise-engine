@@ -69,6 +69,48 @@ fn squeeze(s: &str) -> String {
 }
 
 #[test]
+fn a_note_reference_on_an_invisible_break_keeps_its_annotation_tagged() {
+    use reprise_doc::{
+        BlockKind, Dim, Document, FrameRole, FrameTemplate, Relation, SchemaRegistry, Target,
+        text::RangePolicy,
+    };
+    let doc = Document::new(1).unwrap();
+    doc.define_page_template(&reprise_fixtures::templates::two_columns().with_frame(
+        FrameTemplate::new(
+            "notes",
+            FrameRole::Notes,
+            (Dim::pt(24), Dim::pt(130)),
+            (Dim::pt(250), Dim::pt(140)),
+        ),
+    ))
+    .unwrap();
+    doc.use_page_template("two-columns").unwrap();
+    let paragraph = doc.append_block(BlockKind::Paragraph, "", "a\nb").unwrap();
+    let annotation = doc
+        .append_block(BlockKind::Annotation, "", "a note")
+        .unwrap();
+    let range = doc.add_range(paragraph, 1..2, RangePolicy::FIXED).unwrap();
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(reprise_doc::relation::builtin::NOTE)
+            .owned_by(annotation)
+            .target("anchor", Target::Range(range)),
+    )
+    .unwrap();
+    doc.commit();
+    let fixture = Fixture {
+        name: "invisible_break_reference",
+        doc,
+        engine: reprise_fixtures::engine(),
+        replica: None,
+        expect: &[],
+    };
+    let (_, report, _, _) = export(&fixture);
+    assert_eq!((report.links, report.tagged_links), (1, 1));
+    assert!(report.roles.iter().any(|r| r == "Reference"));
+}
+
+#[test]
 fn every_hostile_fixture_exports_a_checked_tagged_pdf() {
     let mut exported = 0;
     for f in hostile::all().unwrap() {

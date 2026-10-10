@@ -57,7 +57,7 @@ fn fill(
         .enumerate()
         .skip(para.first_break_after(pos))
     {
-        let need = para.natural_width(pos, i);
+        let need = para.fitted_width(pos, i, width);
         let forced = b.kind == BreakKind::Forced;
         if need <= width {
             if forced || b.at == len {
@@ -160,7 +160,10 @@ pub(crate) fn first_fit(
             else {
                 continue;
             };
-            out.lines.push(para.fragment(
+            if stop_at_tab_limit(para, walk, pos, out) {
+                return;
+            }
+            let fragment = para.fragment(
                 pos..end,
                 interval,
                 walk.line,
@@ -168,7 +171,13 @@ pub(crate) fn first_fit(
                 reason,
                 None,
                 Adjustment::default(),
-            ));
+            );
+            let notes = para.tab_notes(pos..end, interval.width());
+            if stop_at_tab_limit(para, walk, pos, out) {
+                return;
+            }
+            out.lines.push(fragment);
+            out.notes.extend(notes);
             pos = end;
             if ends_line {
                 break;
@@ -177,6 +186,22 @@ pub(crate) fn first_fit(
         walk.advance(request.line_height);
     }
     out.block_end = walk.y;
+}
+
+fn stop_at_tab_limit(para: &Para<'_, '_>, walk: &Walk, pos: usize, out: &mut Composition) -> bool {
+    if !para.tab_limited() {
+        return false;
+    }
+    out.notes.push(
+        Note::error(
+            codes::TAB_LIMIT,
+            "tab fitting exceeded its explicit work budget",
+        )
+        .at(pos..para.len),
+    );
+    out.rest = Some(pos);
+    out.block_end = walk.y;
+    true
 }
 
 impl Composer for Greedy {

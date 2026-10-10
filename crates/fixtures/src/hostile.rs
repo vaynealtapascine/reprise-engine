@@ -145,6 +145,8 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         table_concurrent_overlapping_spans()?,
         pdf_structure_storm()?,
         emphasis_overlap()?,
+        marks_cycle_tabs()?,
+        marks_poem()?,
     ])
 }
 
@@ -2703,4 +2705,52 @@ pub fn emphasis_overlap() -> Result<Fixture, DocError> {
         replica: Some(replica),
         ..Fixture::new("emphasis_overlap", doc, &["font.nearest", "font.missing"])
     })
+}
+
+/// Cycle fallback, unreachable stops and concurrent character insertion.
+pub fn marks_cycle_tabs() -> Result<Fixture, DocError> {
+    use reprise_doc::marks::{Alignment, TabStop, TabStops};
+    let doc = document()?;
+    let a = doc.append_block(BlockKind::Paragraph, "body", "a\tb\nc\n")?;
+    let b = doc.append_block(BlockKind::Paragraph, "body", "target")?;
+    doc.set_overrides(
+        a,
+        &Style {
+            tabs: Some(TabStops {
+                interval: Length(1),
+                stops: vec![TabStop {
+                    position: Some(Length::MAX),
+                    alignment: Alignment::End,
+                    leader: None,
+                }],
+            }),
+            ..Default::default()
+        },
+    )?;
+    crate::marks::cycle(&doc, a, b)?;
+    doc.commit();
+    let replica = doc.fork(OTHER_PEER)?;
+    doc.block(a)?.text.insert(1, "\t")?;
+    replica.block(a)?.text.insert(1, "\n")?;
+    doc.commit();
+    replica.commit();
+    doc.merge(&replica)?;
+    replica.merge(&doc)?;
+    Ok(Fixture {
+        replica: Some(replica),
+        ..Fixture::new(
+            "marks_cycle_tabs",
+            doc,
+            &["compose.tab-unreachable", "relation.alignment-cycle"],
+        )
+    })
+}
+pub fn marks_poem() -> Result<Fixture, DocError> {
+    let mut fixture = Fixture::new(
+        "marks_poem",
+        crate::marks::poem()?,
+        &["relation.alignment-outside"],
+    );
+    fixture.engine.medium = reprise_doc::Medium::new(Length::from_pt(850), Length::from_pt(620));
+    Ok(fixture)
 }

@@ -867,7 +867,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 1,
               "x": 0,
-              "width": 9834
+              "width": 2625
             },
             {
               "range": {
@@ -880,7 +880,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 9834,
+              "x": 2625,
               "width": 16896
             },
             {
@@ -894,7 +894,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 26730,
+              "x": 19521,
               "width": 97008
             }
           ]
@@ -2529,7 +2529,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 19521,
-              "width": 37623
+              "width": 30414
             }
           ]
         },
@@ -2631,7 +2631,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 32812
+              "width": 25603
             }
           ]
         },
@@ -2674,7 +2674,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 32812
+              "width": 25603
             }
           ]
         },
@@ -2717,7 +2717,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 17709
+              "width": 10500
             }
           ]
         },

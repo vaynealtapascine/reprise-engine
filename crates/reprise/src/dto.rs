@@ -126,6 +126,12 @@ pub struct ImageInsert {
 pub struct Style {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
+    pub alignment: Option<Alignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub tabs: Option<TabStops>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
     pub weight: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
@@ -144,6 +150,34 @@ pub struct Style {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
+    InsertLineBreak {
+        node: String,
+        at: u32,
+    },
+    InsertTab {
+        node: String,
+        at: u32,
+    },
+    SetAlignment {
+        node: String,
+        at: Option<u32>,
+        alignment: Alignment,
+    },
+    SetTabStops {
+        node: String,
+        tabs: TabStops,
+    },
+    AddAnchor {
+        node: String,
+        at: u32,
+        edge: LineEdge,
+        target: String,
+        target_at: u32,
+        target_edge: AnchorEdge,
+    },
+    RemoveAnchor {
+        id: String,
+    },
     /// Must be the only command, like native fragment paste in the kernel.
     InsertImage {
         image: ImageInsert,
@@ -991,4 +1025,80 @@ pub struct PresenceView {
     pub selection: Option<Selection>,
     pub caret: Option<PageRect>,
     pub rects: Vec<PageRect>,
+}
+
+/// All geometry is integer page units (1/1024 pt); offsets are UTF-8 bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum Alignment {
+    Start,
+    Centre,
+    End,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineEdge {
+    Start,
+    End,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnchorEdge {
+    Position,
+    GapStart,
+    GapEnd,
+    LineStart,
+    LineEnd,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct TabStop {
+    pub position: Option<i32>,
+    pub alignment: Alignment,
+    pub leader: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct TabStops {
+    pub interval: i32,
+    pub stops: Vec<TabStop>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum MarkKind {
+    ParagraphEnd,
+    LineBreak,
+    Gap,
+    Alignment,
+    Anchor,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum RelationState {
+    Valid,
+    Rebound,
+    Ambiguous,
+    Missing,
+    OwnerDeleted,
+    Deleted,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Mark {
+    pub kind: MarkKind,
+    pub node: String,
+    pub offset: u32,
+    pub line: u32,
+    pub from: Point,
+    pub to: Option<Point>,
+    pub target_page: Option<u32>,
+    pub alignment: Option<Alignment>,
+    pub relation: Option<String>,
+    pub state: Option<RelationState>,
+    pub applied: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct MarksPage {
+    pub token: LayoutToken,
+    pub page: u32,
+    pub marks: Vec<Mark>,
 }

@@ -24,9 +24,11 @@ pub const REQUIRED_TEXT_FORMATTING: u64 = 1 << 9;
 
 /// Older format1 readers must refuse packages retaining emphasis or text paint.
 pub const REQUIRED_TEXT_EMPHASIS: u64 = 1 << 10;
+/// Older readers must refuse authored positional properties and characters.
+pub const REQUIRED_MARKS: u64 = 1 << 11;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 =
-    REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING | REQUIRED_TEXT_EMPHASIS;
+    REQUIRED_TABLE_SPANS | REQUIRED_TEXT_FORMATTING | REQUIRED_TEXT_EMPHASIS | REQUIRED_MARKS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -37,6 +39,9 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_marks() {
+        flags.required |= REQUIRED_MARKS;
+    }
     if document.has_text_formatting() {
         flags.required |= REQUIRED_TEXT_FORMATTING;
     }
@@ -75,4 +80,54 @@ pub fn table_features(document: &Document) -> FeatureFlags {
         stack.extend(document.children(Some(node)));
     }
     flags
+}
+
+#[cfg(test)]
+mod marks_tests {
+    use super::*;
+    use reprise_doc::{
+        BlockKind, Style,
+        marks::{Alignment, AnchorEdge, LineEdge, TabStops},
+    };
+
+    #[test]
+    fn positional_forms_and_deleted_owners_require_the_marks_reader() {
+        let doc = Document::new(1).unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "", "ordinary")
+            .unwrap();
+        assert_eq!(table_features(&doc).required & REQUIRED_MARKS, 0);
+        doc.set_alignment(node, Alignment::End).unwrap();
+        assert_ne!(table_features(&doc).required & REQUIRED_MARKS, 0);
+        doc.set_overrides(node, &Style::default()).unwrap();
+        assert_ne!(
+            table_features(&doc).required & REQUIRED_MARKS,
+            0,
+            "new operations remain in history"
+        );
+
+        for text in ["a\tb", "a\nb", "a\r\nb", "a\u{2028}b"] {
+            let doc = Document::new(1).unwrap();
+            let node = doc.append_block(BlockKind::Paragraph, "", text).unwrap();
+            doc.delete_block(node).unwrap();
+            assert_ne!(table_features(&doc).required & REQUIRED_MARKS, 0);
+        }
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "plain").unwrap();
+        let id = doc
+            .pin_line(node, 0, LineEdge::Start, node, 1, AnchorEdge::Position)
+            .unwrap();
+        doc.delete_relation(id).unwrap();
+        assert_ne!(table_features(&doc).required & REQUIRED_MARKS, 0);
+        let doc = Document::new(1).unwrap();
+        doc.define_style(
+            "tabs",
+            &Style {
+                tabs: Some(TabStops::default()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_ne!(table_features(&doc).required & REQUIRED_MARKS, 0);
+    }
 }

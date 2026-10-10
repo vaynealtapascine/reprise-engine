@@ -11,6 +11,8 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<MarksPage>")]
+    pub type MarksPagePayload;
     #[wasm_bindgen(typescript_type = "Payload<SyncRequest>")]
     pub type SyncRequestPayload;
     #[wasm_bindgen(typescript_type = "Payload<SyncPacket>")]
@@ -541,6 +543,9 @@ impl WasmDocument {
             .get(&job)
             .ok_or_else(|| error(Error::InvalidId(job.to_string())))?;
         Ok(encode(job.display_page(&self.inner, page))?.unchecked_into())
+    }
+    pub fn marks(&self, page: u32) -> Result<MarksPagePayload, JsValue> {
+        Ok(encode(self.inner.marks(page))?.unchecked_into())
     }
     pub fn display_page(&self, page: u32) -> Result<DisplayPagePayload, JsValue> {
         Ok(encode(self.inner.display_page(page))?.unchecked_into())

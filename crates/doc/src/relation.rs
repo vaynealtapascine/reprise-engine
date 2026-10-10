@@ -1055,6 +1055,7 @@ pub mod builtin {
     pub fn all() -> Vec<RelationSchema> {
         vec![
             follow(),
+            crate::marks::schema(),
             reference(),
             crate::reading::schema(),
             float(),

@@ -36,6 +36,28 @@ pub const MAX_ANCESTORS: usize = 1024;
 
 #[derive(Debug)]
 pub(crate) enum Step {
+    SetAlignment {
+        node: NodeId,
+        alignment: reprise_doc::marks::Alignment,
+    },
+    SetTabs {
+        node: NodeId,
+        tabs: reprise_doc::marks::TabStops,
+    },
+    AlignLine {
+        node: NodeId,
+        at: usize,
+        alignment: reprise_doc::marks::Alignment,
+    },
+    PinLine {
+        node: NodeId,
+        at: usize,
+        edge: reprise_doc::marks::LineEdge,
+        target: NodeId,
+        target_at: usize,
+        target_edge: reprise_doc::marks::AnchorEdge,
+    },
+
     FormatText {
         node: NodeId,
         range: Range<usize>,
@@ -332,6 +354,89 @@ impl Model<'_> {
 
     fn run(&mut self, command: &Command) -> Result<(), Reason> {
         match command {
+            Command::InsertLineBreak { node, at } => self.insert_text(*node, *at, "\n"),
+            Command::InsertTab { node, at } => self.insert_text(*node, *at, "\t"),
+            Command::SetTabStops { node, tabs } => {
+                tabs.validate().map_err(Reason::from)?;
+                self.add_payload(
+                    serde_json::to_vec(tabs)
+                        .map_err(|e| Reason::Store(e.to_string()))?
+                        .len(),
+                )?;
+                let mut style = self.current_overrides(*node)?;
+                style.tabs = Some(tabs.clone());
+                style.unparsed_keywords.remove("tabs");
+                self.overrides.insert(*node, style);
+                self.plan.steps.push(Step::SetTabs {
+                    node: *node,
+                    tabs: tabs.clone(),
+                });
+                Ok(())
+            }
+            Command::SetAlignment {
+                node,
+                at: None,
+                alignment,
+            } => {
+                let mut style = self.current_overrides(*node)?;
+                style.alignment = Some(*alignment);
+                style.unparsed_keywords.remove("alignment");
+                self.overrides.insert(*node, style);
+                self.plan.steps.push(Step::SetAlignment {
+                    node: *node,
+                    alignment: *alignment,
+                });
+                Ok(())
+            }
+            Command::SetAlignment {
+                node,
+                at: Some(at),
+                alignment,
+            } => {
+                self.mark_point(*node, *at)?;
+                self.mark_capacity()?;
+                self.plan.steps.push(Step::AlignLine {
+                    node: *node,
+                    at: *at,
+                    alignment: *alignment,
+                });
+                Ok(())
+            }
+            Command::AddAnchor {
+                node,
+                at,
+                edge,
+                target,
+                target_at,
+                target_edge,
+            } => {
+                self.mark_point(*node, *at)?;
+                self.mark_point(*target, *target_at)?;
+                self.mark_capacity()?;
+                if matches!(
+                    target_edge,
+                    reprise_doc::marks::AnchorEdge::GapStart
+                        | reprise_doc::marks::AnchorEdge::GapEnd
+                ) && !self
+                    .text(*target)?
+                    .get(*target_at..)
+                    .is_some_and(|s| s.starts_with('\t'))
+                {
+                    return Err(Reason::BadOffset {
+                        node: *target,
+                        offset: *target_at,
+                    });
+                }
+                self.plan.steps.push(Step::PinLine {
+                    node: *node,
+                    at: *at,
+                    edge: *edge,
+                    target: *target,
+                    target_at: *target_at,
+                    target_edge: *target_edge,
+                });
+                Ok(())
+            }
             Command::Paste { .. } => Err(Reason::MixedPaste),
             Command::InsertText { node, at, text } => self.insert_text(*node, *at, text),
             Command::DeleteText { node, range } => self.delete_text(*node, range),
@@ -358,13 +463,10 @@ impl Model<'_> {
                 index,
             } => self.move_block(*node, *parent, *index),
             Command::SetStyleOverride { node, style } => {
-                self.require(*node)?;
-                self.overrides.insert(*node, style.clone());
-                self.plan.steps.push(Step::SetOverrides {
-                    node: *node,
-                    style: style.clone(),
-                });
-                Ok(())
+                if let Some(tabs) = &style.tabs {
+                    tabs.validate().map_err(Reason::from)?;
+                }
+                self.set_overrides(*node, style.clone())
             }
             Command::AddRelation { relation } => self.add_relation(relation),
             Command::RemoveRelation { id } => {
@@ -379,6 +481,48 @@ impl Model<'_> {
                 Ok(())
             }
         }
+    }
+
+    fn current_overrides(&self, node: NodeId) -> Result<Style, Reason> {
+        self.require(node)?;
+        Ok(self
+            .overrides
+            .get(&node)
+            .cloned()
+            .unwrap_or(self.doc.block(node).map_err(Reason::from)?.overrides))
+    }
+    fn set_overrides(&mut self, node: NodeId, style: Style) -> Result<(), Reason> {
+        self.require(node)?;
+        self.overrides.insert(node, style.clone());
+        self.plan.steps.push(Step::SetOverrides { node, style });
+        Ok(())
+    }
+    fn mark_point(&mut self, node: NodeId, at: usize) -> Result<(), Reason> {
+        if !self.text(node)?.is_char_boundary(at) {
+            return Err(Reason::BadOffset { node, offset: at });
+        }
+        Ok(())
+    }
+    fn mark_capacity(&self) -> Result<(), Reason> {
+        let pending = self
+            .plan
+            .steps
+            .iter()
+            .filter(|s| matches!(s, Step::AlignLine { .. } | Step::PinLine { .. }))
+            .count()
+            .saturating_add(
+                self.plan
+                    .relations
+                    .iter()
+                    .filter(|r| r.schema == reprise_doc::marks::ALIGNMENT)
+                    .count(),
+            );
+        if self.doc.alignment_count().saturating_add(pending)
+            >= reprise_doc::marks::MAX_ALIGNMENT_RELATIONS
+        {
+            return Err(Reason::MarksLimit);
+        }
+        Ok(())
     }
 
     fn insert_text(&mut self, node: NodeId, at: usize, text: &str) -> Result<(), Reason> {
@@ -638,6 +782,9 @@ impl Model<'_> {
 
     fn add_relation(&mut self, relation: &Relation) -> Result<(), Reason> {
         self.schemas.validate(relation).map_err(Reason::Schema)?;
+        if relation.schema == reprise_doc::marks::ALIGNMENT {
+            self.mark_capacity()?;
+        }
         if let Some(owner) = relation.owner {
             self.require(owner).map_err(|r| dead_block(r, owner))?;
         }

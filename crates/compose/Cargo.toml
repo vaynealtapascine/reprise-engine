@@ -7,6 +7,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+reprise-doc.workspace = true
 reprise-geom.workspace = true
 reprise-shape.workspace = true
 reprise-diag.workspace = true

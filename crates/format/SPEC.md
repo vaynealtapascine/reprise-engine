@@ -239,3 +239,11 @@ anchored formatting. Readers predating emphasis know bit 9 but ignore diagnosed
 unreadable patches; bit 10 makes them refuse the package. Detection includes
 retained/tombstoned authored state and named styles; unreadable envelopes safely
 over-declare. Legacy records set no new bit.
+
+### Required marks feature (bit 11)
+
+`REQUIRED_MARKS` declares retained hard-break/TAB characters, paragraph alignment,
+versioned tabs1 stops and reprise.alignment relations. Detection includes
+soft-deleted content, style/break records and tombstoned relations; unknown
+alignment/tab stored forms conservatively require the bit. Older readers must
+refuse it. Marks guide geometry is derived and is never persisted.

@@ -150,5 +150,33 @@ for (const run of glyphRuns) {
 }
 assert.throws(() => parity.glyph_outlines(p({ face: { family: "Nope", hash: "00".repeat(32) }, glyphs: [1] })), e => e.data.code === "bindings.missing-font");
 parity.free();
+// Authored positions survive the real WASM command, query and package paths.
+const marksDoc = ws.create(p({ document_id: "50112233445566778899aabbccddeeff", peer_id: "61" }));
+assert.throws(() => marksDoc.marks(0), e => e.data.code === "bindings.layout-required");
+const marksNode = marksDoc.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "ab", style: {} }] })).data.blocks[0];
+marksDoc.apply(p({ commands: [
+  { kind: "insert-tab", node: marksNode, at: 1 },
+  { kind: "insert-line-break", node: marksNode, at: 3 },
+  { kind: "set-tab-stops", node: marksNode, tabs: { interval: 36 * 1024, stops: [{ position: null, alignment: "end", leader: "." }] } },
+  { kind: "set-alignment", node: marksNode, at: null, alignment: "start" },
+  { kind: "set-alignment", node: marksNode, at: 4, alignment: "centre" }
+] }));
+const pin = marksDoc.apply(p({ commands: [{ kind: "add-anchor", node: marksNode, at: 4, edge: "start", target: marksNode, target_at: 1, target_edge: "gap-end" }] })).data.relations[0];
+finish(marksDoc);
+const marksDisplay = marksDoc.display_json(0).data;
+const marks = marksDoc.marks(0).data;
+assert.deepEqual([...new Set(marks.marks.map(m => m.kind))].sort(), ["alignment", "anchor", "gap", "line-break", "paragraph-end"]);
+assert.ok(marks.marks.some(m => m.relation === pin && m.state === "valid" && m.applied && m.from.x === m.to.x));
+assert.equal(marksDoc.display_json(0).data, marksDisplay);
+assert.throws(() => marksDoc.marks(99), e => e.data.code === "bindings.invalid");
+const marksOpen = ws.open(p({ peer_id: "62" }), marksDoc.save().data.bytes); finish(marksOpen);
+assert.deepEqual(marksOpen.marks(0).data.marks, marks.marks);
+assert.equal(marksOpen.display_json(0).data, marksDisplay);
+assert.ok(Buffer.from(marksDoc.export(p("html")).data.content.bytes).toString("utf8").includes("<br>"));
+marksDoc.apply(p({ commands: [{ kind: "remove-anchor", id: pin }] })); finish(marksDoc);
+assert.ok(marksDoc.marks(0).data.marks.every(m => m.relation !== pin));
+marksDoc.undo(); finish(marksDoc);
+assert.ok(marksDoc.marks(0).data.marks.some(m => m.relation === pin && m.applied));
+marksOpen.free(); marksDoc.free();
 second.free();doc.free();ws.free();
-console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, glyph outlines, bytes, and hostile objects passed");
+console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, glyph outlines, authored marks, bytes, and hostile objects passed");

@@ -1779,15 +1779,6 @@ expression: "serde_json::to_string_pretty(&content).unwrap()"
                   "start": 25,
                   "end": 26
                 }
-              },
-              {
-                "id": 0,
-                "x": 124855,
-                "y": 64775,
-                "text": {
-                  "start": 26,
-                  "end": 29
-                }
               }
             ],
             "layer": "content"

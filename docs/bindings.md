@@ -429,3 +429,21 @@ IDs and effects to transform the UI selection after local split/join/delete
 commands, then send `selection` to anchor the resulting caret.
 See [collaboration.md](collaboration.md) for the transport recovery rules and
 trust boundary. Resources travel over the host's separate resource channel.
+
+### Authored marks (W8)
+
+`DocumentSession::marks(page)` / WASM `marks(page)` returns a versioned
+`MarksPage` with a current layout token and integer page-space geometry. It
+requires complete layout at the current revision. It is a separate read-only
+query; display JSON, layout counters and document state do not change. The
+reference worker accepts a `marks` request with `page` and returns `marks` with
+`page: Payload<MarksPage>`. Commands add line breaks, tabs, paragraph/individual
+line alignment, tab stops and persistent pins (`remove-anchor` tombstones the
+relation). Geometry, relation states, bounds, HTML fidelity and the poem fixture
+are documented in [marks.md](marks.md). Package required bit 11 prevents older
+readers silently losing authored positions. Regenerate both declarations using
+the packaging commands above after any DTO change; Node and worker smokes cover
+the real marks query and command path.
+For the Node worker smoke, compile its CommonJS copy with both
+`--module commonjs --moduleResolution node`, then run
+`node crates/reprise-wasm/ts/worker-smoke.cjs <target_directory>/pkg-node <worker-output>/worker.js`.

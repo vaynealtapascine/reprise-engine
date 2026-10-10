@@ -657,7 +657,9 @@ impl Tree<'_> {
                 }
             }
         }
-        if children.is_empty() {
+        // A reference can consist entirely of an invisible authored break.
+        // Its annotation is still content and must belong to the tag tree.
+        if children.is_empty() && !self.links.contains_key(&index) {
             return None;
         }
         let mut group = match &node.role {

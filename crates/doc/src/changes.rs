@@ -130,8 +130,10 @@ impl Document {
                         _ => None,
                     })
                     .collect();
-                if root.as_deref() == Some(crate::flow::BREAKS)
-                    && diff.path.len() <= 1
+                if matches!(
+                    root.as_deref(),
+                    Some(crate::flow::BREAKS | crate::marks::PATCHES)
+                ) && diff.path.len() <= 1
                     && let Diff::Map(m) = &diff.diff
                 {
                     keys.extend(m.updated.keys().map(|k| k.to_string()));
@@ -163,6 +165,16 @@ impl Document {
         let mut subtrees = BTreeSet::new();
         for event in raw {
             match event.root.as_deref() {
+                Some(crate::marks::PATCHES) => {
+                    for key in event.keys {
+                        if let Some((id, _)) = key.rsplit_once('/')
+                            && let Some(node) = NodeId::parse(id)
+                        {
+                            report.blocks.insert(node);
+                        }
+                    }
+                }
+
                 Some("content") => {
                     if !event.tree.is_empty() {
                         report.structure = true;

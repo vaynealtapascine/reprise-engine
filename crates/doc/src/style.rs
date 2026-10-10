@@ -258,6 +258,11 @@ impl Authored {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Style {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<crate::marks::Alignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tabs: Option<crate::marks::TabStops>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weight: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slant: Option<crate::TextSlant>,
@@ -353,6 +358,14 @@ impl Style {
             }
         }
         for (name, value) in [
+            ("alignment", self.alignment.map(|v| v.keyword().to_string())),
+            (
+                "tabs",
+                self.tabs
+                    .as_ref()
+                    .and_then(|v| serde_json::to_string(v).ok())
+                    .map(|v| format!("tabs1:{v}")),
+            ),
             ("weight", self.weight.map(|v| v.to_string())),
             ("slant", self.slant.map(|v| v.keyword().to_string())),
             (
@@ -402,9 +415,33 @@ impl Style {
             family: get_str(map, "family"),
             ..Style::default()
         };
-        for name in ["weight", "slant", "underline", "strike", "color"] {
+        for name in [
+            "alignment",
+            "tabs",
+            "weight",
+            "slant",
+            "underline",
+            "strike",
+            "color",
+        ] {
             if let Some(raw) = get_str(map, name) {
                 let valid = match name {
+                    "alignment" => {
+                        style.alignment = crate::marks::Alignment::parse(&raw);
+                        style.alignment.is_some()
+                    }
+                    "tabs" => {
+                        style.tabs = (raw.len() <= 32 * 1024)
+                            .then(|| {
+                                raw.strip_prefix("tabs1:")
+                                    .and_then(|v| {
+                                        serde_json::from_str::<crate::marks::TabStops>(v).ok()
+                                    })
+                                    .filter(|v| v.validate().is_ok())
+                            })
+                            .flatten();
+                        style.tabs.is_some()
+                    }
                     "weight" => {
                         style.weight = raw.parse().ok().filter(|w| (1..=1000).contains(w));
                         style.weight.is_some()
@@ -476,6 +513,11 @@ impl Style {
 /// Used values after inheritance and overrides (08), with where each came from (39).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<crate::marks::Alignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tabs: Option<crate::marks::TabStops>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weight: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -643,6 +685,8 @@ pub struct PropertyChain {
 /// Stage 3 (08): the style with everything context-free worked out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Computed {
+    pub alignment: Option<crate::marks::Alignment>,
+    pub tabs: Option<crate::marks::TabStops>,
     pub weight: Option<u16>,
     pub slant: Option<crate::TextSlant>,
     pub decoration: crate::Decoration,
@@ -694,6 +738,8 @@ impl Specified {
         // Keywords inherit as they are: the last layer with a readable value
         // wins. An unreadable value is reported and skipped, so the property
         // keeps what it inherited.
+        let mut alignment = None;
+        let mut tabs = None;
         let mut text_orientation = TextOrientation::default();
         let mut text_combine_upright = TextCombineUpright::default();
         let mut weight = None;
@@ -712,6 +758,25 @@ impl Specified {
                         layer.name
                     ),
                 ));
+            }
+            if !unparsed.contains_key("alignment")
+                && let Some(a) = layer.style.alignment
+            {
+                alignment = Some(a);
+                keyword_layers.insert("alignment", layer.name.clone());
+            }
+            if !unparsed.contains_key("tabs")
+                && let Some(t) = &layer.style.tabs
+            {
+                if t.validate().is_ok() {
+                    tabs = Some(t.clone());
+                    keyword_layers.insert("tabs", layer.name.clone());
+                } else {
+                    notes.push(Note::warning(
+                        codes::STYLE_UNPARSED,
+                        "invalid tab stops; inherited stops retained",
+                    ));
+                }
             }
             if !unparsed.contains_key("weight")
                 && let Some(w) = layer.style.weight
@@ -767,6 +832,8 @@ impl Specified {
         let size = chain(Property::Size);
         let line_height = chain(Property::LineHeight);
         Computed {
+            alignment,
+            tabs,
             weight,
             slant,
             decoration,
@@ -1003,6 +1070,8 @@ impl Computed {
         }
         StyleResolution {
             style: ComputedStyle {
+                alignment: self.alignment,
+                tabs: self.tabs.clone(),
                 weight: self.weight,
                 slant: self.slant,
                 decoration: self.decoration,

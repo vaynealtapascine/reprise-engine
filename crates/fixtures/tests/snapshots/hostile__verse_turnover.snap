@@ -177,7 +177,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 14336,
-              "width": 99047
+              "width": 91838
             }
           ]
         },
@@ -263,7 +263,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 14336,
-              "width": 81407
+              "width": 74198
             }
           ]
         },
@@ -349,7 +349,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 14336,
-              "width": 76406
+              "width": 69197
             }
           ]
         },
@@ -435,7 +435,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 14336,
-              "width": 93022
+              "width": 85813
             }
           ]
         },
@@ -478,7 +478,7 @@ expression: snapshot.to_json()
               "size": 11264,
               "level": 0,
               "x": 0,
-              "width": 7209
+              "width": 0
             }
           ]
         },

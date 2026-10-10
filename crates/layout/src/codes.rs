@@ -91,3 +91,13 @@ pub const TABLE_SPAN: Code = Code::new("layout.table-span");
 pub const TABLE_ROWSPAN_SPLIT: Code = Code::new("layout.table-rowspan-split");
 /// Header rows are not repeated on a continuation frame.
 pub const TABLE_HEADER_UNREPEATED: Code = Code::new("layout.table-header-unrepeated");
+
+/// Authored inline constraints that cannot be fulfilled as requested (Warning).
+pub const ALIGNMENT_INVALID: Code = Code::new("relation.alignment-invalid");
+pub const ALIGNMENT_CONFLICT: Code = Code::new("relation.alignment-conflict");
+pub const ALIGNMENT_LIMIT: Code = Code::new("relation.alignment-limit");
+pub const ALIGNMENT_CYCLE: Code = Code::new("relation.alignment-cycle");
+pub const ALIGNMENT_OUTSIDE: Code = Code::new("relation.alignment-outside");
+
+pub const TAB_LEADER_LIMIT: Code = Code::new("layout.tab-leader-limit");
+pub const TAB_LEADER_MISSING: Code = Code::new("layout.tab-leader-missing");
