@@ -270,3 +270,93 @@ fn absurd_integer_metrics_remain_exact_without_overflow() {
     assert_eq!(face.metrics().line_gap, 32767);
     assert!(face.covers('a'));
 }
+#[test]
+fn host_settings_are_atomic_and_mappings_resolve_late_declarations() {
+    let mut store = FontStore::default();
+    let settings = FontSettings {
+        generics: [(GenericFamily::Monospace, "Paper Mono".into())].into(),
+        fallbacks: vec!["Universal".into()],
+        synthetic_oblique: true,
+    };
+    store.set_settings(settings.clone()).unwrap();
+    let matched = store.match_generic(GenericFamily::Monospace, Descriptors::default());
+    assert!(matched.notes.iter().any(|n| n.code == "font.fallback"));
+    let id = store
+        .register(
+            include_bytes!("../../../../fixtures/fonts/PaperMono-TestSubset.ttf").as_slice(),
+            FontDeclaration {
+                family: "Paper Mono".into(),
+                descriptors: Descriptors::default(),
+                face_index: 0,
+            },
+        )
+        .unwrap();
+    assert_eq!(store.generic(GenericFamily::Monospace).id(), &id);
+    assert!(
+        store
+            .match_generic(GenericFamily::Monospace, Descriptors::default())
+            .notes
+            .is_empty()
+    );
+    for name in ["", "   ", &"x".repeat(1025)] {
+        assert_eq!(
+            store
+                .set_settings(FontSettings {
+                    fallbacks: vec![name.into()],
+                    ..Default::default()
+                })
+                .unwrap_err()
+                .code,
+            codes::CONFIG
+        );
+        assert_eq!(store.settings(), &settings);
+    }
+    assert!(
+        store
+            .set_settings(FontSettings {
+                fallbacks: vec!["x".into(); 65],
+                ..Default::default()
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn synthesis_is_opt_in_and_real_slanted_faces_take_precedence() {
+    let mut store = FontStore::default();
+    let normal = store
+        .register(
+            include_bytes!("../../../../fixtures/fonts/PaperMono-TestSubset.ttf").as_slice(),
+            decl(400, FontStyle::Normal, 1000),
+        )
+        .unwrap();
+    let wanted = Descriptors {
+        style: FontStyle::Italic,
+        ..Default::default()
+    };
+    assert!(!store.synthesizes(store.get(&normal).unwrap(), wanted));
+    store
+        .set_settings(FontSettings {
+            synthetic_oblique: true,
+            ..Default::default()
+        })
+        .unwrap();
+    let matched = store.match_family(&normal.family, wanted).unwrap();
+    assert_eq!(matched.notes.len(), 1);
+    assert_eq!(matched.notes[0].code, codes::SYNTHETIC);
+    assert_eq!(matched.notes[0].severity, reprise_diag::Severity::Info);
+    store
+        .register(
+            include_bytes!("../../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf")
+                .as_slice(),
+            decl(400, FontStyle::Italic, 1000),
+        )
+        .unwrap();
+    let matched = store.match_family(&normal.family, wanted).unwrap();
+    assert_eq!(
+        matched.face.declaration().descriptors.style,
+        FontStyle::Italic
+    );
+    assert!(!store.synthesizes(matched.face, wanted));
+    assert!(matched.notes.is_empty());
+}

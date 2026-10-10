@@ -1156,6 +1156,7 @@ fn line_layout(
                 })
             });
             let placed = PositionedRun {
+                synthetic_oblique: run.synthetic_oblique,
                 color: paint.map_or([0, 0, 0, 255], |p| p.color),
                 underline: paint
                     .filter(|p| p.decoration.underline == Some(true))
@@ -1395,6 +1396,7 @@ mod tests {
 
     fn synthetic_run(clusters: &[u32]) -> ShapedRun {
         ShapedRun {
+            synthetic_oblique: false,
             upright: false,
             combined: false,
             horizontal_scale: reprise_geom::Fixed::ONE,

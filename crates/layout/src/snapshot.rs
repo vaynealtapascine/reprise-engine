@@ -25,6 +25,8 @@ use crate::FlowSettings;
 /// and recomputed at any time (05).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LayoutSnapshot {
+    #[serde(skip_serializing_if = "reprise_font::FontSettings::is_default")]
+    pub font_settings: reprise_font::FontSettings,
     pub revision: Revision,
     pub adapter: AdapterInfo,
     pub composer: String,
@@ -178,6 +180,8 @@ pub struct LineLayout {
 /// A run of glyphs placed on a line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PositionedRun {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub synthetic_oblique: bool,
     #[serde(skip_serializing_if = "is_black")]
     pub color: [u8; 4],
     #[serde(skip_serializing_if = "Option::is_none")]

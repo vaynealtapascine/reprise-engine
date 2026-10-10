@@ -178,6 +178,7 @@ mod tests {
                 .enumerate()
                 .filter(|(index, _)| active_indices.contains(index))
                 .map(|(_, (byte, c))| crate::ShapedRun {
+                    synthetic_oblique: false,
                     upright: false,
                     combined: false,
                     horizontal_scale: reprise_geom::Fixed::ONE,

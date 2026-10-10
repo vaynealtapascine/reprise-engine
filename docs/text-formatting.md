@@ -24,7 +24,24 @@ Descriptor-aware itemisation uses CSS stretch/style/weight order and pinned
 identity ties within each family; unavailable descriptors report font.nearest
 Warning. Generics search registered variants of the configured default family
 alongside its pinned regular face. Legacy entry points remain unchanged. No
-synthetic bold/oblique or variable-axis instancing is performed.
+synthetic bold or variable-axis instancing is performed. Hosts may opt into
+synthetic oblique using `FontSettings.synthetic_oblique`: when the family has
+no slanted face, italic/oblique uses the upright glyph with `x += y/4` in y-up
+design space. This fixed quarter shear leaves advances and reading mappings
+intact, reports `font.synthetic` Info and propagates through reshaping, vertical
+compensation, transformed frames, glyph outlines and every backend. Integer
+ink envelopes include the shear. Hosts drawing display JSON request
+`glyph_outlines_styled` with the run's `synthetic_oblique` flag (absent means
+false); outline caches must include the flag alongside face/glyph ID.
+
+Host generic family mappings and ordered universal fallback aliases live in
+`FontSettings`, outside document state. Configuring either enables the existing
+whole-grapheme coverage path even for a single-family style. The author's chain
+is tried first, then host fallback families, then the built-in terminal class.
+An authored generic is itself a preferred family. Atkinson Hyperlegible Next
+is a host choice, not an assertion that every Unicode scalar has a glyph.
+All substitutions/missing glyphs remain diagnosed. Unconfigured defaults keep
+the original matching and snapshot representation.
 
 Decorations are filled content Path rectangles over each visual run's inline
 extent, including spaces. Integer post underline and OS/2 strike metrics scale

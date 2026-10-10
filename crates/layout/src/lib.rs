@@ -124,6 +124,7 @@ impl Engine {
 
     pub fn layout(&self, doc: &Document) -> LayoutSnapshot {
         let mut snapshot = LayoutSnapshot {
+            font_settings: self.fonts.settings().clone(),
             revision: doc.revision(),
             adapter: self.shaper.info(),
             composer: self.composer.name().into(),

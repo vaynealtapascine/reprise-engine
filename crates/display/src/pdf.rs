@@ -572,6 +572,7 @@ fn split_glyph_run(run: &GlyphRun, parts: &[&Range<usize>]) -> Option<Vec<GlyphR
                 }
             }
             Some(GlyphRun {
+                synthetic_oblique: run.synthetic_oblique,
                 face: run.face.clone(),
                 size: run.size,
                 color: run.color,
@@ -1099,7 +1100,13 @@ impl Pdf<'_> {
                 KrillaGlyph::new(
                     GlyphId::new(g.id),
                     0.0,
-                    pt(g.x) / size,
+                    (pt(g.x)
+                        + if run.synthetic_oblique {
+                            pt(g.y) * 0.25
+                        } else {
+                            0.0
+                        })
+                        / size,
                     -pt(g.y) / size,
                     0.0,
                     range,
@@ -1116,6 +1123,11 @@ impl Pdf<'_> {
                 },
             );
         }
+        if run.synthetic_oblique {
+            surface.push_transform(&krilla::geom::Transform::from_row(
+                1.0, 0.0, -0.25, 1.0, 0.0, 0.0,
+            ));
+        }
         surface.draw_glyphs(
             Point::from_xy(0.0, 0.0),
             &glyphs,
@@ -1124,6 +1136,9 @@ impl Pdf<'_> {
             size,
             false,
         );
+        if run.synthetic_oblique {
+            surface.pop();
+        }
         if self.tagged {
             surface.end_tagged();
         }
@@ -1159,6 +1174,18 @@ fn needs_run_text(run: &GlyphRun) -> bool {
 mod tests {
     use super::*;
     use crate::sample;
+
+    #[test]
+    fn tagged_run_splits_keep_synthetic_emphasis() {
+        let (list, _) = sample::list();
+        let Item::Glyphs(mut run) = list.items[0].clone() else {
+            panic!("fixture glyph run")
+        };
+        run.synthetic_oblique = true;
+        let parts = split_glyph_run(&run, &[&(0..1)]).unwrap();
+        assert!(parts[0].synthetic_oblique);
+        assert_eq!(parts[0].text, "a");
+    }
 
     #[test]
     fn renders_one_page_per_list() {

@@ -152,12 +152,21 @@ impl Svg<'_> {
             run.color.alpha()
         );
         for g in &run.glyphs {
-            let key = format!("g{}-{}", &run.face.hash[..8], g.id);
+            let key = format!(
+                "g{}-{}{}",
+                run.face.hash.get(..8).unwrap_or(&run.face.hash),
+                g.id,
+                if run.synthetic_oblique {
+                    "-oblique"
+                } else {
+                    ""
+                }
+            );
             if self.defined.insert(key.clone()) {
                 let _ = write!(
                     self.defs,
                     r#"<path id="{key}" d="{}"/>"#,
-                    outline_data(&font.outline(g.id))
+                    outline_data(&font.outline_oblique(g.id, run.synthetic_oblique))
                 );
             }
             let _ = write!(

@@ -219,7 +219,8 @@ impl Raster<'_> {
         let scale = pt(run.size) / font.metrics().units_per_em as f32;
         let paint = paint(run.color);
         for g in &run.glyphs {
-            let Some(path) = outline_path(&font.outline(g.id)) else {
+            let Some(path) = outline_path(&font.outline_oblique(g.id, run.synthetic_oblique))
+            else {
                 continue;
             };
             let glyph_at = at.pre_translate(pt(g.x), pt(g.y)).pre_scale(scale, -scale);

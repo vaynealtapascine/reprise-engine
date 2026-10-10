@@ -1223,6 +1223,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
     ) -> Self {
         let engine = session.engine;
         let mut base = LayoutSnapshot {
+            font_settings: engine.fonts.settings().clone(),
             revision: doc.revision(),
             adapter: engine.shaper.info(),
             composer: engine.composer.name().into(),

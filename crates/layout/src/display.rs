@@ -673,6 +673,7 @@ fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
         })
         .collect();
     GlyphRun {
+        synthetic_oblique: run.synthetic_oblique,
         face: run.face.clone(),
         size: run.size,
         color: Color(run.color[0], run.color[1], run.color[2], run.color[3]),

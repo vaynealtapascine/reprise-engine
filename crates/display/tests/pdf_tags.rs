@@ -130,6 +130,7 @@ fn runs(texts: &[&str]) -> (Vec<GlyphRun>, FontStore) {
                 })
                 .collect();
             GlyphRun {
+                synthetic_oblique: false,
                 face: id.clone(),
                 size,
                 color: Color::BLACK,

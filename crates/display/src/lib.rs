@@ -93,6 +93,8 @@ pub struct Glyph {
 /// Glyphs of one face and size, with the text they draw.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlyphRun {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub synthetic_oblique: bool,
     pub face: FaceId,
     pub size: Length,
     pub color: Color,
@@ -101,6 +103,48 @@ pub struct GlyphRun {
     /// In visual order.
     pub glyphs: Vec<Glyph>,
     pub layer: Layer,
+}
+
+impl GlyphRun {
+    /// Conservative ink in the enclosing group's coordinate space. Includes
+    /// synthetic shear with exact 16.16 arithmetic; advances are unaffected.
+    /// Apply enclosing group matrices to obtain page-space bounds.
+    pub fn ink_bounds(&self, fonts: &reprise_font::FontStore) -> Option<Rect<PageSpace>> {
+        if self.size <= Length::ZERO {
+            return None;
+        }
+        let face = fonts.get(&self.face).ok()?;
+        let [x0, y0, x1, y1] = face.design_bounds()?;
+        let scale = |v| Length::from_font_units(v, self.size, face.metrics().units_per_em);
+        let shear = if self.synthetic_oblique {
+            Matrix {
+                xy: reprise_geom::Fixed(-(1 << 14)),
+                ..Matrix::IDENTITY
+            }
+        } else {
+            Matrix::IDENTITY
+        };
+        let bound: Rect<PageSpace> = Rect::new(
+            Point::new(scale(x0), -scale(y1)),
+            scale(x1) - scale(x0),
+            scale(y1) - scale(y0),
+        );
+        let bounds: Rect<PageSpace> = reprise_geom::Transform::new(shear).bounds(&bound);
+        // One unit outward covers rounding of scaled outline control points.
+        self.glyphs
+            .iter()
+            .map(|g| {
+                Rect::new(
+                    Point::new(
+                        g.x + bounds.origin.x - Length(1),
+                        g.y + bounds.origin.y - Length(1),
+                    ),
+                    bounds.width + Length(2),
+                    bounds.height + Length(2),
+                )
+            })
+            .reduce(|a, b| a.union(&b))
+    }
 }
 
 /// One segment of a path.
@@ -253,6 +297,7 @@ pub(crate) mod sample {
             height: pt(50),
             items: vec![
                 Item::Glyphs(GlyphRun {
+                    synthetic_oblique: false,
                     face: face_id,
                     size: pt(40),
                     color: Color::BLACK,

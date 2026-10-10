@@ -11,7 +11,8 @@ use std::sync::{Arc, OnceLock};
 
 mod supply;
 pub use supply::{
-    Descriptors, FontDeclaration, FontMatch, FontStyle, GenericFamily, MAX_FONT_BYTES, codes,
+    Descriptors, FontDeclaration, FontMatch, FontSettings, FontStyle, GenericFamily,
+    MAX_FONT_BYTES, codes,
 };
 
 use serde::{Deserialize, Serialize};
@@ -214,6 +215,41 @@ impl Face {
         }
         pen.0
     }
+
+    /// Conservative integer ink envelope from the font's head table, y up.
+    /// This includes every glyph, including CFF curves, without float layout.
+    pub fn design_bounds(&self) -> Option<[i32; 4]> {
+        let font = self.font_ref();
+        let head = font.head().ok()?;
+        Some([
+            i32::from(head.x_min()),
+            i32::from(head.y_min()),
+            i32::from(head.x_max()),
+            i32::from(head.y_max()),
+        ])
+    }
+
+    /// Rendering-only outline variant. Pinned bytes and glyph IDs stay intact.
+    pub fn outline_oblique(&self, glyph: u32, synthetic_oblique: bool) -> Vec<PathCmd> {
+        self.outline(glyph)
+            .into_iter()
+            .map(|cmd| {
+                if !synthetic_oblique {
+                    return cmd;
+                }
+                let x = |x: f32, y: f32| x + y * 0.25;
+                match cmd {
+                    PathCmd::Move(a, b) => PathCmd::Move(x(a, b), b),
+                    PathCmd::Line(a, b) => PathCmd::Line(x(a, b), b),
+                    PathCmd::Quad(a, b, c, d) => PathCmd::Quad(x(a, b), b, x(c, d), d),
+                    PathCmd::Cubic(a, b, c, d, e, f) => {
+                        PathCmd::Cubic(x(a, b), b, x(c, d), d, x(e, f), f)
+                    }
+                    PathCmd::Close => PathCmd::Close,
+                }
+            })
+            .collect()
+    }
 }
 
 /// A path command in font design units.
@@ -251,6 +287,7 @@ impl OutlinePen for Recorder {
 pub struct FontStore {
     faces: BTreeMap<FaceId, Arc<Face>>,
     defaults: BTreeMap<GenericFamily, FaceId>,
+    settings: FontSettings,
 }
 
 impl FontStore {

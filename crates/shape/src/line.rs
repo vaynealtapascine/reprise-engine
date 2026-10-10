@@ -123,6 +123,7 @@ pub fn reorder_line(
         let mut parts: Vec<_> = pieces
             .into_iter()
             .map(|(range, level)| ShapedRun {
+                synthetic_oblique: run.synthetic_oblique,
                 upright: run.upright,
                 combined: run.combined,
                 horizontal_scale: run.horizontal_scale,
@@ -209,6 +210,7 @@ mod tests {
             glyphs.reverse();
         }
         ShapedRun {
+            synthetic_oblique: false,
             upright: false,
             combined: false,
             horizontal_scale: reprise_geom::Fixed::ONE,

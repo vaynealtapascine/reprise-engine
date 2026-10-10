@@ -10,6 +10,8 @@ pub mod codes {
     use super::Code;
     pub const UNREADABLE: Code = Code::new("font.unreadable");
     pub const NEAREST: Code = Code::new("font.nearest");
+    pub const SYNTHETIC: Code = Code::new("font.synthetic");
+    pub const CONFIG: Code = Code::new("font.config");
 }
 impl FontError {
     pub fn note(&self) -> Note {
@@ -27,7 +29,7 @@ pub enum FontStyle {
     Italic,
     Oblique,
 }
-/// Weight 1..=1000; stretch is positive permille (1000 = normal). No synthetic outlines.
+/// Weight 1..=1000; stretch is positive permille (1000 = normal).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Descriptors {
     pub weight: u16,
@@ -91,6 +93,36 @@ pub struct FontMatch<'a> {
     pub notes: Vec<Note>,
 }
 
+/// Host-owned settings, never authored document state. Empty settings preserve
+/// legacy matching. Family names are literal declaration aliases, not chains.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FontSettings {
+    pub generics: std::collections::BTreeMap<GenericFamily, String>,
+    pub fallbacks: Vec<String>,
+    pub synthetic_oblique: bool,
+}
+impl FontSettings {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+    pub fn validate(&self) -> Result<(), Note> {
+        if self.fallbacks.len() > 64
+            || self
+                .generics
+                .values()
+                .chain(&self.fallbacks)
+                .any(|name| name.trim().is_empty() || name.len() > 1024)
+        {
+            return Err(Note::error(
+                codes::CONFIG,
+                "font settings require at most 64 fallback families and nonempty names of at most 1024 bytes",
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn face_hash(bytes: &[u8], index: u32) -> String {
     let mut digest = Sha256::new();
     digest.update(bytes);
@@ -121,6 +153,53 @@ pub(crate) fn bundled() -> &'static [Arc<Face>; 4] {
     })
 }
 impl FontStore {
+    pub fn settings(&self) -> &FontSettings {
+        &self.settings
+    }
+    /// Atomic replacement; declarations may arrive before or after settings.
+    pub fn set_settings(&mut self, settings: FontSettings) -> Result<(), Note> {
+        settings.validate()?;
+        self.settings = settings;
+        Ok(())
+    }
+    pub fn coverage_fallback(&self) -> bool {
+        !self.settings.generics.is_empty() || !self.settings.fallbacks.is_empty()
+    }
+    /// Fixed shear x += y / 4 in design coordinates (y up), about each glyph
+    /// origin. The exact quarter shear is representable in integer 16.16.
+    pub fn synthesizes(&self, face: &Face, wanted: Descriptors) -> bool {
+        self.settings.synthetic_oblique
+            && wanted.style != FontStyle::Normal
+            && face.declaration().descriptors.style == FontStyle::Normal
+            && !self.faces.values().any(|candidate| {
+                candidate
+                    .id()
+                    .family
+                    .eq_ignore_ascii_case(&face.id().family)
+                    && candidate.declaration().descriptors.style != FontStyle::Normal
+            })
+    }
+    pub fn match_notes(&self, face: &Face, wanted: Descriptors, family: &str) -> Vec<Note> {
+        let actual = face.declaration().descriptors;
+        let synthetic = self.synthesizes(face, wanted);
+        let mut notes = Vec::new();
+        if synthetic {
+            notes.push(Note::info(
+                codes::SYNTHETIC,
+                format!("synthetic oblique (x += y/4) in {family:?}"),
+            ));
+        }
+        if actual.weight != wanted.weight
+            || actual.stretch != wanted.stretch
+            || (actual.style != wanted.style && !synthetic)
+        {
+            notes.push(Note::warning(
+                codes::NEAREST,
+                format!("requested {wanted:?} in {family:?}; used {actual:?}"),
+            ));
+        }
+        notes
+    }
     pub fn register(
         &mut self,
         bytes: impl Into<Arc<[u8]>>,
@@ -130,12 +209,23 @@ impl FontStore {
     }
     pub fn generic(&self, generic: GenericFamily) -> &Arc<Face> {
         if let Some(face) = self
+            .settings
+            .generics
+            .get(&generic)
+            .and_then(|family| self.match_family(family, Descriptors::default()))
+        {
+            return face.face;
+        }
+        if let Some(face) = self
             .defaults
             .get(&generic)
             .and_then(|id| self.faces.get(id))
         {
             return face;
         }
+        self.builtin_generic(generic)
+    }
+    pub fn builtin_generic(&self, generic: GenericFamily) -> &Arc<Face> {
         match generic {
             GenericFamily::Serif => &bundled()[0],
             GenericFamily::SansSerif => &bundled()[1],
@@ -164,6 +254,21 @@ impl FontStore {
         .collect()
     }
     pub fn match_generic(&self, generic: GenericFamily, wanted: Descriptors) -> FontMatch<'_> {
+        if let Some(family) = self.settings.generics.get(&generic) {
+            if let Some(matched) = self.match_family(family, wanted) {
+                return matched;
+            }
+            let face = self.builtin_generic(generic);
+            let mut notes = self.match_notes(face, wanted, generic.name());
+            notes.push(Note::warning(
+                Code::new("font.fallback"),
+                format!(
+                    "configured family {family:?} unavailable; used built-in {}",
+                    generic.name()
+                ),
+            ));
+            return FontMatch { face, notes };
+        }
         let base = self.generic(generic);
         let face = self
             .faces
@@ -180,7 +285,9 @@ impl FontStore {
                 )
             })
             .unwrap_or(base);
-        let notes = if face.declaration().descriptors == wanted {
+        let notes = if self.settings.synthetic_oblique {
+            self.match_notes(face, wanted, generic.name())
+        } else if face.declaration().descriptors == wanted {
             Vec::new()
         } else {
             vec![Note::warning(
@@ -212,7 +319,9 @@ impl FontStore {
                     f.id().clone(),
                 )
             })?;
-        let notes = if face.declaration().descriptors == wanted {
+        let notes = if self.settings.synthetic_oblique {
+            self.match_notes(face, wanted, family)
+        } else if face.declaration().descriptors == wanted {
             Vec::new()
         } else {
             vec![Note::warning(

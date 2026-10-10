@@ -148,6 +148,7 @@ pub(crate) fn assemble(
             parts.reverse();
         }
         runs.push(reprise_shape::combine_run(ShapedRun {
+            synthetic_oblique: item.synthetic_oblique,
             upright: item.upright,
             combined: item.combined,
             horizontal_scale: reprise_geom::Fixed::ONE,

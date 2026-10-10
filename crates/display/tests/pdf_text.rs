@@ -172,6 +172,7 @@ fn run(text: &str, direction: InlineDirection) -> (GlyphRun, FontStore) {
     let face = fonts.add(face);
     (
         GlyphRun {
+            synthetic_oblique: false,
             face,
             size,
             color: Color::BLACK,
@@ -193,6 +194,25 @@ fn bytes(run: GlyphRun, fonts: &FontStore) -> Vec<u8> {
         fonts,
     )
     .unwrap()
+}
+
+#[test]
+fn synthetic_oblique_keeps_extracted_clusters_and_run_splits() {
+    for (source, direction) in [
+        ("office a\u{301}", InlineDirection::Ltr),
+        ("אב ffi", InlineDirection::Rtl),
+    ] {
+        let (mut run, fonts) = run(source, direction);
+        let normal = extract(&bytes(run.clone(), &fonts));
+        run.synthetic_oblique = true;
+        assert_eq!(extract(&bytes(run.clone(), &fonts)), normal);
+        let bounds = run.ink_bounds(&fonts).unwrap();
+        assert!(bounds.width > Length::ZERO && bounds.height > Length::ZERO);
+        for size in [Length::MIN, Length::ZERO, Length::MAX] {
+            run.size = size;
+            assert_eq!(run.ink_bounds(&fonts).is_some(), size > Length::ZERO);
+        }
+    }
 }
 
 #[test]

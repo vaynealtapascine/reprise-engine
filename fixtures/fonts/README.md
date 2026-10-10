@@ -26,3 +26,15 @@ recorded in its `name` table), made with `subset_noto_sans_jp.py` and fontTools
 4.66.1. The script lists exactly which characters and layout features are kept,
 and its output is byte-identical between runs. Noto Sans JP declares no Reserved
 Font Name, so the modified version keeps its family name under the OFL.
+
+| Purpose | File | License | Bytes | SHA-256 | Upstream |
+| --- | --- | --- | ---: | --- | --- |
+| host mono / synthetic emphasis / forced coverage fallback | PaperMono-TestSubset.ttf | SIL OFL 1.1, PaperMono-OFL.txt and PaperMono-LICENSE.txt | 9424 | 151f35b61341982a363a226a1a57fc3266f5b58eaf3956e263de0172426e5269 | paper-design/paper-mono@e6eaeceaef02e77e3db997711e07a16378de2bd7, `fonts/ttf/PaperMono-Regular.ttf` |
+| host last-resort family | AtkinsonHyperlegibleNext-Regular.ttf | SIL OFL 1.1, AtkinsonHyperlegibleNext-OFL.txt | 65068 | 88ed5c31a71584c7772963b02d04bef1eb7e3d2e9c8b9cb204339b1f82cf432c | googlefonts/atkinson-hyperlegible-next@7925f50f649b3813257faf2f4c0b381011f434f1, `fonts/ttf/AtkinsonHyperlegibleNext-Regular.ttf` |
+
+Paper Mono is an ASCII subset reproduced by `subset_paper_mono.py` and
+fontTools 4.66.1; its source SHA-256 is recorded in the script. Upstream
+declares no Reserved Font Name. Both upstream licence/attribution files are
+retained, including the Geist Mono attribution. Atkinson is an unchanged
+upstream static Regular file, also without a Reserved Font Name. Its Latin
+coverage does not imply coverage of every script: uncovered text is diagnosed.

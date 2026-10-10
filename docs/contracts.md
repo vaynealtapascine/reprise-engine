@@ -48,7 +48,7 @@ Codes in use:
 
 | Library | Codes |
 | --- | --- |
-| font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
+| font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit` |
 | layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing` |
@@ -235,7 +235,7 @@ Codes in use:
     to 32 MiB. `match_family` searches stretch, style, then weight in CSS-inspired
     order, breaking ties by `FaceId` and reporting nearest matches with `font.nearest`
     (Warning). Versions and collection descriptors supplement the frozen `FaceId`;
-    package pins retain them. No synthetic outlines, variable-axis instancing,
+    package pins retain them. Without host synthesis settings, no synthetic outlines. No variable-axis instancing,
     system discovery, license checks or embedding-flag checks are performed.
 
 -   **Three steps:**
@@ -262,6 +262,40 @@ Codes in use:
     every byte.
 -   **Lines:** `reorder_line` applies rules L1 and L2 to one composed line and returns its
     runs in visual order.
+
+### Host font configuration additions (21, 38)
+
+`FontStore::set_settings(FontSettings)` atomically replaces host-owned family
+mappings for serif, sans-serif, monospace and script, ordered last-resort
+`fallbacks`, and the opt-in `synthetic_oblique` flag. Defaults are empty/false;
+legacy selection and existing snapshots remain unchanged. Names are literal
+declared aliases, resolved at layout time, so settings may precede declarations.
+Unset generic mappings keep existing pinned defaults. An unavailable mapping
+tries the host fallback families, then the built-in terminal generic. Configured
+coverage fallback also applies to legacy single-family styles, using the same
+whole-grapheme coverage/byte diagnostics as explicit chains. The style's own
+available families win; fallback families precede an automatically appended
+generic. An explicitly authored generic remains a preferred family. At most
+64 authored families and 64 host fallback families are searched; unavailable
+coverage retains .notdef with `font.missing`. Substitutions use `font.fallback`
+Warning. Empty/whitespace or >1024-byte names and >64 fallback entries refuse
+the whole settings update with `font.config` Error. There is no I/O or discovery.
+
+`LayoutSnapshot.font_settings` records nondefault settings (omitted when empty).
+Runs still pin the selected original `FaceId`. Synthetic emphasis adds a
+default-false `synthetic_oblique` flag to item, shaped, positioned and display
+runs. Italic/oblique requests in a family without any registered slanted face
+use the upright outline with exact design-coordinate shear `x += y/4` (y up,
+16.16 coefficient 16384), about each glyph origin. Advances and source mappings
+are unchanged. `font.synthetic` is Info because the author requested slanted
+text and the host enabled this behavior; unresolved weight/stretch still
+reports `font.nearest` Warning. Real slanted faces retain CSS matching priority.
+`Face::outline_oblique` is rendering only. `GlyphRun::ink_bounds` computes a
+conservative integer head-table envelope with the same shear, plus one outward
+layout unit for rounding, in the enclosing group's space; enclosing matrices
+must be applied for page bounds. SVG/PNG shear outlines; PDF applies a glyph
+transform to embedded text, preserving ToUnicode/ActualText and tagging.
+Synthetic bold and variable-axis instancing are not provided.
 
 ## Composition: `reprise-compose`
 

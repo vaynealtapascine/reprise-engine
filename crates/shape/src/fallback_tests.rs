@@ -219,3 +219,134 @@ fn legacy_entrypoint_keeps_its_full_family_search_contract() {
     );
     assert!(explicit.notes.is_empty());
 }
+fn host_fonts() -> (FontStore, reprise_font::FaceId, reprise_font::FaceId) {
+    let mut fonts = FontStore::default();
+    let declare = |family: &str| FontDeclaration {
+        family: family.into(),
+        descriptors: Descriptors::default(),
+        face_index: 0,
+    };
+    let mono = fonts
+        .register(
+            include_bytes!("../../../fixtures/fonts/PaperMono-TestSubset.ttf").as_slice(),
+            declare("Paper Mono"),
+        )
+        .unwrap();
+    let universal = fonts
+        .register(
+            include_bytes!("../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf")
+                .as_slice(),
+            declare("Universal"),
+        )
+        .unwrap();
+    fonts
+        .set_settings(reprise_font::FontSettings {
+            generics: [(GenericFamily::Monospace, "Paper Mono".into())].into(),
+            fallbacks: vec!["Absent".into(), "Universal".into()],
+            synthetic_oblique: true,
+        })
+        .unwrap();
+    (fonts, mono, universal)
+}
+
+#[test]
+fn host_fallback_covers_mid_word_and_keeps_rtl_clusters() {
+    let (fonts, mono, universal) = host_fonts();
+    for direction in [None, Some(reprise_geom::InlineDirection::Rtl)] {
+        let text = "aéb α אב";
+        let out = itemize(
+            &ParagraphInput {
+                text,
+                styles: &[run(text, &["monospace"])],
+                direction,
+            },
+            &fonts,
+        );
+        assert_eq!(out.items[0].face, mono);
+        assert_eq!(
+            out.items
+                .iter()
+                .find(|i| i.range.contains(&1))
+                .unwrap()
+                .face,
+            universal
+        );
+        assert_eq!(
+            out.items
+                .iter()
+                .find(|i| i.range.contains(&3))
+                .unwrap()
+                .face,
+            mono
+        );
+        assert!(
+            out.notes
+                .iter()
+                .any(|n| n.code == codes::FONT_FALLBACK && n.bytes == Some(1..3))
+        );
+        assert!(out.notes.iter().any(|n| n.code == codes::FONT_MISSING));
+        if direction.is_some() {
+            assert_eq!(out.base_level, 1);
+        }
+    }
+    let out = item("abc", &["Lost"], &fonts);
+    assert_eq!(out.items[0].face, universal);
+    assert!(out.notes.iter().any(|n| n.code == codes::FONT_FALLBACK));
+    let out = item("abc", &["Lost", "Paper Mono"], &fonts);
+    assert_eq!(out.items[0].face, mono);
+    assert_eq!(
+        out.notes
+            .iter()
+            .filter(|n| n.code == codes::FONT_FALLBACK)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn configured_missing_generic_and_synthetic_reshape_remain_bounded() {
+    let (mut fonts, _, universal) = host_fonts();
+    fonts
+        .set_settings(reprise_font::FontSettings {
+            generics: [(GenericFamily::Serif, "Missing".into())].into(),
+            ..fonts.settings().clone()
+        })
+        .unwrap();
+    let out = item("aé", &["serif"], &fonts);
+    assert_eq!(out.items[0].face, universal);
+    assert!(out.notes.iter().any(|n| n.code == codes::FONT_FALLBACK));
+    for size in [Length::MIN, Length::ZERO, Length::MAX] {
+        let text = "ab";
+        let mut style = run(text, &["Paper Mono"]);
+        style.size = size;
+        let out = itemize_emphasis(
+            &ParagraphInput {
+                text,
+                styles: &[style],
+                direction: None,
+            },
+            &fonts,
+            false,
+            &[Descriptors {
+                style: reprise_font::FontStyle::Oblique,
+                ..Default::default()
+            }],
+        );
+        assert!(out.items.iter().all(|i| i.synthetic_oblique));
+        let shaper = Shaper {
+            text,
+            items: &out.items,
+            fonts: &fonts,
+            adapter: &HarfRust,
+        };
+        assert!(shaper.shape().runs.iter().all(|r| r.synthetic_oblique));
+        assert!(shaper.reshape(1..2).iter().all(|r| r.synthetic_oblique));
+    }
+    let empty = item("", &["monospace"], &fonts);
+    assert!(empty.items.is_empty());
+    let long = "aé".repeat(8192);
+    let out = item(&long, &["monospace"], &fonts);
+    assert_eq!(out.items.last().unwrap().range.end, long.len());
+    let out = item("a", &vec!["missing"; 4096], &fonts);
+    assert!(out.notes.iter().any(|n| n.code == codes::FONT_CHAIN_LIMIT));
+}

@@ -289,6 +289,7 @@ impl<'r, 'a> Para<'r, 'a> {
                     .copied()
                     .collect();
                 (!glyphs.is_empty()).then(|| ShapedRun {
+                    synthetic_oblique: run.synthetic_oblique,
                     upright: run.upright,
                     combined: run.combined,
                     horizontal_scale: run.horizontal_scale,

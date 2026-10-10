@@ -113,6 +113,8 @@ pub trait ShapingAdapter: Send + Sync {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub synthetic_oblique: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub upright: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub combined: bool,
@@ -222,6 +224,7 @@ pub fn vertical_items(
                 && previous.script == item.script
                 && previous.language == item.language
                 && previous.features == item.features
+                && previous.synthetic_oblique == item.synthetic_oblique
             {
                 previous.range.end = end;
             } else {
@@ -269,6 +272,8 @@ pub fn visual_order(levels: &[u8]) -> Vec<usize> {
 /// A shaped run: one item, or the part of one that fell on a line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShapedRun {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub synthetic_oblique: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub upright: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -370,6 +375,7 @@ impl ShapedText {
                     .copied()
                     .collect();
                 (!glyphs.is_empty()).then(|| ShapedRun {
+                    synthetic_oblique: run.synthetic_oblique,
                     upright: run.upright,
                     combined: run.combined,
                     horizontal_scale: run.horizontal_scale,
@@ -519,6 +525,7 @@ mod tests {
         let face = Face::from_bytes(SERIF).unwrap();
         let text = "a\u{301}b";
         let make = |range| Item {
+            synthetic_oblique: false,
             range,
             face: face.id().clone(),
             size: Length::from_pt(12),

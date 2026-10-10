@@ -103,6 +103,7 @@ fn itemize_inner(
     generic_defaults: bool,
     emphasis: Option<&[Descriptors]>,
 ) -> Itemized {
+    let generic_defaults = generic_defaults || fonts.coverage_fallback();
     let text = input.text;
     let bidi = unicode::bidi(
         text,
@@ -185,19 +186,19 @@ fn itemize_inner(
                 .at(r.clone()),
             );
         }
-        if generic_defaults
+        let terminal = run
+            .families
+            .last()
+            .and_then(|f| GenericFamily::parse(f))
+            .unwrap_or(GenericFamily::Serif);
+        let automatic_generic = generic_defaults
             && families
                 .last()
                 .and_then(|f| GenericFamily::parse(f))
-                .is_none()
-        {
-            families.push(
-                run.families
-                    .last()
-                    .and_then(|f| GenericFamily::parse(f))
-                    .unwrap_or(GenericFamily::Serif)
-                    .name(),
-            );
+                .is_none();
+        families.extend(fonts.settings().fallbacks.iter().map(String::as_str));
+        if automatic_generic {
+            families.push(terminal.name());
         }
         let mut nearest = std::collections::BTreeMap::new();
         let mut reported_matches = std::collections::BTreeSet::new();
@@ -207,7 +208,15 @@ fn itemize_inner(
             .filter_map(|(index, family)| {
                 let face = if generic_defaults {
                     if let Some(generic) = GenericFamily::parse(family) {
-                        Some(if emphasis.is_some() {
+                        if fonts
+                            .settings()
+                            .generics
+                            .get(&generic)
+                            .is_some_and(|name| fonts.match_family(name, wanted).is_none())
+                        {
+                            return None;
+                        }
+                        Some(if emphasis.is_some() || fonts.coverage_fallback() {
                             let matched = fonts.match_generic(generic, wanted);
                             nearest.insert(index, matched.notes);
                             matched.face
@@ -243,6 +252,17 @@ fn itemize_inner(
                 face.map(|face| (index, face))
             })
             .collect();
+        // Keep an actual built-in last resort after host mappings/fallbacks,
+        // including when an unavailable mapping produced no candidate.
+        if fonts.coverage_fallback() {
+            let index = families.len();
+            families.push(terminal.name());
+            let face = fonts.builtin_generic(terminal);
+            if emphasis.is_some() {
+                nearest.insert(index, fonts.match_notes(face, wanted, terminal.name()));
+            }
+            candidates.push((index, face));
+        }
         if !generic_defaults && candidates.is_empty() {
             let index = families.len();
             families.push(GenericFamily::Serif.name());
@@ -341,7 +361,7 @@ fn itemize_inner(
                 if !covers(chosen.1) {
                     append_font_note(&mut out.notes, Note::warning(codes::FONT_MISSING, "no face covers this grapheme; shaped with the generic default and .notdef").at(bytes.clone()));
                 }
-                if chosen.0 > 0 {
+                if chosen.0 > 0 || (fonts.coverage_fallback() && run.families.is_empty()) {
                     append_font_note(
                         &mut out.notes,
                         Note::warning(
@@ -377,6 +397,7 @@ fn itemize_inner(
                 continue;
             }
             out.items.push(Item {
+                synthetic_oblique: fonts.synthesizes(face, wanted),
                 upright: false,
                 combined: false,
                 range: range.clone(),
@@ -446,6 +467,7 @@ impl Shaper<'_> {
                     features: &item.features,
                 });
                 Some(crate::combine_run(ShapedRun {
+                    synthetic_oblique: item.synthetic_oblique,
                     upright: item.upright,
                     combined: item.combined,
                     horizontal_scale: reprise_geom::Fixed::ONE,
@@ -610,6 +632,7 @@ mod tests {
         let alone = Shaper {
             text: "two",
             items: &[Item {
+                synthetic_oblique: false,
                 upright: false,
                 combined: false,
                 range: 0..3,
