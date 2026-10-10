@@ -291,9 +291,10 @@ are unchanged. `font.synthetic` is Info because the author requested slanted
 text and the host enabled this behavior; unresolved weight/stretch still
 reports `font.nearest` Warning. Real slanted faces retain CSS matching priority.
 `Face::outline_oblique` is rendering only. `GlyphRun::ink_bounds` computes a
-conservative integer head-table envelope with the same shear, plus one outward
-layout unit for rounding, in the enclosing group's space; enclosing matrices
-must be applied for page bounds. SVG/PNG shear outlines; PDF applies a glyph
+conservative integer head-table envelope with the same shear, plus two outward
+layout units for combined scaling/shear rounding, in the enclosing group's
+space; enclosing matrices must be applied for page bounds. SVG/PNG shear
+outlines; PDF applies a glyph
 transform to embedded text, preserving ToUnicode/ActualText and tagging.
 Synthetic bold and variable-axis instancing are not provided.
 

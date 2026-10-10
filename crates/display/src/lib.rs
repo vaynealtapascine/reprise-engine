@@ -130,17 +130,17 @@ impl GlyphRun {
             scale(y1) - scale(y0),
         );
         let bounds: Rect<PageSpace> = reprise_geom::Transform::new(shear).bounds(&bound);
-        // One unit outward covers rounding of scaled outline control points.
+        // Two units outward cover combined font scaling and shear rounding.
         self.glyphs
             .iter()
             .map(|g| {
                 Rect::new(
                     Point::new(
-                        g.x + bounds.origin.x - Length(1),
-                        g.y + bounds.origin.y - Length(1),
+                        g.x + bounds.origin.x - Length(2),
+                        g.y + bounds.origin.y - Length(2),
                     ),
-                    bounds.width + Length(2),
-                    bounds.height + Length(2),
+                    bounds.width + Length(4),
+                    bounds.height + Length(4),
                 )
             })
             .reduce(|a, b| a.union(&b))
