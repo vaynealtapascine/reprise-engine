@@ -74,6 +74,8 @@ pub(crate) struct ResolvedTemplate {
     pub height: Length,
     /// In the template's threading order.
     pub frames: Vec<ResolvedFrame>,
+    /// Source physical rectangle before writing axes or path expansion.
+    pub page_setup: Option<reprise_doc::page_setup::PageDimensions>,
 }
 
 impl ResolvedTemplate {
@@ -142,6 +144,19 @@ pub(crate) fn resolve(
         }
     }
 
+    let (template, source) = match doc.patch_page_template(&template, &engine.medium) {
+        Ok(Some(patched)) => (patched, TemplateSource::Document),
+        Ok(None) => (template, source),
+        Err(why) => {
+            report(
+                diagnostics,
+                Severity::Warning,
+                codes::PAGE_SETUP_INVALID,
+                format!("page setup ignored: {why}; the base template is used"),
+            );
+            (template, source)
+        }
+    };
     match resolve_template(&template, source, &engine.medium) {
         Ok((resolved, notes)) => {
             diagnostics.extend(notes);
@@ -174,6 +189,7 @@ fn builtin(medium: &Medium) -> ResolvedTemplate {
             width: Length::ZERO,
             height: Length::ZERO,
             frames: Vec::new(),
+            page_setup: None,
         },
     }
 }
@@ -237,6 +253,7 @@ fn resolve_template(
         width,
         height,
         frames,
+        page_setup: reprise_doc::page_setup::PageDimensions::from_template(template, medium).ok(),
     };
     if resolved.main_thread().is_empty() {
         return Err("it has no frame with room for the main flow".into());

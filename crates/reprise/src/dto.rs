@@ -74,8 +74,56 @@ pub struct State {
     pub revision: Vec<Clock>,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub page_setup: PageSetup,
     pub blocks: Vec<Block>,
     pub diagnostics: Vec<Diagnostic>,
+}
+/// Integer physical page setup; absent patch fields remain unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct PageSetupPatch {
+    #[ts(optional = nullable)]
+    pub width: Option<i32>,
+    #[ts(optional = nullable)]
+    pub height: Option<i32>,
+    #[ts(optional = nullable)]
+    pub top: Option<i32>,
+    #[ts(optional = nullable)]
+    pub right: Option<i32>,
+    #[ts(optional = nullable)]
+    pub bottom: Option<i32>,
+    #[ts(optional = nullable)]
+    pub left: Option<i32>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageSetup {
+    pub width: i32,
+    pub height: i32,
+    pub margins: PageMargins,
+    pub orientation: PageOrientation,
+    pub template: String,
+    pub source: PageTemplateSource,
+    pub patched: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageMargins {
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub left: i32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum PageOrientation {
+    Portrait,
+    Landscape,
+    Square,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum PageTemplateSource {
+    Builtin,
+    Document,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Clock {
@@ -150,6 +198,10 @@ pub struct Style {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
+    SetPageSetup {
+        setup: PageSetupPatch,
+    },
+    SwapPageOrientation,
     InsertLineBreak {
         node: String,
         at: u32,

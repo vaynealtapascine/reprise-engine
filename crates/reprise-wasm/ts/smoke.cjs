@@ -176,8 +176,15 @@ for (const run of styledRuns) {
 }
 assert.throws(() => parity.set_font_settings(p({ generics: {}, fallbacks: Array(65).fill("bad"), synthetic_oblique: true })), e => e.data.code === "font.config");
 assert.throws(() => parity.set_font_settings(p({ generics: { unknown: "bad" }, fallbacks: [], synthetic_oblique: false })));
+// Authored paper edits retain host font settings; resetting fonts retains paper.
+parity.set_page_setup(p({ width: 240 * 1024, height: 320 * 1024, right: 36 * 1024 }));
+finish(parity);
+assert.equal(parity.display_page(0).data.display.width, 240 * 1024);
+assert.ok(parity.display_json(0).data.includes('"synthetic_oblique":true'));
+assert.ok(parity.display_json(0).data.includes('"family":"Universal"'));
 parity.set_font_settings(p({ generics: {}, fallbacks: [], synthetic_oblique: false }));
 finish(parity); assert.ok(!parity.display_json(0).data.includes('"synthetic_oblique"'));
+assert.equal(parity.state().data.page_setup.width, 240 * 1024);
 parity.free();
 // Authored positions survive the real WASM command, query and package paths.
 const marksDoc = ws.create(p({ document_id: "50112233445566778899aabbccddeeff", peer_id: "61" }));
@@ -207,5 +214,47 @@ assert.ok(marksDoc.marks(0).data.marks.every(m => m.relation !== pin));
 marksDoc.undo(); finish(marksDoc);
 assert.ok(marksDoc.marks(0).data.marks.some(m => m.relation === pin && m.applied));
 marksOpen.free(); marksDoc.free();
-second.free();doc.free();ws.free();
+second.free();doc.free();
 console.log("WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, host fonts, synthetic glyph outlines and ink bounds, authored marks, bytes, and hostile objects passed");
+
+// Page setup is readable before layout, property-merged, undoable and packaged.
+const paper = ws.create(p({ document_id: "99112233445566778899aabbccddeeff", peer_id: "90" }));
+const paperPeer = ws.create(p({ document_id: "99112233445566778899aabbccddeeff", peer_id: "91" }));
+assert.equal(paper.state().data.page_setup.width, 420 * 1024);
+assert.equal(paper.state().data.page_setup.patched, false);
+paperPeer.sync_import(paper.sync_export(p({ since: null })));
+paper.set_page_setup(p({ width: 609562, height: 862095 }));
+paperPeer.apply(p({ commands: [{ kind: "set-page-setup", setup: { top: 36864, right: 49152, bottom: 55296, left: 73728 } }] }));
+const paperUpdate = paper.sync_export(p({ since: null }));
+const marginUpdate = paperPeer.sync_export(p({ since: null }));
+paper.sync_import(marginUpdate); paperPeer.sync_import(paperUpdate);
+assert.deepEqual(paper.state().data.page_setup, paperPeer.state().data.page_setup);
+assert.equal(paper.state().data.page_setup.orientation, "portrait");
+assert.equal(paper.state().data.page_setup.margins.right, 49152);
+paper.apply(p({ commands: [{ kind: "swap-page-orientation" }] }));
+assert.equal(paper.state().data.page_setup.width, 862095);
+assert.equal(paper.state().data.page_setup.orientation, "landscape");
+paper.undo(); assert.equal(paper.state().data.page_setup.width, 609562);
+paper.undo(); assert.equal(paper.state().data.page_setup.width, 420 * 1024);
+assert.equal(paper.state().data.page_setup.margins.right, 49152);
+paper.redo();
+const validPaper = paper.state();
+assert.throws(() => paper.set_page_setup(p({ width: 0 })), e => e.data.code === "edit.page-setup-invalid" && e.data.severity === "error");
+assert.throws(() => paper.set_page_setup(p({ left: 2147483647 })), e => e.data.code === "edit.page-setup-invalid");
+assert.deepEqual(paper.state(), validPaper);
+paper.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "Paper setup survives WASM layout and packaging.", style: { families: null, size: null, line_height: null } }] }));
+finish(paper);
+assert.equal(paper.display_page(0).data.display.width, 609562);
+const paperOpen = ws.open(p({ peer_id: "92" }), paper.save().data.bytes);
+assert.deepEqual(paperOpen.state().data.page_setup, paper.state().data.page_setup);
+const paperNative = paper.export(p("native")).data.content.bytes;
+const paperTarget = ws.create(p({ document_id: "a9112233445566778899aabbccddeeff", peer_id: "93" }));
+paperTarget.paste(p({ at: null }), paperNative);
+assert.deepEqual(paperTarget.state().data.page_setup, paper.state().data.page_setup);
+paperTarget.undo();
+assert.equal(paperTarget.state().data.page_setup.patched, false);
+assert.equal(paperTarget.state().data.blocks.length, 0);
+paperTarget.redo(); finish(paperTarget);
+assert.equal(paperTarget.display_page(0).data.display.width, 609562);
+paperTarget.free(); paperOpen.free(); paperPeer.free(); paper.free(); ws.free();
+console.log("page setup WASM smoke passed");

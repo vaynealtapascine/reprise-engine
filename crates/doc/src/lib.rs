@@ -44,6 +44,7 @@ pub mod invariants;
 mod lifecycle;
 pub mod marks;
 mod page;
+pub mod page_setup;
 mod persist;
 mod position;
 mod ranges;

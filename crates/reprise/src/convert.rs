@@ -95,9 +95,21 @@ pub(crate) fn kind(k: BlockKind) -> reprise_doc::BlockKind {
         BlockKind::Image => reprise_doc::BlockKind::Image,
     }
 }
-pub(crate) fn command(c: &Command) -> Result<reprise_edit::Command> {
+pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<reprise_edit::Command> {
     use reprise_edit::Command as C;
     Ok(match c {
+        Command::SetPageSetup { setup } => C::SetPageSetup {
+            patch: reprise_doc::page_setup::PageSetupPatch {
+                width: setup.width.map(Length),
+                height: setup.height.map(Length),
+                top: setup.top.map(Length),
+                right: setup.right.map(Length),
+                bottom: setup.bottom.map(Length),
+                left: setup.left.map(Length),
+            },
+            medium,
+        },
+        Command::SwapPageOrientation => C::SwapPageOrientation { medium },
         Command::InsertLineBreak { node, at } => C::InsertLineBreak {
             node: id(node)?,
             at: *at as usize,

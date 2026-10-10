@@ -67,6 +67,9 @@ pub struct Fragment {
     /// Copy-all carries authored page setup; partial copies leave this empty.
     pub templates: BTreeMap<String, String>,
     pub template_choice: Option<String>,
+    /// Bounded versioned raw page properties; copy-all only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_setup_patch: Option<String>,
     #[serde(default)]
     pub notes: Vec<reprise_diag::Note>,
 }
@@ -89,6 +92,10 @@ impl Fragment {
         }
         if self.source.is_empty() {
             return Err(FragmentError::Invalid("empty source namespace".into()));
+        }
+        if let Some(raw) = &self.page_setup_patch {
+            Document::validate_raw_page_setup(raw)
+                .map_err(|e| FragmentError::Invalid(e.to_string()))?;
         }
         if self.blocks.len() > MAX_FRAGMENT_BLOCKS
             || self.ranges.len() > 8192
@@ -224,6 +231,7 @@ impl Document {
             relations: Vec::new(),
             templates: BTreeMap::new(),
             template_choice: None,
+            page_setup_patch: None,
             notes: Vec::new(),
         };
         let mut cuts = BTreeMap::new();
@@ -437,6 +445,9 @@ impl Document {
             }
         }
         fragment.template_choice = get_str(&self.doc.get_map("page_setup"), "template");
+        fragment.page_setup_patch = self
+            .raw_page_setup()
+            .map_err(|e| FragmentError::Invalid(e.to_string()))?;
         fragment.validate()?;
         Ok(fragment)
     }

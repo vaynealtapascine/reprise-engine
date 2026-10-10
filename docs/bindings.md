@@ -370,7 +370,8 @@ configuration-bound caches, without modifying authored state or sync updates.
 Settings themselves are not stored in packages; saving still embeds fonts used
 by the configured layout. Hosts reapply settings after opening a session;
 configured snapshots record them. Generic mappings resolve declared
-weight/style variants.
+weight/style variants. Page setup edits retain these settings; resetting font
+settings leaves authored page setup intact.
 
 Display glyph runs expose optional `synthetic_oblique` (absent means false).
 `glyph_outlines` still returns the face's original outlines with its existing
@@ -477,3 +478,44 @@ the real marks query and command path.
 For the Node worker smoke, compile its CommonJS copy with both
 `--module commonjs --moduleResolution node`, then run
 `node crates/reprise-wasm/ts/worker-smoke.cjs <target_directory>/pkg-node <worker-output>/worker.js`.
+
+
+### Page setup
+
+Use `session.set_page_setup({version: 1, data: {width, height, top, right,
+bottom, left}})` natively or in WASM; every property is optional (null also
+means unchanged). The equivalent edit command is `{kind: "set-page-setup",
+setup: {...}}`. `{kind: "swap-page-orientation"}` swaps width/height while
+keeping physical margins. Standalone calls are individually undoable. Commands
+may share a transaction with text edits, with normal atomic validation.
+
+All values are integer 1/1024 pt. Letter is 626688 by 811008 units; ISO A4 is
+609562 by 862095 units, rounded from 210 by 297 mm. Landscape swaps these pairs.
+Dimensions must be positive and at most 14745600 units (200 inches); margins
+must be nonnegative and leave at least one unit of width and height. Invalid
+requests return `edit.page-setup-invalid` Error without changing the document,
+revision, or undo history. The app chooses its new-document defaults and should
+send all six fields when choosing a paper preset.
+
+`state().data.page_setup` reports effective size, `margins: {top, right, bottom,
+left}`, orientation, template name/source and `patched`, before any layout job.
+Patches change the active template's first main frame and preserve other frames
+and authored transforms/writing modes. Unspecified properties inherit that base
+frame. Without a patch, the built-in 420 by 300 pt page remains unchanged; its
+main frame has margins 36/164/36/36 pt in top/right/bottom/left order. A size-only
+patch retains those base margins.
+
+Flat `page-setup1` scalar keys merge independently, including first edits on
+both peers. Invalid merged combinations retain authored data but use the base
+page with `layout.page-setup-invalid` Warning in state and layout diagnostics.
+Required package bit 12 makes old readers refuse page-setup history; it stays
+set after undo because retained operations can restore those properties.
+The existing worker `edit` request accepts both commands and returns current
+state, so no separate worker message is required.
+
+Native copy-all carries the raw page patch along with templates and template
+choice. Paste into an empty document restores it in the same undo step as the
+content; a nonempty target keeps its page. Partial copies omit page setup.
+The optional native-fragment field is absent from older fragments, and strict
+older readers refuse new fragments that contain it. It carries authored
+properties rather than geometry resolved for a particular viewport.
