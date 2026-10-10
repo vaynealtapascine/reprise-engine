@@ -32,7 +32,7 @@ impl EditError {
             | Reason::TransactionTooLarge { .. }
             | Reason::TreeDepthLimit { .. }
             | Reason::MarksLimit => crate::codes::LIMIT,
-            Reason::PageSetup(_) => reprise_diag::Code::new("edit.page-setup-invalid"),
+            Reason::PageSetup(_) => crate::codes::PAGE_SETUP_INVALID,
             Reason::Store(_) => crate::codes::STORE,
             _ => crate::codes::INVALID_COMMAND,
         };

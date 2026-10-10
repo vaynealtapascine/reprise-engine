@@ -59,6 +59,15 @@ mod tests {
         }
         let doc = Document::new(1).unwrap();
         doc.doc
+            .get_text(ROOT)
+            .insert(0, "future root type")
+            .unwrap();
+        doc.commit();
+        let revision = doc.revision();
+        assert_eq!(doc.page_setup_patch(), Err(PageSetupError::Unreadable));
+        assert_eq!(revision, doc.revision());
+        let doc = Document::new(1).unwrap();
+        doc.doc
             .get_map(ROOT)
             .insert_container("width", loro::LoroMap::new())
             .unwrap();
@@ -272,8 +281,13 @@ impl Document {
     }
 
     pub fn page_setup_patch(&self) -> Result<PageSetupPatch, PageSetupError> {
-        if !self.has_page_setup() {
-            return Ok(PageSetupPatch::default());
+        let LoroValue::Map(roots) = self.doc.get_value() else {
+            return Err(PageSetupError::Unreadable);
+        };
+        match roots.get(ROOT) {
+            None => return Ok(PageSetupPatch::default()),
+            Some(LoroValue::Container(id)) if id.container_type() == loro::ContainerType::Map => {}
+            Some(_) => return Err(PageSetupError::Unreadable),
         }
         let map = self.doc.get_map(ROOT);
         if map.len() > KEYS.len() || map.keys().any(|k| !KEYS.contains(&k.as_ref())) {

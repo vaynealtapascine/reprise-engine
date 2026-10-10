@@ -26,8 +26,9 @@ pub const REQUIRED_TEXT_FORMATTING: u64 = 1 << 9;
 pub const REQUIRED_TEXT_EMPHASIS: u64 = 1 << 10;
 /// Older readers must refuse authored positional properties and characters.
 pub const REQUIRED_MARKS: u64 = 1 << 11;
-/// Required bits this version understands. Any other required bit refuses.
+/// Older readers must refuse retained authored page-property history.
 pub const REQUIRED_PAGE_SETUP: u64 = 1 << 12;
+/// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
     | REQUIRED_TEXT_EMPHASIS
