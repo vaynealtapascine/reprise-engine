@@ -481,3 +481,10 @@ Required package bit 12 makes old readers refuse page-setup history; it stays
 set after undo because retained operations can restore those properties.
 The existing worker `edit` request accepts both commands and returns current
 state, so no separate worker message is required.
+
+Native copy-all carries the raw page patch along with templates and template
+choice. Paste into an empty document restores it in the same undo step as the
+content; a nonempty target keeps its page. Partial copies omit page setup.
+The optional native-fragment field is absent from older fragments, and strict
+older readers refuse new fragments that contain it. It carries authored
+properties rather than geometry resolved for a particular viewport.

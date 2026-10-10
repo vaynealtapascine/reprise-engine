@@ -59,6 +59,12 @@ pub(crate) fn prepare(
     target: &str,
 ) -> Result<Prepared, EditError> {
     fragment.validate().map_err(invalid)?;
+    if at.is_none()
+        && doc.blocks().is_empty()
+        && let Some(raw) = &fragment.page_setup_patch
+    {
+        doc.validate_page_setup_import(raw).map_err(store)?;
+    }
     if target.is_empty() {
         return Err(invalid(FragmentError::Invalid(
             "empty target namespace".into(),
@@ -292,6 +298,9 @@ pub(crate) fn write(
             if let Some(choice) = &fragment.template_choice {
                 doc.use_page_template(choice).map_err(store)?;
             }
+            if let Some(raw) = &fragment.page_setup_patch {
+                doc.restore_raw_page_setup(raw).map_err(store)?;
+            }
         }
         return Ok(result);
     }
@@ -444,6 +453,9 @@ pub(crate) fn write(
         }
         if let Some(choice) = &fragment.template_choice {
             doc.use_page_template(choice).map_err(store)?;
+        }
+        if let Some(raw) = &fragment.page_setup_patch {
+            doc.restore_raw_page_setup(raw).map_err(store)?;
         }
     }
     let mut root_index = index;

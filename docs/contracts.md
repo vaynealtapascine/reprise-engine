@@ -980,3 +980,17 @@ one-em box. Source byte offsets remain available for text edits and authored ran
 - Section-specific templates, columns, headers and footers are outside this
   command's scope. Their existing template model is preserved, so future section
   choices can carry their own property scope rather than replace this root.
+- Native copy-all also carries `Fragment.page_setup_patch: Option<String>`
+  (the additive frozen-contract exception authorized for this workstream).
+  It defaults to absent and is omitted from old/partial fragment JSON. A present
+  value is a version-1 envelope with `properties`, a sorted map of raw scalar
+  values, bounded to 16 KiB and 64 properties. Unknown keys, unreadable scalar
+  types and conflicting values are retained rather than resolved to geometry.
+  Nested containers, malformed envelopes and excess metadata are refused with
+  the existing `clipboard.invalid` Error: the copy/paste cannot be performed.
+  Older strict fragment readers refuse the new field rather than ignore it.
+  Paste into an empty document replaces the raw patch alongside templates and
+  choice in the same undo step; a nonempty target keeps its page setup. All
+  envelope and destination checks precede staging or writes. An emptied root is
+  retained, including its required package feature bit. Capture never authors
+  a page root or resolves against a layout medium.

@@ -5,6 +5,8 @@ use reprise_geom::Length;
 
 use crate::{Dim, DocError, Document, FrameRole, MAIN_FLOW, Medium, PageTemplate};
 
+mod fragment;
+
 const ROOT: &str = "page-setup1";
 const KEYS: [&str; 6] = ["width", "height", "top", "right", "bottom", "left"];
 /// Maximum page dimension/margin: 200 inches (14,400 pt), in layout units.
