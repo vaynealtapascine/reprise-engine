@@ -196,6 +196,10 @@ fn itemize_inner(
                 .last()
                 .and_then(|f| GenericFamily::parse(f))
                 .is_none();
+        let host_families = families.len()
+            ..families
+                .len()
+                .saturating_add(fonts.settings().fallbacks.len());
         families.extend(fonts.settings().fallbacks.iter().map(String::as_str));
         if automatic_generic {
             families.push(terminal.name());
@@ -207,7 +211,9 @@ fn itemize_inner(
             .enumerate()
             .filter_map(|(index, family)| {
                 let face = if generic_defaults {
-                    if let Some(generic) = GenericFamily::parse(family) {
+                    if let Some(generic) =
+                        GenericFamily::parse(family).filter(|_| !host_families.contains(&index))
+                    {
                         if fonts
                             .settings()
                             .generics

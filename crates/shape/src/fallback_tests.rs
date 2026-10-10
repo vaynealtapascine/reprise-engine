@@ -304,6 +304,43 @@ fn host_fallback_covers_mid_word_and_keeps_rtl_clusters() {
 }
 
 #[test]
+fn host_fallback_aliases_are_literal_even_when_named_like_a_generic() {
+    let (mut fonts, mono, _) = host_fonts();
+    let alias = fonts
+        .register(
+            include_bytes!("../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf")
+                .as_slice(),
+            reprise_font::FontDeclaration {
+                family: "serif".into(),
+                descriptors: Descriptors::default(),
+                face_index: 0,
+            },
+        )
+        .unwrap();
+    fonts
+        .set_settings(reprise_font::FontSettings {
+            fallbacks: vec!["serif".into()],
+            ..fonts.settings().clone()
+        })
+        .unwrap();
+    let out = item("aéb", &["monospace"], &fonts);
+    assert_eq!(out.items[0].face, mono);
+    assert_eq!(
+        out.items
+            .iter()
+            .find(|i| i.range.contains(&1))
+            .unwrap()
+            .face,
+        alias
+    );
+    assert!(
+        out.notes
+            .iter()
+            .any(|n| n.code == codes::FONT_FALLBACK && n.bytes == Some(1..3))
+    );
+}
+
+#[test]
 fn configured_missing_generic_and_synthetic_reshape_remain_bounded() {
     let (mut fonts, _, universal) = host_fonts();
     fonts
