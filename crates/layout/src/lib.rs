@@ -107,7 +107,43 @@ pub struct Engine {
     pub flow: FlowSettings,
 }
 
+/// Effective page geometry, available before shaping or layout.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageSetupInfo {
+    pub dimensions: reprise_doc::page_setup::PageDimensions,
+    pub template: String,
+    pub source: TemplateSource,
+    pub patched: bool,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 impl Engine {
+    pub fn page_setup(&self, doc: &Document) -> PageSetupInfo {
+        let mut diagnostics = Vec::new();
+        let template = template::resolve(self, doc, &mut diagnostics);
+        let dimensions = template
+            .page_setup
+            .unwrap_or(reprise_doc::page_setup::PageDimensions {
+                width: template.width,
+                height: template.height,
+                top: Length::ZERO,
+                right: Length::ZERO,
+                bottom: Length::ZERO,
+                left: Length::ZERO,
+            });
+        let patched = doc.page_setup_patch().is_ok_and(|p| !p.is_empty())
+            && !diagnostics
+                .iter()
+                .any(|d| d.code == codes::PAGE_SETUP_INVALID || d.code == codes::TEMPLATE_UNUSABLE);
+        PageSetupInfo {
+            dimensions,
+            template: template.name,
+            source: template.source,
+            patched,
+            diagnostics,
+        }
+    }
+
     pub fn new(fonts: FontStore) -> Engine {
         Engine {
             fonts,

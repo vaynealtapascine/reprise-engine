@@ -247,3 +247,14 @@ versioned tabs1 stops and reprise.alignment relations. Detection includes
 soft-deleted content, style/break records and tombstoned relations; unknown
 alignment/tab stored forms conservatively require the bit. Older readers must
 refuse it. Marks guide geometry is derived and is never persisted.
+
+
+## Page setup feature (required bit 12)
+
+`REQUIRED_PAGE_SETUP` is declared whenever the authored `page-setup1` flat
+property root is retained, even if its live properties are empty after undo or
+unreadable. Scalars are integer 1/1024 pt width/height and physical margins;
+projection/validation is described in `docs/contracts.md`. A reader whose known
+required mask predates bit 12 refuses before decoding the document section.
+Untouched documents, empty page patches, and refused commands retain their old
+required mask. No container version or frozen template JSON envelope changes.

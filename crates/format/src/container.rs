@@ -187,6 +187,14 @@ impl Container {
     /// Parse sequentially, validating framing before allocation. Corrupt cache
     /// content is recoverable; ambiguous framing and authored corruption are not.
     pub fn decode(bytes: &[u8], limits: Limits) -> Result<(Self, Vec<Note>), FormatError> {
+        Self::decode_known(bytes, limits, crate::features::KNOWN_REQUIRED)
+    }
+
+    fn decode_known(
+        bytes: &[u8],
+        limits: Limits,
+        known_required: u64,
+    ) -> Result<(Self, Vec<Note>), FormatError> {
         let limits = limits.bounded();
         if bytes.len() > limits.file_bytes {
             return Err(FormatError::Limit("file bytes"));
@@ -206,7 +214,7 @@ impl Container {
         if digest(bytes.get(..48).ok_or(FormatError::Truncated)?) != checksum {
             return Err(FormatError::Integrity(None));
         }
-        let unknown = features.required & !crate::features::KNOWN_REQUIRED;
+        let unknown = features.required & !known_required;
         if unknown != 0 {
             return Err(FormatError::RequiredFeatures(unknown));
         }
@@ -344,5 +352,59 @@ impl Container {
             out.extend_from_slice(&section.bytes);
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod page_setup_tests {
+    use super::*;
+    use reprise_doc::page_setup::PageSetupPatch;
+    use reprise_doc::{Document, Medium, PersistenceMode};
+    #[test]
+    fn old_reader_refuses_page_setup_even_after_undo_but_accepts_untouched_documents() {
+        let doc = Document::new(1).unwrap();
+        let reprise_doc::Dim::Pt(width) = reprise_doc::PageTemplate::builtin().width else {
+            panic!("builtin size must be absolute")
+        };
+        let old = crate::features::KNOWN_REQUIRED & !crate::features::REQUIRED_PAGE_SETUP;
+        let save = || {
+            crate::Package::new(&doc, DocumentId([42; 16]), PersistenceMode::History)
+                .unwrap()
+                .save()
+                .unwrap()
+        };
+        doc.page_setup_patch().unwrap();
+        doc.patch_page_template(
+            &reprise_doc::PageTemplate::builtin(),
+            &Medium::new(width, width),
+        )
+        .unwrap();
+        Container::decode_known(&save(), Limits::default(), old).unwrap();
+        let mut undo = doc.undo_stack();
+        doc.set_page_setup_patch(PageSetupPatch {
+            width: Some(width),
+            ..Default::default()
+        })
+        .unwrap();
+        doc.commit();
+        for bytes in [save(), {
+            assert!(undo.undo().unwrap());
+            save()
+        }] {
+            assert!(
+                matches!(Container::decode_known(&bytes, Limits::default(), old), Err(FormatError::RequiredFeatures(bits)) if bits == crate::features::REQUIRED_PAGE_SETUP)
+            );
+            Container::decode(&bytes, Limits::default()).unwrap();
+            let imported = crate::Package::open(
+                &bytes,
+                2,
+                Limits::default(),
+                &crate::MigrationRegistry::builtin(),
+            )
+            .unwrap()
+            .into_document()
+            .unwrap();
+            assert!(imported.has_page_setup());
+        }
     }
 }

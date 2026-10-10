@@ -1580,6 +1580,7 @@ mod tests {
             width: Length::MAX,
             height: Length::ZERO,
             frames: vec![frame.clone()],
+            page_setup: None,
         };
         let ctx = resolution_context(&engine, &template, Some(&frame), frame.width);
         assert_eq!(

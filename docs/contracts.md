@@ -51,11 +51,11 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit` |
-| layout | `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing` |
+| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
-| edit | `edit.limit`, `edit.invalid-command`, `edit.store` |
+| edit | `edit.page-setup-invalid`, `edit.limit`, `edit.invalid-command`, `edit.store` |
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
 | clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped` |
 | pdf | `pdf.figure-alt-missing`, `pdf.reference-unlinked`, `pdf.heading-level`, `pdf.structure-depth`, `pdf.run-split`, `pdf.ua-not-met` |
@@ -936,3 +936,47 @@ change counts before decoding.
 
 Combined vertical runs are atomic visual caret units with stops before/after the
 one-em box. Source byte offsets remain available for text edits and authored ranges.
+
+
+## Page setup additions (05, 24, 29, 34, 37, 38)
+
+- `Command::SetPageSetup` patches width, height and physical top/right/bottom/left
+  margins. Facade `DocumentSession::set_page_setup(Payload<PageSetupPatch>)`
+  is the same one-command kernel transaction; WASM exposes `set_page_setup`.
+  `Command::SwapPageOrientation` swaps width and height and retains margins.
+  Each standalone command is one undo step; a multi-command transaction retains
+  the existing one-step semantics and sequential, atomic validation.
+- Geometry uses integer 1/1024 pt. Dimensions are 1..=14,745,600 units
+  (14,400 pt / 200 inches); each margin is 0..=14,745,600 units, and opposing
+  margins must sum to strictly less than the corresponding dimension.
+  Invalid local geometry is refused before writing with `edit.page-setup-invalid`
+  Error: the requested edit is omitted. An empty patch creates no root/history.
+- Six optional scalar keys (`width`, `height`, `top`, `right`, `bottom`, `left`)
+  live in the versioned flat Loro root `page-setup1`. Only supplied properties
+  are written, including on the first edit. Independent size/margin and
+  width/height edits therefore merge without a competing nested-container write.
+  The patch is applied over the current selected template, or the built-in
+  fallback. It changes the first main-flow frame in threading order; its name,
+  transform, writing mode, path and all other regions remain authored as before.
+  Unspecified values inherit the base template's physical rectangle, resolved
+  against the explicit engine medium. No layout result is saved.
+- Malformed/unknown keys, wrong scalar types, excessive dimensions and impossible
+  merged margin combinations remain in authored storage. Interpretation checks
+  at most six keys. The entire patch is ignored with `layout.page-setup-invalid`
+  Warning: the page differs from what was asked. State and layout share the same
+  template resolver and fallback. A later valid patch can repair contradictory
+  scalar values without dropping the other peer's properties.
+- `State.page_setup` reports effective width/height, physical margins, orientation
+  (`portrait`, `landscape`, `square`), template name/source, and whether the patch
+  took effect. The query requires no layout or fonts and never mutates the CRDT.
+  Margins describe the first authored main frame's physical rectangle before its
+  transform; they do not reinterpret transformed writing axes.
+- Required package bit 12 (`REQUIRED_PAGE_SETUP`) declares any retained
+  `page-setup1` root, including unreadable values and an emptied root after undo.
+  Readers without that bit refuse with the existing `format.invalid` Error /
+  `FormatError::RequiredFeatures`. Merely reading state, an empty patch, and a
+  refused command create no bit. Untouched documents keep their exact layout.
+  Existing template definitions and selection storage remain readable unchanged.
+- Section-specific templates, columns, headers and footers are outside this
+  command's scope. Their existing template model is preserved, so future section
+  choices can carry their own property scope rather than replace this root.

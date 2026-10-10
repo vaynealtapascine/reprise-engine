@@ -28,6 +28,16 @@ pub fn declarations() -> String {
     text.push_str(&Open::decl(&cfg));
     text.push('\n');
     text.push_str("export ");
+    text.push_str(&PageSetupPatch::decl(&cfg));
+    text.push_str("\nexport ");
+    text.push_str(&PageSetup::decl(&cfg));
+    text.push_str("\nexport ");
+    text.push_str(&PageMargins::decl(&cfg));
+    text.push_str("\nexport ");
+    text.push_str(&PageOrientation::decl(&cfg));
+    text.push_str("\nexport ");
+    text.push_str(&PageTemplateSource::decl(&cfg));
+    text.push_str("\nexport ");
     text.push_str(&State::decl(&cfg));
     text.push('\n');
     text.push_str("export ");

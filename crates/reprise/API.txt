@@ -16,6 +16,7 @@ pub fn contain<T>(&mut self, f: impl FnOnce(&mut DocumentSession) -> Result<T>) 
 pub fn is_poisoned(&self) -> bool
 pub fn state(&self) -> Result<Payload<State>>
 pub fn set_layout_threads(&mut self, threads: usize) -> usize
+pub fn set_page_setup( &mut self, request: &Payload<PageSetupPatch>, ) -> Result<Payload<Applied>>
 pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>>
 pub fn insert_image(&mut self, request: &Payload<ImageInsert>) -> Result<Payload<Applied>>
 pub fn undo(&mut self) -> Result<Payload<bool>>

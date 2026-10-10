@@ -32,6 +32,7 @@ impl EditError {
             | Reason::TransactionTooLarge { .. }
             | Reason::TreeDepthLimit { .. }
             | Reason::MarksLimit => crate::codes::LIMIT,
+            Reason::PageSetup(_) => reprise_diag::Code::new("edit.page-setup-invalid"),
             Reason::Store(_) => crate::codes::STORE,
             _ => crate::codes::INVALID_COMMAND,
         };
@@ -50,6 +51,8 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error(transparent)]
+    PageSetup(reprise_doc::page_setup::PageSetupError),
     #[error("alignment relation limit exceeded")]
     MarksLimit,
     #[error(transparent)]

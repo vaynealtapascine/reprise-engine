@@ -194,6 +194,14 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `fixtures` | `src/marks.rs`, `src/hostile.rs`, `src/lib.rs`, `tests/marks.rs`, `tests/hostile.rs`, `tests/geometry.rs`, `examples/marks_poem.rs` | Poem and cyclic/unreachable-tab goldens, concurrency, empty tails, geometric hits, reflow, RTL/vertical and storm attacks; reproducible visual export | 11–15, 20, 29, 30, 37–39 |
 | docs | `docs/marks.md`, `docs/bindings.md`, `docs/contracts.md`, `docs/CODEMAP.md` | Authored/query vocabulary, bounded fallback rules and target fidelity | 05, 11–15, 34, 37–39 |
 
+| `doc` | `src/page_setup.rs`, `src/lib.rs` | Versioned flat page property storage, bounded geometry validation, patch projection retaining other authored frames, malformed/extreme read tests | 05, 19, 24, 29, 34, 37, 38 |
+| `edit` | `src/command.rs`, `src/plan.rs`, `src/editor.rs`, `src/error.rs` | Atomic sequential page patches and orientation swaps through the existing per-peer undo step | 24, 29, 37 |
+| `layout` | `src/lib.rs`, `src/template.rs`, `src/codes.rs`, `src/flow.rs` (test construction) | Shared effective page setup query/resolver, base-template fallback for malformed or conflicting patches, cache-compatible template projection | 24, 27, 37, 38 |
+| `format` | `src/features.rs`, `src/container.rs`, `SPEC.md` | Required page setup bit 12 including retained roots, actual legacy-known-mask decoder refusal and undo/import coverage | 34, 37 |
+| `reprise`, `reprise-wasm` | `reprise/src/{dto.rs,convert.rs,session.rs,typescript.rs}`, `reprise/tests/page_setup.rs`, `reprise/API.txt`, `reprise-wasm/src/lib.rs`, `reprise-wasm/ts/{types.d.ts,reprise_wasm.d.ts,smoke.cjs}` | Facade-owned page commands/state, native/WASM setter, generated wire declarations, concurrency/undo/atomicity/package smoke coverage | 02, 24, 29, 34, 38 |
+| `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/page_setup.rs`, `tests/snapshots/hostile__{content_,}page_setup_*.snap` | A4/Letter portrait/landscape and conflicting-margin layout/content goldens; long-text lossless reflow and incremental/full parity; explicit tiny-page termination | 24, 27, 37–39 |
+| docs | `docs/bindings.md`, `docs/contracts.md`, `docs/CODEMAP.md` | Page setup API, units/bounds, merge interpretation and old-reader compatibility | 05, 24, 29, 34, 37, 38 |
+
 ## Recipes
 
 -   **Add a relation type:**

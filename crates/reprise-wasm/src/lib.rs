@@ -11,6 +11,8 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<PageSetupPatch>")]
+    pub type PageSetupPatchPayload;
     #[wasm_bindgen(typescript_type = "Payload<MarksPage>")]
     pub type MarksPagePayload;
     #[wasm_bindgen(typescript_type = "Payload<SyncRequest>")]
@@ -402,6 +404,12 @@ impl WasmDocument {
     }
     pub fn state(&self) -> Result<StatePayload, JsValue> {
         Ok(encode(self.inner.state())?.unchecked_into())
+    }
+    pub fn set_page_setup(
+        &mut self,
+        request: &PageSetupPatchPayload,
+    ) -> Result<AppliedPayload, JsValue> {
+        Ok(encode(self.inner.set_page_setup(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn apply(&mut self, request: &TransactionPayload) -> Result<AppliedPayload, JsValue> {
         Ok(encode(self.inner.apply(&decode(request.as_ref())?))?.unchecked_into())

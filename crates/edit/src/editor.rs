@@ -289,6 +289,7 @@ impl Editor {
         let missing = || reprise_doc::DocError::Store("a staged item is missing".into());
         let staged = |i: usize| blocks.get(i).copied().flatten().ok_or_else(missing);
         match step {
+            Step::SetPageSetup(patch) => self.doc.set_page_setup_patch(*patch)?,
             Step::SetAlignment { node, alignment } => self.doc.set_alignment(*node, *alignment)?,
             Step::SetTabs { node, tabs } => self.doc.set_tab_stops(*node, tabs)?,
             Step::AlignLine { .. } | Step::PinLine { .. } => {

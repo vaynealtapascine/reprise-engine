@@ -15,6 +15,15 @@ use reprise_doc::{NewBlock, NodeId, Relation, RelationId, Style};
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Command {
+    /// Patch only supplied properties. Medium is an explicit validation input.
+    SetPageSetup {
+        patch: reprise_doc::page_setup::PageSetupPatch,
+        medium: reprise_doc::Medium,
+    },
+    /// Swap physical dimensions, retaining the physical margins.
+    SwapPageOrientation {
+        medium: reprise_doc::Medium,
+    },
     InsertLineBreak {
         node: NodeId,
         at: usize,

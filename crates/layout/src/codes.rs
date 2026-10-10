@@ -3,6 +3,9 @@
 
 use reprise_diag::Code;
 
+/// Merged or unreadable page properties could not be applied.
+pub const PAGE_SETUP_INVALID: Code = Code::new("layout.page-setup-invalid");
+
 pub const IMAGE_RECORD: Code = Code::new("layout.image-record");
 pub const IMAGE_MISSING: Code = Code::new("layout.image-missing");
 pub const IMAGE_HEADER: Code = Code::new("layout.image-header");

@@ -36,6 +36,7 @@ pub const MAX_ANCESTORS: usize = 1024;
 
 #[derive(Debug)]
 pub(crate) enum Step {
+    SetPageSetup(reprise_doc::page_setup::PageSetupPatch),
     SetAlignment {
         node: NodeId,
         alignment: reprise_doc::marks::Alignment,
@@ -186,6 +187,10 @@ struct Model<'a> {
     kids: BTreeMap<Option<NodeId>, Vec<Slot>>,
     live_relations: Option<BTreeSet<RelationId>>,
     payload: usize,
+    page_setup: Option<(
+        reprise_doc::page_setup::PageDimensions,
+        reprise_doc::page_setup::PageSetupPatch,
+    )>,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -239,6 +244,7 @@ pub(crate) fn plan(
         kids: BTreeMap::new(),
         live_relations: None,
         payload: 0,
+        page_setup: None,
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -352,8 +358,68 @@ impl Model<'_> {
         }
     }
 
+    fn page_base(
+        &mut self,
+        medium: &reprise_doc::Medium,
+    ) -> Result<
+        (
+            reprise_doc::page_setup::PageDimensions,
+            reprise_doc::page_setup::PageSetupPatch,
+        ),
+        Reason,
+    > {
+        if let Some(setup) = self.page_setup {
+            return Ok(setup);
+        }
+        let base = match self.doc.page_template() {
+            reprise_doc::TemplateChoice::Template(t) => t,
+            _ => reprise_doc::PageTemplate::builtin(),
+        };
+        let setup = reprise_doc::page_setup::PageDimensions::from_template(&base, medium)
+            .map_err(Reason::PageSetup)?;
+        let patch = self.doc.page_setup_patch().map_err(Reason::PageSetup)?;
+        self.page_setup = Some((setup, patch));
+        Ok((setup, patch))
+    }
+
+    fn page_dimensions(
+        &mut self,
+        medium: &reprise_doc::Medium,
+    ) -> Result<reprise_doc::page_setup::PageDimensions, Reason> {
+        let (base, patch) = self.page_base(medium)?;
+        patch.apply(base).map_err(Reason::PageSetup)
+    }
+
+    fn set_page_setup(
+        &mut self,
+        patch: reprise_doc::page_setup::PageSetupPatch,
+        medium: &reprise_doc::Medium,
+    ) -> Result<(), Reason> {
+        if patch.is_empty() {
+            return Ok(());
+        }
+        let (base, previous) = self.page_base(medium)?;
+        let candidate = previous.overlay(patch);
+        candidate.apply(base).map_err(Reason::PageSetup)?;
+        self.page_setup = Some((base, candidate));
+        self.plan.steps.push(Step::SetPageSetup(patch));
+        Ok(())
+    }
+
     fn run(&mut self, command: &Command) -> Result<(), Reason> {
         match command {
+            Command::SetPageSetup { patch, medium } => self.set_page_setup(*patch, medium),
+            Command::SwapPageOrientation { medium } => {
+                let setup = self.page_dimensions(medium)?;
+                self.set_page_setup(
+                    reprise_doc::page_setup::PageSetupPatch {
+                        width: Some(setup.height),
+                        height: Some(setup.width),
+                        ..Default::default()
+                    },
+                    medium,
+                )
+            }
             Command::InsertLineBreak { node, at } => self.insert_text(*node, *at, "\n"),
             Command::InsertTab { node, at } => self.insert_text(*node, *at, "\t"),
             Command::SetTabStops { node, tabs } => {

@@ -219,7 +219,36 @@ impl DocumentSession {
                 formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
             });
         }
+        let page = self.engine.page_setup(self.doc());
+        let d = page.dimensions;
+        let page_setup = PageSetup {
+            width: d.width.0,
+            height: d.height.0,
+            margins: PageMargins {
+                top: d.top.0,
+                right: d.right.0,
+                bottom: d.bottom.0,
+                left: d.left.0,
+            },
+            orientation: match d.width.cmp(&d.height) {
+                std::cmp::Ordering::Less => PageOrientation::Portrait,
+                std::cmp::Ordering::Greater => PageOrientation::Landscape,
+                std::cmp::Ordering::Equal => PageOrientation::Square,
+            },
+            template: page.template,
+            source: match page.source {
+                reprise_layout::TemplateSource::Builtin => PageTemplateSource::Builtin,
+                reprise_layout::TemplateSource::Document => PageTemplateSource::Document,
+            },
+            patched: page.patched,
+        };
         let mut diagnostics = self.diagnostics().data;
+        for note in page.diagnostics {
+            let note = cv::layout_diagnostic(&note);
+            if !diagnostics.contains(&note) {
+                diagnostics.push(note);
+            }
+        }
         diagnostics.extend(malformed.into_iter().map(|node| Diagnostic {
             code: reprise_doc::invariants::MALFORMED_NODE.as_str().into(),
             severity: Severity::Error,
@@ -235,6 +264,7 @@ impl DocumentSession {
             can_undo: self.editor.can_undo(),
             can_redo: self.editor.can_redo(),
             blocks,
+            page_setup,
             diagnostics,
         }))
     }
@@ -252,6 +282,15 @@ impl DocumentSession {
             let _ = threads;
             1
         }
+    }
+    pub fn set_page_setup(
+        &mut self,
+        request: &Payload<PageSetupPatch>,
+    ) -> Result<Payload<Applied>> {
+        let setup = *validate(request)?;
+        self.apply(&Payload::new(Transaction {
+            commands: vec![Command::SetPageSetup { setup }],
+        }))
     }
     pub fn apply(&mut self, request: &Payload<Transaction>) -> Result<Payload<Applied>> {
         let r = validate(request)?;
@@ -273,7 +312,7 @@ impl DocumentSession {
         let commands = r
             .commands
             .iter()
-            .map(cv::command)
+            .map(|c| cv::command(c, self.engine.medium))
             .collect::<Result<Vec<_>>>()?;
         let applied = self.editor.apply(&commands.into())?;
         self.snapshot = None;
