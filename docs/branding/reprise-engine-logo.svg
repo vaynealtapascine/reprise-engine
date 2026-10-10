@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 1350 1350" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:affinity="https://www.affinity.studio/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g transform="matrix(1,0,0,1,-1472.990382,0)">
+        <g id="reprise-engine" transform="matrix(1,0,0,1,1472.990382,0)">
+            <rect x="0" y="0" width="1350" height="1350" style="fill:none;"/>
+            <path id="Rounded-Rectangle-Squircle" affinity:id="Rounded Rectangle Squircle" d="M607.5,0L742.5,0C1278.923,0 1350,71.077 1350,607.5L1350,742.5C1350,1278.923 1278.923,1350 742.5,1350L607.5,1350C71.077,1350 0,1278.923 0,742.5L0,607.5C0,71.077 71.077,0 607.5,0Z" style="fill:rgb(19,33,55);"/>
+            <g transform="matrix(0.838658,0,0,0.838658,-87.491956,110.220857)">
+                <path d="M491,1078L491,312L450,312L450,249L713,249L713,312L675,312L675,355L796,355C796,355 885.715,178 1063.269,178C1383.666,178 1399.666,758.204 1079.269,758.204C832.681,758.204 960.684,488.204 675,488.204L675,1078L713,1078L713,1137L588.847,1137L588.847,312L533.753,312L533.753,1137L450,1137L450,1078L491,1078Z" style="fill:rgb(209,227,255);"/>
+            </g>
+            <g transform="matrix(-0.896889,-0,0,-0.834303,1652.768463,1798.864834)">
+                <path d="M898.51,881.083C898.51,881.083 1062.508,1005.811 1161.522,1081.116C1171.698,1088.856 1176.044,1102.786 1172.266,1115.556C1168.489,1128.327 1157.457,1137 1144.992,1137L641.935,1137C629.376,1137 618.285,1128.199 614.585,1115.297C610.885,1102.395 615.442,1088.408 625.821,1080.806C728.68,1005.47 898.51,881.083 898.51,881.083Z" style="fill:rgb(40,154,255);"/>
+            </g>
+        </g>
+    </g>
+</svg>

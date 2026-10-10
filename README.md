@@ -1,3 +1,5 @@
+<p><img src="docs/branding/reprise-engine-logo.svg" width="96" height="96" alt="reprise-engine logo"></p>
+
 # reprise-engine
 
 The relational document and layout engine behind [Reprise](https://github.com/vaynealtapascine/Reprise).

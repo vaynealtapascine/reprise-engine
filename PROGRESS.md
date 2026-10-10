@@ -2,6 +2,13 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-10: supplied engine logo
+
+Added the supplied SVG at `docs/branding/reprise-engine-logo.svg` and displayed
+it in the repository README. Verified the artwork in a browser and checked it
+against the supplied source byte for byte. No engine behavior or interfaces
+changed.
+
 ## 2026-10-09: anchored character formatting; glyph outlines for web renderers
 
 Completed Astra's uncommitted formatting slice (`docs/text-formatting.md`) after

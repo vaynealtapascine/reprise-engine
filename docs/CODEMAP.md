@@ -5,6 +5,9 @@ The table is in crate dependency order. File paths are relative to that crate un
 start with `docs/`, which names repository-level documentation.
 [contracts.md](contracts.md) describes the frozen interfaces.
 
+Repository branding lives in `docs/branding/reprise-engine-logo.svg`, the
+supplied engine logo displayed by `README.md`.
+
 | Crate | Files | What it does | Decisions |
 | --- | --- | --- | --- |
 | `diag` | `src/lib.rs` | `Note`, `Severity`, `Code`: diagnostics shared by every library | 37, 39 |
