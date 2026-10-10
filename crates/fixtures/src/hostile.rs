@@ -147,6 +147,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         emphasis_overlap()?,
         marks_cycle_tabs()?,
         marks_poem()?,
+        font_host_oblique()?,
     ])
 }
 
@@ -2752,5 +2753,70 @@ pub fn marks_poem() -> Result<Fixture, DocError> {
         &["relation.alignment-outside"],
     );
     fixture.engine.medium = reprise_doc::Medium::new(Length::from_pt(850), Length::from_pt(620));
+    Ok(fixture)
+}
+
+/// Missing mapped families, mid-word coverage and RTL .notdef under a rotated
+/// frame. Synthetic emphasis must retain all bytes and extraction mappings.
+pub fn font_host_oblique() -> Result<Fixture, DocError> {
+    use reprise_font::{Descriptors, FontDeclaration, FontSettings, GenericFamily};
+    let doc = document()?;
+    let node = doc.append_block(BlockKind::Paragraph, "body", "aéb α אב ffi")?;
+    doc.set_overrides(
+        node,
+        &Style {
+            family: Some("monospace".into()),
+            slant: Some(reprise_doc::TextSlant::Italic),
+            ..Default::default()
+        },
+    )?;
+    let mut frame = flow_frame(
+        "slanted",
+        Dim::pt(40),
+        Dim::pt(30),
+        Dim::pt(190),
+        Dim::pt(100),
+    );
+    frame.transform.rotation = reprise_doc::Rotation::Quarter(1);
+    frame.transform.origin_x = Dim::pt(95);
+    frame.transform.origin_y = Dim::pt(50);
+    doc.set_page_template(
+        &PageTemplate::new("host fonts", Dim::pt(300), Dim::pt(300)).with_frame(frame),
+    )?;
+    doc.commit();
+    let mut fixture = Fixture::new("font_host_oblique", doc, &["font.fallback", "font.missing"]);
+    for (family, bytes) in [
+        (
+            "Paper Mono",
+            include_bytes!("../../../fixtures/fonts/PaperMono-TestSubset.ttf").as_slice(),
+        ),
+        (
+            "Universal",
+            include_bytes!("../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf")
+                .as_slice(),
+        ),
+    ] {
+        fixture
+            .engine
+            .fonts
+            .register(
+                bytes,
+                FontDeclaration {
+                    family: family.into(),
+                    descriptors: Descriptors::default(),
+                    face_index: 0,
+                },
+            )
+            .expect("pinned fixture fonts");
+    }
+    fixture
+        .engine
+        .fonts
+        .set_settings(FontSettings {
+            generics: [(GenericFamily::Monospace, "Paper Mono".into())].into(),
+            fallbacks: vec!["Missing".into(), "Universal".into()],
+            synthetic_oblique: true,
+        })
+        .expect("bounded fixture settings");
     Ok(fixture)
 }

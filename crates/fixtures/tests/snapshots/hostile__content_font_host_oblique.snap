@@ -1,0 +1,286 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: "serde_json::to_string_pretty(&content).unwrap()"
+---
+[
+  {
+    "width": 307200,
+    "height": 307200,
+    "items": [
+      {
+        "type": "group",
+        "transform": {
+          "xx": 0,
+          "yx": 65536,
+          "xy": -65536,
+          "yy": 0,
+          "tx": 189440,
+          "ty": -15360
+        },
+        "clip": null,
+        "items": [
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Paper Mono",
+              "hash": "151f35b61341982a363a226a1a57fc32"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "a",
+            "glyphs": [
+              {
+                "id": 28,
+                "x": 0,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Universal",
+              "hash": "88ed5c31a71584c7772963b02d04bef1"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "é",
+            "glyphs": [
+              {
+                "id": 134,
+                "x": 6826,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Paper Mono",
+              "hash": "151f35b61341982a363a226a1a57fc32"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "b ",
+            "glyphs": [
+              {
+                "id": 29,
+                "x": 12886,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 1,
+                "x": 19712,
+                "y": 10521,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Source Code Pro",
+              "hash": "9f9664e2edf6f045c11e774f9bd0be69"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "α",
+            "glyphs": [
+              {
+                "id": 639,
+                "x": 26538,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Paper Mono",
+              "hash": "151f35b61341982a363a226a1a57fc32"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
+              {
+                "id": 1,
+                "x": 33296,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Source Code Pro",
+              "hash": "9f9664e2edf6f045c11e774f9bd0be69"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "אב",
+            "glyphs": [
+              {
+                "id": 0,
+                "x": 40122,
+                "y": 10521,
+                "text": {
+                  "start": 2,
+                  "end": 4
+                }
+              },
+              {
+                "id": 0,
+                "x": 46880,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 2
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Paper Mono",
+              "hash": "151f35b61341982a363a226a1a57fc32"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": " ",
+            "glyphs": [
+              {
+                "id": 1,
+                "x": 53638,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              }
+            ],
+            "layer": "content"
+          },
+          {
+            "type": "glyphs",
+            "synthetic_oblique": true,
+            "face": {
+              "family": "Paper Mono",
+              "hash": "151f35b61341982a363a226a1a57fc32"
+            },
+            "size": 11264,
+            "color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "text": "ffi",
+            "glyphs": [
+              {
+                "id": 33,
+                "x": 60464,
+                "y": 10521,
+                "text": {
+                  "start": 0,
+                  "end": 1
+                }
+              },
+              {
+                "id": 33,
+                "x": 67290,
+                "y": 10521,
+                "text": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "id": 36,
+                "x": 74116,
+                "y": 10521,
+                "text": {
+                  "start": 2,
+                  "end": 3
+                }
+              }
+            ],
+            "layer": "content"
+          }
+        ]
+      }
+    ]
+  }
+]
