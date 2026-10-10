@@ -38,6 +38,8 @@ export type TextFeature = {
     export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
     export type FontStyle = "normal" | "italic" | "oblique";
     export type FontDeclaration = { family: string, weight: number, style: FontStyle, stretch: number, face_index: number, };
+    export type GenericFamily = "serif" | "sans-serif" | "monospace" | "script";
+    export type FontSettings = { generics: Partial<Record<GenericFamily, string>>, fallbacks: Array<string>, synthetic_oblique: boolean, };
     export type Face = { family: string, hash: string, };
     export type AssetDeclaration = { id: string, kind: AssetKind, };
     export type AssetKind = "image" | "other";
@@ -79,7 +81,9 @@ export type TextFeature = {
     export type Layer = "content" | "debug";
     export type ByteRange = { start: number, end: number, };
     export type Glyph = { id: number, x: number, y: number, text: ByteRange, };
-    export type GlyphRun = { face: Face, size: number, color: [number, number, number, number], text: string, glyphs: Array<Glyph>, layer: Layer, };
+    export type GlyphRun = { synthetic_oblique?: boolean, face: Face, size: number, color: [number, number, number, number], text: string, glyphs: Array<Glyph>, layer: Layer, };
+    export type StyledGlyphRequest = { face: Face, glyphs: Array<number>, synthetic_oblique: boolean, };
+    export type GlyphBounds = { x_min: number, y_min: number, x_max: number, y_max: number, };
     export type Segment = { "move": Point } | { "line": Point } | { "quad": [Point, Point] } | { "cubic": [Point, Point, Point] } | "close";
     export type Stroke = { color: [number, number, number, number], width: number, };
     export type DisplayItem = { "type": "glyphs" } & GlyphRun | { "type": "image", asset: string, rect: DisplayRect, alt: string, layer: Layer, } | { "type": "path", path: Array<Segment>, fill: [number, number, number, number] | null, stroke: Stroke | null, layer: Layer, } | { "type": "group", transform: Matrix, clip: Array<Segment> | null, items: Array<DisplayItem>, };
@@ -87,7 +91,7 @@ export type TextFeature = {
     export type DisplayPage = { token: LayoutToken, page: number, settled: boolean, complete: boolean, display: DisplayList, };
     export type GlyphRequest = { face: Face, glyphs: Array<number>, };
     export type GlyphOutlines = { units_per_em: number, glyphs: Array<GlyphOutline>, };
-    export type GlyphOutline = { id: number, path: string, };
+    export type GlyphOutline = { id: number, path: string, ink_bounds?: GlyphBounds, };
     export type Relation = { schema: string, owner: string | null, targets: { [key in string]: Array<Target> }, params: { [key in string]: Param }, };
     export type Target = { "node": string } | { "range": string } | { "structural": StructuralQuery } | { "layout": LayoutQuery } | { "snapshot": SnapshotReference };
     export type StructuralQuery = { "query": "next-sibling", from: string, kind: BlockKind | null, } | { "query": "previous-sibling", from: string, kind: BlockKind | null, } | { "query": "nth-child", of: string | null, index: number, from_end: boolean, kind: BlockKind | null, } | { "query": "first-child", of: string | null, kind: BlockKind | null, } | { "query": "last-child", of: string | null, kind: BlockKind | null, } | { "query": "parent", of: string, } | { "query": "children", of: string | null, kind: BlockKind | null, };
@@ -159,6 +163,7 @@ export type TextFeature = {
         export(request: Payload<ExportFormat>): Payload<Exported>;
         export_updates(): Payload<SyncUpdate>;
         glyph_outlines(request: Payload<GlyphRequest>): Payload<GlyphOutlines>;
+        glyph_outlines_styled(request: Payload<StyledGlyphRequest>): Payload<GlyphOutlines>;
         hit_test(request: Payload<HitTest>): Payload<Hit>;
         import_text(request: Payload<TextImport>): Payload<Applied>;
         import_updates(request: Payload<SyncUpdate>): Payload<SyncInfo>;
@@ -185,6 +190,7 @@ export type TextFeature = {
         run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
         save(): Payload<Bytes>;
         selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
+        set_font_settings(request: Payload<FontSettings>): Payload<null>;
         set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
         start_layout(request: Payload<LayoutOptions>): Payload<number>;
         state(): Payload<State>;
@@ -235,6 +241,7 @@ export type TextFeature = {
         readonly documentsession_export: (a: number, b: any) => [number, number, number];
         readonly documentsession_export_updates: (a: number) => [number, number, number];
         readonly documentsession_glyph_outlines: (a: number, b: any) => [number, number, number];
+        readonly documentsession_glyph_outlines_styled: (a: number, b: any) => [number, number, number];
         readonly documentsession_hit_test: (a: number, b: any) => [number, number, number];
         readonly documentsession_import_text: (a: number, b: any) => [number, number, number];
         readonly documentsession_import_updates: (a: number, b: any) => [number, number, number];
@@ -261,6 +268,7 @@ export type TextFeature = {
         readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
         readonly documentsession_save: (a: number) => [number, number, number];
         readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
+        readonly documentsession_set_font_settings: (a: number, b: any) => [number, number, number];
         readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
         readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
         readonly documentsession_state: (a: number) => [number, number, number];

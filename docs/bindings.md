@@ -366,15 +366,18 @@ Host font choices are configured with
 64); `synthetic_oblique` defaults to false in native `FontSettings::default()`.
 Supply all three fields on the wire. Names may precede font declarations and
 are limited to 1024 UTF-8 bytes. Updates invalidate jobs/results and clear
-configuration-bound caches, without modifying authored state or sync/package
-bytes. Hosts reapply settings after opening a session; configured snapshots
-record them. Generic mappings resolve declared weight/style variants.
+configuration-bound caches, without modifying authored state or sync updates.
+Settings themselves are not stored in packages; saving still embeds fonts used
+by the configured layout. Hosts reapply settings after opening a session;
+configured snapshots record them. Generic mappings resolve declared
+weight/style variants.
 
 Display glyph runs expose optional `synthetic_oblique` (absent means false).
-`glyph_outlines` retains its original upright behavior and request type;
-`glyph_outlines_styled(Payload<StyledGlyphRequest>)` accepts the same face and
-glyph IDs plus that boolean, and returns paths already sheared by `x += y/4`
-in y-up design units. A renderer must not shear these paths a second time.
+`glyph_outlines` still returns the face's original outlines with its existing
+request type; `glyph_outlines_styled(Payload<StyledGlyphRequest>)` accepts the
+same face and glyph IDs plus that boolean, and returns paths already sheared
+by `x += y/4` in y-up design units. A renderer must not shear these paths a
+second time.
 Cache outlines by face, glyph and synthetic flag. SVG, PNG and PDF apply the
 same transformation; PDF retains font text and extraction/accessibility tags.
 Styled outline responses also expose `glyphs[].ink_bounds` for nonempty paths:

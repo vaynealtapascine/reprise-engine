@@ -294,9 +294,9 @@ reports `font.nearest` Warning. Real slanted faces retain CSS matching priority.
 conservative integer head-table envelope with the same shear, plus two outward
 layout units for combined scaling/shear rounding, in the enclosing group's
 space; enclosing matrices must be applied for page bounds. SVG/PNG shear
-outlines; PDF applies a glyph
-transform to embedded text, preserving ToUnicode/ActualText and tagging.
-Synthetic bold and variable-axis instancing are not provided.
+outlines; PDF applies a glyph transform to embedded text, preserving
+ToUnicode/ActualText and tagging. Synthetic bold and variable-axis instancing
+are not provided.
 
 ## Composition: `reprise-compose`
 
