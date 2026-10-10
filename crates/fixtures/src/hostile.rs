@@ -147,6 +147,11 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         emphasis_overlap()?,
         marks_cycle_tabs()?,
         marks_poem()?,
+        page_setup_a4_portrait()?,
+        page_setup_a4_landscape()?,
+        page_setup_letter_portrait()?,
+        page_setup_letter_landscape()?,
+        page_setup_conflicting_margins()?,
     ])
 }
 
@@ -2752,5 +2757,75 @@ pub fn marks_poem() -> Result<Fixture, DocError> {
         &["relation.alignment-outside"],
     );
     fixture.engine.medium = reprise_doc::Medium::new(Length::from_pt(850), Length::from_pt(620));
+    Ok(fixture)
+}
+
+// ISO A4: 210 x 297 mm, rounded half away from zero to 1/1024 pt.
+fn page_setup_paper(
+    name: &'static str,
+    width: Length,
+    height: Length,
+) -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(BlockKind::Paragraph, "body", "A page with asymmetric margins. The main frame follows paper size while other authored regions retain their geometry.")?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(width),
+        height: Some(height),
+        top: Some(Length::from_pt(36)),
+        right: Some(Length::from_pt(48)),
+        bottom: Some(Length::from_pt(54)),
+        left: Some(Length::from_pt(72)),
+    })?;
+    doc.commit();
+    Ok(Fixture::new(name, doc, &[]))
+}
+pub fn page_setup_a4_portrait() -> Result<Fixture, DocError> {
+    page_setup_paper("page_setup_a4_portrait", Length(609562), Length(862125))
+}
+pub fn page_setup_a4_landscape() -> Result<Fixture, DocError> {
+    page_setup_paper("page_setup_a4_landscape", Length(862125), Length(609562))
+}
+pub fn page_setup_letter_portrait() -> Result<Fixture, DocError> {
+    page_setup_paper(
+        "page_setup_letter_portrait",
+        Length::from_pt(612),
+        Length::from_pt(792),
+    )
+}
+pub fn page_setup_letter_landscape() -> Result<Fixture, DocError> {
+    page_setup_paper(
+        "page_setup_letter_landscape",
+        Length::from_pt(792),
+        Length::from_pt(612),
+    )
+}
+/// Two individually valid margin edits whose merged sum leaves no text area.
+pub fn page_setup_conflicting_margins() -> Result<Fixture, DocError> {
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Conflicting margins must keep this text readable and report the fallback.",
+    )?;
+    doc.commit();
+    let peer = doc.fork(OTHER_PEER)?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        top: Some(Length::from_pt(200)),
+        ..Default::default()
+    })?;
+    peer.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        bottom: Some(Length::from_pt(150)),
+        ..Default::default()
+    })?;
+    doc.commit();
+    peer.commit();
+    doc.merge(&peer)?;
+    peer.merge(&doc)?;
+    let mut fixture = Fixture::new(
+        "page_setup_conflicting_margins",
+        doc,
+        &["layout.page-setup-invalid"],
+    );
+    fixture.replica = Some(peer);
     Ok(fixture)
 }

@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 93);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 98);
 }
 
 hostile_tests!(
@@ -1159,3 +1159,11 @@ hostile_tests!(format_overlap_storm);
 hostile_tests!(emphasis_overlap);
 
 hostile_tests!(marks_cycle_tabs, marks_poem);
+
+hostile_tests!(
+    page_setup_a4_portrait,
+    page_setup_a4_landscape,
+    page_setup_letter_portrait,
+    page_setup_letter_landscape,
+    page_setup_conflicting_margins
+);
