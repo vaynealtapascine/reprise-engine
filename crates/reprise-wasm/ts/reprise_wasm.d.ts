@@ -8,7 +8,12 @@ export type Diagnostic = { code: string, severity: Severity, message: string, su
 export type ErrorPayload = { code: string, severity: Severity, message: string, command: number | null, };
 export type Create = { document_id: string, peer_id: string, };
 export type Open = { peer_id: string, };
-export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, blocks: Array<Block>, diagnostics: Array<Diagnostic>, };
+export type PageSetupPatch = { width?: number | null, height?: number | null, top?: number | null, right?: number | null, bottom?: number | null, left?: number | null, };
+export type PageSetup = { width: number, height: number, margins: PageMargins, orientation: PageOrientation, template: string, source: PageTemplateSource, patched: boolean, };
+export type PageMargins = { top: number, right: number, bottom: number, left: number, };
+export type PageOrientation = "portrait" | "landscape" | "square";
+export type PageTemplateSource = "builtin" | "document";
+export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>, };
 export type Clock = { peer: string, counter: number, };
 export type Block = { id: string, parent: string | null, kind: BlockKind, text: string,
 /**
@@ -32,7 +37,7 @@ export type TextFeature = {
      */
     tag: string, value: number, };
     export type TextRun = { start: number, end: number, style: TextStyle, };
-    export type Command = { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
+    export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
     export type Transaction = { commands: Array<Command>, };
     export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
     export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
@@ -185,6 +190,7 @@ export type TextFeature = {
         run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
         save(): Payload<Bytes>;
         selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
+        set_page_setup(request: Payload<PageSetupPatch>): Payload<Applied>;
         set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
         start_layout(request: Payload<LayoutOptions>): Payload<number>;
         state(): Payload<State>;
@@ -261,6 +267,7 @@ export type TextFeature = {
         readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
         readonly documentsession_save: (a: number) => [number, number, number];
         readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
+        readonly documentsession_set_page_setup: (a: number, b: any) => [number, number, number];
         readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
         readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
         readonly documentsession_state: (a: number) => [number, number, number];
