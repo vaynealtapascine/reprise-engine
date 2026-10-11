@@ -49,8 +49,8 @@ pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>>
 pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>>
 pub fn page_links(&self, page: u32) -> Result<Payload<PageLinks>>
 pub fn annotation(&self, request: &Payload<String>) -> Result<Payload<Option<Annotation>>>
-pub fn annotations_at(&self, request: &Payload<AnnotationsAt>) -> Result<Payload<AnnotationList>>
-pub fn annotations_in(&self, request: &Payload<AnnotationsIn>) -> Result<Payload<AnnotationList>>
+pub fn annotations_at( &self, request: &Payload<AnnotationsAt>, ) -> Result<Payload<AnnotationList>>
+pub fn annotations_in( &self, request: &Payload<AnnotationsIn>, ) -> Result<Payload<AnnotationList>>
 pub fn annotations_of_kind( &self, request: &Payload<AnnotationKind>, ) -> Result<Payload<AnnotationList>>
 pub fn annotation_geometry( &self, request: &Payload<String>, ) -> Result<Payload<Option<AnnotationGeometry>>>
 pub fn display_json(&self, page: u32) -> Result<Payload<String>>

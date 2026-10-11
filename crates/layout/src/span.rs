@@ -234,6 +234,10 @@ impl LayoutSnapshot {
         let mut resolver = SpanResolver::new(self);
         let mut at: BTreeMap<AnnotationId, usize> = BTreeMap::new();
         let mut scan = |block: &BlockLayout, repeated: bool, out: &mut PageLinks| {
+            // Most blocks have no annotation at all: look that up first.
+            if view.pieces(block.node).is_empty() {
+                return;
+            }
             if !block
                 .lines
                 .iter()
