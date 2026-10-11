@@ -11,6 +11,22 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<ImportCopy>")]
+    pub type ImportCopyPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Batch>")]
+    pub type BatchPayload;
+    #[wasm_bindgen(typescript_type = "Payload<BatchReport>")]
+    pub type BatchReportPayload;
+    #[wasm_bindgen(typescript_type = "Payload<ReplaceSelection>")]
+    pub type ReplaceSelectionPayload;
+    #[wasm_bindgen(typescript_type = "Payload<ReplaceText>")]
+    pub type ReplaceTextPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Replaced>")]
+    pub type ReplacedPayload;
+    #[wasm_bindgen(typescript_type = "Payload<DiagnosticFilter>")]
+    pub type DiagnosticFilterPayload;
+    #[wasm_bindgen(typescript_type = "Payload<DiagnosticList>")]
+    pub type DiagnosticListPayload;
     #[wasm_bindgen(typescript_type = "Payload<PageSetupPatch>")]
     pub type PageSetupPatchPayload;
     #[wasm_bindgen(typescript_type = "Payload<MarksPage>")]
@@ -291,6 +307,14 @@ fn decode<T: DeserializeOwned>(value: &JsValue) -> Result<Payload<T>, JsValue> {
     serde_wasm_bindgen::from_value(snapshot).map_err(|e| error(Error::Invalid(e.to_string())))
 }
 
+/// The one bound on a sync packet body, in bytes (32 MiB). The TypeScript
+/// type `PacketBound` is this number as a literal. See the native constant
+/// `reprise::MAX_PACKET_BYTES` for the rationale.
+#[wasm_bindgen(js_name = maxPacketBytes)]
+pub fn max_packet_bytes() -> u32 {
+    u32::try_from(reprise::MAX_PACKET_BYTES).unwrap_or(u32::MAX)
+}
+
 #[wasm_bindgen(js_name=Workspace)]
 pub struct WasmWorkspace {
     inner: reprise::Workspace,
@@ -309,6 +333,41 @@ impl WasmWorkspace {
                 .create(&decode(request.as_ref())?)
                 .map_err(error)?,
         ))
+    }
+    /// Imports a package as a new, independent document (new identity, fresh
+    /// history). See `Workspace::import_copy` in the native facade.
+    pub fn import_copy(
+        &self,
+        request: &ImportCopyPayload,
+        content: &js_sys::Uint8Array,
+    ) -> Result<WasmDocument, JsValue> {
+        let content = bytes(content, 128 * 1024 * 1024)?;
+        Ok(WasmDocument::new(
+            self.inner
+                .import_copy(&decode(request.as_ref())?, &content)
+                .map_err(error)?,
+        ))
+    }
+    /// Declares a font once for every session of this workspace. `content` is
+    /// a `Uint8Array`, copied once into engine memory.
+    pub fn declare_font(
+        &self,
+        request: &FontDeclarationPayload,
+        content: &js_sys::Uint8Array,
+    ) -> Result<FacePayload, JsValue> {
+        let content = bytes(content, 32 * 1024 * 1024)?;
+        Ok(encode(
+            self.inner
+                .declare_font(&decode(request.as_ref())?, &content),
+        )?
+        .unchecked_into())
+    }
+    /// Default font settings for every session of this workspace.
+    pub fn set_font_settings(
+        &self,
+        request: &FontSettingsPayload,
+    ) -> Result<UnitPayload, JsValue> {
+        Ok(encode(self.inner.set_font_settings(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn open(
         &self,
@@ -407,6 +466,30 @@ impl WasmDocument {
     }
     pub fn resource_bytes(&self, request: &StringPayload) -> Result<BytesPayload, JsValue> {
         Ok(encode(self.inner.resource_bytes(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn batch(&mut self, request: &BatchPayload) -> Result<BatchReportPayload, JsValue> {
+        Ok(encode(self.inner.batch(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn replace_selection(
+        &mut self,
+        request: &ReplaceSelectionPayload,
+        content: &js_sys::Uint8Array,
+    ) -> Result<ReplacedPayload, JsValue> {
+        let content = bytes(content, 96 * 1024 * 1024)?;
+        Ok(encode(
+            self.inner
+                .replace_selection(&decode(request.as_ref())?, &content),
+        )?
+        .unchecked_into())
+    }
+    pub fn replace_text(&mut self, request: &ReplaceTextPayload) -> Result<ReplacedPayload, JsValue> {
+        Ok(encode(self.inner.replace_text(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn diagnostics_for(
+        &self,
+        request: &DiagnosticFilterPayload,
+    ) -> Result<DiagnosticListPayload, JsValue> {
+        Ok(encode(self.inner.diagnostics_for(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn state(&self) -> Result<StatePayload, JsValue> {
         Ok(encode(self.inner.state())?.unchecked_into())

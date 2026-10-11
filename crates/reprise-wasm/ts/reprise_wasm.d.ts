@@ -63,7 +63,12 @@ export type TextFeature = {
     export type PageRect = { page: number, rect: Rect, };
     export type HitTest = { page: number, x: number, y: number, };
     export type Hit = { caret: Caret, page: number, inside: boolean, };
-    export type ReadingStep = { node: string, line: number, page: number, };
+    export type ReadingStep = { node: string, line: number, page: number,
+    /**
+     * The line's UTF-8 byte range in its block's text (`State.blocks[].text`),
+     * trailing whitespace included, so a reader can slice without `move`.
+     */
+    start: number, end: number, };
     export type ExportFormat = "plain-text" | "html" | "native" | "pdf";
     export type Loss = { code: string, disposition: Disposition, detail: string, };
     export type Disposition = "preserved" | "approximated" | "dropped";
@@ -145,179 +150,284 @@ export type TextFeature = {
     export type TabStops = { interval: number, stops: Array<TabStop>, };
     export type MarkKind = "paragraph-end" | "line-break" | "gap" | "alignment" | "anchor";
     export type RelationState = "valid" | "rebound" | "ambiguous" | "missing" | "owner-deleted" | "deleted";
-    export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean, };
+    export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean,
+    /**
+     * Anchors: the authored source edge.
+     */
+    edge: LineEdge | null,
+    /**
+     * Anchors: the target's block and UTF-8 byte offset, when it resolved.
+     */
+    target_node: string | null, target_offset: number | null,
+    /**
+     * Anchors: the authored target edge.
+     */
+    target_edge: AnchorEdge | null,
+    /**
+     * Anchors: the stable code of the layout diagnostic that explains an
+     * unapplied or suspect pin (`relation.alignment-cycle`, `-limit`,
+     * `-outside`, `-conflict` or `-invalid`).
+     */
+    diagnostic: string | null, };
     export type MarksPage = { token: LayoutToken, page: number, marks: Array<Mark>, };
+    export type DiagnosticFilter = {
+        /**
+         * Keep codes starting with this text, such as `relation.` or
+         * `relation.alignment-cycle`.
+         */
+        code_prefix: string | null,
+        /**
+         * Keep this severity and worse.
+         */
+        min_severity: Severity | null,
+        /**
+         * Keep one subject: `relation:<id>`, `node:<id>`, `range:<id>`,
+         * `document`, or a bare id.
+         */
+        subject: string | null,
+        /**
+         * At most this many (default and ceiling 1000).
+         */
+        limit: number | null, };
+        export type DiagnosticList = { diagnostics: Array<Diagnostic>,
+        /**
+         * More matched than `limit` allowed.
+         */
+        truncated: boolean, };
+        export type ImportCopy = { document_id: string, peer_id: string, };
+        export type ReplaceSelection = { selection: StableSelection, };
+        export type ReplaceText = { selection: StableSelection, text: string, html: boolean, };
+        export type Replaced = {
+            /**
+             * The deletion's effects, then the paste's: one pass maps a position.
+             */
+            applied: Applied,
+            /**
+             * A collapsed selection at the end of the inserted content (or at the
+             * start of the replaced range when nothing was inserted).
+             */
+            selection: Selection | null, };
+            export type Batch = { commands: Array<Command>,
+            /**
+             * Refuse with `bindings.stale`, writing nothing, unless the document is
+             * at exactly this revision (`State.revision`).
+             */
+            expected_revision: Array<Clock> | null,
+            /**
+             * Mapped through the batch's effects and returned in `BatchReport`.
+             */
+            selection: Selection | null, };
+            export type BatchReport = { applied: Applied,
+            /**
+             * `Batch.selection` as the batch left it; `None` when it was not given or
+             * its block was deleted.
+             */
+            selection: Selection | null, };
+            export type PacketBound = 33554432;
 
 
 
-    export class DocumentSession {
-        private constructor();
-        free(): void;
-        [Symbol.dispose](): void;
-        anchor_selection(request: Payload<Selection>): Payload<StableSelection>;
-        apply(request: Payload<Transaction>): Payload<Applied>;
-        awareness(content: Uint8Array): Payload<Awareness>;
-        cancel(job: number): Payload<boolean>;
-        caret_rect(request: Payload<Caret>): Payload<PageRect>;
-        copy(request: Payload<Selection>): Payload<Bytes>;
-        copy_as(request: Payload<CopyAs>): Payload<Exported>;
-        declare_font(request: Payload<FontDeclaration>, content: Uint8Array): Payload<Face>;
-        diagnostics(): Payload<Array<Diagnostic>>;
-        display_json(page: number): Payload<string>;
-        display_page(page: number): Payload<DisplayPage>;
-        export(request: Payload<ExportFormat>): Payload<Exported>;
-        export_updates(): Payload<SyncUpdate>;
-        glyph_outlines(request: Payload<GlyphRequest>): Payload<GlyphOutlines>;
-        glyph_outlines_styled(request: Payload<StyledGlyphRequest>): Payload<GlyphOutlines>;
-        hit_test(request: Payload<HitTest>): Payload<Hit>;
-        import_text(request: Payload<TextImport>): Payload<Applied>;
-        import_updates(request: Payload<SyncUpdate>): Payload<SyncInfo>;
-        insert_image(request: Payload<ImageInsert>): Payload<Applied>;
-        install_plugin(plugin: number, request: Payload<PluginInstall>): Payload<boolean>;
-        load_plugin(request: Payload<PluginSpec>, content: Uint8Array): Payload<number>;
-        local_selection(): Payload<Selection | null>;
-        marks(page: number): Payload<MarksPage>;
-        move_cursor(request: Payload<Move>): Payload<Cursor>;
-        partial_page(job: number, page: number): Payload<DisplayPage>;
-        paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
-        png(page: number, scale_permille: number): Payload<Bytes>;
-        presence(request: Payload<Presence>): Payload<Awareness>;
-        reading_order(): Payload<Array<ReadingStep>>;
-        redo(): Payload<boolean>;
-        redo_report(): Payload<EditReport>;
-        register_asset(request: Payload<AssetDeclaration>, content: Uint8Array): Payload<string>;
-        release_job(job: number): Payload<boolean>;
-        release_plugin(plugin: number): Payload<boolean>;
-        resolve_presence(request: Payload<Awareness>): Payload<PresenceView>;
-        resolve_selection(request: Payload<StableSelection>): Payload<Selection | null>;
-        resource_bytes(request: Payload<string>): Payload<Bytes>;
-        resources(): Payload<Array<Resource>>;
-        run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
-        save(): Payload<Bytes>;
-        selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
-        set_font_settings(request: Payload<FontSettings>): Payload<null>;
-        set_page_setup(request: Payload<PageSetupPatch>): Payload<Applied>;
-        set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
-        start_layout(request: Payload<LayoutOptions>): Payload<number>;
-        state(): Payload<State>;
-        step(job: number, budget: number): Payload<LayoutProgress>;
-        svg(page: number): Payload<string>;
-        sync_export(request: Payload<SyncRequest>): Payload<SyncPacket>;
-        sync_import(request: Payload<SyncPacket>): Payload<SyncReport>;
-        sync_info(): Payload<SyncInfo>;
-        undo(): Payload<boolean>;
-        undo_report(): Payload<EditReport>;
-        validate_awareness(request: Payload<Awareness>): Payload<Bytes>;
-    }
+            export class DocumentSession {
+                private constructor();
+                free(): void;
+                [Symbol.dispose](): void;
+                anchor_selection(request: Payload<Selection>): Payload<StableSelection>;
+                apply(request: Payload<Transaction>): Payload<Applied>;
+                awareness(content: Uint8Array): Payload<Awareness>;
+                batch(request: Payload<Batch>): Payload<BatchReport>;
+                cancel(job: number): Payload<boolean>;
+                caret_rect(request: Payload<Caret>): Payload<PageRect>;
+                copy(request: Payload<Selection>): Payload<Bytes>;
+                copy_as(request: Payload<CopyAs>): Payload<Exported>;
+                declare_font(request: Payload<FontDeclaration>, content: Uint8Array): Payload<Face>;
+                diagnostics(): Payload<Array<Diagnostic>>;
+                diagnostics_for(request: Payload<DiagnosticFilter>): Payload<DiagnosticList>;
+                display_json(page: number): Payload<string>;
+                display_page(page: number): Payload<DisplayPage>;
+                export(request: Payload<ExportFormat>): Payload<Exported>;
+                export_updates(): Payload<SyncUpdate>;
+                glyph_outlines(request: Payload<GlyphRequest>): Payload<GlyphOutlines>;
+                glyph_outlines_styled(request: Payload<StyledGlyphRequest>): Payload<GlyphOutlines>;
+                hit_test(request: Payload<HitTest>): Payload<Hit>;
+                import_text(request: Payload<TextImport>): Payload<Applied>;
+                import_updates(request: Payload<SyncUpdate>): Payload<SyncInfo>;
+                insert_image(request: Payload<ImageInsert>): Payload<Applied>;
+                install_plugin(plugin: number, request: Payload<PluginInstall>): Payload<boolean>;
+                load_plugin(request: Payload<PluginSpec>, content: Uint8Array): Payload<number>;
+                local_selection(): Payload<Selection | null>;
+                marks(page: number): Payload<MarksPage>;
+                move_cursor(request: Payload<Move>): Payload<Cursor>;
+                partial_page(job: number, page: number): Payload<DisplayPage>;
+                paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
+                png(page: number, scale_permille: number): Payload<Bytes>;
+                presence(request: Payload<Presence>): Payload<Awareness>;
+                reading_order(): Payload<Array<ReadingStep>>;
+                redo(): Payload<boolean>;
+                redo_report(): Payload<EditReport>;
+                register_asset(request: Payload<AssetDeclaration>, content: Uint8Array): Payload<string>;
+                release_job(job: number): Payload<boolean>;
+                release_plugin(plugin: number): Payload<boolean>;
+                replace_selection(request: Payload<ReplaceSelection>, content: Uint8Array): Payload<Replaced>;
+                replace_text(request: Payload<ReplaceText>): Payload<Replaced>;
+                resolve_presence(request: Payload<Awareness>): Payload<PresenceView>;
+                resolve_selection(request: Payload<StableSelection>): Payload<Selection | null>;
+                resource_bytes(request: Payload<string>): Payload<Bytes>;
+                resources(): Payload<Array<Resource>>;
+                run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
+                save(): Payload<Bytes>;
+                selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
+                set_font_settings(request: Payload<FontSettings>): Payload<null>;
+                set_page_setup(request: Payload<PageSetupPatch>): Payload<Applied>;
+                set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
+                start_layout(request: Payload<LayoutOptions>): Payload<number>;
+                state(): Payload<State>;
+                step(job: number, budget: number): Payload<LayoutProgress>;
+                svg(page: number): Payload<string>;
+                sync_export(request: Payload<SyncRequest>): Payload<SyncPacket>;
+                sync_import(request: Payload<SyncPacket>): Payload<SyncReport>;
+                sync_info(): Payload<SyncInfo>;
+                undo(): Payload<boolean>;
+                undo_report(): Payload<EditReport>;
+                validate_awareness(request: Payload<Awareness>): Payload<Bytes>;
+            }
 
-    export class Workspace {
-        free(): void;
-        [Symbol.dispose](): void;
-        create(request: Payload<Create>): DocumentSession;
-        constructor();
-        open(request: Payload<Open>, content: Uint8Array): DocumentSession;
-    }
+            export class Workspace {
+                free(): void;
+                [Symbol.dispose](): void;
+                create(request: Payload<Create>): DocumentSession;
+                /**
+                 * Declares a font once for every session of this workspace. `content` is
+                 * a `Uint8Array`, copied once into engine memory.
+                 */
+                declare_font(request: Payload<FontDeclaration>, content: Uint8Array): Payload<Face>;
+                /**
+                 * Imports a package as a new, independent document (new identity, fresh
+                 * history). See `Workspace::import_copy` in the native facade.
+                 */
+                import_copy(request: Payload<ImportCopy>, content: Uint8Array): DocumentSession;
+                constructor();
+                open(request: Payload<Open>, content: Uint8Array): DocumentSession;
+                /**
+                 * Default font settings for every session of this workspace.
+                 */
+                set_font_settings(request: Payload<FontSettings>): Payload<null>;
+            }
 
-    /**
-     * Calls `handler(message)` when the engine panics, before the instance
-     * traps. A `panic=abort` build cannot recover: after the call every export
-     * fails, so the host should discard this instance (its worker), reopen the
-     * last saved package in a fresh one and resynchronise. The message names
-     * the panic and its location, for reporting.
-     */
-    export function setPanicHandler(handler: Function): void;
+            /**
+             * The one bound on a sync packet body, in bytes (32 MiB). The TypeScript
+             * type `PacketBound` is this number as a literal. See the native constant
+             * `reprise::MAX_PACKET_BYTES` for the rationale.
+             */
+            export function maxPacketBytes(): number;
 
-    export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+            /**
+             * Calls `handler(message)` when the engine panics, before the instance
+             * traps. A `panic=abort` build cannot recover: after the call every export
+             * fails, so the host should discard this instance (its worker), reopen the
+             * last saved package in a fresh one and resynchronise. The message names
+             * the panic and its location, for reporting.
+             */
+            export function setPanicHandler(handler: Function): void;
 
-    export interface InitOutput {
-        readonly memory: WebAssembly.Memory;
-        readonly __wbg_documentsession_free: (a: number, b: number) => void;
-        readonly __wbg_workspace_free: (a: number, b: number) => void;
-        readonly documentsession_anchor_selection: (a: number, b: any) => [number, number, number];
-        readonly documentsession_apply: (a: number, b: any) => [number, number, number];
-        readonly documentsession_awareness: (a: number, b: any) => [number, number, number];
-        readonly documentsession_cancel: (a: number, b: number) => [number, number, number];
-        readonly documentsession_caret_rect: (a: number, b: any) => [number, number, number];
-        readonly documentsession_copy: (a: number, b: any) => [number, number, number];
-        readonly documentsession_copy_as: (a: number, b: any) => [number, number, number];
-        readonly documentsession_declare_font: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_diagnostics: (a: number) => [number, number, number];
-        readonly documentsession_display_json: (a: number, b: number) => [number, number, number];
-        readonly documentsession_display_page: (a: number, b: number) => [number, number, number];
-        readonly documentsession_export: (a: number, b: any) => [number, number, number];
-        readonly documentsession_export_updates: (a: number) => [number, number, number];
-        readonly documentsession_glyph_outlines: (a: number, b: any) => [number, number, number];
-        readonly documentsession_glyph_outlines_styled: (a: number, b: any) => [number, number, number];
-        readonly documentsession_hit_test: (a: number, b: any) => [number, number, number];
-        readonly documentsession_import_text: (a: number, b: any) => [number, number, number];
-        readonly documentsession_import_updates: (a: number, b: any) => [number, number, number];
-        readonly documentsession_insert_image: (a: number, b: any) => [number, number, number];
-        readonly documentsession_install_plugin: (a: number, b: number, c: any) => [number, number, number];
-        readonly documentsession_load_plugin: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_local_selection: (a: number) => [number, number, number];
-        readonly documentsession_marks: (a: number, b: number) => [number, number, number];
-        readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
-        readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
-        readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_png: (a: number, b: number, c: number) => [number, number, number];
-        readonly documentsession_presence: (a: number, b: any) => [number, number, number];
-        readonly documentsession_reading_order: (a: number) => [number, number, number];
-        readonly documentsession_redo: (a: number) => [number, number, number];
-        readonly documentsession_redo_report: (a: number) => [number, number, number];
-        readonly documentsession_register_asset: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_release_job: (a: number, b: number) => [number, number, number];
-        readonly documentsession_release_plugin: (a: number, b: number) => [number, number, number];
-        readonly documentsession_resolve_presence: (a: number, b: any) => [number, number, number];
-        readonly documentsession_resolve_selection: (a: number, b: any) => [number, number, number];
-        readonly documentsession_resource_bytes: (a: number, b: any) => [number, number, number];
-        readonly documentsession_resources: (a: number) => [number, number, number];
-        readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
-        readonly documentsession_save: (a: number) => [number, number, number];
-        readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
-        readonly documentsession_set_font_settings: (a: number, b: any) => [number, number, number];
-        readonly documentsession_set_page_setup: (a: number, b: any) => [number, number, number];
-        readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
-        readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
-        readonly documentsession_state: (a: number) => [number, number, number];
-        readonly documentsession_step: (a: number, b: number, c: number) => [number, number, number];
-        readonly documentsession_svg: (a: number, b: number) => [number, number, number];
-        readonly documentsession_sync_export: (a: number, b: any) => [number, number, number];
-        readonly documentsession_sync_import: (a: number, b: any) => [number, number, number];
-        readonly documentsession_sync_info: (a: number) => [number, number, number];
-        readonly documentsession_undo: (a: number) => [number, number, number];
-        readonly documentsession_undo_report: (a: number) => [number, number, number];
-        readonly documentsession_validate_awareness: (a: number, b: any) => [number, number, number];
-        readonly setPanicHandler: (a: any) => void;
-        readonly workspace_create: (a: number, b: any) => [number, number, number];
-        readonly workspace_new: () => number;
-        readonly workspace_open: (a: number, b: any, c: any) => [number, number, number];
-        readonly __wbindgen_malloc: (a: number, b: number) => number;
-        readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-        readonly __wbindgen_exn_store: (a: number) => void;
-        readonly __externref_table_alloc: () => number;
-        readonly __wbindgen_externrefs: WebAssembly.Table;
-        readonly __externref_table_dealloc: (a: number) => void;
-        readonly __wbindgen_start: () => void;
-    }
+            export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
-    export type SyncInitInput = BufferSource | WebAssembly.Module;
+            export interface InitOutput {
+                readonly memory: WebAssembly.Memory;
+                readonly __wbg_documentsession_free: (a: number, b: number) => void;
+                readonly __wbg_workspace_free: (a: number, b: number) => void;
+                readonly documentsession_anchor_selection: (a: number, b: any) => [number, number, number];
+                readonly documentsession_apply: (a: number, b: any) => [number, number, number];
+                readonly documentsession_awareness: (a: number, b: any) => [number, number, number];
+                readonly documentsession_batch: (a: number, b: any) => [number, number, number];
+                readonly documentsession_cancel: (a: number, b: number) => [number, number, number];
+                readonly documentsession_caret_rect: (a: number, b: any) => [number, number, number];
+                readonly documentsession_copy: (a: number, b: any) => [number, number, number];
+                readonly documentsession_copy_as: (a: number, b: any) => [number, number, number];
+                readonly documentsession_declare_font: (a: number, b: any, c: any) => [number, number, number];
+                readonly documentsession_diagnostics: (a: number) => [number, number, number];
+                readonly documentsession_diagnostics_for: (a: number, b: any) => [number, number, number];
+                readonly documentsession_display_json: (a: number, b: number) => [number, number, number];
+                readonly documentsession_display_page: (a: number, b: number) => [number, number, number];
+                readonly documentsession_export: (a: number, b: any) => [number, number, number];
+                readonly documentsession_export_updates: (a: number) => [number, number, number];
+                readonly documentsession_glyph_outlines: (a: number, b: any) => [number, number, number];
+                readonly documentsession_glyph_outlines_styled: (a: number, b: any) => [number, number, number];
+                readonly documentsession_hit_test: (a: number, b: any) => [number, number, number];
+                readonly documentsession_import_text: (a: number, b: any) => [number, number, number];
+                readonly documentsession_import_updates: (a: number, b: any) => [number, number, number];
+                readonly documentsession_insert_image: (a: number, b: any) => [number, number, number];
+                readonly documentsession_install_plugin: (a: number, b: number, c: any) => [number, number, number];
+                readonly documentsession_load_plugin: (a: number, b: any, c: any) => [number, number, number];
+                readonly documentsession_local_selection: (a: number) => [number, number, number];
+                readonly documentsession_marks: (a: number, b: number) => [number, number, number];
+                readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
+                readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
+                readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];
+                readonly documentsession_png: (a: number, b: number, c: number) => [number, number, number];
+                readonly documentsession_presence: (a: number, b: any) => [number, number, number];
+                readonly documentsession_reading_order: (a: number) => [number, number, number];
+                readonly documentsession_redo: (a: number) => [number, number, number];
+                readonly documentsession_redo_report: (a: number) => [number, number, number];
+                readonly documentsession_register_asset: (a: number, b: any, c: any) => [number, number, number];
+                readonly documentsession_release_job: (a: number, b: number) => [number, number, number];
+                readonly documentsession_release_plugin: (a: number, b: number) => [number, number, number];
+                readonly documentsession_replace_selection: (a: number, b: any, c: any) => [number, number, number];
+                readonly documentsession_replace_text: (a: number, b: any) => [number, number, number];
+                readonly documentsession_resolve_presence: (a: number, b: any) => [number, number, number];
+                readonly documentsession_resolve_selection: (a: number, b: any) => [number, number, number];
+                readonly documentsession_resource_bytes: (a: number, b: any) => [number, number, number];
+                readonly documentsession_resources: (a: number) => [number, number, number];
+                readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
+                readonly documentsession_save: (a: number) => [number, number, number];
+                readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
+                readonly documentsession_set_font_settings: (a: number, b: any) => [number, number, number];
+                readonly documentsession_set_page_setup: (a: number, b: any) => [number, number, number];
+                readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
+                readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
+                readonly documentsession_state: (a: number) => [number, number, number];
+                readonly documentsession_step: (a: number, b: number, c: number) => [number, number, number];
+                readonly documentsession_svg: (a: number, b: number) => [number, number, number];
+                readonly documentsession_sync_export: (a: number, b: any) => [number, number, number];
+                readonly documentsession_sync_import: (a: number, b: any) => [number, number, number];
+                readonly documentsession_sync_info: (a: number) => [number, number, number];
+                readonly documentsession_undo: (a: number) => [number, number, number];
+                readonly documentsession_undo_report: (a: number) => [number, number, number];
+                readonly documentsession_validate_awareness: (a: number, b: any) => [number, number, number];
+                readonly maxPacketBytes: () => number;
+                readonly setPanicHandler: (a: any) => void;
+                readonly workspace_create: (a: number, b: any) => [number, number, number];
+                readonly workspace_declare_font: (a: number, b: any, c: any) => [number, number, number];
+                readonly workspace_import_copy: (a: number, b: any, c: any) => [number, number, number];
+                readonly workspace_new: () => number;
+                readonly workspace_open: (a: number, b: any, c: any) => [number, number, number];
+                readonly workspace_set_font_settings: (a: number, b: any) => [number, number, number];
+                readonly __wbindgen_malloc: (a: number, b: number) => number;
+                readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+                readonly __wbindgen_exn_store: (a: number) => void;
+                readonly __externref_table_alloc: () => number;
+                readonly __wbindgen_externrefs: WebAssembly.Table;
+                readonly __externref_table_dealloc: (a: number) => void;
+                readonly __wbindgen_start: () => void;
+            }
 
-    /**
-     * Instantiates the given `module`, which can either be bytes or
-     * a precompiled `WebAssembly.Module`.
-     *
-     * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
-     *
-     * @returns {InitOutput}
-     */
-    export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+            export type SyncInitInput = BufferSource | WebAssembly.Module;
 
-    /**
-     * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
-     * for everything else, calls `WebAssembly.instantiate` directly.
-     *
-     * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
-     *
-     * @returns {Promise<InitOutput>}
-     */
-    export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;
+            /**
+             * Instantiates the given `module`, which can either be bytes or
+             * a precompiled `WebAssembly.Module`.
+             *
+             * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+             *
+             * @returns {InitOutput}
+             */
+            export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+            /**
+             * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+             * for everything else, calls `WebAssembly.instantiate` directly.
+             *
+             * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+             *
+             * @returns {Promise<InitOutput>}
+             */
+            export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

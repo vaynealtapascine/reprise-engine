@@ -47,8 +47,8 @@ children). When it does not, the blocks stay separate and the paste lands at
 the start of the range. Reading-order overrides are not consulted: they are a
 layout notion, and replace must work without a layout.
 
-**Batch** is the facade's `batch`. It is `apply` made safe for hosts that edit
-concurrently and track a selection:
+**Batch** is the facade's `batch`. Its commands are the ones `apply` takes, run
+with what a host that edits concurrently and tracks a selection needs:
 
 -   `commands` is the same list `apply` takes. It is all or nothing, validated
     whole before anything is written, with the index of a refused command in
@@ -58,17 +58,20 @@ concurrently and track a selection:
     `editAnchored` proposal).
 -   `selection` is mapped through the batch's effects and returned, so the host
     never recomputes a caret from a stale position.
--   `Command::ReplaceText { selection, text }` is a new **selection-addressed
-    command**. It is resolved and expanded against the document *and the earlier
-    commands of the same batch* (positions are mapped through the effects so
-    far), so "make heading" or "accept a suggestion" can replace text and change
-    a style in one step. Rich (native or HTML) replacement carries bytes and
-    stays a separate call, `replace_selection`, because it needs the document
-    after the deletion.
 
-Extension points: a new selection-addressed command is one more `Command`
-variant whose expansion produces ordinary commands; a new precondition is one
-more optional field on `Batch`.
+Replacement stays a separate call (`replace_selection`, `replace_text`) rather
+than a command inside a batch. A replacement needs the document *after* its own
+deletion, so it cannot be validated by the kernel's command model ahead of the
+write, and a batch has to be refused whole before anything is written. A batch
+may therefore not contain a replacement, and a replacement may not contain a
+batch. Features that need both (accept a suggestion, insert a link over a
+selection) first replace, then use the returned `Replaced.selection` and
+`Applied` in a batch: two undo steps, unless the feature adds its own kernel
+command. This narrows the idea of a selection-addressed batch command; the
+extension point is a new kernel `Command` whose planning resolves its anchors.
+
+Extension points: a new precondition is one more optional field on `Batch`; a
+new selection-aware operation is a new kernel command, planned like the others.
 
 ## 2. Import as a copy
 

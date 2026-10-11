@@ -61,7 +61,12 @@ export type Rect = { x: number, y: number, width: number, height: number, };
 export type PageRect = { page: number, rect: Rect, };
 export type HitTest = { page: number, x: number, y: number, };
 export type Hit = { caret: Caret, page: number, inside: boolean, };
-export type ReadingStep = { node: string, line: number, page: number, };
+export type ReadingStep = { node: string, line: number, page: number, 
+/**
+ * The line's UTF-8 byte range in its block's text (`State.blocks[].text`),
+ * trailing whitespace included, so a reader can slice without `move`.
+ */
+start: number, end: number, };
 export type ExportFormat = "plain-text" | "html" | "native" | "pdf";
 export type Loss = { code: string, disposition: Disposition, detail: string, };
 export type Disposition = "preserved" | "approximated" | "dropped";
@@ -143,5 +148,77 @@ export type TabStop = { position: number | null, alignment: Alignment, leader: s
 export type TabStops = { interval: number, stops: Array<TabStop>, };
 export type MarkKind = "paragraph-end" | "line-break" | "gap" | "alignment" | "anchor";
 export type RelationState = "valid" | "rebound" | "ambiguous" | "missing" | "owner-deleted" | "deleted";
-export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean, };
+export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean, 
+/**
+ * Anchors: the authored source edge.
+ */
+edge: LineEdge | null, 
+/**
+ * Anchors: the target's block and UTF-8 byte offset, when it resolved.
+ */
+target_node: string | null, target_offset: number | null, 
+/**
+ * Anchors: the authored target edge.
+ */
+target_edge: AnchorEdge | null, 
+/**
+ * Anchors: the stable code of the layout diagnostic that explains an
+ * unapplied or suspect pin (`relation.alignment-cycle`, `-limit`,
+ * `-outside`, `-conflict` or `-invalid`).
+ */
+diagnostic: string | null, };
 export type MarksPage = { token: LayoutToken, page: number, marks: Array<Mark>, };
+export type DiagnosticFilter = { 
+/**
+ * Keep codes starting with this text, such as `relation.` or
+ * `relation.alignment-cycle`.
+ */
+code_prefix: string | null, 
+/**
+ * Keep this severity and worse.
+ */
+min_severity: Severity | null, 
+/**
+ * Keep one subject: `relation:<id>`, `node:<id>`, `range:<id>`,
+ * `document`, or a bare id.
+ */
+subject: string | null, 
+/**
+ * At most this many (default and ceiling 1000).
+ */
+limit: number | null, };
+export type DiagnosticList = { diagnostics: Array<Diagnostic>, 
+/**
+ * More matched than `limit` allowed.
+ */
+truncated: boolean, };
+export type ImportCopy = { document_id: string, peer_id: string, };
+export type ReplaceSelection = { selection: StableSelection, };
+export type ReplaceText = { selection: StableSelection, text: string, html: boolean, };
+export type Replaced = { 
+/**
+ * The deletion's effects, then the paste's: one pass maps a position.
+ */
+applied: Applied, 
+/**
+ * A collapsed selection at the end of the inserted content (or at the
+ * start of the replaced range when nothing was inserted).
+ */
+selection: Selection | null, };
+export type Batch = { commands: Array<Command>, 
+/**
+ * Refuse with `bindings.stale`, writing nothing, unless the document is
+ * at exactly this revision (`State.revision`).
+ */
+expected_revision: Array<Clock> | null, 
+/**
+ * Mapped through the batch's effects and returned in `BatchReport`.
+ */
+selection: Selection | null, };
+export type BatchReport = { applied: Applied, 
+/**
+ * `Batch.selection` as the batch left it; `None` when it was not given or
+ * its block was deleted.
+ */
+selection: Selection | null, };
+export type PacketBound = 33554432;
