@@ -703,3 +703,38 @@ pub(crate) fn mark(m: reprise_layout::marks::Mark) -> Mark {
         diagnostic: m.diagnostic.map(|c| c.to_string()),
     }
 }
+
+pub(crate) fn font_declaration(r: &FontDeclaration) -> reprise_font::FontDeclaration {
+    reprise_font::FontDeclaration {
+        family: r.family.clone(),
+        descriptors: reprise_font::Descriptors {
+            weight: r.weight,
+            stretch: r.stretch,
+            style: match r.style {
+                FontStyle::Normal => reprise_font::FontStyle::Normal,
+                FontStyle::Italic => reprise_font::FontStyle::Italic,
+                FontStyle::Oblique => reprise_font::FontStyle::Oblique,
+            },
+        },
+        face_index: r.face_index,
+    }
+}
+pub(crate) fn font_settings(r: &FontSettings) -> reprise_font::FontSettings {
+    reprise_font::FontSettings {
+        generics: r
+            .generics
+            .iter()
+            .map(|(g, name)| {
+                let g = match g {
+                    GenericFamily::Serif => reprise_font::GenericFamily::Serif,
+                    GenericFamily::SansSerif => reprise_font::GenericFamily::SansSerif,
+                    GenericFamily::Monospace => reprise_font::GenericFamily::Monospace,
+                    GenericFamily::Script => reprise_font::GenericFamily::Script,
+                };
+                (g, name.clone())
+            })
+            .collect(),
+        fallbacks: r.fallbacks.clone(),
+        synthetic_oblique: r.synthetic_oblique,
+    }
+}

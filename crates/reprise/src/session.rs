@@ -6,6 +6,7 @@ use reprise_layout::incremental::{LayoutCache, LayoutContinuation, LayoutSession
 use reprise_layout::{Engine, LayoutSnapshot};
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 // InsertBlock's empty named style is the session base. Preserve an existing
 // definition, including custom authored defaults in a package.
@@ -23,12 +24,89 @@ fn ensure_base_style(doc: &Document) -> Result<()> {
     Ok(())
 }
 
-/// Workspace factory. Each document owns isolated font/plugin configuration.
+/// Font state shared by every session of one [`Workspace`].
 #[derive(Default)]
-pub struct Workspace;
+struct SharedFonts {
+    /// Parsed once; sessions copy the `Arc`, never the bytes.
+    faces: Vec<Arc<reprise_font::Face>>,
+    settings: Option<reprise_font::FontSettings>,
+    /// Bumped by every change; a session compares it with the one it last saw.
+    generation: u64,
+}
+type Fonts = Arc<Mutex<SharedFonts>>;
+fn lock(fonts: &Fonts) -> MutexGuard<'_, SharedFonts> {
+    // Nothing panics while holding the lock; recover the data regardless.
+    fonts.lock().unwrap_or_else(PoisonError::into_inner)
+}
+/// The most faces one workspace holds (a font menu is far smaller).
+const MAX_WORKSPACE_FACES: usize = 256;
+
+/// Workspace factory. Documents opened from one workspace share its declared
+/// fonts and font settings; plugin configuration stays per document.
+///
+/// Fonts declared here are parsed once and held as shared handles, so opening
+/// a document copies pointers instead of megabytes. A session also keeps its
+/// own `declare_font` for a face that belongs to that document alone.
+#[derive(Default)]
+pub struct Workspace {
+    fonts: Fonts,
+}
 impl Workspace {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+    /// Declares a font for every session of this workspace, present and
+    /// future. Sessions pick it up when they next lay out, save or paste.
+    /// Declaring the same bytes and descriptors again changes nothing.
+    pub fn declare_font(
+        &self,
+        request: &Payload<FontDeclaration>,
+        bytes: &[u8],
+    ) -> Result<Payload<Face>> {
+        let r = validate(request)?;
+        if bytes.len() > 32 * 1024 * 1024 {
+            return Err(Error::Limit("font bytes".into()));
+        }
+        let face = reprise_font::Face::declared(bytes.to_vec(), Some(cv::font_declaration(r)))
+            .map_err(|e| Error::note(e.note()))?;
+        let out = Face {
+            family: face.id().family.clone(),
+            hash: face.id().hash.clone(),
+        };
+        let mut shared = lock(&self.fonts);
+        if !shared.faces.iter().any(|f| f.id() == face.id()) {
+            if shared.faces.len() >= MAX_WORKSPACE_FACES {
+                return Err(Error::Limit("workspace faces".into()));
+            }
+            shared.faces.push(Arc::new(face));
+            shared.generation = shared.generation.saturating_add(1);
+        }
+        Ok(Payload::new(out))
+    }
+    /// Default font settings for every session of this workspace. A session
+    /// that calls its own `set_font_settings` stops following them.
+    pub fn set_font_settings(&self, request: &Payload<FontSettings>) -> Result<Payload<()>> {
+        let settings = cv::font_settings(validate(request)?);
+        settings.validate().map_err(Error::note)?;
+        let mut shared = lock(&self.fonts);
+        shared.settings = Some(settings);
+        shared.generation = shared.generation.saturating_add(1);
+        Ok(Payload::new(()))
+    }
+    /// How many holders share `face`: one for the workspace plus one for each
+    /// session that has picked it up. `None` when the workspace has no such
+    /// face. A count rather than a timing, for tests and diagnostics.
+    pub fn font_handles(&self, face: &Face) -> Option<usize> {
+        lock(&self.fonts)
+            .faces
+            .iter()
+            .find(|f| f.id().family == face.family && f.id().hash == face.hash)
+            .map(Arc::strong_count)
+    }
+    fn adopt(&self, mut session: DocumentSession) -> Result<DocumentSession> {
+        session.shared = Some(self.fonts.clone());
+        session.sync_fonts()?;
+        Ok(session)
     }
     pub fn create(&self, request: &Payload<Create>) -> Result<DocumentSession> {
         let r = validate(request)?;
@@ -37,7 +115,7 @@ impl Workspace {
         let doc = Document::new(peer)?;
         ensure_base_style(&doc)?;
         let package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
-        Ok(DocumentSession::new(
+        self.adopt(DocumentSession::new(
             doc,
             package,
             r.document_id.clone(),
@@ -77,7 +155,7 @@ impl Workspace {
         let notes = opened.notes.clone();
         let doc = opened.into_document()?;
         ensure_base_style(&doc)?;
-        Ok(DocumentSession::new(
+        self.adopt(DocumentSession::new(
             doc,
             package,
             id,
@@ -105,6 +183,11 @@ pub struct DocumentSession {
     workers: std::sync::Arc<dyn reprise_layout::workers::Workers>,
     /// Set when a contained call panicked; see [`DocumentSession::contain`].
     poisoned: Option<String>,
+    /// The workspace's shared fonts, and the generation of them this session
+    /// has taken. `settings_local` is set once the session chose its own.
+    shared: Option<Fonts>,
+    shared_seen: u64,
+    settings_local: bool,
 }
 impl DocumentSession {
     /// Runs `f` on this session and turns a panic inside it into
@@ -156,7 +239,42 @@ impl DocumentSession {
             selection: None,
             workers: std::sync::Arc::new(reprise_layout::workers::Serial),
             poisoned: None,
+            shared: None,
+            shared_seen: 0,
+            settings_local: false,
         }
+    }
+    /// Takes the workspace's font changes since last time, sharing its faces
+    /// by handle. Invalidates layout only when something changed.
+    fn sync_fonts(&mut self) -> Result<()> {
+        let Some(shared) = self.shared.clone() else {
+            return Ok(());
+        };
+        let shared = lock(&shared);
+        if shared.generation == self.shared_seen {
+            return Ok(());
+        }
+        for face in &shared.faces {
+            let held = self
+                .engine
+                .fonts
+                .get(face.id())
+                .is_ok_and(|have| Arc::ptr_eq(have, face));
+            if !held {
+                self.engine.fonts.add_shared(face.clone());
+            }
+        }
+        if !self.settings_local
+            && let Some(settings) = &shared.settings
+            && self.engine.fonts.settings() != settings
+        {
+            self.engine
+                .fonts
+                .set_settings(settings.clone())
+                .map_err(Error::note)?;
+        }
+        self.shared_seen = shared.generation;
+        self.reconfigure()
     }
     fn doc(&self) -> &Document {
         self.editor.document()
@@ -375,19 +493,7 @@ impl DocumentSession {
         if bytes.len() > 32 * 1024 * 1024 {
             return Err(Error::Limit("font bytes".into()));
         }
-        let declaration = reprise_font::FontDeclaration {
-            family: r.family.clone(),
-            descriptors: reprise_font::Descriptors {
-                weight: r.weight,
-                stretch: r.stretch,
-                style: match r.style {
-                    FontStyle::Normal => reprise_font::FontStyle::Normal,
-                    FontStyle::Italic => reprise_font::FontStyle::Italic,
-                    FontStyle::Oblique => reprise_font::FontStyle::Oblique,
-                },
-            },
-            face_index: r.face_index,
-        };
+        let declaration = cv::font_declaration(r);
         let id = self
             .engine
             .fonts
@@ -402,24 +508,9 @@ impl DocumentSession {
     /// Replace host font settings and invalidate revision-bound layout jobs.
     pub fn set_font_settings(&mut self, request: &Payload<FontSettings>) -> Result<Payload<()>> {
         let r = validate(request)?;
-        let settings = reprise_font::FontSettings {
-            generics: r
-                .generics
-                .iter()
-                .map(|(g, name)| {
-                    let g = match g {
-                        GenericFamily::Serif => reprise_font::GenericFamily::Serif,
-                        GenericFamily::SansSerif => reprise_font::GenericFamily::SansSerif,
-                        GenericFamily::Monospace => reprise_font::GenericFamily::Monospace,
-                        GenericFamily::Script => reprise_font::GenericFamily::Script,
-                    };
-                    (g, name.clone())
-                })
-                .collect(),
-            fallbacks: r.fallbacks.clone(),
-            synthetic_oblique: r.synthetic_oblique,
-        };
+        let settings = cv::font_settings(r);
         settings.validate().map_err(Error::note)?;
+        self.settings_local = true;
         self.reconfigure()?;
         self.engine
             .fonts
@@ -487,6 +578,7 @@ impl DocumentSession {
     }
     pub fn start_layout(&mut self, request: &Payload<LayoutOptions>) -> Result<LayoutJob> {
         let r = validate(request)?;
+        self.sync_fonts()?;
         if r.max_pages > 10_000 || r.viewport_start > r.viewport_end || r.viewport_end > 10_000 {
             return Err(Error::Limit("layout pages/viewport".into()));
         }
@@ -731,6 +823,7 @@ impl DocumentSession {
             .map(|c| cv::caret(c).map(|c| (c.node, c.offset)))
             .transpose()?;
         fragment.validate()?;
+        self.sync_fonts()?;
         // Resource installation must not fail after authored state has committed.
         let fonts = fragment
             .resources
@@ -779,6 +872,7 @@ impl DocumentSession {
         self.paste_fragment(imported.fragment, r.at.as_ref())
     }
     pub fn save(&mut self) -> Result<Payload<Bytes>> {
+        self.sync_fonts()?;
         // Embedding all used fonts requires current complete layout. Saving always
         // finishes the incremental coordinator, rather than dropping resources.
         if self.snapshot.is_none() {
