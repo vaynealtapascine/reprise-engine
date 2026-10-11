@@ -256,5 +256,88 @@ assert.equal(paperTarget.state().data.page_setup.patched, false);
 assert.equal(paperTarget.state().data.blocks.length, 0);
 paperTarget.redo(); finish(paperTarget);
 assert.equal(paperTarget.display_page(0).data.display.width, 609562);
+// Paragraph styles: define, apply, patch with clear, null alignment, State.
+const styled = ws.create(p({ document_id: "60112233445566778899aabbccddeeff", peer_id: "41" }));
+const para = styled.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "styled words in a justified paragraph", style: { families: null, size: null, line_height: null } }] })).data.blocks[0];
+styled.apply(p({ commands: [
+  { kind: "define-style", name: "Quote", parent: "", style: { families: null, size: null, line_height: null, indent_start: "24pt", space_before: "1lh", alignment: "justify", keep_together: true } },
+  { kind: "apply-style", node: para, style: "Quote" },
+  { kind: "set-style", node: para, style: { families: null, size: null, line_height: null, indent_first: "-12pt" }, clear: [] },
+  { kind: "set-alignment", node: para, at: null, alignment: "end" },
+  { kind: "set-alignment", node: para, at: null, alignment: null },
+] }));
+const styledState = styled.state().data;
+const styledBlock = styledState.blocks[0];
+assert.equal(styledBlock.style.name, "Quote");
+assert.equal(styledBlock.style.direct.indent_first, "-12pt");
+const quote = styledState.resolved[styledBlock.style.resolved];
+assert.equal(quote.indent_start, 24 * 1024);
+assert.equal(quote.indent_first, -12 * 1024);
+assert.equal(quote.alignment, "justify");
+assert.equal(quote.keep_together, true);
+assert.ok(styledState.styles.some(s => s.name === "Heading 1" && s.builtin));
+assert.throws(() => styled.apply(p({ commands: [{ kind: "delete-style", name: "" }] })));
+finish(styled);
+const reopened = ws.open(p({ peer_id: "42" }), styled.save().data.bytes);
+assert.deepEqual(reopened.state().data.resolved, styledState.resolved);
+reopened.free(); styled.free();
+console.log("paragraph style WASM smoke passed");
+// Plumbing: one workspace font as a Uint8Array shared by sessions, batch, atomic replace, copy, ranges.
+{
+  assert.equal(wasm.maxPacketBytes(), 32 * 1024 * 1024);
+  const pw = new wasm.Workspace();
+  const fontBytes = new Uint8Array(fs.readFileSync(path.join(__dirname, "../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf")));
+  const face = pw.declare_font(p({ family: "Universal", weight: 400, style: "normal", stretch: 1000, face_index: 0 }), fontBytes).data;
+  assert.throws(() => pw.declare_font(p({ family: "Universal", weight: 400, style: "normal", stretch: 1000, face_index: 0 }), [1, 2, 3]), e => e.data.code === "bindings.invalid");
+  const plain = { families: null, size: null, line_height: null };
+  const mk = (id, peer) => pw.create(p({ document_id: id, peer_id: peer }));
+  const s1 = mk("b0112233445566778899aabbccddeeff", "101"), s2 = mk("b1112233445566778899aabbccddeeff", "102");
+  const n1 = s1.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "hello world", style: plain }] })).data.blocks[0];
+  s2.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "x", style: plain }] }));
+  s1.apply(p({ commands: [{ kind: "format-text", node: n1, start: 0, end: 5, style: { families: ["Universal"], size: null, language: null, features: null, reset: false } }] }));
+  finish(s1); finish(s2);
+  assert.ok(!s1.diagnostics().data.some(d => d.code.startsWith("font.")), "the workspace face is used without a per-session declaration");
+  assert.ok(s1.save().data.bytes.length > 0);
+  // Batch: a failing third command applies nothing.
+  const state = s1.state();
+  const bad = p({ commands: [
+    { kind: "insert-text", node: n1, at: 0, text: ">" },
+    { kind: "insert-block", parent: null, index: 1, block_kind: "paragraph", text: "b", style: plain },
+    { kind: "delete-text", node: n1, start: 500, end: 600 }], expected_revision: null, selection: null });
+  assert.throws(() => s1.batch(bad), e => e.data.command === 2);
+  assert.deepEqual(s1.state(), state);
+  const stale = p({ commands: [{ kind: "insert-text", node: n1, at: 0, text: "!" }], expected_revision: [{ peer: "101", counter: 0 }], selection: null });
+  assert.throws(() => s1.batch(stale), e => e.data.code === "bindings.stale");
+  const sel = { anchor: { node: n1, offset: 6, affinity: "downstream" }, focus: { node: n1, offset: 11, affinity: "downstream" } };
+  const report = s1.batch(p({ commands: [{ kind: "insert-text", node: n1, at: 0, text: ">> " }], expected_revision: state.data.revision, selection: sel }));
+  assert.equal(report.data.selection.anchor.offset, 9);
+  s1.undo();
+  assert.equal(s1.state().data.blocks[0].text, "hello world");
+  // Atomic replace: one undo step.
+  const stable = s1.anchor_selection(p(sel)).data;
+  const replaced = s1.replace_text(p({ selection: stable, text: "there", html: false }));
+  assert.equal(s1.state().data.blocks[0].text, "hello there");
+  assert.equal(replaced.data.selection.focus.offset, 11);
+  s1.undo();
+  assert.equal(s1.state().data.blocks[0].text, "hello world");
+  assert.throws(() => s1.replace_selection(p({ selection: stable }), new Uint8Array([1, 2, 3])), e => e.data.code.startsWith("clipboard."));
+  assert.equal(s1.state().data.blocks[0].text, "hello world");
+  // Reading order carries byte ranges; marks carry anchor facts.
+  finish(s1);
+  const steps = s1.reading_order().data;
+  assert.ok(steps.every(s => s.end >= s.start));
+  assert.equal(steps[0].start, 0);
+  assert.ok(Array.isArray(s1.diagnostics_for(p({ code_prefix: "font.", min_severity: null, subject: null, limit: 10 })).data.diagnostics));
+  // Import as a copy: a new identity, no shared history.
+  const saved = s1.save().data.bytes;
+  const copy = pw.import_copy(p({ document_id: "b2112233445566778899aabbccddeeff", peer_id: "103" }), saved);
+  assert.equal(copy.state().data.document_id, "b2112233445566778899aabbccddeeff");
+  assert.equal(copy.state().data.blocks[0].text, "hello world");
+  assert.deepEqual(copy.sync_info().data.vector.map(c => c.peer), ["103"]);
+  assert.throws(() => copy.sync_import(s1.sync_export(p({ since: null }))), e => e.data.code === "bindings.copy-source");
+  assert.throws(() => pw.import_copy(p({ document_id: "b0112233445566778899aabbccddeeff", peer_id: "104" }), saved), e => e.data.code === "bindings.id");
+  copy.free(); s2.free(); s1.free(); pw.free();
+  console.log("plumbing WASM smoke passed");
+}
 paperTarget.free(); paperOpen.free(); paperPeer.free(); paper.free(); ws.free();
 console.log("page setup WASM smoke passed");

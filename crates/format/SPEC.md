@@ -258,3 +258,16 @@ projection/validation is described in `docs/contracts.md`. A reader whose known
 required mask predates bit 12 refuses before decoding the document section.
 Untouched documents, empty page patches, and refused commands retain their old
 required mask. No container version or frozen template JSON envelope changes.
+
+## Paragraph styles feature (required bit 13)
+
+`REQUIRED_PARAGRAPH_STYLES` is declared when the flat `styles1` (named-style
+properties and states) or `para1` (per-block property patches) roots are
+retained, even emptied by undo; when any nested style or override map holds a
+paragraph key (`indent-start`, `indent-end`, `indent-first`, `space-before`,
+`space-after`, `keep-with-next`, `keep-together`, `widows`, `orphans`,
+`background`); when `alignment` is `justify` anywhere, `marks1` included; and
+when a `format1` envelope carries `clear`. An older reader would silently drop
+those properties, styles or masks, so it must refuse. Untouched documents,
+including those that only name built-in styles, keep their old mask. See
+`docs/paragraph-styles.md`; the bit number may be renumbered on integration.

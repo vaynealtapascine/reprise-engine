@@ -31,7 +31,8 @@ impl EditError {
             | Reason::TextTooLong { .. }
             | Reason::TransactionTooLarge { .. }
             | Reason::TreeDepthLimit { .. }
-            | Reason::MarksLimit => crate::codes::LIMIT,
+            | Reason::MarksLimit
+            | Reason::StyleLimit { .. } => crate::codes::LIMIT,
             Reason::PageSetup(_) => crate::codes::PAGE_SETUP_INVALID,
             Reason::Store(_) => crate::codes::STORE,
             _ => crate::codes::INVALID_COMMAND,
@@ -93,4 +94,10 @@ pub enum Reason {
     DeadRange(RangeId),
     #[error("the document refused a validated change: {0}")]
     Store(String),
+    #[error("the style edit is invalid: {0}")]
+    Style(String),
+    #[error("a document holds at most {max} named styles")]
+    StyleLimit { max: usize },
+    #[error("the selection no longer resolves to any block")]
+    SelectionGone,
 }

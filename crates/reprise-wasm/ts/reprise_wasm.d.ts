@@ -13,7 +13,17 @@ export type PageSetup = { width: number, height: number, margins: PageMargins, o
 export type PageMargins = { top: number, right: number, bottom: number, left: number, };
 export type PageOrientation = "portrait" | "landscape" | "square";
 export type PageTemplateSource = "builtin" | "document";
-export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>, };
+export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>,
+/**
+ * The live named styles, built-ins included, sorted by name (at most
+ * 1,024; a `bindings.limit` diagnostic says when more were left out).
+ */
+styles: Array<NamedStyle>,
+/**
+ * The distinct resolved paragraph styles that `blocks[].style.resolved`
+ * indexes. Blocks sharing a style share an entry.
+ */
+resolved: Array<ResolvedStyle>, };
 export type Clock = { peer: string, counter: number, };
 export type Block = { id: string, parent: string | null, kind: BlockKind, text: string,
 /**
@@ -21,303 +31,463 @@ export type Block = { id: string, parent: string | null, kind: BlockKind, text: 
  * present only when some formatting action covers this block. A run's
  * absent fields inherit the paragraph style.
  */
-formatting?: Array<TextRun>, };
+formatting?: Array<TextRun>,
+/**
+ * The block's paragraph style: the one additive per-block field.
+ */
+style: BlockStyle, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
-export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, };
-export type Decoration = { underline?: boolean | null, strike?: boolean | null, };
-export type TextStyle = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null,
+export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, indent_start?: string | null, indent_end?: string | null,
 /**
- * Positive font size in 1/1024 pt.
+ * Negative values hang, bounded by `indent_start`.
  */
-size: number | null, language: string | null, features: Array<TextFeature> | null, reset: boolean, };
-export type TextFeature = {
+indent_first?: string | null, space_before?: string | null, space_after?: string | null, keep_with_next?: boolean | null, keep_together?: boolean | null,
+/**
+ * 1..=32 lines.
+ */
+widows?: number | null,
+/**
+ * 1..=32 lines.
+ */
+orphans?: number | null, background?: [number, number, number, number] | null, };
+export type StyleProperty = "parent" | "families" | "size" | "line-height" | "alignment" | "tabs" | "weight" | "slant" | "underline" | "strike" | "color" | "indent-start" | "indent-end" | "indent-first" | "space-before" | "space-after" | "keep-with-next" | "keep-together" | "widows" | "orphans" | "background" | "language" | "features";
+export type NamedStyle = { name: string, parent: string | null,
+/**
+ * Engine data the document has not redefined.
+ */
+builtin: boolean,
+/**
+ * The authored properties of this style alone (not inherited ones).
+ */
+style: Style, };
+export type BlockStyle = {
     /**
-     * Exactly four ASCII graphic characters.
+     * The named style, as stored (the empty name is the document base). A
+     * renamed style is reported under its new name.
      */
-    tag: string, value: number, };
-    export type TextRun = { start: number, end: number, style: TextStyle, };
-    export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
-    export type Transaction = { commands: Array<Command>, };
-    export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
-    export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
-    export type FontStyle = "normal" | "italic" | "oblique";
-    export type FontDeclaration = { family: string, weight: number, style: FontStyle, stretch: number, face_index: number, };
-    export type GenericFamily = "serif" | "sans-serif" | "monospace" | "script";
-    export type FontSettings = { generics: Partial<Record<GenericFamily, string>>, fallbacks: Array<string>, synthetic_oblique: boolean, };
-    export type Face = { family: string, hash: string, };
-    export type AssetDeclaration = { id: string, kind: AssetKind, };
-    export type AssetKind = "image" | "other";
-    export type LayoutOptions = { width: number, height: number, max_pages: number, viewport_start: number, viewport_end: number, };
-    export type LayoutToken = { document_id: string, revision: Array<Clock>, generation: string, };
-    export type Pass = "flow" | "region-feedback" | "relations" | "reading-order" | "complete";
-    export type LayoutProgress = { token: LayoutToken, used: number, pass: Pass, viewport_ready: boolean, complete: boolean, settled: boolean, outside_document: boolean, pages: Array<number>, counters: Counters, };
-    export type Counters = { units: number, shapes: number, compositions: number, reused_compositions: number, };
-    export type Affinity = "upstream" | "downstream";
-    export type Caret = { node: string, offset: number, affinity: Affinity, };
-    export type Cursor = { caret: Caret, goal_x: number | null, };
-    export type Movement = "next-grapheme" | "previous-grapheme" | "next-word" | "previous-word" | "visual-right" | "visual-left" | "inline-forward" | "inline-backward" | "line-up" | "line-down" | "line-start" | "line-end" | "line-leftmost" | "line-rightmost" | "line-inline-start" | "line-inline-end" | "block-start" | "block-end" | "document-start" | "document-end";
-    export type Move = { cursor: Cursor, movement: Movement, };
-    export type Selection = { anchor: Caret, focus: Caret, };
-    export type Rect = { x: number, y: number, width: number, height: number, };
-    export type PageRect = { page: number, rect: Rect, };
-    export type HitTest = { page: number, x: number, y: number, };
-    export type Hit = { caret: Caret, page: number, inside: boolean, };
-    export type ReadingStep = { node: string, line: number, page: number, };
-    export type ExportFormat = "plain-text" | "html" | "native" | "pdf";
-    export type Loss = { code: string, disposition: Disposition, detail: string, };
-    export type Disposition = "preserved" | "approximated" | "dropped";
-    export type Exported = { content: Bytes, losses: Array<Loss>, diagnostics: Array<Diagnostic>, };
-    export type Paste = { at: Caret | null, };
-    export type TextImport = { text: string, html: boolean, at: Caret | null, };
-    export type SyncInfo = { document_id: string, peer_id: string, vector: Array<Clock>, };
-    export type SyncUpdate = { document_id: string, from_peer: string, vector: Array<Clock>, content: Bytes, };
-    export type Awareness = { document_id: string, peer_id: string, content: Bytes, };
-    export type Capability = "read-text" | "insert-text";
-    export type PluginPhase = "layout" | "editing";
-    export type Dimension = "length" | "number" | "percentage" | "ratio";
-    export type PluginFunction = { name: string, operation: number, params: Array<Dimension>, variadic: Dimension | null, returns: Dimension, };
-    export type PluginSpec = { name: string, plugin_version: string, sha256: string, phase: PluginPhase, imports: Array<Capability>, grants: Array<Capability>, functions: Array<PluginFunction>, fuel: number, memory_pages: number, table_elements: number, buffer_bytes: number, };
-    export type PluginInstall = { "kind": "relation", schema: RelationSchema, operation: number, } | { "kind": "functions" } | { "kind": "geometry", operation: number, };
-    export type PluginEdit = { operation: number, nodes: Array<string>, };
-    export type DisplayRect = { origin: Point, width: number, height: number, };
-    export type Point = { x: number, y: number, };
-    export type Matrix = { xx: number, yx: number, xy: number, yy: number, tx: number, ty: number, };
-    export type Layer = "content" | "debug";
-    export type ByteRange = { start: number, end: number, };
-    export type Glyph = { id: number, x: number, y: number, text: ByteRange, };
-    export type GlyphRun = { synthetic_oblique?: boolean, face: Face, size: number, color: [number, number, number, number], text: string, glyphs: Array<Glyph>, layer: Layer, };
-    export type StyledGlyphRequest = { face: Face, glyphs: Array<number>, synthetic_oblique: boolean, };
-    export type GlyphBounds = { x_min: number, y_min: number, x_max: number, y_max: number, };
-    export type Segment = { "move": Point } | { "line": Point } | { "quad": [Point, Point] } | { "cubic": [Point, Point, Point] } | "close";
-    export type Stroke = { color: [number, number, number, number], width: number, };
-    export type DisplayItem = { "type": "glyphs" } & GlyphRun | { "type": "image", asset: string, rect: DisplayRect, alt: string, layer: Layer, } | { "type": "path", path: Array<Segment>, fill: [number, number, number, number] | null, stroke: Stroke | null, layer: Layer, } | { "type": "group", transform: Matrix, clip: Array<Segment> | null, items: Array<DisplayItem>, };
-    export type DisplayList = { width: number, height: number, items: Array<DisplayItem>, };
-    export type DisplayPage = { token: LayoutToken, page: number, settled: boolean, complete: boolean, display: DisplayList, };
-    export type GlyphRequest = { face: Face, glyphs: Array<number>, };
-    export type GlyphOutlines = { units_per_em: number, glyphs: Array<GlyphOutline>, };
-    export type GlyphOutline = { id: number, path: string, ink_bounds?: GlyphBounds, };
-    export type Relation = { schema: string, owner: string | null, targets: { [key in string]: Array<Target> }, params: { [key in string]: Param }, };
-    export type Target = { "node": string } | { "range": string } | { "structural": StructuralQuery } | { "layout": LayoutQuery } | { "snapshot": SnapshotReference };
-    export type StructuralQuery = { "query": "next-sibling", from: string, kind: BlockKind | null, } | { "query": "previous-sibling", from: string, kind: BlockKind | null, } | { "query": "nth-child", of: string | null, index: number, from_end: boolean, kind: BlockKind | null, } | { "query": "first-child", of: string | null, kind: BlockKind | null, } | { "query": "last-child", of: string | null, kind: BlockKind | null, } | { "query": "parent", of: string, } | { "query": "children", of: string | null, kind: BlockKind | null, };
-    export type LayoutQuery = { "query": "line-containing", range: string, } | { "query": "previous-line", range: string, } | { "query": "next-line", range: string, } | { "query": "first-line", node: string, } | { "query": "last-line", node: string, } | { "query": "lines-in", range: string, } | { "query": "frame-containing", range: string, } | { "query": "page-containing", range: string, };
-    export type SnapshotReference = { revision: Array<Clock>, of: SnapshotSubject, };
-    export type SnapshotSubject = { "node": string } | { "range": string };
-    export type Param = { "length": RelativeLength } | { "int": string } | { "bool": boolean } | { "text": string };
-    export type RelativeLength = { "pt": number } | { "em": number };
-    export type TargetClass = "node" | "range" | "structural" | "layout" | "snapshot";
-    export type ParamKind = "length" | "int" | "bool" | "text";
-    export type Ownership = "owned" | "independent";
-    export type OnTargetDeleted = "rebind" | "keep-missing" | "delete";
-    export type CopyInside = "duplicate" | "drop";
-    export type CopyCrossing = "keep-outside" | "drop";
-    export type CopyPolicy = { inside: CopyInside, crossing: CopyCrossing, };
-    export type RoleSpec = { name: string, accepts: Array<TargetClass>, min: number, max: number | null, };
-    export type ParamSpec = { name: string, kind: ParamKind, required: boolean, };
-    export type RelationSchema = { id: string, version: number, ownership: Ownership, roles: Array<RoleSpec>, params: Array<ParamSpec>, on_target_deleted: OnTargetDeleted, on_copy: CopyPolicy, };
-    export type CopyAs = { selection: Selection, format: CopyFormat, };
-    export type Resource = { id: string, kind: ResourceKind, hash: string, available: boolean, font: Face | null, location: ResourceLocation | null, };
-    export type ResourceKind = "font" | "image" | "other";
-    export type ResourceLocation = { "kind": "path", "value": string } | { "kind": "url", "value": string };
-    export type CopyFormat = "plain-text" | "html";
-    export type SyncRequest = { since: Array<Clock> | null, };
-    export type SyncKind = "delta" | "snapshot";
-    export type SyncPacket = { document_id: string, from_peer: string, format: number, features: Array<string>, kind: SyncKind, since: Array<Clock>, vector: Array<Clock>, content: Bytes, };
-    export type Changes = { blocks: Array<string>, structure: boolean, styles: boolean, relations: Array<string>, ranges: Array<string>, other: boolean, };
-    export type SyncReport = { info: SyncInfo, changed: boolean, changes: Changes,
+    name: string,
     /**
-     * The anchored local selection after the import, if one is set.
+     * The block's direct overrides.
      */
-    selection: Selection | null,
+    direct: Style,
     /**
-     * Whether an end of it had to take a fallback.
+     * Index into `State.resolved`.
      */
-    selection_moved: boolean, };
-    export type EditReport = { changed: boolean, changes: Changes, selection: Selection | null, selection_moved: boolean, };
-    export type StableCaret = { node: string, affinity: Affinity, anchor: string, };
-    export type StableSelection = { anchor: StableCaret, focus: StableCaret, };
-    export type Presence = { selection: Selection | null, meta: { [key in string]: string }, };
-    export type PresenceView = { peer_id: string, meta: { [key in string]: string }, selection: Selection | null, caret: PageRect | null, rects: Array<PageRect>, };
-    export type Alignment = "start" | "centre" | "end";
-    export type LineEdge = "start" | "end";
-    export type AnchorEdge = "position" | "gap-start" | "gap-end" | "line-start" | "line-end";
-    export type TabStop = { position: number | null, alignment: Alignment, leader: string | null, };
-    export type TabStops = { interval: number, stops: Array<TabStop>, };
-    export type MarkKind = "paragraph-end" | "line-break" | "gap" | "alignment" | "anchor";
-    export type RelationState = "valid" | "rebound" | "ambiguous" | "missing" | "owner-deleted" | "deleted";
-    export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean, };
-    export type MarksPage = { token: LayoutToken, page: number, marks: Array<Mark>, };
-
-
-
-    export class DocumentSession {
-        private constructor();
-        free(): void;
-        [Symbol.dispose](): void;
-        anchor_selection(request: Payload<Selection>): Payload<StableSelection>;
-        apply(request: Payload<Transaction>): Payload<Applied>;
-        awareness(content: Uint8Array): Payload<Awareness>;
-        cancel(job: number): Payload<boolean>;
-        caret_rect(request: Payload<Caret>): Payload<PageRect>;
-        copy(request: Payload<Selection>): Payload<Bytes>;
-        copy_as(request: Payload<CopyAs>): Payload<Exported>;
-        declare_font(request: Payload<FontDeclaration>, content: Uint8Array): Payload<Face>;
-        diagnostics(): Payload<Array<Diagnostic>>;
-        display_json(page: number): Payload<string>;
-        display_page(page: number): Payload<DisplayPage>;
-        export(request: Payload<ExportFormat>): Payload<Exported>;
-        export_updates(): Payload<SyncUpdate>;
-        glyph_outlines(request: Payload<GlyphRequest>): Payload<GlyphOutlines>;
-        glyph_outlines_styled(request: Payload<StyledGlyphRequest>): Payload<GlyphOutlines>;
-        hit_test(request: Payload<HitTest>): Payload<Hit>;
-        import_text(request: Payload<TextImport>): Payload<Applied>;
-        import_updates(request: Payload<SyncUpdate>): Payload<SyncInfo>;
-        insert_image(request: Payload<ImageInsert>): Payload<Applied>;
-        install_plugin(plugin: number, request: Payload<PluginInstall>): Payload<boolean>;
-        load_plugin(request: Payload<PluginSpec>, content: Uint8Array): Payload<number>;
-        local_selection(): Payload<Selection | null>;
-        marks(page: number): Payload<MarksPage>;
-        move_cursor(request: Payload<Move>): Payload<Cursor>;
-        partial_page(job: number, page: number): Payload<DisplayPage>;
-        paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
-        png(page: number, scale_permille: number): Payload<Bytes>;
-        presence(request: Payload<Presence>): Payload<Awareness>;
-        reading_order(): Payload<Array<ReadingStep>>;
-        redo(): Payload<boolean>;
-        redo_report(): Payload<EditReport>;
-        register_asset(request: Payload<AssetDeclaration>, content: Uint8Array): Payload<string>;
-        release_job(job: number): Payload<boolean>;
-        release_plugin(plugin: number): Payload<boolean>;
-        resolve_presence(request: Payload<Awareness>): Payload<PresenceView>;
-        resolve_selection(request: Payload<StableSelection>): Payload<Selection | null>;
-        resource_bytes(request: Payload<string>): Payload<Bytes>;
-        resources(): Payload<Array<Resource>>;
-        run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
-        save(): Payload<Bytes>;
-        selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
-        set_font_settings(request: Payload<FontSettings>): Payload<null>;
-        set_page_setup(request: Payload<PageSetupPatch>): Payload<Applied>;
-        set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
-        start_layout(request: Payload<LayoutOptions>): Payload<number>;
-        state(): Payload<State>;
-        step(job: number, budget: number): Payload<LayoutProgress>;
-        svg(page: number): Payload<string>;
-        sync_export(request: Payload<SyncRequest>): Payload<SyncPacket>;
-        sync_import(request: Payload<SyncPacket>): Payload<SyncReport>;
-        sync_info(): Payload<SyncInfo>;
-        undo(): Payload<boolean>;
-        undo_report(): Payload<EditReport>;
-        validate_awareness(request: Payload<Awareness>): Payload<Bytes>;
-    }
-
-    export class Workspace {
-        free(): void;
-        [Symbol.dispose](): void;
-        create(request: Payload<Create>): DocumentSession;
-        constructor();
-        open(request: Payload<Open>, content: Uint8Array): DocumentSession;
-    }
-
+    resolved: number, };
+    export type ResolvedStyle = { family: string,
     /**
-     * Calls `handler(message)` when the engine panics, before the instance
-     * traps. A `panic=abort` build cannot recover: after the call every export
-     * fails, so the host should discard this instance (its worker), reopen the
-     * last saved package in a fresh one and resynchronise. The message names
-     * the panic and its location, for reporting.
+     * Empty for a legacy single-family chain.
      */
-    export function setPanicHandler(handler: Function): void;
-
-    export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
-
-    export interface InitOutput {
-        readonly memory: WebAssembly.Memory;
-        readonly __wbg_documentsession_free: (a: number, b: number) => void;
-        readonly __wbg_workspace_free: (a: number, b: number) => void;
-        readonly documentsession_anchor_selection: (a: number, b: any) => [number, number, number];
-        readonly documentsession_apply: (a: number, b: any) => [number, number, number];
-        readonly documentsession_awareness: (a: number, b: any) => [number, number, number];
-        readonly documentsession_cancel: (a: number, b: number) => [number, number, number];
-        readonly documentsession_caret_rect: (a: number, b: any) => [number, number, number];
-        readonly documentsession_copy: (a: number, b: any) => [number, number, number];
-        readonly documentsession_copy_as: (a: number, b: any) => [number, number, number];
-        readonly documentsession_declare_font: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_diagnostics: (a: number) => [number, number, number];
-        readonly documentsession_display_json: (a: number, b: number) => [number, number, number];
-        readonly documentsession_display_page: (a: number, b: number) => [number, number, number];
-        readonly documentsession_export: (a: number, b: any) => [number, number, number];
-        readonly documentsession_export_updates: (a: number) => [number, number, number];
-        readonly documentsession_glyph_outlines: (a: number, b: any) => [number, number, number];
-        readonly documentsession_glyph_outlines_styled: (a: number, b: any) => [number, number, number];
-        readonly documentsession_hit_test: (a: number, b: any) => [number, number, number];
-        readonly documentsession_import_text: (a: number, b: any) => [number, number, number];
-        readonly documentsession_import_updates: (a: number, b: any) => [number, number, number];
-        readonly documentsession_insert_image: (a: number, b: any) => [number, number, number];
-        readonly documentsession_install_plugin: (a: number, b: number, c: any) => [number, number, number];
-        readonly documentsession_load_plugin: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_local_selection: (a: number) => [number, number, number];
-        readonly documentsession_marks: (a: number, b: number) => [number, number, number];
-        readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
-        readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
-        readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_png: (a: number, b: number, c: number) => [number, number, number];
-        readonly documentsession_presence: (a: number, b: any) => [number, number, number];
-        readonly documentsession_reading_order: (a: number) => [number, number, number];
-        readonly documentsession_redo: (a: number) => [number, number, number];
-        readonly documentsession_redo_report: (a: number) => [number, number, number];
-        readonly documentsession_register_asset: (a: number, b: any, c: any) => [number, number, number];
-        readonly documentsession_release_job: (a: number, b: number) => [number, number, number];
-        readonly documentsession_release_plugin: (a: number, b: number) => [number, number, number];
-        readonly documentsession_resolve_presence: (a: number, b: any) => [number, number, number];
-        readonly documentsession_resolve_selection: (a: number, b: any) => [number, number, number];
-        readonly documentsession_resource_bytes: (a: number, b: any) => [number, number, number];
-        readonly documentsession_resources: (a: number) => [number, number, number];
-        readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
-        readonly documentsession_save: (a: number) => [number, number, number];
-        readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
-        readonly documentsession_set_font_settings: (a: number, b: any) => [number, number, number];
-        readonly documentsession_set_page_setup: (a: number, b: any) => [number, number, number];
-        readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
-        readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
-        readonly documentsession_state: (a: number) => [number, number, number];
-        readonly documentsession_step: (a: number, b: number, c: number) => [number, number, number];
-        readonly documentsession_svg: (a: number, b: number) => [number, number, number];
-        readonly documentsession_sync_export: (a: number, b: any) => [number, number, number];
-        readonly documentsession_sync_import: (a: number, b: any) => [number, number, number];
-        readonly documentsession_sync_info: (a: number) => [number, number, number];
-        readonly documentsession_undo: (a: number) => [number, number, number];
-        readonly documentsession_undo_report: (a: number) => [number, number, number];
-        readonly documentsession_validate_awareness: (a: number, b: any) => [number, number, number];
-        readonly setPanicHandler: (a: any) => void;
-        readonly workspace_create: (a: number, b: any) => [number, number, number];
-        readonly workspace_new: () => number;
-        readonly workspace_open: (a: number, b: any, c: any) => [number, number, number];
-        readonly __wbindgen_malloc: (a: number, b: number) => number;
-        readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-        readonly __wbindgen_exn_store: (a: number) => void;
-        readonly __externref_table_alloc: () => number;
-        readonly __wbindgen_externrefs: WebAssembly.Table;
-        readonly __externref_table_dealloc: (a: number) => void;
-        readonly __wbindgen_start: () => void;
-    }
-
-    export type SyncInitInput = BufferSource | WebAssembly.Module;
-
+    families: Array<string>, size: number, line_height: number, alignment: Alignment | null, tabs: TabStops | null, indent_start: number, indent_end: number, indent_first: number, space_before: number, space_after: number, keep_with_next: boolean, keep_together: boolean, widows: number, orphans: number, weight: number | null, slant: FontStyle | null, decoration: Decoration, color: [number, number, number, number] | null, background: [number, number, number, number] | null, };
+    export type Decoration = { underline?: boolean | null, strike?: boolean | null, };
+    export type TextStyle = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null,
     /**
-     * Instantiates the given `module`, which can either be bytes or
-     * a precompiled `WebAssembly.Module`.
-     *
-     * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
-     *
-     * @returns {InitOutput}
+     * Positive font size in 1/1024 pt.
      */
-    export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
-
+    size: number | null, language: string | null, features: Array<TextFeature> | null, reset: boolean,
     /**
-     * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
-     * for everything else, calls `WebAssembly.instantiate` directly.
-     *
-     * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
-     *
-     * @returns {Promise<InitOutput>}
+     * Character fields this action clears (they reveal the paragraph
+     * style) without a full `reset`.
      */
-    export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;
+    clear?: Array<StyleProperty>, };
+    export type TextFeature = {
+        /**
+         * Exactly four ASCII graphic characters.
+         */
+        tag: string, value: number, };
+        export type TextRun = { start: number, end: number, style: TextStyle, };
+        export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, };
+        export type Transaction = { commands: Array<Command>, };
+        export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
+        export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
+        export type FontStyle = "normal" | "italic" | "oblique";
+        export type FontDeclaration = { family: string, weight: number, style: FontStyle, stretch: number, face_index: number, };
+        export type GenericFamily = "serif" | "sans-serif" | "monospace" | "script";
+        export type FontSettings = { generics: Partial<Record<GenericFamily, string>>, fallbacks: Array<string>, synthetic_oblique: boolean, };
+        export type Face = { family: string, hash: string, };
+        export type AssetDeclaration = { id: string, kind: AssetKind, };
+        export type AssetKind = "image" | "other";
+        export type LayoutOptions = { width: number, height: number, max_pages: number, viewport_start: number, viewport_end: number, };
+        export type LayoutToken = { document_id: string, revision: Array<Clock>, generation: string, };
+        export type Pass = "flow" | "region-feedback" | "relations" | "reading-order" | "complete";
+        export type LayoutProgress = { token: LayoutToken, used: number, pass: Pass, viewport_ready: boolean, complete: boolean, settled: boolean, outside_document: boolean, pages: Array<number>, counters: Counters, };
+        export type Counters = { units: number, shapes: number, compositions: number, reused_compositions: number, };
+        export type Affinity = "upstream" | "downstream";
+        export type Caret = { node: string, offset: number, affinity: Affinity, };
+        export type Cursor = { caret: Caret, goal_x: number | null, };
+        export type Movement = "next-grapheme" | "previous-grapheme" | "next-word" | "previous-word" | "visual-right" | "visual-left" | "inline-forward" | "inline-backward" | "line-up" | "line-down" | "line-start" | "line-end" | "line-leftmost" | "line-rightmost" | "line-inline-start" | "line-inline-end" | "block-start" | "block-end" | "document-start" | "document-end";
+        export type Move = { cursor: Cursor, movement: Movement, };
+        export type Selection = { anchor: Caret, focus: Caret, };
+        export type Rect = { x: number, y: number, width: number, height: number, };
+        export type PageRect = { page: number, rect: Rect, };
+        export type HitTest = { page: number, x: number, y: number, };
+        export type Hit = { caret: Caret, page: number, inside: boolean, };
+        export type ReadingStep = { node: string, line: number, page: number,
+        /**
+         * The line's UTF-8 byte range in its block's text (`State.blocks[].text`),
+         * trailing whitespace included, so a reader can slice without `move`.
+         */
+        start: number, end: number, };
+        export type ExportFormat = "plain-text" | "html" | "native" | "pdf";
+        export type Loss = { code: string, disposition: Disposition, detail: string, };
+        export type Disposition = "preserved" | "approximated" | "dropped";
+        export type Exported = { content: Bytes, losses: Array<Loss>, diagnostics: Array<Diagnostic>, };
+        export type Paste = { at: Caret | null, };
+        export type TextImport = { text: string, html: boolean, at: Caret | null, };
+        export type SyncInfo = { document_id: string, peer_id: string, vector: Array<Clock>, };
+        export type SyncUpdate = { document_id: string, from_peer: string, vector: Array<Clock>, content: Bytes, };
+        export type Awareness = { document_id: string, peer_id: string, content: Bytes, };
+        export type Capability = "read-text" | "insert-text";
+        export type PluginPhase = "layout" | "editing";
+        export type Dimension = "length" | "number" | "percentage" | "ratio";
+        export type PluginFunction = { name: string, operation: number, params: Array<Dimension>, variadic: Dimension | null, returns: Dimension, };
+        export type PluginSpec = { name: string, plugin_version: string, sha256: string, phase: PluginPhase, imports: Array<Capability>, grants: Array<Capability>, functions: Array<PluginFunction>, fuel: number, memory_pages: number, table_elements: number, buffer_bytes: number, };
+        export type PluginInstall = { "kind": "relation", schema: RelationSchema, operation: number, } | { "kind": "functions" } | { "kind": "geometry", operation: number, };
+        export type PluginEdit = { operation: number, nodes: Array<string>, };
+        export type DisplayRect = { origin: Point, width: number, height: number, };
+        export type Point = { x: number, y: number, };
+        export type Matrix = { xx: number, yx: number, xy: number, yy: number, tx: number, ty: number, };
+        export type Layer = "content" | "debug";
+        export type ByteRange = { start: number, end: number, };
+        export type Glyph = { id: number, x: number, y: number, text: ByteRange, };
+        export type GlyphRun = { synthetic_oblique?: boolean, face: Face, size: number, color: [number, number, number, number], text: string, glyphs: Array<Glyph>, layer: Layer, };
+        export type StyledGlyphRequest = { face: Face, glyphs: Array<number>, synthetic_oblique: boolean, };
+        export type GlyphBounds = { x_min: number, y_min: number, x_max: number, y_max: number, };
+        export type Segment = { "move": Point } | { "line": Point } | { "quad": [Point, Point] } | { "cubic": [Point, Point, Point] } | "close";
+        export type Stroke = { color: [number, number, number, number], width: number, };
+        export type DisplayItem = { "type": "glyphs" } & GlyphRun | { "type": "image", asset: string, rect: DisplayRect, alt: string, layer: Layer, } | { "type": "path", path: Array<Segment>, fill: [number, number, number, number] | null, stroke: Stroke | null, layer: Layer, } | { "type": "group", transform: Matrix, clip: Array<Segment> | null, items: Array<DisplayItem>, };
+        export type DisplayList = { width: number, height: number, items: Array<DisplayItem>, };
+        export type DisplayPage = { token: LayoutToken, page: number, settled: boolean, complete: boolean, display: DisplayList, };
+        export type GlyphRequest = { face: Face, glyphs: Array<number>, };
+        export type GlyphOutlines = { units_per_em: number, glyphs: Array<GlyphOutline>, };
+        export type GlyphOutline = { id: number, path: string, ink_bounds?: GlyphBounds, };
+        export type Relation = { schema: string, owner: string | null, targets: { [key in string]: Array<Target> }, params: { [key in string]: Param }, };
+        export type Target = { "node": string } | { "range": string } | { "structural": StructuralQuery } | { "layout": LayoutQuery } | { "snapshot": SnapshotReference };
+        export type StructuralQuery = { "query": "next-sibling", from: string, kind: BlockKind | null, } | { "query": "previous-sibling", from: string, kind: BlockKind | null, } | { "query": "nth-child", of: string | null, index: number, from_end: boolean, kind: BlockKind | null, } | { "query": "first-child", of: string | null, kind: BlockKind | null, } | { "query": "last-child", of: string | null, kind: BlockKind | null, } | { "query": "parent", of: string, } | { "query": "children", of: string | null, kind: BlockKind | null, };
+        export type LayoutQuery = { "query": "line-containing", range: string, } | { "query": "previous-line", range: string, } | { "query": "next-line", range: string, } | { "query": "first-line", node: string, } | { "query": "last-line", node: string, } | { "query": "lines-in", range: string, } | { "query": "frame-containing", range: string, } | { "query": "page-containing", range: string, };
+        export type SnapshotReference = { revision: Array<Clock>, of: SnapshotSubject, };
+        export type SnapshotSubject = { "node": string } | { "range": string };
+        export type Param = { "length": RelativeLength } | { "int": string } | { "bool": boolean } | { "text": string };
+        export type RelativeLength = { "pt": number } | { "em": number };
+        export type TargetClass = "node" | "range" | "structural" | "layout" | "snapshot";
+        export type ParamKind = "length" | "int" | "bool" | "text";
+        export type Ownership = "owned" | "independent";
+        export type OnTargetDeleted = "rebind" | "keep-missing" | "delete";
+        export type CopyInside = "duplicate" | "drop";
+        export type CopyCrossing = "keep-outside" | "drop";
+        export type CopyPolicy = { inside: CopyInside, crossing: CopyCrossing, };
+        export type RoleSpec = { name: string, accepts: Array<TargetClass>, min: number, max: number | null, };
+        export type ParamSpec = { name: string, kind: ParamKind, required: boolean, };
+        export type RelationSchema = { id: string, version: number, ownership: Ownership, roles: Array<RoleSpec>, params: Array<ParamSpec>, on_target_deleted: OnTargetDeleted, on_copy: CopyPolicy, };
+        export type CopyAs = { selection: Selection, format: CopyFormat, };
+        export type Resource = { id: string, kind: ResourceKind, hash: string, available: boolean, font: Face | null, location: ResourceLocation | null, };
+        export type ResourceKind = "font" | "image" | "other";
+        export type ResourceLocation = { "kind": "path", "value": string } | { "kind": "url", "value": string };
+        export type CopyFormat = "plain-text" | "html";
+        export type SyncRequest = { since: Array<Clock> | null, };
+        export type SyncKind = "delta" | "snapshot";
+        export type SyncPacket = { document_id: string, from_peer: string, format: number, features: Array<string>, kind: SyncKind, since: Array<Clock>, vector: Array<Clock>, content: Bytes, };
+        export type Changes = { blocks: Array<string>, structure: boolean, styles: boolean, relations: Array<string>, ranges: Array<string>, other: boolean, };
+        export type SyncReport = { info: SyncInfo, changed: boolean, changes: Changes,
+        /**
+         * The anchored local selection after the import, if one is set.
+         */
+        selection: Selection | null,
+        /**
+         * Whether an end of it had to take a fallback.
+         */
+        selection_moved: boolean, };
+        export type EditReport = { changed: boolean, changes: Changes, selection: Selection | null, selection_moved: boolean, };
+        export type StableCaret = { node: string, affinity: Affinity, anchor: string, };
+        export type StableSelection = { anchor: StableCaret, focus: StableCaret, };
+        export type Presence = { selection: Selection | null, meta: { [key in string]: string }, };
+        export type PresenceView = { peer_id: string, meta: { [key in string]: string }, selection: Selection | null, caret: PageRect | null, rects: Array<PageRect>, };
+        export type Alignment = "start" | "centre" | "end" | "justify";
+        export type LineEdge = "start" | "end";
+        export type AnchorEdge = "position" | "gap-start" | "gap-end" | "line-start" | "line-end";
+        export type TabStop = { position: number | null, alignment: Alignment, leader: string | null, };
+        export type TabStops = { interval: number, stops: Array<TabStop>, };
+        export type MarkKind = "paragraph-end" | "line-break" | "gap" | "alignment" | "anchor";
+        export type RelationState = "valid" | "rebound" | "ambiguous" | "missing" | "owner-deleted" | "deleted";
+        export type Mark = { kind: MarkKind, node: string, offset: number, line: number, from: Point, to: Point | null, target_page: number | null, alignment: Alignment | null, relation: string | null, state: RelationState | null, applied: boolean,
+        /**
+         * Anchors: the authored source edge.
+         */
+        edge: LineEdge | null,
+        /**
+         * Anchors: the target's block and UTF-8 byte offset, when it resolved.
+         */
+        target_node: string | null, target_offset: number | null,
+        /**
+         * Anchors: the authored target edge.
+         */
+        target_edge: AnchorEdge | null,
+        /**
+         * Anchors: the stable code of the layout diagnostic that explains an
+         * unapplied or suspect pin (`relation.alignment-cycle`, `-limit`,
+         * `-outside`, `-conflict` or `-invalid`).
+         */
+        diagnostic: string | null, };
+        export type MarksPage = { token: LayoutToken, page: number, marks: Array<Mark>, };
+        export type DiagnosticFilter = {
+            /**
+             * Keep codes starting with this text, such as `relation.` or
+             * `relation.alignment-cycle`.
+             */
+            code_prefix: string | null,
+            /**
+             * Keep this severity and worse.
+             */
+            min_severity: Severity | null,
+            /**
+             * Keep one subject: `relation:<id>`, `node:<id>`, `range:<id>`,
+             * `document`, or a bare id.
+             */
+            subject: string | null,
+            /**
+             * At most this many (default and ceiling 1000).
+             */
+            limit: number | null, };
+            export type DiagnosticList = { diagnostics: Array<Diagnostic>,
+            /**
+             * More matched than `limit` allowed.
+             */
+            truncated: boolean, };
+            export type ImportCopy = { document_id: string, peer_id: string, };
+            export type ReplaceSelection = { selection: StableSelection, };
+            export type ReplaceText = { selection: StableSelection, text: string, html: boolean, };
+            export type Replaced = {
+                /**
+                 * The deletion's effects, then the paste's: one pass maps a position.
+                 */
+                applied: Applied,
+                /**
+                 * A collapsed selection at the end of the inserted content (or at the
+                 * start of the replaced range when nothing was inserted).
+                 */
+                selection: Selection | null, };
+                export type Batch = { commands: Array<Command>,
+                /**
+                 * Refuse with `bindings.stale`, writing nothing, unless the document is
+                 * at exactly this revision (`State.revision`).
+                 */
+                expected_revision: Array<Clock> | null,
+                /**
+                 * Mapped through the batch's effects and returned in `BatchReport`.
+                 */
+                selection: Selection | null, };
+                export type BatchReport = { applied: Applied,
+                /**
+                 * `Batch.selection` as the batch left it; `None` when it was not given or
+                 * its block was deleted.
+                 */
+                selection: Selection | null, };
+                export type PacketBound = 33554432
+
+
+
+                export class DocumentSession {
+                    private constructor();
+                    free(): void;
+                    [Symbol.dispose](): void;
+                    anchor_selection(request: Payload<Selection>): Payload<StableSelection>;
+                    apply(request: Payload<Transaction>): Payload<Applied>;
+                    awareness(content: Uint8Array): Payload<Awareness>;
+                    batch(request: Payload<Batch>): Payload<BatchReport>;
+                    cancel(job: number): Payload<boolean>;
+                    caret_rect(request: Payload<Caret>): Payload<PageRect>;
+                    copy(request: Payload<Selection>): Payload<Bytes>;
+                    copy_as(request: Payload<CopyAs>): Payload<Exported>;
+                    declare_font(request: Payload<FontDeclaration>, content: Uint8Array): Payload<Face>;
+                    diagnostics(): Payload<Array<Diagnostic>>;
+                    diagnostics_for(request: Payload<DiagnosticFilter>): Payload<DiagnosticList>;
+                    display_json(page: number): Payload<string>;
+                    display_page(page: number): Payload<DisplayPage>;
+                    export(request: Payload<ExportFormat>): Payload<Exported>;
+                    export_updates(): Payload<SyncUpdate>;
+                    glyph_outlines(request: Payload<GlyphRequest>): Payload<GlyphOutlines>;
+                    glyph_outlines_styled(request: Payload<StyledGlyphRequest>): Payload<GlyphOutlines>;
+                    hit_test(request: Payload<HitTest>): Payload<Hit>;
+                    import_text(request: Payload<TextImport>): Payload<Applied>;
+                    import_updates(request: Payload<SyncUpdate>): Payload<SyncInfo>;
+                    insert_image(request: Payload<ImageInsert>): Payload<Applied>;
+                    install_plugin(plugin: number, request: Payload<PluginInstall>): Payload<boolean>;
+                    load_plugin(request: Payload<PluginSpec>, content: Uint8Array): Payload<number>;
+                    local_selection(): Payload<Selection | null>;
+                    marks(page: number): Payload<MarksPage>;
+                    move_cursor(request: Payload<Move>): Payload<Cursor>;
+                    partial_page(job: number, page: number): Payload<DisplayPage>;
+                    paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
+                    png(page: number, scale_permille: number): Payload<Bytes>;
+                    presence(request: Payload<Presence>): Payload<Awareness>;
+                    reading_order(): Payload<Array<ReadingStep>>;
+                    redo(): Payload<boolean>;
+                    redo_report(): Payload<EditReport>;
+                    register_asset(request: Payload<AssetDeclaration>, content: Uint8Array): Payload<string>;
+                    release_job(job: number): Payload<boolean>;
+                    release_plugin(plugin: number): Payload<boolean>;
+                    replace_selection(request: Payload<ReplaceSelection>, content: Uint8Array): Payload<Replaced>;
+                    replace_text(request: Payload<ReplaceText>): Payload<Replaced>;
+                    resolve_presence(request: Payload<Awareness>): Payload<PresenceView>;
+                    resolve_selection(request: Payload<StableSelection>): Payload<Selection | null>;
+                    resource_bytes(request: Payload<string>): Payload<Bytes>;
+                    resources(): Payload<Array<Resource>>;
+                    run_plugin_edit(plugin: number, request: Payload<PluginEdit>, content: Uint8Array): Payload<Applied>;
+                    save(): Payload<Bytes>;
+                    selection_rects(request: Payload<Selection>): Payload<Array<PageRect>>;
+                    set_font_settings(request: Payload<FontSettings>): Payload<null>;
+                    set_page_setup(request: Payload<PageSetupPatch>): Payload<Applied>;
+                    set_selection(request: Payload<Selection | null>): Payload<StableSelection | null>;
+                    start_layout(request: Payload<LayoutOptions>): Payload<number>;
+                    state(): Payload<State>;
+                    step(job: number, budget: number): Payload<LayoutProgress>;
+                    svg(page: number): Payload<string>;
+                    sync_export(request: Payload<SyncRequest>): Payload<SyncPacket>;
+                    sync_import(request: Payload<SyncPacket>): Payload<SyncReport>;
+                    sync_info(): Payload<SyncInfo>;
+                    undo(): Payload<boolean>;
+                    undo_report(): Payload<EditReport>;
+                    validate_awareness(request: Payload<Awareness>): Payload<Bytes>;
+                }
+
+                export class Workspace {
+                    free(): void;
+                    [Symbol.dispose](): void;
+                    create(request: Payload<Create>): DocumentSession;
+                    /**
+                     * Declares a font once for every session of this workspace. `content` is
+                     * a `Uint8Array`, copied once into engine memory.
+                     */
+                    declare_font(request: Payload<FontDeclaration>, content: Uint8Array): Payload<Face>;
+                    /**
+                     * Imports a package as a new, independent document (new identity, fresh
+                     * history). See `Workspace::import_copy` in the native facade.
+                     */
+                    import_copy(request: Payload<ImportCopy>, content: Uint8Array): DocumentSession;
+                    constructor();
+                    open(request: Payload<Open>, content: Uint8Array): DocumentSession;
+                    /**
+                     * Default font settings for every session of this workspace.
+                     */
+                    set_font_settings(request: Payload<FontSettings>): Payload<null>;
+                }
+
+                /**
+                 * The one bound on a sync packet body, in bytes (32 MiB). The TypeScript
+                 * type `PacketBound` is this number as a literal. See the native constant
+                 * `reprise::MAX_PACKET_BYTES` for the rationale.
+                 */
+                export function maxPacketBytes(): number;
+
+                /**
+                 * Calls `handler(message)` when the engine panics, before the instance
+                 * traps. A `panic=abort` build cannot recover: after the call every export
+                 * fails, so the host should discard this instance (its worker), reopen the
+                 * last saved package in a fresh one and resynchronise. The message names
+                 * the panic and its location, for reporting.
+                 */
+                export function setPanicHandler(handler: Function): void;
+
+                export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+
+                export interface InitOutput {
+                    readonly memory: WebAssembly.Memory;
+                    readonly __wbg_documentsession_free: (a: number, b: number) => void;
+                    readonly __wbg_workspace_free: (a: number, b: number) => void;
+                    readonly documentsession_anchor_selection: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_apply: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_awareness: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_batch: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_cancel: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_caret_rect: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_copy: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_copy_as: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_declare_font: (a: number, b: any, c: any) => [number, number, number];
+                    readonly documentsession_diagnostics: (a: number) => [number, number, number];
+                    readonly documentsession_diagnostics_for: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_display_json: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_display_page: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_export: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_export_updates: (a: number) => [number, number, number];
+                    readonly documentsession_glyph_outlines: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_glyph_outlines_styled: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_hit_test: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_import_text: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_import_updates: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_insert_image: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_install_plugin: (a: number, b: number, c: any) => [number, number, number];
+                    readonly documentsession_load_plugin: (a: number, b: any, c: any) => [number, number, number];
+                    readonly documentsession_local_selection: (a: number) => [number, number, number];
+                    readonly documentsession_marks: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
+                    readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];
+                    readonly documentsession_png: (a: number, b: number, c: number) => [number, number, number];
+                    readonly documentsession_presence: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_reading_order: (a: number) => [number, number, number];
+                    readonly documentsession_redo: (a: number) => [number, number, number];
+                    readonly documentsession_redo_report: (a: number) => [number, number, number];
+                    readonly documentsession_register_asset: (a: number, b: any, c: any) => [number, number, number];
+                    readonly documentsession_release_job: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_release_plugin: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_replace_selection: (a: number, b: any, c: any) => [number, number, number];
+                    readonly documentsession_replace_text: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_resolve_presence: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_resolve_selection: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_resource_bytes: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_resources: (a: number) => [number, number, number];
+                    readonly documentsession_run_plugin_edit: (a: number, b: number, c: any, d: any) => [number, number, number];
+                    readonly documentsession_save: (a: number) => [number, number, number];
+                    readonly documentsession_selection_rects: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_set_font_settings: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_set_page_setup: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_set_selection: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_start_layout: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_state: (a: number) => [number, number, number];
+                    readonly documentsession_step: (a: number, b: number, c: number) => [number, number, number];
+                    readonly documentsession_svg: (a: number, b: number) => [number, number, number];
+                    readonly documentsession_sync_export: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_sync_import: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_sync_info: (a: number) => [number, number, number];
+                    readonly documentsession_undo: (a: number) => [number, number, number];
+                    readonly documentsession_undo_report: (a: number) => [number, number, number];
+                    readonly documentsession_validate_awareness: (a: number, b: any) => [number, number, number];
+                    readonly maxPacketBytes: () => number;
+                    readonly setPanicHandler: (a: any) => void;
+                    readonly workspace_create: (a: number, b: any) => [number, number, number];
+                    readonly workspace_declare_font: (a: number, b: any, c: any) => [number, number, number];
+                    readonly workspace_import_copy: (a: number, b: any, c: any) => [number, number, number];
+                    readonly workspace_new: () => number;
+                    readonly workspace_open: (a: number, b: any, c: any) => [number, number, number];
+                    readonly workspace_set_font_settings: (a: number, b: any) => [number, number, number];
+                    readonly __wbindgen_malloc: (a: number, b: number) => number;
+                    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+                    readonly __wbindgen_exn_store: (a: number) => void;
+                    readonly __externref_table_alloc: () => number;
+                    readonly __wbindgen_externrefs: WebAssembly.Table;
+                    readonly __externref_table_dealloc: (a: number) => void;
+                    readonly __wbindgen_start: () => void;
+                }
+
+                export type SyncInitInput = BufferSource | WebAssembly.Module;
+
+                /**
+                 * Instantiates the given `module`, which can either be bytes or
+                 * a precompiled `WebAssembly.Module`.
+                 *
+                 * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+                 *
+                 * @returns {InitOutput}
+                 */
+                export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+                /**
+                 * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+                 * for everything else, calls `WebAssembly.instantiate` directly.
+                 *
+                 * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+                 *
+                 * @returns {Promise<InitOutput>}
+                 */
+                export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

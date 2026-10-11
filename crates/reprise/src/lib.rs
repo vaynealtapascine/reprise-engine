@@ -30,6 +30,20 @@ pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 pub const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_AWARENESS_BYTES: usize = 64 * 1024;
+/// The one bound on a sync packet's body, in bytes: 32 MiB (the frame header
+/// adds under a KiB). The app, the relay and
+/// browser persistence should all import this number instead of carrying
+/// their own.
+///
+/// Why this value. It is the largest packet the sync layer will build or
+/// import, and a full-snapshot packet is the only way a new peer can join, so
+/// a document whose snapshot exceeds it cannot be shared at all. Below it
+/// (16 MiB) a document the engine and relay accept would be unstorable
+/// locally. Above it (the 64 MiB persistence cap) one packet would dwarf the
+/// 32 MiB font and 16 MiB asset bounds that travel beside it, and a relay would
+/// have to buffer far more per peer before it could refuse. A packet is
+/// refused with `bindings.limit` before it is parsed.
+pub const MAX_PACKET_BYTES: usize = reprise_doc::sync::MAX_PACKET_BYTES;
 pub fn validate<T>(payload: &Payload<T>) -> Result<&T> {
     if payload.version != API_VERSION {
         return Err(Error::Version(payload.version));

@@ -280,7 +280,7 @@ impl Document {
                     if fragment.styles.contains_key(&name) {
                         break;
                     }
-                    let Some(style) = self.style(&name) else {
+                    let Some(style) = self.style_for_copy(&name) else {
                         break;
                     };
                     next = style.parent.clone();

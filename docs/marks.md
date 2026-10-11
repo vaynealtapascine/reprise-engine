@@ -8,8 +8,9 @@ Native clipboard preserves characters, styles, ranges and remapped relations.
 
 `Style.alignment` is start, centre or end in logical inline coordinates. The
 default remains legacy positioning when no alignment is authored. Tabs opt into
-logical start alignment, including RTL. Justification is deliberately absent;
-the existing Optimal composer remains available for ordinary paragraphs.
+logical start alignment, including RTL. `justify` (added by
+`docs/paragraph-styles.md`) composes the paragraph with Optimal's justified
+mode; it is not a tab stop alignment.
 
 `Style.tabs` is a versioned `tabs1:` JSON string with a positive default interval
 and up to 256 increasing stops. A stop has an integer distance from inline start,

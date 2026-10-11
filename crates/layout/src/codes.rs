@@ -117,3 +117,11 @@ pub const ALIGNMENT_OUTSIDE: Code = Code::new("relation.alignment-outside");
 
 pub const TAB_LEADER_LIMIT: Code = Code::new("layout.tab-leader-limit");
 pub const TAB_LEADER_MISSING: Code = Code::new("layout.tab-leader-missing");
+
+/// Paragraph indents would leave less than a quarter of the frame's inline
+/// size; they were reduced (Warning: not the authored indents).
+pub const INDENT_CLAMPED: Code = Code::new("layout.indent-clamped");
+/// A keep (keep-with-next, keep-together, widows, orphans) could not be met
+/// even in an empty frame, or its chain passed 32 blocks; the paragraph
+/// breaks normally (Warning).
+pub const KEEP_UNSATISFIED: Code = Code::new("layout.keep-unsatisfied");

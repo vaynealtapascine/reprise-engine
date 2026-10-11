@@ -191,7 +191,7 @@ impl Editor {
     /// Writes a validated plan. Validation made every check, and the document
     /// applies the steps the model applied, so a failure here would be a bug
     /// in this crate or the store; it is reported, never panicked on (37).
-    fn write(&self, plan: Plan) -> Result<Applied, EditError> {
+    pub(crate) fn write(&self, plan: Plan) -> Result<Applied, EditError> {
         if let Some(paste) = plan.paste {
             return crate::paste::write(&self.doc, &self.schemas, paste).map(|p| p.applied);
         }
@@ -338,6 +338,22 @@ impl Editor {
                 self.doc.restore_relation(id)?;
             }
             Step::RemoveRelation { id } => self.doc.delete_relation(*id)?,
+            Step::DefineStyle { name, style } => self.doc.define_named_style(name, style)?,
+            Step::PatchStyle { name, patch } => self.doc.patch_named_style(name, patch)?,
+            Step::RenameStyle { from, to } => self.doc.rename_named_style(from, to)?,
+            Step::DeleteStyle { name } => self.doc.delete_named_style(name)?,
+            Step::SetStyleName { node, name } => self.doc.set_style_name(*node, name)?,
+            Step::PatchOverrides { node, patch } => self.doc.patch_overrides(*node, patch)?,
+            Step::ClearAlignment { node } => self.doc.patch_overrides(
+                *node,
+                &reprise_doc::StylePatch {
+                    clear: ["alignment".to_string()].into(),
+                    ..Default::default()
+                },
+            )?,
+            Step::ClearLineAlignment { node, at } => {
+                self.doc.clear_line_alignment(*node, *at)?;
+            }
         }
         Ok(())
     }

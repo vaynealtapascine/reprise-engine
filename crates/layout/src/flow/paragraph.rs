@@ -36,6 +36,9 @@ pub(crate) struct Paragraph {
     stalls: usize,
     forced: bool,
     overflowed: bool,
+    /// `layout.indent-clamped` and `layout.keep-unsatisfied` go out once.
+    indent_reported: bool,
+    keep_reported: bool,
 }
 
 /// Which preparation is running: the block's first, or a retry against a
@@ -71,6 +74,8 @@ impl Paragraph {
             stalls: 0,
             forced: false,
             overflowed: false,
+            indent_reported: false,
+            keep_reported: false,
         }
     }
     pub(crate) fn node(&self) -> NodeId {
@@ -109,7 +114,8 @@ impl Flow<'_> {
         if !p.started {
             p.started = true;
             if let Some(evaluation) = self.evaluation {
-                let key = FlowKey::new(self, doc, p.node);
+                let ahead = self.keep_lookahead(doc, p.node);
+                let key = FlowKey::new(self, doc, p.node, ahead);
                 if let Some(delta) = evaluation.flow_hit(p.node, &key, self.engine) {
                     self.apply_delta(delta);
                     p.finished = true;
@@ -288,33 +294,26 @@ impl Flow<'_> {
         let fill = self.fills[index];
         let template = self.template;
         let frame = &template.frames[self.thread[self.pos]];
-        let y = if prepared.image.is_some() {
+        let first = p.lines.is_empty();
+        let image = prepared.image.is_some();
+        // Spacing collapses to the larger of the two, and is truncated at
+        // the start of every frame (`docs/paragraph-styles.md`).
+        let y = if image {
             self.table_top()
         } else if fill.empty {
             Length::ZERO
+        } else if first {
+            fill.used + fill.after.max(prepared.style.space_before)
         } else {
             fill.used
         };
-        let measure = Measure(frame.width);
-        let runaround = Runaround {
-            base: measure,
-            exclusions: self
-                .plan
-                .exclusions
-                .get(&index)
-                .into_iter()
-                .flatten()
-                .copied()
-                .map(Polygon::rect)
-                .collect(),
-            margin: Length::ZERO,
-            min_width: Length(1),
-        };
-        let depth = self.depth(index, frame.depth);
-        if prepared.image.is_some()
-            && y > Length::ZERO
-            && (y > depth || depth - y < prepared.line_height())
-        {
+        if prepared.indents(frame.width).1 && !p.indent_reported {
+            p.indent_reported = true;
+            self.snapshot.diagnostics.push(indent_clamped(&subject));
+        }
+        let room = self.room(index, frame, prepared, p.start);
+        let depth = room.depth;
+        if image && y > Length::ZERO && (y > depth || depth - y < prepared.line_height()) {
             if !self.advance() {
                 self.end_loop(p);
                 return;
@@ -322,17 +321,13 @@ impl Flow<'_> {
             self.retry(doc, p);
             return;
         }
-        let inner: &dyn GeometryProvider = if runaround.exclusions.is_empty() {
-            &runaround.base
-        } else {
-            &runaround
-        };
+        let inner = room.inner();
         let bounded = Bounded { inner, depth };
         let unbounded =
             (prepared.line_height() > self.max_depth || p.forced) && depth > Length::ZERO;
         let geometry: &dyn GeometryProvider = if unbounded { inner } else { &bounded };
         let mut composition_notes = Vec::new();
-        let composed = prepared.compose(
+        let mut composed = prepared.compose(
             engine,
             geometry,
             index,
@@ -363,6 +358,118 @@ impl Flow<'_> {
             }
             return;
         }
+        // Keeps, widows and orphans: bounded lookahead, never undoing placed
+        // lines. Moving helps only when the frame holds something that is
+        // not a keep-with-next chain into this paragraph; the next frame is
+        // then empty, so a paragraph moves at most once.
+        let style = &prepared.style;
+        let mut move_on = false;
+        let mut unsatisfied = false;
+        if !image && !unbounded && !p.forced && style.has_keeps() {
+            let can_move = first && !fill.anchored && self.next_frame().is_some();
+            let refuse = |move_on: &mut bool, unsatisfied: &mut bool| {
+                if can_move {
+                    *move_on = true;
+                } else if fill.empty || !first {
+                    *unsatisfied = true;
+                }
+            };
+            let here = rows(&composed.lines);
+            match composed.rest {
+                Some(rest) => {
+                    if first && (style.keep_together || here.len() < style.orphans()) {
+                        refuse(&mut move_on, &mut unsatisfied);
+                    }
+                    if !move_on
+                        && style.widows() > 1
+                        && let Some((next_index, t)) = self.next_frame()
+                        && let Some(next) = template.frames.get(t)
+                        && next.writing_mode == frame.writing_mode
+                    {
+                        let next_room = self.room(next_index, next, prepared, rest);
+                        let trial = prepared.compose(
+                            engine,
+                            &Bounded {
+                                inner: next_room.inner(),
+                                depth: next_room.depth,
+                            },
+                            next_index,
+                            rest,
+                            Length::ZERO,
+                            &subject,
+                            &mut Vec::new(),
+                            None,
+                        );
+                        let there = rows(&trial.lines).len();
+                        if trial.rest.is_none() && there > 0 && there < style.widows() {
+                            let keep = here.len().saturating_sub(style.widows() - there);
+                            let floor = if first { style.orphans() } else { 1 };
+                            match here.get(keep.wrapping_sub(1)) {
+                                Some(&(_, bottom)) if keep >= floor => {
+                                    let mut notes = Vec::new();
+                                    let shorter = prepared.compose(
+                                        engine,
+                                        &Bounded {
+                                            inner,
+                                            depth: bottom.min(depth),
+                                        },
+                                        index,
+                                        p.start,
+                                        y,
+                                        &subject,
+                                        &mut notes,
+                                        self.evaluation,
+                                    );
+                                    if shorter.rest.is_some() && rows(&shorter.lines).len() == keep
+                                    {
+                                        composed = shorter;
+                                        composition_notes = notes;
+                                    }
+                                }
+                                _ => refuse(&mut move_on, &mut unsatisfied),
+                            }
+                        }
+                    }
+                }
+                None if first && style.keep_with_next => {
+                    match self.chain_fits(
+                        doc,
+                        p.node,
+                        style.space_after,
+                        composed.block_end,
+                        index,
+                        frame,
+                        &p.ctx,
+                    ) {
+                        Chain::Fits => {}
+                        Chain::Fails => refuse(&mut move_on, &mut unsatisfied),
+                        Chain::TooLong => unsatisfied = true,
+                    }
+                }
+                None => {}
+            }
+        }
+        let keep_with_next = style.keep_with_next && !image;
+        let space_after = style.space_after;
+        if move_on {
+            // As if nothing fit: the next frame is the candidate start.
+            if !self.advance() {
+                self.end_loop(p);
+                return;
+            }
+            self.retry(doc, p);
+            return;
+        }
+        if unsatisfied && !p.keep_reported {
+            p.keep_reported = true;
+            self.snapshot.diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                codes::KEEP_UNSATISFIED,
+                subject.clone(),
+                "a keep, widow or orphan rule can't be met even in an empty frame; \
+                 the paragraph breaks normally",
+            ));
+        }
         self.snapshot.diagnostics.append(&mut p.preparation_notes);
         self.snapshot.diagnostics.extend(composition_notes);
         if unbounded && !p.overflowed {
@@ -384,6 +491,8 @@ impl Flow<'_> {
                 self.fills[index] = Fill {
                     used: composed.block_end + spacing,
                     empty: false,
+                    after: space_after,
+                    anchored: fill.anchored && keep_with_next,
                 };
                 self.end_loop(p);
             }
@@ -392,6 +501,8 @@ impl Flow<'_> {
                 self.fills[index] = Fill {
                     used: composed.block_end,
                     empty: false,
+                    after: Length::ZERO,
+                    anchored: false,
                 };
                 if !self.advance() {
                     self.end_loop(p);
