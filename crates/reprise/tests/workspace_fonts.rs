@@ -188,8 +188,10 @@ fn workspace_font_input_is_bounded_and_atomic() {
         w.declare_font(&bad, ATKINSON).unwrap_err().code(),
         "bindings.version"
     );
-    let mut settings = FontSettings::default();
-    settings.fallbacks = vec![String::new()];
+    let settings = FontSettings {
+        fallbacks: vec![String::new()],
+        ..FontSettings::default()
+    };
     assert!(w.set_font_settings(&Payload::new(settings)).is_err());
     // Nothing was kept from the refusals.
     let face = w.declare_font(&declaration(), ATKINSON).unwrap().data;

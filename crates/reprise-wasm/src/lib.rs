@@ -363,10 +363,7 @@ impl WasmWorkspace {
         .unchecked_into())
     }
     /// Default font settings for every session of this workspace.
-    pub fn set_font_settings(
-        &self,
-        request: &FontSettingsPayload,
-    ) -> Result<UnitPayload, JsValue> {
+    pub fn set_font_settings(&self, request: &FontSettingsPayload) -> Result<UnitPayload, JsValue> {
         Ok(encode(self.inner.set_font_settings(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn open(
@@ -482,7 +479,10 @@ impl WasmDocument {
         )?
         .unchecked_into())
     }
-    pub fn replace_text(&mut self, request: &ReplaceTextPayload) -> Result<ReplacedPayload, JsValue> {
+    pub fn replace_text(
+        &mut self,
+        request: &ReplaceTextPayload,
+    ) -> Result<ReplacedPayload, JsValue> {
         Ok(encode(self.inner.replace_text(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn diagnostics_for(

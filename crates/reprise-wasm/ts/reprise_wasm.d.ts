@@ -223,7 +223,7 @@ export type TextFeature = {
              * its block was deleted.
              */
             selection: Selection | null, };
-            export type PacketBound = 33554432;
+            export type PacketBound = 33554432
 
 
 

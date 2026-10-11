@@ -58,7 +58,10 @@ fn one_block_replacement_is_one_undo_step() {
     assert_eq!(texts(&e), ["hello there"]);
     assert_eq!(e.undo_count(), 1);
     let (node, offset) = done.caret.unwrap();
-    assert_eq!(e.document().block(node).unwrap().text.to_string(), "hello there");
+    assert_eq!(
+        e.document().block(node).unwrap().text.to_string(),
+        "hello there"
+    );
     assert_eq!(offset, 11);
     assert!(e.undo().unwrap());
     assert_eq!(texts(&e), ["hello world"]);
@@ -125,7 +128,9 @@ fn a_remote_packet_between_staging_and_commit_is_part_of_the_resolution() {
     let mut remote = Editor::new(doc.fork(OTHER_PEER).unwrap(), engine().schemas.clone());
     // The host selects "cdef" and stages the clipboard...
     let s = select(local.document(), (ids[0], 2), (ids[0], 6));
-    let staged = local.stage_replacement(&fragment(&["-"]), "target").unwrap();
+    let staged = local
+        .stage_replacement(&fragment(&["-"]), "target")
+        .unwrap();
     // ...a collaborator types inside the selection and just before it...
     remote
         .apply(&reprise_edit::Transaction::new().with(Command::InsertText {
@@ -149,7 +154,11 @@ fn a_remote_packet_between_staging_and_commit_is_part_of_the_resolution() {
     let before = local.undo_count();
     // ...and the commit resolves against what is there now.
     local.replace_selection(&s, &staged).unwrap();
-    assert_eq!(texts(&local), ["R:ab-gh"], "everything inside the selection went");
+    assert_eq!(
+        texts(&local),
+        ["R:ab-gh"],
+        "everything inside the selection went"
+    );
     assert_eq!(local.undo_count(), before + 1, "one undo step");
     assert!(local.undo().unwrap());
     assert_eq!(
@@ -195,8 +204,12 @@ fn a_selection_that_resolves_nowhere_writes_nothing() {
 fn a_selection_ending_in_a_child_keeps_the_subtree() {
     let doc = Document::new(PEER).unwrap();
     reprise_fixtures::spike::define_styles(&doc).unwrap();
-    let a = doc.append_block(BlockKind::Paragraph, "body", "first").unwrap();
-    let parent = doc.append_block(BlockKind::Paragraph, "body", "parent").unwrap();
+    let a = doc
+        .append_block(BlockKind::Paragraph, "body", "first")
+        .unwrap();
+    let parent = doc
+        .append_block(BlockKind::Paragraph, "body", "parent")
+        .unwrap();
     let child = doc
         .insert_block_at(
             Some(parent),
@@ -218,7 +231,10 @@ fn a_selection_ending_in_a_child_keeps_the_subtree() {
     assert!(e.document().block(parent).is_ok(), "the ancestor survives");
     assert_eq!(e.undo_count(), 1);
     assert!(e.undo().unwrap());
-    assert_eq!(e.document().block(parent).unwrap().text.to_string(), "parent");
+    assert_eq!(
+        e.document().block(parent).unwrap().text.to_string(),
+        "parent"
+    );
 }
 
 #[test]

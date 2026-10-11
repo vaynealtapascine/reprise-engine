@@ -32,7 +32,14 @@ fn paragraph(text: &str, index: u32) -> Command {
         style: Style::default(),
     }
 }
-fn anchor(node: &str, at: u32, edge: LineEdge, target: &str, target_at: u32, te: AnchorEdge) -> Command {
+fn anchor(
+    node: &str,
+    at: u32,
+    edge: LineEdge,
+    target: &str,
+    target_at: u32,
+    te: AnchorEdge,
+) -> Command {
     Command::AddAnchor {
         node: node.into(),
         at,
@@ -189,7 +196,10 @@ fn diagnostics_filter_is_bounded_and_validated() {
         version: 9,
         data: DiagnosticFilter::default(),
     };
-    assert_eq!(s.diagnostics_for(&bad).unwrap_err().code(), "bindings.version");
+    assert_eq!(
+        s.diagnostics_for(&bad).unwrap_err().code(),
+        "bindings.version"
+    );
     let none = s
         .diagnostics_for(&Payload::new(DiagnosticFilter {
             limit: Some(0),

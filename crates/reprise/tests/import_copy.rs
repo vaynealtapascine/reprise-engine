@@ -25,7 +25,13 @@ fn finish(s: &mut DocumentSession) {
     while !job.step(s, 1000).unwrap().data.complete {}
 }
 fn texts(s: &DocumentSession) -> Vec<String> {
-    s.state().unwrap().data.blocks.into_iter().map(|b| b.text).collect()
+    s.state()
+        .unwrap()
+        .data
+        .blocks
+        .into_iter()
+        .map(|b| b.text)
+        .collect()
 }
 fn block(text: &str, index: u32) -> Command {
     Command::InsertBlock {
@@ -39,9 +45,12 @@ fn block(text: &str, index: u32) -> Command {
 /// A source with text, character formatting, a page setup, a pin and an asset.
 fn source() -> (Vec<u8>, DocumentSession) {
     let mut s = session(SOURCE, "1");
-    let ids = tx(&mut s, vec![block("first paragraph", 0), block("second", 1)])
-        .data
-        .blocks;
+    let ids = tx(
+        &mut s,
+        vec![block("first paragraph", 0), block("second", 1)],
+    )
+    .data
+    .blocks;
     tx(
         &mut s,
         vec![
@@ -109,7 +118,13 @@ fn a_copy_keeps_content_and_drops_history() {
     );
     assert!(!b.can_undo, "no undo history");
     // No operation of the source survives: its peer is gone from the log.
-    let peers: Vec<_> = copy.sync_info().data.vector.into_iter().map(|c| c.peer).collect();
+    let peers: Vec<_> = copy
+        .sync_info()
+        .data
+        .vector
+        .into_iter()
+        .map(|c| c.peer)
+        .collect();
     assert_eq!(peers, ["2"]);
     // The pin, tab and the bundled asset are kept.
     finish(&mut copy);
@@ -152,7 +167,12 @@ fn a_copy_saves_and_reopens_under_its_own_identity() {
         .unwrap();
     let saved = copy.save().unwrap().data.bytes;
     let reopened = workspace()
-        .open(&Payload::new(Open { peer_id: "3".into() }), &saved)
+        .open(
+            &Payload::new(Open {
+                peer_id: "3".into(),
+            }),
+            &saved,
+        )
         .unwrap();
     assert_eq!(reopened.state().unwrap().data.document_id, COPY);
     assert_eq!(texts(&reopened), texts(&copy));
@@ -200,7 +220,10 @@ fn a_copy_and_its_source_never_cross_sync() {
     // Honest packets are refused with stable codes, in both directions.
     let error = copy.sync_import(&from_source).unwrap_err();
     assert_eq!(error.code(), "bindings.copy-source");
-    assert_eq!(original.sync_import(&from_copy).unwrap_err().code(), "bindings.id");
+    assert_eq!(
+        original.sync_import(&from_copy).unwrap_err().code(),
+        "bindings.id"
+    );
     let legacy = original.export_updates().unwrap();
     assert_eq!(
         copy.import_updates(&legacy).unwrap_err().code(),
@@ -233,12 +256,18 @@ fn identity_must_change_and_input_is_bounded() {
         })
     };
     assert_eq!(
-        w.import_copy(&request(SOURCE), &bytes).err().unwrap().code(),
+        w.import_copy(&request(SOURCE), &bytes)
+            .err()
+            .unwrap()
+            .code(),
         "bindings.id",
         "a copy needs a new identity"
     );
     assert_eq!(
-        w.import_copy(&request("not-hex"), &bytes).err().unwrap().code(),
+        w.import_copy(&request("not-hex"), &bytes)
+            .err()
+            .unwrap()
+            .code(),
         "bindings.id"
     );
     assert!(w.import_copy(&request(COPY), b"garbage").is_err());
@@ -247,10 +276,18 @@ fn identity_must_change_and_input_is_bounded() {
         version: 3,
         data: request(COPY).data,
     };
-    assert_eq!(w.import_copy(&bad, &bytes).err().unwrap().code(), "bindings.version");
+    assert_eq!(
+        w.import_copy(&bad, &bytes).err().unwrap().code(),
+        "bindings.version"
+    );
     // The source bytes are untouched and still open as the source.
     let reopened = w
-        .open(&Payload::new(Open { peer_id: "9".into() }), &bytes)
+        .open(
+            &Payload::new(Open {
+                peer_id: "9".into(),
+            }),
+            &bytes,
+        )
         .unwrap();
     assert_eq!(reopened.state().unwrap().data.document_id, SOURCE);
 }

@@ -192,7 +192,7 @@ impl Workspace {
         doc.commit();
         ensure_base_style(&doc)?;
         let mut package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
-        use reprise_format::{ids, Asset, FontPin};
+        use reprise_format::{Asset, FontPin, ids};
         let sections = &source.container().sections;
         package.set_settings(&source.settings()?)?;
         package.set_optional_features(source.container().header.features.optional)?;
@@ -1029,7 +1029,10 @@ impl DocumentSession {
         if bytes.len() > 96 * 1024 * 1024 {
             return Err(Error::Limit("clipboard bytes".into()));
         }
-        self.replace_fragment(reprise_clipboard::NativeFragment::decode(bytes)?, &r.selection)
+        self.replace_fragment(
+            reprise_clipboard::NativeFragment::decode(bytes)?,
+            &r.selection,
+        )
     }
     /// [`DocumentSession::replace_selection`] with plain text or HTML.
     pub fn replace_text(&mut self, request: &Payload<ReplaceText>) -> Result<Payload<Replaced>> {

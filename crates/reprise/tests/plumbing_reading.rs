@@ -62,7 +62,11 @@ fn ranges_slice_the_text_and_tile_each_block() {
         assert!(line.is_none_or(|l| l < step.line));
     }
     for (node, text) in &blocks {
-        assert_eq!(covered.get(node).copied().unwrap_or(0), text.len(), "{node}");
+        assert_eq!(
+            covered.get(node).copied().unwrap_or(0),
+            text.len(),
+            "{node}"
+        );
     }
 }
 
@@ -79,5 +83,8 @@ fn editing_retires_the_steps_until_layout_returns() {
         }],
     }))
     .unwrap();
-    assert_eq!(s.reading_order().unwrap_err().code(), "bindings.layout-required");
+    assert_eq!(
+        s.reading_order().unwrap_err().code(),
+        "bindings.layout-required"
+    );
 }

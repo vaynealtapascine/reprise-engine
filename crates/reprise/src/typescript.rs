@@ -380,30 +380,24 @@ pub fn declarations() -> String {
     text.push('\n');
     text.push_str("export ");
     text.push_str(&ImportCopy::decl(&cfg));
-    text.push_str("\n");
+    text.push('\n');
     text.push_str("export ");
     text.push_str(&ReplaceSelection::decl(&cfg));
-    text.push_str("
-");
+    text.push('\n');
     text.push_str("export ");
     text.push_str(&ReplaceText::decl(&cfg));
-    text.push_str("
-");
+    text.push('\n');
     text.push_str("export ");
     text.push_str(&Replaced::decl(&cfg));
-    text.push_str("
-");
+    text.push('\n');
     text.push_str("export ");
     text.push_str(&Batch::decl(&cfg));
-    text.push_str("
-");
+    text.push('\n');
     text.push_str("export ");
     text.push_str(&BatchReport::decl(&cfg));
-    text.push_str("
-");
+    text.push('\n');
     text.push_str(&format!(
-        "export type PacketBound = {};
-",
+        "export type PacketBound = {}\n",
         crate::MAX_PACKET_BYTES
     ));
     text

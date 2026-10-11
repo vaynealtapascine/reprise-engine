@@ -163,4 +163,40 @@ browser persistence should raise from 16 MiB to the constant.
 
 ## How later features plug in
 
-Written with the final report and kept here for the next wave.
+-   **Duplicate in the app.** `Workspace.import_copy` with a fresh document id
+    and peer, then the app stores it as a new document. The worker kind is
+    `import-copy`; the Tauri host mirrors it. The server must not copy access
+    grants, and the relay must give the copy its own room.
+-   **Paste over a selection.** Anchor with `set_selection`/`anchor_selection`,
+    then `replace_selection` (native bytes) or `replace_text` (HTML or plain,
+    after the app's own native, then HTML, then plain fallback). One call, one
+    undo step; use `Replaced.selection` as the new caret.
+-   **Make heading and insert link as batches.** `batch` with the style or role
+    commands and, for a link, the relation commands; pass `expected_revision`
+    from the last `State` and the current selection to get it mapped back. Both
+    are plain commands today; a link that must also replace the visible text
+    needs a kernel command that plans its own anchors (the extension point).
+-   **Accepting a suggestion.** Delete and insert of the suggested range are
+    ordinary commands in one `batch`; the suggestion relation's removal goes in
+    the same batch, so accept is one undo step.
+-   **The marks UI's details and repick.** `Mark.edge`, `target_node`,
+    `target_offset` and `target_edge` give repick its defaults without a hit
+    test; `Mark.diagnostic` selects the message; `diagnostics_for` with
+    `subject: "relation:<id>"` gives the full diagnostic. Repick is `batch`
+    of `remove-anchor` then `add-anchor`.
+-   **The accessibility mirror.** `reading_order()` steps slice
+    `State.blocks[].text` by `start..end` (UTF-8 bytes); no `move` calls.
+-   **The refactor round.** `docs/facade-review.md`.
+
+## App seam
+
+Commands: `batch` (`Batch`), `replace_selection`, `replace_text`,
+`import_copy`, workspace `declare_font` and `set_font_settings`,
+`diagnostics_for`. State and results: `Replaced`, `BatchReport`,
+`DiagnosticList`, `Mark` (new fields), `ReadingStep` (`start`, `end`),
+`PacketBound`/`maxPacketBytes()`. Worker kinds: `import-copy`,
+`workspace-font`, `workspace-font-settings`, `batch`, `replace`,
+`replace-text`, `diagnostics`. Host protocol (`app/engine/protocol.ts`)
+additions: `importCopy`, `batch`, `replaceClipboard` (selection plus native,
+HTML and text; try native first and fall back on `clipboard.invalid` or
+`clipboard.version`), `diagnostics`, `workspaceFont`.

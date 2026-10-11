@@ -30,7 +30,13 @@ fn block(text: &str, index: u32) -> Command {
     }
 }
 fn texts(s: &DocumentSession) -> Vec<String> {
-    s.state().unwrap().data.blocks.into_iter().map(|b| b.text).collect()
+    s.state()
+        .unwrap()
+        .data
+        .blocks
+        .into_iter()
+        .map(|b| b.text)
+        .collect()
 }
 fn caret(node: &str, offset: u32) -> Caret {
     Caret {
@@ -82,9 +88,17 @@ fn a_batch_with_a_failing_third_command_applies_nothing() {
     };
     let error = s.batch(&Payload::new(batch)).unwrap_err();
     let payload = error.payload().data;
-    assert_eq!(payload.command, Some(2), "the error names the third command");
+    assert_eq!(
+        payload.command,
+        Some(2),
+        "the error names the third command"
+    );
     assert_eq!(s.state().unwrap().data, before.0);
-    assert_eq!(s.sync_info().data, before.1, "not even a tombstone was written");
+    assert_eq!(
+        s.sync_info().data,
+        before.1,
+        "not even a tombstone was written"
+    );
 }
 
 #[test]
@@ -119,7 +133,11 @@ fn a_batch_is_one_undo_step_and_maps_the_selection() {
     let mapped = report.selection.unwrap();
     assert_eq!((mapped.anchor.offset, mapped.focus.offset), (9, 14));
     assert!(s.undo().unwrap().data);
-    assert_eq!(texts(&s), ["hello world"], "one undo undoes the whole batch");
+    assert_eq!(
+        texts(&s),
+        ["hello world"],
+        "one undo undoes the whole batch"
+    );
     assert!(s.undo().unwrap().data, "the setup block is the next step");
     assert!(texts(&s).is_empty());
 }
@@ -194,7 +212,12 @@ fn a_remote_edit_before_the_replacement_is_part_of_it() {
     let node = tx(&mut a, vec![block("abcdefgh", 0)]).data.blocks[0].clone();
     let saved = a.save().unwrap().data.bytes;
     let mut b = Workspace::new()
-        .open(&Payload::new(Open { peer_id: "2".into() }), &saved)
+        .open(
+            &Payload::new(Open {
+                peer_id: "2".into(),
+            }),
+            &saved,
+        )
         .unwrap();
     let stable = a
         .anchor_selection(&Payload::new(selection(&node, 2, 6)))
@@ -252,15 +275,21 @@ fn native_fragment_replacement_and_refusals_leave_the_selection() {
     let mut bad = stable.clone();
     bad.anchor.anchor = "zz".into();
     assert_eq!(
-        s.replace_selection(&Payload::new(ReplaceSelection { selection: bad }), &fragment)
-            .unwrap_err()
-            .code(),
+        s.replace_selection(
+            &Payload::new(ReplaceSelection { selection: bad }),
+            &fragment
+        )
+        .unwrap_err()
+        .code(),
         "bindings.invalid"
     );
     assert_eq!(s.state().unwrap().data, before);
     // The real fragment replaces in one step.
-    s.replace_selection(&Payload::new(ReplaceSelection { selection: stable }), &fragment)
-        .unwrap();
+    s.replace_selection(
+        &Payload::new(ReplaceSelection { selection: stable }),
+        &fragment,
+    )
+    .unwrap();
     assert_eq!(texts(&s), ["PASTED world"]);
     assert!(s.undo().unwrap().data);
     assert_eq!(texts(&s), ["hello world"]);
