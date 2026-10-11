@@ -175,6 +175,24 @@ pub struct LineLayout {
     pub explanation: Explanation,
     /// In visual order, left to right along the inline axis.
     pub runs: Vec<PositionedRun>,
+    /// A list item's marker, on the item's first line only. Derived, not part
+    /// of the block's text; left out of JSON when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marker: Option<MarkerLayout>,
+}
+
+/// A list marker placed in the hanging indent (see `docs/roles-and-lists.md`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MarkerLayout {
+    /// The rendered marker, such as `3.` or `•`. Run ranges are its bytes.
+    pub text: String,
+    /// Where it starts on the frame's inline axis.
+    pub x: Length,
+    pub width: Length,
+    /// The baseline it sits on: its line's.
+    pub baseline: Length,
+    /// In visual order.
+    pub runs: Vec<PositionedRun>,
 }
 
 /// A run of glyphs placed on a line.

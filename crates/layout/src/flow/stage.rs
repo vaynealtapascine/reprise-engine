@@ -32,6 +32,9 @@ pub(crate) struct Staged {
     emphasis: bool,
     family_chains: bool,
     fallback: Option<(FaceId, Length)>,
+    /// A list item's numbering, shaped into a marker once the paragraph's
+    /// direction is known.
+    list: Option<crate::list_marker::ListSpec>,
     shape_key: Option<crate::incremental::ShapingKey>,
     /// Every note so far, in the order `prepare_with` would report them.
     notes: Vec<Diagnostic>,
@@ -103,6 +106,16 @@ pub(crate) fn begin(
             .cloned()
             .map(|note| Diagnostic::from_note(note, subject.clone())),
     );
+    // Role and list membership, read once per preparation; published with
+    // the block like its style notes.
+    let semantics = crate::list_marker::semantics(doc, node);
+    notes.extend(
+        semantics
+            .notes
+            .iter()
+            .cloned()
+            .map(|note| Diagnostic::from_note(note, subject.clone())),
+    );
     for property in &style.clamped {
         notes.push(Diagnostic::new(
             Severity::Warning,
@@ -132,6 +145,7 @@ pub(crate) fn begin(
                 breaks: Vec::new(),
                 fallback: None,
                 image: Some(image),
+                marker: None,
             })),
             notes,
         );
@@ -327,6 +341,19 @@ pub(crate) fn begin(
             value.map(|mut prepared| {
                 prepared.kind = block.kind;
                 prepared.style = style;
+                // The memo is shared by equal text and style; the marker is
+                // this block's own.
+                prepared.marker = marker_for(
+                    engine,
+                    semantics.list.clone(),
+                    prepared.base_level,
+                    &styles,
+                    &descriptors,
+                    &paint,
+                    family_chains,
+                    &subject,
+                    &mut notes,
+                );
                 Box::new(prepared)
             }),
             notes,
@@ -347,6 +374,7 @@ pub(crate) fn begin(
         emphasis,
         family_chains,
         fallback,
+        list: semantics.list,
         shape_key,
         notes,
         shape_notes,
@@ -554,6 +582,19 @@ impl Staged {
             .map(Option::unwrap_or_default)
             .collect();
         let shaped = shaping::assemble(self.text.len(), &itemized.items, &self.requests, glyphs);
+        let subject = Subject::Node(self.node);
+        let mut marker_notes = Vec::new();
+        let marker = marker_for(
+            engine,
+            self.list.take(),
+            itemized.base_level,
+            &self.styles,
+            &self.descriptors,
+            &self.paint,
+            self.family_chains,
+            &subject,
+            &mut marker_notes,
+        );
         let prepared = Prepared {
             paint: self.paint,
             node: self.node,
@@ -567,6 +608,7 @@ impl Staged {
             shaped,
             fallback: self.fallback,
             image: None,
+            marker,
         };
         if let (Some(e), Some(key)) = (evaluation, self.shape_key) {
             e.shaping_miss(
@@ -579,12 +621,50 @@ impl Staged {
                     .to_vec(),
             );
         }
+        // After the memo's notes: the marker is recomputed on every hit.
+        self.notes.extend(marker_notes);
         Finished {
             value: Some(prepared),
             notes: self.notes,
             itemized: true,
         }
     }
+}
+
+/// Shapes a list item's marker in the style of the paragraph's first run.
+#[allow(clippy::too_many_arguments)]
+fn marker_for(
+    engine: &Engine,
+    list: Option<crate::list_marker::ListSpec>,
+    base_level: u8,
+    styles: &[StyleRun],
+    descriptors: &[reprise_font::Descriptors],
+    paint: &[PaintRun],
+    family_chains: bool,
+    subject: &Subject,
+    notes: &mut Vec<Diagnostic>,
+) -> Option<crate::list_marker::PreparedMarker> {
+    let spec = list?;
+    let first = styles.iter().position(|s| s.range.start == 0).unwrap_or(0);
+    let mut shaping_notes = Vec::new();
+    let marker = crate::list_marker::prepare(
+        engine,
+        spec,
+        base_level,
+        crate::list_marker::FirstRun {
+            style: styles.get(first),
+            descriptors: descriptors.get(first).copied(),
+            color: paint.get(first).map_or([0, 0, 0, 255], |p| p.color),
+            family_chains,
+        },
+        &mut shaping_notes,
+    );
+    notes.extend(
+        shaping_notes
+            .into_iter()
+            .map(|n| Diagnostic::from_note(n, subject.clone())),
+    );
+    Some(marker)
 }
 
 /// `prepare_with`, as its stages back to back.

@@ -102,5 +102,8 @@ pub const ALIGNMENT_LIMIT: Code = Code::new("relation.alignment-limit");
 pub const ALIGNMENT_CYCLE: Code = Code::new("relation.alignment-cycle");
 pub const ALIGNMENT_OUTSIDE: Code = Code::new("relation.alignment-outside");
 
+/// A list item's indent would leave less than one em of room; it was reduced (Warning).
+pub const LIST_INDENT: Code = Code::new("layout.list-indent");
+
 pub const TAB_LEADER_LIMIT: Code = Code::new("layout.tab-leader-limit");
 pub const TAB_LEADER_MISSING: Code = Code::new("layout.tab-leader-missing");

@@ -825,6 +825,8 @@ pub(crate) struct Prepared {
     /// Empty lines take their vertical metrics from the style's own face.
     fallback: Option<(FaceId, Length)>,
     image: Option<crate::ImageLayout>,
+    /// A list item's marker and indents.
+    pub(crate) marker: Option<crate::list_marker::PreparedMarker>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -952,6 +954,7 @@ impl Prepared {
                     baseline: block_start,
                     width: image.rect.width,
                     runs: Vec::new(),
+                    marker: None,
                     explanation: Explanation {
                         reason: BreakReason::End,
                         score: None,
@@ -971,6 +974,14 @@ impl Prepared {
             items: &self.items,
             fonts: &engine.fonts,
             adapter: engine.shaper.as_ref(),
+        };
+        // A list item's text is inset from the room's logical inline start.
+        let inset = self.marker.as_ref().map(|m| {
+            crate::list_marker::Inset::new(geometry, m, start == 0, self.style.size)
+        });
+        let geometry: &dyn GeometryProvider = match &inset {
+            Some(inset) => inset,
+            None => geometry,
         };
         let request = ComposeRequest {
             text: &self.text,
@@ -1004,12 +1015,45 @@ impl Prepared {
         if let Some(e) = evaluation {
             e.composed(self.text.len(), composition.lines.len());
         }
+        let mut lines: Vec<LineLayout> = composition
+            .lines
+            .into_iter()
+            .map(|l| line_layout(engine, self, frame, l, subject, diagnostics))
+            .collect();
+        if let (Some(inset), Some(marker)) = (&inset, &self.marker)
+            && start == 0
+        {
+            if inset.clamped.get() {
+                diagnostics.push(Diagnostic::new(
+                    Severity::Warning,
+                    codes::LIST_INDENT,
+                    subject.clone(),
+                    "a list indent leaves less than one em of room; reduced",
+                ));
+            }
+            if let Some(first) = lines.first_mut() {
+                let edges = inset.first_edges(first.rect.origin.y).unwrap_or_else(|| {
+                    // The composer asked at another offset: rebuild from the line.
+                    let inset = marker.first_inset;
+                    if marker.rtl {
+                        crate::list_marker::Edges {
+                            lo: first.available.start,
+                            hi: first.available.end + inset,
+                            inset,
+                        }
+                    } else {
+                        crate::list_marker::Edges {
+                            lo: first.available.start - inset,
+                            hi: first.available.end,
+                            inset,
+                        }
+                    }
+                });
+                first.marker = crate::list_marker::place(marker, first, edges);
+            }
+        }
         Composed {
-            lines: composition
-                .lines
-                .into_iter()
-                .map(|l| line_layout(engine, self, frame, l, subject, diagnostics))
-                .collect(),
+            lines,
             rest: composition.rest,
             block_end: composition.block_end,
         }
@@ -1203,6 +1247,7 @@ fn line_layout(
         width,
         explanation: fragment.explanation,
         runs,
+        marker: None,
     }
 }
 

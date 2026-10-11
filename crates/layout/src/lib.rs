@@ -22,6 +22,7 @@ mod floats;
 mod flow;
 pub mod geometry;
 mod image;
+mod list_marker;
 pub mod incremental;
 pub mod marks;
 mod notes;
@@ -52,7 +53,7 @@ pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
 pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
-    PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader, Resolution, Subject,
+    MarkerLayout, PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader, Resolution, Subject,
     TargetLayout, TemplateSource, TemplateUsed,
 };
 
