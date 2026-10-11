@@ -115,6 +115,22 @@ pub enum Command {
     RemoveRelation {
         id: RelationId,
     },
+    /// Adds an annotation (a link or comment anchor) over a nonempty span,
+    /// with its kind's edge policy. Its ID is in [`crate::Applied::annotations`].
+    AddAnnotation {
+        node: NodeId,
+        range: Range<usize>,
+        data: reprise_doc::annotation::AnnotationData,
+    },
+    /// Replaces an annotation's payload; its kind cannot change.
+    UpdateAnnotation {
+        id: reprise_doc::RangeId,
+        data: reprise_doc::annotation::AnnotationData,
+    },
+    /// Removes an annotation, readable or not. Undo restores it with its ID.
+    RemoveAnnotation {
+        id: reprise_doc::RangeId,
+    },
 }
 
 /// What a command did to positions, so that a caret or selection held by a UI

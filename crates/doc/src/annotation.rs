@@ -784,15 +784,30 @@ impl Document {
         data: &AnnotationData,
         pending: usize,
     ) -> Result<(), AnnotationError> {
-        self.check_target(data)?;
         if bytes.is_empty() {
             return Err(AnnotationError::Empty);
         }
         self.block(node)?.text.slice(bytes)?;
+        self.check_annotation_data(data, pending)
+    }
+
+    /// The span-independent checks: payload, internal targets and capacity.
+    /// `pending` counts additions not yet written.
+    pub fn check_annotation_data(
+        &self,
+        data: &AnnotationData,
+        pending: usize,
+    ) -> Result<(), AnnotationError> {
+        self.check_target(data)?;
         if self.annotation_count().saturating_add(pending) >= MAX_ANNOTATIONS {
             return Err(AnnotationError::Limit);
         }
         Ok(())
+    }
+
+    /// Checks an annotation can be removed: a live record, readable or not.
+    pub fn check_annotation_removal(&self, id: AnnotationId) -> Result<(), AnnotationError> {
+        self.annotation_record(id).map(|_| ())
     }
 
     /// Adds an annotation over `bytes` of `node`, with its kind's policy.

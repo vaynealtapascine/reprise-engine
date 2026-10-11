@@ -34,6 +34,7 @@ impl EditError {
             | Reason::MarksLimit => crate::codes::LIMIT,
             Reason::PageSetup(_) => crate::codes::PAGE_SETUP_INVALID,
             Reason::Store(_) => crate::codes::STORE,
+            Reason::Annotation(ref e) => e.code().unwrap_or(crate::codes::STORE),
             _ => crate::codes::INVALID_COMMAND,
         };
         Note::new(Severity::Error, code, self.to_string())
@@ -93,4 +94,16 @@ pub enum Reason {
     DeadRange(RangeId),
     #[error("the document refused a validated change: {0}")]
     Store(String),
+    /// An annotation edit was refused; the code is the annotation's own.
+    #[error(transparent)]
+    Annotation(reprise_doc::annotation::AnnotationError),
+}
+
+impl From<reprise_doc::annotation::AnnotationError> for Reason {
+    fn from(e: reprise_doc::annotation::AnnotationError) -> Self {
+        match e {
+            reprise_doc::annotation::AnnotationError::Store(s) => Reason::Store(s),
+            e => Reason::Annotation(e),
+        }
+    }
 }

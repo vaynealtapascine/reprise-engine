@@ -44,7 +44,18 @@ pub struct FragmentRange {
     pub node: NodeId,
     pub bytes: Range<usize>,
     pub policy: RangePolicy,
+    /// The annotation this range carries (see `docs/annotations.md`).
+    /// Absent from fragments without annotations; older strict readers
+    /// refuse a fragment that has one rather than paste a bare range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<crate::annotation::AnnotationData>,
 }
+
+/// An annotation was left out of a copy or paste: a kind that is not
+/// copied (Info), or a link whose internal target is outside the copy and
+/// the target document (Warning: the text is pasted without its link).
+pub const ANNOTATION_DROPPED: reprise_diag::Code =
+    reprise_diag::Code::new("clipboard.annotation-dropped");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -146,6 +157,7 @@ impl Fragment {
             }
         }
         let mut ranges = BTreeSet::new();
+        let mut annotations = 0usize;
         for range in &self.ranges {
             let (block, _) = nodes
                 .get(&range.node)
@@ -157,6 +169,17 @@ impl Fragment {
                 return Err(FragmentError::Invalid(
                     "duplicate range or invalid UTF-8 range".into(),
                 ));
+            }
+            if let Some(data) = &range.annotation {
+                annotations += 1;
+                if annotations > crate::annotation::MAX_ANNOTATIONS {
+                    return Err(FragmentError::Limit("annotations"));
+                }
+                if range.bytes.is_empty() {
+                    return Err(FragmentError::Invalid("empty annotation range".into()));
+                }
+                data.validate()
+                    .map_err(|e| FragmentError::Invalid(e.to_string()))?;
             }
         }
         let mut relations = BTreeSet::new();
@@ -362,6 +385,47 @@ impl Document {
             if start > end || (start == end && !bytes.is_empty()) {
                 continue;
             }
+            // Annotations travel with their data; kinds that are not copied
+            // and records this engine cannot read are left out and reported.
+            let annotation = match get_str(&meta, crate::annotation::KEY) {
+                None if meta.get(crate::annotation::KEY).is_none() => None,
+                raw => match raw.map(|r| crate::annotation::AnnotationData::read(&r)) {
+                    Some(Ok(data))
+                        if data.kind().spec().copy
+                            == crate::annotation::CopyPolicy::Duplicate =>
+                    {
+                        if start == end {
+                            continue;
+                        }
+                        Some(data)
+                    }
+                    Some(Ok(data)) => {
+                        let message = format!(
+                            "{} annotations are not copied",
+                            data.kind().name()
+                        );
+                        if !fragment.notes.iter().any(|n| n.message == message) {
+                            fragment
+                                .notes
+                                .push(reprise_diag::Note::info(ANNOTATION_DROPPED, message));
+                        }
+                        continue;
+                    }
+                    _ => {
+                        if !fragment
+                            .notes
+                            .iter()
+                            .any(|n| n.code == crate::annotation::UNREADABLE)
+                        {
+                            fragment.notes.push(reprise_diag::Note::warning(
+                                crate::annotation::UNREADABLE,
+                                "an unreadable annotation was left out of the copy",
+                            ));
+                        }
+                        continue;
+                    }
+                },
+            };
             let meta = tree
                 .get_meta(id)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
@@ -405,6 +469,7 @@ impl Document {
                 node,
                 bytes: start - cut.start..end - cut.start,
                 policy,
+                annotation,
             });
         }
         let copied = CopySet {
