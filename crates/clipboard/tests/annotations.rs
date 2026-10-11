@@ -469,7 +469,10 @@ fn the_pdf_has_link_elements_with_annotations_and_alt_text() {
     assert!(report.xmp.contains("pdfuaid"), "{}", report.xmp);
     let reported = annotation_losses(&losses);
     assert_eq!(reported.len(), 1, "{reported:?}");
-    assert!(reported[0].1.contains("comment anchors"), "the comment is omitted");
+    assert!(
+        reported[0].1.contains("comment anchors"),
+        "the comment is omitted"
+    );
 }
 
 #[test]
@@ -591,7 +594,8 @@ fn a_hostile_native_fragment_is_refused_whole() {
     let schemas = SchemaRegistry::builtin();
     let honest = reprise_clipboard::copy_all(&doc, "source", &schemas, None, None).unwrap();
     let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
-    let attacks: Vec<(&str, Box<dyn Fn(&mut NativeFragment)>)> = vec![
+    type Attack = Box<dyn Fn(&mut NativeFragment)>;
+    let attacks: Vec<(&str, Attack)> = vec![
         (
             "a forbidden scheme",
             Box::new(|f| {
