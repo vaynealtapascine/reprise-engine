@@ -190,7 +190,7 @@ impl Container {
         Self::decode_known(bytes, limits, crate::features::KNOWN_REQUIRED)
     }
 
-    fn decode_known(
+    pub(crate) fn decode_known(
         bytes: &[u8],
         limits: Limits,
         known_required: u64,

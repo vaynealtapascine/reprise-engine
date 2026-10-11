@@ -93,4 +93,16 @@ pub enum Reason {
     DeadRange(RangeId),
     #[error("the document refused a validated change: {0}")]
     Store(String),
+    #[error("no live list {0:?}")]
+    NoSuchList(crate::ListRef),
+    #[error("the list definition is invalid: {0}")]
+    InvalidList(String),
+    #[error("{0} is not a text block, so it can't be a list item")]
+    NotText(NodeId),
+    #[error("{0} is not a list item")]
+    NotAListItem(NodeId),
+    #[error("list levels are 0 to 8, not {0}")]
+    BadLevel(u8),
+    #[error("heading levels are 1 to 6")]
+    BadRole,
 }

@@ -23,6 +23,8 @@ use reprise_doc::{
 use crate::command::Command;
 use crate::error::{EditError, Reason};
 
+mod semantic;
+
 /// The most commands one transaction may hold.
 pub const MAX_COMMANDS: usize = 10_000;
 /// The most text one `InsertText` or `InsertBlock` may carry, in bytes.
@@ -115,6 +117,37 @@ pub(crate) enum Step {
     RemoveRelation {
         id: RelationId,
     },
+    SetRole {
+        node: NodeId,
+        role: reprise_doc::Role,
+    },
+    /// `new` indexes [`Plan::lists`].
+    ActivateList {
+        new: usize,
+    },
+    UpdateList {
+        list: reprise_doc::ListId,
+        definition: reprise_doc::ListDefinition,
+    },
+    DeleteList {
+        list: crate::ListRef,
+    },
+    SetListItem {
+        node: NodeId,
+        list: crate::ListRef,
+        level: u8,
+    },
+    RemoveListItem {
+        node: NodeId,
+    },
+    SetListLevel {
+        node: NodeId,
+        level: u8,
+    },
+    SetListRestart {
+        node: NodeId,
+        value: Option<i64>,
+    },
 }
 
 /// A block the transaction creates.
@@ -133,6 +166,8 @@ pub(crate) struct Plan {
     /// staged first; steps name them by index.
     pub created: Vec<Created>,
     pub relations: Vec<Relation>,
+    /// List definitions to stage; [`Step::ActivateList`] names them by index.
+    pub lists: Vec<reprise_doc::ListDefinition>,
     pub steps: Vec<Step>,
     /// The commands' effects, with staged blocks as indices; the editor
     /// resolves them once those have IDs.
@@ -191,6 +226,10 @@ struct Model<'a> {
         reprise_doc::page_setup::PageDimensions,
         reprise_doc::page_setup::PageSetupPatch,
     )>,
+    /// List membership this transaction has changed: `None` for not an item.
+    members: BTreeMap<NodeId, Option<(crate::ListRef, u8)>>,
+    /// Lists this transaction has deleted.
+    dead_lists: BTreeSet<crate::ListRef>,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -245,6 +284,8 @@ pub(crate) fn plan(
         live_relations: None,
         payload: 0,
         page_setup: None,
+        members: BTreeMap::new(),
+        dead_lists: BTreeSet::new(),
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -546,6 +587,7 @@ impl Model<'_> {
                 self.plan.steps.push(Step::RemoveRelation { id: *id });
                 Ok(())
             }
+            other => self.semantic(other),
         }
     }
 

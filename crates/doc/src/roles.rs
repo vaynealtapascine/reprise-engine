@@ -215,7 +215,7 @@ impl Document {
 
     /// Copies `from`'s role and list membership onto `to` (for splits and
     /// moves that copy a paragraph). Does not commit.
-    pub(crate) fn copy_semantics_to(&self, from: NodeId, to: NodeId) -> Result<(), DocError> {
+    pub fn copy_semantics_to(&self, from: NodeId, to: NodeId) -> Result<(), DocError> {
         let source = self.meta_of(from)?;
         copy_semantics(&source, &self.meta_of(to)?)
     }

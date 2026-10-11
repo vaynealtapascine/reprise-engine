@@ -102,6 +102,35 @@ pub enum Role {
     Row,
     /// `TD` or `TH`.
     Cell(CellRole),
+    /// `Title` (role-mapped to a standard type for PDF/UA-1).
+    Title,
+    /// `BlockQuote`.
+    BlockQuote,
+    /// `Code`.
+    Code,
+    /// `L`, with its `/ListNumbering`.
+    List(Numbering),
+    /// `LI`: one list item.
+    ListItem,
+    /// `Lbl`: a list item's marker.
+    Label,
+    /// `LBody`: a list item's content, including nested lists.
+    ListBody,
+}
+
+/// A list's `/ListNumbering` (ISO 32000-1, table 347).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Numbering {
+    #[default]
+    None,
+    Disc,
+    Circle,
+    Square,
+    Decimal,
+    LowerRoman,
+    UpperRoman,
+    LowerAlpha,
+    UpperAlpha,
 }
 
 /// A child of a node: another node or a painted run.

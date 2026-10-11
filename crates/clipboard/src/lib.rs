@@ -1,5 +1,6 @@
 //! Deterministic native clipboard, bounded HTML import and honest exporters (35).
 pub mod codes;
+mod semantic_html;
 mod export;
 mod html;
 mod image_export;

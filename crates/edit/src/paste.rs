@@ -564,8 +564,67 @@ pub(crate) fn write(
     } else {
         BTreeMap::new()
     };
+    write_semantics(doc, &fragment, &mut result, join_first.then_some(first).flatten())?;
+    // The first pasted paragraph joined the caret's paragraph, which it
+    // replaces here: it keeps that paragraph's role and membership.
+    if join_first
+        && let (Some((host, _)), Some(first)) = (at, first)
+        && let Some(&new) = result.ids.nodes.get(&first)
+    {
+        doc.copy_semantics_to(host, new).map_err(store)?;
+    }
     write_formats(doc, &fragment, &result.ids, &shifts)?;
     Ok(result)
+}
+
+/// Pasted roles and lists: each definition the fragment carries is staged
+/// with a fresh ID and activated, and every pasted block takes its role and
+/// membership. A first block joined into the paragraph at the caret leaves
+/// that paragraph's own role and membership alone.
+fn write_semantics(
+    doc: &Document,
+    fragment: &Fragment,
+    result: &mut Pasted,
+    kept: Option<NodeId>,
+) -> Result<(), EditError> {
+    let mut lists = BTreeMap::new();
+    for (old, def) in &fragment.lists {
+        let mut own = def.clone();
+        own.base = None;
+        let new = doc.stage_list(&own).map_err(store)?;
+        doc.activate_list(new).map_err(store)?;
+        lists.insert(*old, new);
+        result.applied.lists.push(new);
+    }
+    for (old, def) in &fragment.lists {
+        if let (Some(base), Some(&new)) = (def.base, lists.get(old))
+            && let Some(&base) = lists.get(&base)
+        {
+            let mut own = def.clone();
+            own.base = Some(base);
+            doc.update_list(new, &own).map_err(store)?;
+        }
+    }
+    for block in &fragment.blocks {
+        if Some(block.id) == kept {
+            continue;
+        }
+        let Some(&node) = result.ids.nodes.get(&block.id) else {
+            continue;
+        };
+        if let Some(role) = block.role {
+            doc.set_role(node, role).map_err(store)?;
+        }
+        if let Some(item) = &block.list
+            && let Some(&list) = lists.get(&item.list)
+        {
+            doc.set_list_item(node, list, item.level).map_err(store)?;
+            if item.restart.is_some() {
+                doc.set_list_restart(node, item.restart).map_err(store)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn write_formats(
@@ -817,6 +876,8 @@ fn write_into_flow(
     for new in result.relations.values() {
         doc.restore_relation(*new).map_err(store)?;
     }
+    let kept = if join_first { first } else { None };
+    write_semantics(doc, &fragment, &mut result, kept)?;
     write_formats(doc, &fragment, &result.ids, &joined)?;
     Ok(result)
 }

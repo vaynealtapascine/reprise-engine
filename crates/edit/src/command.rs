@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 
-use reprise_doc::{NewBlock, NodeId, Relation, RelationId, Style};
+use reprise_doc::{ListId, NewBlock, NodeId, Relation, RelationId, Style};
 
 /// One edit. Offsets are byte offsets on character boundaries; a block's
 /// children are indexed among the *live* siblings.
@@ -115,6 +115,78 @@ pub enum Command {
     RemoveRelation {
         id: RelationId,
     },
+
+    // Roles and lists (see `docs/roles-and-lists.md`).
+    /// Sets what a paragraph is. Appearance is a separate style change.
+    SetRole {
+        node: NodeId,
+        role: reprise_doc::Role,
+    },
+    /// Creates a list definition. Later commands of the transaction name it
+    /// [`ListRef::New`], counting `CreateList` commands from 0.
+    CreateList {
+        definition: reprise_doc::ListDefinition,
+    },
+    /// Writes the properties of a definition that changed.
+    UpdateList {
+        list: ListId,
+        definition: reprise_doc::ListDefinition,
+    },
+    /// Deletes a definition; its items become plain paragraphs.
+    DeleteList {
+        list: ListRef,
+    },
+    /// Makes a text block an item of `list` at `level` (0 to 8).
+    SetListItem {
+        node: NodeId,
+        list: ListRef,
+        level: u8,
+    },
+    /// Takes a block out of its list; its text and role stay.
+    RemoveListItem {
+        node: NodeId,
+    },
+    SetListLevel {
+        node: NodeId,
+        level: u8,
+    },
+    /// Tab (`by: 1`) and Shift+Tab (`by: -1`): the level moves, clamped to
+    /// 0 to 8. Nothing happens to a block that is not an item.
+    IndentListItem {
+        node: NodeId,
+        by: i8,
+    },
+    /// Restarts numbering at an item with `value`, or (`None`) continues it.
+    RestartList {
+        node: NodeId,
+        value: Option<i64>,
+    },
+    /// Continues the previous list: clears the item's restart and, when the
+    /// nearest earlier item belongs to another list, moves this item and every
+    /// later item of its list into that list. Reads numbering as it was when
+    /// the transaction started.
+    ContinueList {
+        node: NodeId,
+    },
+    /// The Enter key: on an empty list item, outdent one level, or leave the
+    /// list at level 0; otherwise a split, which keeps role, list and level.
+    Enter {
+        node: NodeId,
+        at: usize,
+    },
+    /// Backspace at a block's start: on a list item, remove its marker (it
+    /// leaves the list); otherwise join it onto the previous sibling, if any.
+    BackspaceAtStart {
+        node: NodeId,
+    },
+}
+
+/// A list a command names: one that exists, or the `n`th made by this
+/// transaction's `CreateList` commands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ListRef {
+    Existing(ListId),
+    New(usize),
 }
 
 /// What a command did to positions, so that a caret or selection held by a UI

@@ -28,12 +28,16 @@ pub const REQUIRED_TEXT_EMPHASIS: u64 = 1 << 10;
 pub const REQUIRED_MARKS: u64 = 1 << 11;
 /// Older readers must refuse retained authored page-property history.
 pub const REQUIRED_PAGE_SETUP: u64 = 1 << 12;
+/// Older readers must refuse paragraph roles, list membership and list
+/// definitions, retained history included (see `docs/roles-and-lists.md`).
+pub const REQUIRED_BLOCK_SEMANTICS: u64 = 1 << 13;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
     | REQUIRED_TEXT_EMPHASIS
     | REQUIRED_MARKS
-    | REQUIRED_PAGE_SETUP;
+    | REQUIRED_PAGE_SETUP
+    | REQUIRED_BLOCK_SEMANTICS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -46,6 +50,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if document.has_page_setup() {
         flags.required |= REQUIRED_PAGE_SETUP;
+    }
+    if document.has_block_semantics() {
+        flags.required |= REQUIRED_BLOCK_SEMANTICS;
     }
     if document.has_marks() {
         flags.required |= REQUIRED_MARKS;
@@ -137,5 +144,73 @@ mod marks_tests {
         )
         .unwrap();
         assert_ne!(table_features(&doc).required & REQUIRED_MARKS, 0);
+    }
+}
+
+#[cfg(test)]
+mod semantics_tests {
+    use super::*;
+    use reprise_doc::{BlockKind, ListDefinition, Role};
+
+    #[test]
+    fn roles_and_lists_require_the_semantics_reader() {
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "plain").unwrap();
+        doc.commit();
+        assert_eq!(table_features(&doc).required & REQUIRED_BLOCK_SEMANTICS, 0);
+        doc.set_role(node, Role::Heading(1)).unwrap();
+        doc.commit();
+        assert_ne!(table_features(&doc).required & REQUIRED_BLOCK_SEMANTICS, 0);
+        doc.set_role(node, Role::Body).unwrap();
+        doc.commit();
+        assert_ne!(
+            table_features(&doc).required & REQUIRED_BLOCK_SEMANTICS,
+            0,
+            "the stored role stays in the record"
+        );
+        let doc = Document::new(1).unwrap();
+        doc.append_block(BlockKind::Paragraph, "", "plain").unwrap();
+        let list = doc.create_list(&ListDefinition::bulleted()).unwrap();
+        doc.delete_list(list).unwrap();
+        doc.commit();
+        assert_ne!(table_features(&doc).required & REQUIRED_BLOCK_SEMANTICS, 0);
+    }
+
+    #[test]
+    fn an_old_reader_refuses_lists_and_reads_documents_without_them() {
+        use crate::container::{Container, Limits};
+        let old = KNOWN_REQUIRED & !REQUIRED_BLOCK_SEMANTICS;
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "item").unwrap();
+        doc.commit();
+        let save = |doc: &Document| {
+            crate::Package::new(
+                doc,
+                crate::DocumentId([7; 16]),
+                reprise_doc::PersistenceMode::History,
+            )
+            .unwrap()
+            .save()
+            .unwrap()
+        };
+        Container::decode_known(&save(&doc), Limits::default(), old).unwrap();
+        let list = doc.create_list(&ListDefinition::numbered()).unwrap();
+        doc.set_list_item(node, list, 0).unwrap();
+        doc.commit();
+        let bytes = save(&doc);
+        assert!(matches!(
+            Container::decode_known(&bytes, Limits::default(), old),
+            Err(crate::FormatError::RequiredFeatures(bits)) if bits == REQUIRED_BLOCK_SEMANTICS
+        ));
+        let reopened = crate::Package::open(
+            &bytes,
+            2,
+            Limits::default(),
+            &crate::MigrationRegistry::builtin(),
+        )
+        .unwrap()
+        .into_document()
+        .unwrap();
+        assert_eq!(reopened.list_item(node).unwrap().marker, "1.");
     }
 }

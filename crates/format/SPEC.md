@@ -258,3 +258,13 @@ projection/validation is described in `docs/contracts.md`. A reader whose known
 required mask predates bit 12 refuses before decoding the document section.
 Untouched documents, empty page patches, and refused commands retain their old
 required mask. No container version or frozen template JSON envelope changes.
+
+## Block semantics feature (required bit 13)
+
+`REQUIRED_BLOCK_SEMANTICS` is declared whenever any paragraph metadata or break
+record holds a role (`role1`) or list membership (`list1`, `level1`,
+`restart1`), or the `lists` tree of list definitions exists, including deleted
+definitions and values reset to body whose history is retained. A reader whose
+known required mask predates bit 13 refuses before decoding the document
+section. Documents that never used roles or lists retain their old required
+mask. Numbering is derived and never persisted. See `docs/roles-and-lists.md`.

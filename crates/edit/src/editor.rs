@@ -72,6 +72,8 @@ pub struct Applied {
     pub blocks: Vec<NodeId>,
     /// The relations it created, in command order.
     pub relations: Vec<RelationId>,
+    /// The list definitions it created (by `CreateList` or a paste), in order.
+    pub lists: Vec<reprise_doc::ListId>,
     /// What its commands did to positions, in order.
     pub effects: Vec<Effect>,
 }
@@ -212,6 +214,12 @@ impl Editor {
             .map(|r| self.doc.stage_relation(&self.schemas, r))
             .collect::<Result<Vec<_>, _>>()
             .map_err(store)?;
+        let lists = plan
+            .lists
+            .iter()
+            .map(|l| self.doc.stage_list(l))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(store)?;
         let mut made_relations = Vec::new();
         for step in &plan.steps {
             match step {
@@ -235,10 +243,13 @@ impl Editor {
                         .map_err(store)?,
                 ),
                 Step::AddRelation { new } => {
-                    self.step(step, &mut blocks, &relations).map_err(store)?;
+                    self.step(step, &mut blocks, &relations, &lists)
+                        .map_err(store)?;
                     made_relations.extend(relations.get(*new).copied());
                 }
-                _ => self.step(step, &mut blocks, &relations).map_err(store)?,
+                _ => self
+                    .step(step, &mut blocks, &relations, &lists)
+                    .map_err(store)?,
             }
         }
         let blocks = blocks
@@ -276,6 +287,7 @@ impl Editor {
         Ok(Applied {
             blocks,
             relations: made_relations,
+            lists,
             effects,
         })
     }
@@ -285,6 +297,7 @@ impl Editor {
         step: &Step,
         blocks: &mut [Option<NodeId>],
         relations: &[RelationId],
+        lists: &[reprise_doc::ListId],
     ) -> Result<(), reprise_doc::DocError> {
         let missing = || reprise_doc::DocError::Store("a staged item is missing".into());
         let staged = |i: usize| blocks.get(i).copied().flatten().ok_or_else(missing);
@@ -338,6 +351,29 @@ impl Editor {
                 self.doc.restore_relation(id)?;
             }
             Step::RemoveRelation { id } => self.doc.delete_relation(*id)?,
+            Step::SetRole { node, role } => self.doc.set_role(*node, *role)?,
+            Step::ActivateList { new } => {
+                self.doc
+                    .activate_list(lists.get(*new).copied().ok_or_else(missing)?)?;
+            }
+            Step::UpdateList { list, definition } => self.doc.update_list(*list, definition)?,
+            Step::DeleteList { list } => {
+                let id = match list {
+                    crate::ListRef::Existing(id) => *id,
+                    crate::ListRef::New(i) => lists.get(*i).copied().ok_or_else(missing)?,
+                };
+                self.doc.delete_list(id)?;
+            }
+            Step::SetListItem { node, list, level } => {
+                let id = match list {
+                    crate::ListRef::Existing(id) => *id,
+                    crate::ListRef::New(i) => lists.get(*i).copied().ok_or_else(missing)?,
+                };
+                self.doc.set_list_item(*node, id, *level)?;
+            }
+            Step::RemoveListItem { node } => self.doc.remove_list_item(*node)?,
+            Step::SetListLevel { node, level } => self.doc.set_list_level(*node, *level)?,
+            Step::SetListRestart { node, value } => self.doc.set_list_restart(*node, *value)?,
         }
         Ok(())
     }
