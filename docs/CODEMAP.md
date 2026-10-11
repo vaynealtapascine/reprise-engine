@@ -227,6 +227,8 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
     1.  Add the field to `Style` and `ComputedStyle` in `doc/src/style.rs`.
     2.  Add it to `Property` and resolve it in `Computed` (`style.rs`), recording its source in `explain` and
         clamping it if negative values make no sense.
+    3.  For a paragraph property, follow the end-to-end recipe (storage, layout, facade,
+        export, package bit) in `docs/paragraph-styles.md`.
 -   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module
     (`layout/src/codes.rs` for layout) and to the table in `contracts.md`.
 -   **Add a page template feature (a frame role, a frame property):**

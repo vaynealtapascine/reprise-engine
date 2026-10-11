@@ -143,3 +143,47 @@ fn html_export_and_import_keep_paragraph_properties() {
     .unwrap();
     assert!(!out.contains("margin") && !out.contains("break-") && !out.contains("indent"));
 }
+
+#[test]
+fn a_block_on_a_deleted_or_renamed_style_pastes_with_its_appearance() {
+    let doc = Document::new(1).unwrap();
+    let mut base = Style {
+        weight: Some(600),
+        ..Style::default()
+    };
+    base.set(
+        Property::IndentStart,
+        Authored::Expr(Expr::parse("9pt").unwrap()),
+    );
+    doc.define_named_style("Base", &base).unwrap();
+    doc.define_named_style(
+        "Gone",
+        &Style {
+            parent: Some("Base".into()),
+            weight: Some(900),
+            ..Style::default()
+        },
+    )
+    .unwrap();
+    doc.define_named_style("Old", &Style::default()).unwrap();
+    let gone = doc.append_block(BlockKind::Paragraph, "Gone", "a").unwrap();
+    let old = doc.append_block(BlockKind::Paragraph, "Old", "b").unwrap();
+    doc.delete_named_style("Gone").unwrap();
+    doc.rename_named_style("Old", "New").unwrap();
+    doc.commit();
+    let fragment = copy_all(&doc, "source", &SchemaRegistry::builtin(), None, None).unwrap();
+    let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
+    let pasted = editor.paste(&fragment.fragment, None, "target").unwrap();
+    for node in [gone, old] {
+        let source = doc.computed_style(node).unwrap();
+        let target = editor
+            .document()
+            .computed_style(pasted.ids.nodes[&node])
+            .unwrap();
+        assert_eq!(
+            (target.weight, target.indent_start, target.size),
+            (source.weight, source.indent_start, source.size)
+        );
+        assert!(target.notes.is_empty(), "{:?}", target.notes);
+    }
+}

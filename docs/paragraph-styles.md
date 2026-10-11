@@ -130,7 +130,7 @@ the first line of the paragraph (only when composition starts at byte 0)
 loses `indent-start + indent-first`. A negative `indent-first` is bounded by
 `indent-start`, so a hanging first line never leaves the frame. If the
 indents would leave less than a quarter of the frame's inline size, they are
-reduced (end first, then start) to leave exactly a quarter, and
+reduced (end first, then a positive first-line indent, then start) to leave exactly a quarter, and
 `layout.indent-clamped` (Warning) is reported. Indents larger than the frame,
 `Length::MAX` and negative values therefore all terminate.
 
@@ -190,8 +190,8 @@ there is reported with `layout.keep-unsatisfied` (Warning) and the paragraph
 breaks normally. The chain walk stops after 32 blocks (reported with the same
 code) or as soon as it leaves the frame, so `keep-with-next` on every paragraph
 of a long document costs at most one frame's worth of trial compositions per
-paragraph. Tables, images and annotations end a chain (they are treated as
-fitting). Lookahead reads the following blocks; the flow memo key includes
+paragraph. Tables and flowed images end a chain (they are treated as
+fitting); annotations placed by relations are skipped. Lookahead reads the following blocks; the flow memo key includes
 their inputs for exactly the blocks the chain may read, so incremental layout
 re-lays a heading when the paragraph after it changes.
 

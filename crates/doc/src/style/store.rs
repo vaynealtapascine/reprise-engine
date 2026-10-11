@@ -219,6 +219,28 @@ impl Document {
         name.to_string()
     }
 
+    /// What a copy carries for `name`: the live definition it resolves to
+    /// (following renames), or for a deleted style just its parent, which is
+    /// how it resolves, so pasted text keeps its appearance. A pasted
+    /// document has no deleted style to report.
+    pub(crate) fn style_for_copy(&self, name: &str) -> Option<Style> {
+        let mut current = name.to_string();
+        for _ in 0..=MAX_CHAIN {
+            let record = self.style_record(&current)?;
+            match record.status {
+                StyleStatus::Live => return Some(record.style),
+                StyleStatus::Deleted => {
+                    return Some(Style {
+                        parent: record.style.parent,
+                        ..Style::default()
+                    });
+                }
+                StyleStatus::Renamed(to) => current = to,
+            }
+        }
+        None
+    }
+
     /// The live named styles, built-ins included, sorted by name, at most
     /// [`MAX_STYLES`]. The flag says the listing was cut short.
     pub fn style_names(&self) -> (Vec<String>, bool) {

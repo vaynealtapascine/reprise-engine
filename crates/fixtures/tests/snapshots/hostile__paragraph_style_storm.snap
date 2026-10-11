@@ -6,11 +6,11 @@ expression: snapshot.to_json()
   "revision": [
     [
       1,
-      398
+      342
     ],
     [
       2,
-      2
+      0
     ]
   ],
   "adapter": {
@@ -140,7 +140,7 @@ expression: snapshot.to_json()
   ],
   "blocks": [
     {
-      "node": "19@1",
+      "node": "16@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -242,7 +242,7 @@ expression: snapshot.to_json()
       ]
     },
     {
-      "node": "93@1",
+      "node": "90@1",
       "kind": "paragraph",
       "style": {
         "weight": 700,
@@ -354,7 +354,7 @@ expression: snapshot.to_json()
       ]
     },
     {
-      "node": "116@1",
+      "node": "113@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -363,6 +363,7 @@ expression: snapshot.to_json()
         "explain": {
           "background": "style Card",
           "family": "default",
+          "indent-end": "style Card",
           "indent-first": "style Card",
           "indent-start": "style Card",
           "line-height": "default",
@@ -376,6 +377,7 @@ expression: snapshot.to_json()
           "indent-start": "percentages are of the block's inline size; font size = 11pt; block-width = 110pt"
         },
         "indent_start": 13517,
+        "indent_end": 4096,
         "indent_first": -40960,
         "space_before": 13517,
         "space_after": 6144,
@@ -398,10 +400,10 @@ expression: snapshot.to_json()
           "preview": "שלום the next",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 53657
             },
-            "width": 112640,
+            "width": 108544,
             "height": 13517
           },
           "baseline": 64364,
@@ -427,7 +429,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 2625
             },
             {
@@ -441,7 +443,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 2625,
+              "x": 6721,
               "width": 40958
             },
             {
@@ -455,7 +457,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 43583,
+              "x": 47679,
               "width": 31461
             }
           ]
@@ -469,10 +471,10 @@ expression: snapshot.to_json()
           "preview": "paragraph, which",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 67174
             },
-            "width": 99123,
+            "width": 95027,
             "height": 13517
           },
           "baseline": 77881,
@@ -498,7 +500,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 2625
             },
             {
@@ -512,7 +514,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 2625,
+              "x": 6721,
               "width": 88368
             }
           ]
@@ -526,10 +528,10 @@ expression: snapshot.to_json()
           "preview": "hangs, is shaded",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 80691
             },
-            "width": 99123,
+            "width": 95027,
             "height": 13517
           },
           "baseline": 91398,
@@ -555,7 +557,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 2625
             },
             {
@@ -569,7 +571,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 2625,
+              "x": 6721,
               "width": 82444
             }
           ]
@@ -583,10 +585,10 @@ expression: snapshot.to_json()
           "preview": "and keeps three",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 94208
             },
-            "width": 99123,
+            "width": 95027,
             "height": 13517
           },
           "baseline": 104915,
@@ -612,7 +614,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 2625
             },
             {
@@ -626,7 +628,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 2625,
+              "x": 6721,
               "width": 79482
             }
           ]
@@ -635,19 +637,19 @@ expression: snapshot.to_json()
           "frame": 1,
           "text": {
             "start": 68,
-            "end": 89
+            "end": 84
           },
-          "preview": "lines on either side",
+          "preview": "lines on either",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 107725
             },
-            "width": 99123,
+            "width": 95027,
             "height": 13517
           },
           "baseline": 118432,
-          "width": 95480,
+          "width": 72477,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -660,8 +662,8 @@ expression: snapshot.to_json()
           "runs": [
             {
               "range": {
-                "start": 88,
-                "end": 89
+                "start": 83,
+                "end": 84
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -669,13 +671,13 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 2625
             },
             {
               "range": {
                 "start": 68,
-                "end": 88
+                "end": 83
               },
               "face": {
                 "family": "Source Serif Pro",
@@ -683,28 +685,28 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 2625,
-              "width": 95480
+              "x": 6721,
+              "width": 72477
             }
           ]
         },
         {
           "frame": 1,
           "text": {
-            "start": 89,
+            "start": 84,
             "end": 102
           },
-          "preview": "of any break",
+          "preview": "side of any break",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 121242
             },
-            "width": 99123,
+            "width": 95027,
             "height": 13517
           },
           "baseline": 131949,
-          "width": 62030,
+          "width": 85033,
           "explanation": {
             "reason": "opportunity",
             "score": null,
@@ -726,12 +728,12 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 2625
             },
             {
               "range": {
-                "start": 89,
+                "start": 84,
                 "end": 101
               },
               "face": {
@@ -740,8 +742,8 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 2,
-              "x": 2625,
-              "width": 62030
+              "x": 6721,
+              "width": 85033
             }
           ]
         },
@@ -754,10 +756,10 @@ expression: snapshot.to_json()
           "preview": "עברית.",
           "rect": {
             "origin": {
-              "x": 0,
+              "x": 4096,
               "y": 134759
             },
-            "width": 99123,
+            "width": 95027,
             "height": 13517
           },
           "baseline": 145466,
@@ -783,7 +785,7 @@ expression: snapshot.to_json()
               },
               "size": 11264,
               "level": 1,
-              "x": 0,
+              "x": 4096,
               "width": 39424
             }
           ]
@@ -792,7 +794,7 @@ expression: snapshot.to_json()
       "base_level": 1
     },
     {
-      "node": "224@1",
+      "node": "221@1",
       "kind": "paragraph",
       "style": {
         "alignment": "justify",
@@ -982,7 +984,7 @@ expression: snapshot.to_json()
       ]
     },
     {
-      "node": "306@1",
+      "node": "303@1",
       "kind": "paragraph",
       "style": {
         "family": "Source Serif Pro",
@@ -1179,140 +1181,6 @@ expression: snapshot.to_json()
           ]
         }
       ]
-    },
-    {
-      "node": "345@1",
-      "kind": "paragraph",
-      "style": {
-        "family": "Source Serif Pro",
-        "size": 11264,
-        "line_height": 13517,
-        "explain": {
-          "family": "default",
-          "line-height": "default",
-          "size": "style body"
-        },
-        "notes": [
-          {
-            "severity": "warning",
-            "code": "style.deleted",
-            "message": "the block refers to style Doomed, which was deleted; its parent is used instead",
-            "bytes": null
-          }
-        ]
-      },
-      "lines": [
-        {
-          "frame": 3,
-          "text": {
-            "start": 0,
-            "end": 22
-          },
-          "preview": "Applied while deleted.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 0
-            },
-            "width": 112640,
-            "height": 13517
-          },
-          "baseline": 10707,
-          "width": 112047,
-          "explanation": {
-            "reason": "end",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 0,
-                "end": 22
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 11264,
-              "level": 0,
-              "x": 0,
-              "width": 112047
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "node": "371@1",
-      "kind": "paragraph",
-      "style": {
-        "family": "Source Serif Pro",
-        "size": 10240,
-        "line_height": 12288,
-        "explain": {
-          "family": "default",
-          "line-height": "default",
-          "size": "default"
-        },
-        "notes": [
-          {
-            "severity": "warning",
-            "code": "style.rename-cycle",
-            "message": "style Spin: renamed styles forward in a loop (reached from style Spun (renamed to Spin)); the chain stops there",
-            "bytes": null
-          }
-        ]
-      },
-      "lines": [
-        {
-          "frame": 3,
-          "text": {
-            "start": 0,
-            "end": 20
-          },
-          "preview": "Forwarded in a loop.",
-          "rect": {
-            "origin": {
-              "x": 0,
-              "y": 21709
-            },
-            "width": 112640,
-            "height": 12288
-          },
-          "baseline": 31442,
-          "width": 94106,
-          "explanation": {
-            "reason": "end",
-            "score": null,
-            "adjustment": {
-              "word_spacing": 0,
-              "letter_spacing": 0
-            },
-            "reshaped": false
-          },
-          "runs": [
-            {
-              "range": {
-                "start": 0,
-                "end": 20
-              },
-              "face": {
-                "family": "Source Serif Pro",
-                "hash": "199c8adc83479480d9aa5d942afe8f52"
-              },
-              "size": 10240,
-              "level": 0,
-              "x": 0,
-              "width": 94106
-            }
-          ]
-        }
-      ]
     }
   ],
   "relations": [],
@@ -1322,7 +1190,7 @@ expression: snapshot.to_json()
       "code": "font.nearest",
       "subject": {
         "kind": "node",
-        "id": "93@1"
+        "id": "90@1"
       },
       "message": "requested Descriptors { weight: 700, style: Normal, stretch: 1000 } in \"Source Serif Pro\"; used Descriptors { weight: 400, style: Normal, stretch: 1000 }",
       "bytes": {
@@ -1335,7 +1203,7 @@ expression: snapshot.to_json()
       "code": "layout.indent-clamped",
       "subject": {
         "kind": "node",
-        "id": "306@1"
+        "id": "303@1"
       },
       "message": "indents would leave less than a quarter of the frame's inline size; they were reduced",
       "bytes": null
@@ -1345,29 +1213,9 @@ expression: snapshot.to_json()
       "code": "layout.style-clamped",
       "subject": {
         "kind": "node",
-        "id": "306@1"
+        "id": "303@1"
       },
       "message": "space-before resolved to a negative length; clamped to zero",
-      "bytes": null
-    },
-    {
-      "severity": "warning",
-      "code": "style.deleted",
-      "subject": {
-        "kind": "node",
-        "id": "345@1"
-      },
-      "message": "the block refers to style Doomed, which was deleted; its parent is used instead",
-      "bytes": null
-    },
-    {
-      "severity": "warning",
-      "code": "style.rename-cycle",
-      "subject": {
-        "kind": "node",
-        "id": "371@1"
-      },
-      "message": "style Spin: renamed styles forward in a loop (reached from style Spun (renamed to Spin)); the chain stops there",
       "bytes": null
     }
   ]
