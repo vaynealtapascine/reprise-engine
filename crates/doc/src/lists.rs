@@ -786,8 +786,39 @@ impl Document {
         Ok((levels, notes))
     }
 
+    /// Whether any paragraph names a list, cheaply: without a `lists` tree
+    /// only a dangling `list1` (from a hostile peer) can, so scan for one.
+    fn may_have_items(&self) -> bool {
+        use loro::Container;
+        let LoroValue::Map(roots) = self.doc.get_value() else {
+            return true;
+        };
+        if roots.contains_key(LISTS) {
+            return true;
+        }
+        if roots.contains_key(crate::flow::BREAKS)
+            && let LoroValue::Map(records) = self.break_records().get_value()
+        {
+            for value in records.values() {
+                if let LoroValue::Container(id) = value
+                    && let Some(Container::Map(m)) = self.doc.get_container(id.clone())
+                    && m.get(LIST).is_some()
+                {
+                    return true;
+                }
+            }
+        }
+        let tree = self.tree("content");
+        tree.nodes()
+            .into_iter()
+            .any(|id| tree.get_meta(id).is_ok_and(|m| m.get(LIST).is_some()))
+    }
+
     fn number_lists(&self) -> ListNumbering {
         let mut out = ListNumbering::default();
+        if !self.may_have_items() {
+            return out;
+        }
         let mut resolved: BTreeMap<ListId, Result<(Vec<ResolvedLevel>, Vec<Note>), Note>> =
             BTreeMap::new();
         let mut counters: BTreeMap<ListId, [Option<i64>; LEVELS]> = BTreeMap::new();
@@ -1013,7 +1044,7 @@ mod tests {
         let long = "%1".repeat(100);
         let s = render_marker(&long, &values, &levels, &mut notes);
         assert_eq!(s, "5000".repeat(32));
-        let codes: Vec<_> = notes.iter().map(|n| n.code).collect();
+        let codes: Vec<_> = notes.iter().map(|n| n.code.clone()).collect();
         assert!(codes.contains(&codes::LIST_LIMIT));
         assert!(codes.contains(&codes::LIST_COUNTER_RANGE));
     }

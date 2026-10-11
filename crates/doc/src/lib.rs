@@ -43,6 +43,8 @@ pub mod image;
 pub mod invariants;
 mod lifecycle;
 pub mod lists;
+#[cfg(test)]
+mod lists_tests;
 pub mod marks;
 mod page;
 pub mod page_setup;
