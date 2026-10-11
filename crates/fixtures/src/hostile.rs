@@ -153,6 +153,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         page_setup_letter_landscape()?,
         page_setup_conflicting_margins()?,
         font_host_oblique()?,
+        paragraph_style_storm()?,
     ])
 }
 
@@ -2901,5 +2902,125 @@ pub fn font_host_oblique() -> Result<Fixture, DocError> {
             synthetic_oblique: true,
         })
         .expect("bounded fixture settings");
+    Ok(fixture)
+}
+
+/// Paragraph styles under attack (`docs/paragraph-styles.md`): a built-in
+/// heading kept with its paragraph across a horizontal frame into a vertical
+/// one; a right-to-left paragraph with a hanging indent and shading;
+/// justification; widows and orphans; indents wider than the frame and
+/// negative spacing; and a concurrent edit of another property of the same
+/// named style. (Deleted and looping styles are resolution states a pasted
+/// copy can't reproduce, so they are tested in `reprise-doc`, the facade and
+/// the clipboard instead of here, where every fixture must round-trip.)
+pub fn paragraph_style_storm() -> Result<Fixture, DocError> {
+    use reprise_doc::marks::Alignment;
+    let length = |text: &str| -> Result<Authored, DocError> {
+        Expr::parse(text)
+            .map(Authored::Expr)
+            .map_err(|e| DocError::Store(e.to_string()))
+    };
+    let doc = document()?;
+    let mut across = flow_frame(
+        "across",
+        Dim::pt(20),
+        Dim::pt(20),
+        Dim::pt(220),
+        Dim::pt(70),
+    );
+    across.writing_mode = reprise_doc::WritingMode::HorizontalTb;
+    let mut down = flow_frame(
+        "down",
+        Dim::pt(20),
+        Dim::pt(100),
+        Dim::pt(220),
+        Dim::pt(110),
+    );
+    down.writing_mode = reprise_doc::WritingMode::VerticalRl;
+    doc.set_page_template(
+        &PageTemplate::new("paragraph storm", Dim::pt(260), Dim::pt(230))
+            .with_frame(across)
+            .with_frame(down),
+    )?;
+    let mut card = Style {
+        parent: Some("body".into()),
+        background: Some([235, 240, 255, 255]),
+        widows: Some(3),
+        orphans: Some(3),
+        ..Style::default()
+    };
+    card.set(Property::IndentStart, length("12%")?);
+    card.set(Property::IndentFirst, length("-40pt")?);
+    card.set(Property::SpaceBefore, length("1lh")?);
+    doc.define_named_style("Card", &card)?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Opening words fill the first frame so the heading lands near its foot.",
+    )?;
+    doc.append_block(BlockKind::Paragraph, "Heading 3", "A heading kept with")?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "Card",
+        "\u{5E9}\u{5DC}\u{5D5}\u{5DD} the next paragraph, which hangs, is shaded and \
+         keeps three lines on either side of any break \u{5E2}\u{5D1}\u{5E8}\u{5D9}\u{5EA}.",
+    )?;
+    let justified = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Justified text stretches its spaces to the measure, except on its last line.",
+    )?;
+    doc.set_overrides(
+        justified,
+        &Style {
+            alignment: Some(Alignment::Justify),
+            ..Style::default()
+        },
+    )?;
+    let absurd = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Absurd indents, negative space.",
+    )?;
+    let mut wild = Style::default();
+    wild.set(Property::IndentStart, length("1000000pt")?);
+    wild.set(Property::IndentEnd, length("500%")?);
+    wild.set(Property::SpaceBefore, length("-30pt")?);
+    doc.set_overrides(absurd, &wild)?;
+    doc.commit();
+    let peer = doc.fork(OTHER_PEER)?;
+    let mut inset = Style::default();
+    inset.set(Property::IndentEnd, length("4pt")?);
+    doc.patch_named_style(
+        "Card",
+        &reprise_doc::StylePatch {
+            set: inset,
+            ..Default::default()
+        },
+    )?;
+    let mut tint = Style::default();
+    tint.set(Property::SpaceAfter, length("6pt")?);
+    peer.patch_named_style(
+        "Card",
+        &reprise_doc::StylePatch {
+            set: tint,
+            ..Default::default()
+        },
+    )?;
+    doc.commit();
+    peer.commit();
+    doc.merge(&peer)?;
+    peer.merge(&doc)?;
+    let mut fixture = Fixture::new(
+        "paragraph_style_storm",
+        doc,
+        &[
+            // The built-in heading is bold; the bundled face is regular.
+            "font.nearest",
+            "layout.indent-clamped",
+            "layout.style-clamped",
+        ],
+    );
+    fixture.replica = Some(peer);
     Ok(fixture)
 }

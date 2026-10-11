@@ -118,6 +118,25 @@ pub struct PageSetupInfo {
 }
 
 impl Engine {
+    /// The context a paragraph starting in the first main frame of the
+    /// effective template resolves against: what `State` reports resolved
+    /// paragraph styles in. Layout resolves each paragraph in the frame it
+    /// actually starts in.
+    pub fn paragraph_context(&self, doc: &Document) -> reprise_doc::ResolutionContext {
+        let mut diagnostics = Vec::new();
+        let template = template::resolve(self, doc, &mut diagnostics);
+        let frame = template
+            .main_thread()
+            .first()
+            .and_then(|&i| template.frames.get(i));
+        flow::resolution_context(
+            self,
+            &template,
+            frame,
+            frame.map_or(Length::ZERO, |f| f.width),
+        )
+    }
+
     pub fn page_setup(&self, doc: &Document) -> PageSetupInfo {
         let mut diagnostics = Vec::new();
         let template = template::resolve(self, doc, &mut diagnostics);

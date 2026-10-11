@@ -256,5 +256,31 @@ assert.equal(paperTarget.state().data.page_setup.patched, false);
 assert.equal(paperTarget.state().data.blocks.length, 0);
 paperTarget.redo(); finish(paperTarget);
 assert.equal(paperTarget.display_page(0).data.display.width, 609562);
+// Paragraph styles: define, apply, patch with clear, null alignment, State.
+const styled = ws.create(p({ document_id: "60112233445566778899aabbccddeeff", peer_id: "41" }));
+const para = styled.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "styled words in a justified paragraph", style: { families: null, size: null, line_height: null } }] })).data.blocks[0];
+styled.apply(p({ commands: [
+  { kind: "define-style", name: "Quote", parent: "", style: { families: null, size: null, line_height: null, indent_start: "24pt", space_before: "1lh", alignment: "justify", keep_together: true } },
+  { kind: "apply-style", node: para, style: "Quote" },
+  { kind: "set-style", node: para, style: { families: null, size: null, line_height: null, indent_first: "-12pt" }, clear: [] },
+  { kind: "set-alignment", node: para, at: null, alignment: "end" },
+  { kind: "set-alignment", node: para, at: null, alignment: null },
+] }));
+const styledState = styled.state().data;
+const styledBlock = styledState.blocks[0];
+assert.equal(styledBlock.style.name, "Quote");
+assert.equal(styledBlock.style.direct.indent_first, "-12pt");
+const quote = styledState.resolved[styledBlock.style.resolved];
+assert.equal(quote.indent_start, 24 * 1024);
+assert.equal(quote.indent_first, -12 * 1024);
+assert.equal(quote.alignment, "justify");
+assert.equal(quote.keep_together, true);
+assert.ok(styledState.styles.some(s => s.name === "Heading 1" && s.builtin));
+assert.throws(() => styled.apply(p({ commands: [{ kind: "delete-style", name: "" }] })));
+finish(styled);
+const reopened = ws.open(p({ peer_id: "42" }), styled.save().data.bytes);
+assert.deepEqual(reopened.state().data.resolved, styledState.resolved);
+reopened.free(); styled.free();
+console.log("paragraph style WASM smoke passed");
 paperTarget.free(); paperOpen.free(); paperPeer.free(); paper.free(); ws.free();
 console.log("page setup WASM smoke passed");

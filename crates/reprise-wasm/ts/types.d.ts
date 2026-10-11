@@ -11,7 +11,17 @@ export type PageSetup = { width: number, height: number, margins: PageMargins, o
 export type PageMargins = { top: number, right: number, bottom: number, left: number, };
 export type PageOrientation = "portrait" | "landscape" | "square";
 export type PageTemplateSource = "builtin" | "document";
-export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>, };
+export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>, 
+/**
+ * The live named styles, built-ins included, sorted by name (at most
+ * 1,024; a `bindings.limit` diagnostic says when more were left out).
+ */
+styles: Array<NamedStyle>, 
+/**
+ * The distinct resolved paragraph styles that `blocks[].style.resolved`
+ * indexes. Blocks sharing a style share an entry.
+ */
+resolved: Array<ResolvedStyle>, };
 export type Clock = { peer: string, counter: number, };
 export type Block = { id: string, parent: string | null, kind: BlockKind, text: string, 
 /**
@@ -19,23 +29,73 @@ export type Block = { id: string, parent: string | null, kind: BlockKind, text: 
  * present only when some formatting action covers this block. A run's
  * absent fields inherit the paragraph style.
  */
-formatting?: Array<TextRun>, };
+formatting?: Array<TextRun>, 
+/**
+ * The block's paragraph style: the one additive per-block field.
+ */
+style: BlockStyle, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
-export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, };
+export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, indent_start?: string | null, indent_end?: string | null, 
+/**
+ * Negative values hang, bounded by `indent_start`.
+ */
+indent_first?: string | null, space_before?: string | null, space_after?: string | null, keep_with_next?: boolean | null, keep_together?: boolean | null, 
+/**
+ * 1..=32 lines.
+ */
+widows?: number | null, 
+/**
+ * 1..=32 lines.
+ */
+orphans?: number | null, background?: [number, number, number, number] | null, };
+export type StyleProperty = "parent" | "families" | "size" | "line-height" | "alignment" | "tabs" | "weight" | "slant" | "underline" | "strike" | "color" | "indent-start" | "indent-end" | "indent-first" | "space-before" | "space-after" | "keep-with-next" | "keep-together" | "widows" | "orphans" | "background" | "language" | "features";
+export type NamedStyle = { name: string, parent: string | null, 
+/**
+ * Engine data the document has not redefined.
+ */
+builtin: boolean, 
+/**
+ * The authored properties of this style alone (not inherited ones).
+ */
+style: Style, };
+export type BlockStyle = { 
+/**
+ * The named style, as stored (the empty name is the document base). A
+ * renamed style is reported under its new name.
+ */
+name: string, 
+/**
+ * The block's direct overrides.
+ */
+direct: Style, 
+/**
+ * Index into `State.resolved`.
+ */
+resolved: number, };
+export type ResolvedStyle = { family: string, 
+/**
+ * Empty for a legacy single-family chain.
+ */
+families: Array<string>, size: number, line_height: number, alignment: Alignment | null, tabs: TabStops | null, indent_start: number, indent_end: number, indent_first: number, space_before: number, space_after: number, keep_with_next: boolean, keep_together: boolean, widows: number, orphans: number, weight: number | null, slant: FontStyle | null, decoration: Decoration, color: [number, number, number, number] | null, background: [number, number, number, number] | null, };
 export type Decoration = { underline?: boolean | null, strike?: boolean | null, };
 export type TextStyle = { weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, 
 /**
  * Positive font size in 1/1024 pt.
  */
-size: number | null, language: string | null, features: Array<TextFeature> | null, reset: boolean, };
+size: number | null, language: string | null, features: Array<TextFeature> | null, reset: boolean, 
+/**
+ * Character fields this action clears (they reveal the paragraph
+ * style) without a full `reset`.
+ */
+clear?: Array<StyleProperty>, };
 export type TextFeature = { 
 /**
  * Exactly four ASCII graphic characters.
  */
 tag: string, value: number, };
 export type TextRun = { start: number, end: number, style: TextStyle, };
-export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, };
+export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, };
 export type Transaction = { commands: Array<Command>, };
 export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
 export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
@@ -136,7 +196,7 @@ export type StableCaret = { node: string, affinity: Affinity, anchor: string, };
 export type StableSelection = { anchor: StableCaret, focus: StableCaret, };
 export type Presence = { selection: Selection | null, meta: { [key in string]: string }, };
 export type PresenceView = { peer_id: string, meta: { [key in string]: string }, selection: Selection | null, caret: PageRect | null, rects: Array<PageRect>, };
-export type Alignment = "start" | "centre" | "end";
+export type Alignment = "start" | "centre" | "end" | "justify";
 export type LineEdge = "start" | "end";
 export type AnchorEdge = "position" | "gap-start" | "gap-end" | "line-start" | "line-end";
 export type TabStop = { position: number | null, alignment: Alignment, leader: string | null, };

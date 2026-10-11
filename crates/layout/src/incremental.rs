@@ -185,23 +185,25 @@ struct Inputs {
     text: String,
     overrides: Style,
     formatting: reprise_doc::formatting::TextFormats,
-    styles: Vec<(String, Option<Style>)>,
+    /// Every name the style chain visits, with its record: exactly what
+    /// resolution reads, built-ins, deletions and renames included.
+    styles: Vec<(String, Option<reprise_doc::StyleRecord>)>,
 }
 impl Inputs {
     fn read(doc: &Document, node: NodeId) -> Option<Self> {
         let block = doc.block(node).ok()?;
-        let mut styles = Vec::new();
-        let mut name = block.style.clone();
-        let mut visited = BTreeSet::new();
-        // Mirrors the reference resolver's 32-level boundary, including the
-        // next missing/cyclic name so diagnostic changes cannot hide in reuse.
-        for _ in 0..=32 {
-            let Some(n) = name.take() else { break };
-            let style = doc.style(&n);
-            name = style.as_ref().and_then(|s| s.parent.clone());
-            styles.push((n.clone(), style));
-            if !visited.insert(n) {
-                break;
+        // The reference resolver's own walk, including the next missing or
+        // cyclic name, so diagnostic changes cannot hide in reuse.
+        let mut styles = reprise_doc::style_chain(doc, block.style.clone()).0;
+        // A cut chain still depends on the name it stopped at.
+        if let Some((_, Some(record))) = styles.last() {
+            let next = match &record.status {
+                reprise_doc::StyleStatus::Renamed(to) => Some(to.clone()),
+                _ => record.style.parent.clone(),
+            };
+            if let Some(n) = next {
+                let record = doc.style_record(&n);
+                styles.push((n, record));
             }
         }
         Some(Self {
@@ -225,10 +227,10 @@ impl Inputs {
         for style in self
             .styles
             .iter()
-            .filter_map(|(_, s)| s.as_ref())
+            .filter_map(|(_, s)| s.as_ref().map(|r| &r.style))
             .chain(std::iter::once(&self.overrides))
         {
-            for prop in [Property::Size, Property::LineHeight] {
+            for prop in Property::ALL {
                 if let Some(Authored::Expr(expr)) = style.get(prop) {
                     out.extend(
                         expr.dependencies(&engine.functions)
@@ -331,10 +333,29 @@ pub(crate) struct FlowKey {
     // Geometry is the entire frozen input plan. It includes query results and
     // relation-driven placements, not merely the authored relation IDs.
     plan: Plan,
+    /// The blocks keep-with-next lookahead may read, with their inputs.
+    lookahead: Vec<(NodeId, Option<Inputs>, bool)>,
 }
 impl FlowKey {
-    pub(crate) fn new(flow: &flow::Flow<'_>, doc: &Document, node: NodeId) -> Self {
+    /// `ahead` is what [`flow::Flow::keep_lookahead`] says the paragraph's
+    /// placement may read besides its own inputs.
+    pub(crate) fn new(
+        flow: &flow::Flow<'_>,
+        doc: &Document,
+        node: NodeId,
+        ahead: Vec<NodeId>,
+    ) -> Self {
         Self {
+            lookahead: ahead
+                .into_iter()
+                .map(|n| {
+                    (
+                        n,
+                        Inputs::read(doc, n),
+                        !matches!(doc.table_role(n), Ok(None)),
+                    )
+                })
+                .collect(),
             inputs: Inputs::read(doc, node),
             previous: flow.previous,
             position: flow.position_key(),

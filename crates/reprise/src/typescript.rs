@@ -55,6 +55,16 @@ pub fn declarations() -> String {
     text.push_str("export ");
     text.push_str(&Style::decl(&cfg));
     text.push('\n');
+    for decl in [
+        StyleProperty::decl(&cfg),
+        NamedStyle::decl(&cfg),
+        BlockStyle::decl(&cfg),
+        ResolvedStyle::decl(&cfg),
+    ] {
+        text.push_str("export ");
+        text.push_str(&decl);
+        text.push('\n');
+    }
     text.push_str("export ");
     text.push_str(&Decoration::decl(&cfg));
     text.push_str("\nexport ");

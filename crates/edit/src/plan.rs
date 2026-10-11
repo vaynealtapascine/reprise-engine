@@ -115,6 +115,36 @@ pub(crate) enum Step {
     RemoveRelation {
         id: RelationId,
     },
+    DefineStyle {
+        name: String,
+        style: Style,
+    },
+    PatchStyle {
+        name: String,
+        patch: reprise_doc::StylePatch,
+    },
+    RenameStyle {
+        from: String,
+        to: String,
+    },
+    DeleteStyle {
+        name: String,
+    },
+    SetStyleName {
+        node: NodeId,
+        name: String,
+    },
+    PatchOverrides {
+        node: NodeId,
+        patch: reprise_doc::StylePatch,
+    },
+    ClearAlignment {
+        node: NodeId,
+    },
+    ClearLineAlignment {
+        node: NodeId,
+        at: usize,
+    },
 }
 
 /// A block the transaction creates.
@@ -191,6 +221,8 @@ struct Model<'a> {
         reprise_doc::page_setup::PageDimensions,
         reprise_doc::page_setup::PageSetupPatch,
     )>,
+    /// Named styles the transaction made live (`true`) or not (`false`).
+    styles: BTreeMap<String, bool>,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -245,6 +277,7 @@ pub(crate) fn plan(
         live_relations: None,
         payload: 0,
         page_setup: None,
+        styles: BTreeMap::new(),
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -535,6 +568,111 @@ impl Model<'_> {
                 self.set_overrides(*node, style.clone())
             }
             Command::AddRelation { relation } => self.add_relation(relation),
+            Command::DefineStyle { name, style } => {
+                self.new_style(name)?;
+                if style.parent.as_deref() == Some(name.as_str()) {
+                    return Err(Reason::Style(format!("{name} can't be its own parent")));
+                }
+                reprise_doc::StylePatch {
+                    set: style.clone(),
+                    ..Default::default()
+                }
+                .validate()
+                .map_err(style_reason)?;
+                self.add_payload(style_size(style))?;
+                self.styles.insert(name.clone(), true);
+                self.plan.steps.push(Step::DefineStyle {
+                    name: name.clone(),
+                    style: style.clone(),
+                });
+                Ok(())
+            }
+            Command::PatchStyle { name, patch } => {
+                self.live_style(name)?;
+                patch.validate().map_err(style_reason)?;
+                if patch.set.parent.as_deref() == Some(name.as_str()) {
+                    return Err(Reason::Style(format!("{name} can't be its own parent")));
+                }
+                self.add_payload(style_size(&patch.set))?;
+                self.plan.steps.push(Step::PatchStyle {
+                    name: name.clone(),
+                    patch: patch.clone(),
+                });
+                Ok(())
+            }
+            Command::RenameStyle { from, to } => {
+                if from.is_empty() || to.is_empty() {
+                    return Err(Reason::Style("the document base can't be renamed".into()));
+                }
+                self.live_style(from)?;
+                if from != to {
+                    if self.is_live_style(to) {
+                        return Err(Reason::Style(format!("a style named {to} exists")));
+                    }
+                    self.new_style(to)?;
+                    self.styles.insert(from.clone(), false);
+                    self.styles.insert(to.clone(), true);
+                }
+                self.plan.steps.push(Step::RenameStyle {
+                    from: from.clone(),
+                    to: to.clone(),
+                });
+                Ok(())
+            }
+            Command::DeleteStyle { name } => {
+                if name.is_empty() {
+                    return Err(Reason::Style("the document base can't be deleted".into()));
+                }
+                self.live_style(name)?;
+                self.styles.insert(name.clone(), false);
+                self.plan
+                    .steps
+                    .push(Step::DeleteStyle { name: name.clone() });
+                Ok(())
+            }
+            Command::SetStyleName { node, name } => {
+                self.require(*node)?;
+                self.live_style(name)?;
+                self.plan.steps.push(Step::SetStyleName {
+                    node: *node,
+                    name: name.clone(),
+                });
+                Ok(())
+            }
+            Command::PatchOverrides { node, patch } => {
+                patch.validate().map_err(style_reason)?;
+                self.add_payload(style_size(&patch.set))?;
+                let mut style = self.current_overrides(*node)?;
+                for key in &patch.clear {
+                    style.unset(key);
+                }
+                for key in patch.supplied() {
+                    if let Some(raw) = patch.set.stored(key) {
+                        style.apply_stored(key, raw);
+                    }
+                }
+                self.overrides.insert(*node, style);
+                self.plan.steps.push(Step::PatchOverrides {
+                    node: *node,
+                    patch: patch.clone(),
+                });
+                Ok(())
+            }
+            Command::ClearAlignment { node, at: None } => {
+                let mut style = self.current_overrides(*node)?;
+                style.unset("alignment");
+                self.overrides.insert(*node, style);
+                self.plan.steps.push(Step::ClearAlignment { node: *node });
+                Ok(())
+            }
+            Command::ClearAlignment { node, at: Some(at) } => {
+                self.mark_point(*node, *at)?;
+                self.plan.steps.push(Step::ClearLineAlignment {
+                    node: *node,
+                    at: *at,
+                });
+                Ok(())
+            }
             Command::RemoveRelation { id } => {
                 let doc = self.doc;
                 let live = self
@@ -547,6 +685,47 @@ impl Model<'_> {
                 Ok(())
             }
         }
+    }
+
+    /// Whether `name` is a live style at this point of the transaction.
+    fn is_live_style(&self, name: &str) -> bool {
+        match self.styles.get(name) {
+            Some(live) => *live,
+            None => self
+                .doc
+                .style_record(name)
+                .is_some_and(|r| r.status == reprise_doc::StyleStatus::Live),
+        }
+    }
+    /// The empty name (the document base) is always accepted.
+    fn live_style(&self, name: &str) -> Result<(), Reason> {
+        if name.is_empty() || self.is_live_style(name) {
+            Ok(())
+        } else {
+            Err(Reason::Style(format!("no live style {name}")))
+        }
+    }
+    /// A name that may be (re)defined: valid, and within the style limit
+    /// when it is not live yet.
+    fn new_style(&mut self, name: &str) -> Result<(), Reason> {
+        reprise_doc::check_style_name(name).map_err(style_reason)?;
+        if self.is_live_style(name) {
+            return Ok(());
+        }
+        let mut live: BTreeSet<String> = self.doc.style_names().0.into_iter().collect();
+        for (n, alive) in &self.styles {
+            if *alive {
+                live.insert(n.clone());
+            } else {
+                live.remove(n);
+            }
+        }
+        if live.len() >= reprise_doc::MAX_STYLES {
+            return Err(Reason::StyleLimit {
+                max: reprise_doc::MAX_STYLES,
+            });
+        }
+        Ok(())
     }
 
     fn current_overrides(&self, node: NodeId) -> Result<Style, Reason> {
@@ -893,6 +1072,19 @@ impl From<DocError> for Reason {
     fn from(e: DocError) -> Reason {
         Reason::Store(e.to_string())
     }
+}
+
+fn style_reason(e: DocError) -> Reason {
+    Reason::Style(e.to_string())
+}
+
+/// Bytes a style edit adds to the transaction payload.
+fn style_size(style: &Style) -> usize {
+    reprise_doc::STORED_KEYS
+        .iter()
+        .filter_map(|k| style.stored(k))
+        .map(|v| v.len().saturating_add(16))
+        .sum()
 }
 
 fn dead_block(reason: Reason, node: NodeId) -> Reason {

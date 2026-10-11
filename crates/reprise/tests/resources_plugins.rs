@@ -74,6 +74,7 @@ fn plugins_install_functions_geometry_and_schemas_without_losing_undo() {
                 size: Some("demo-double(6pt)".into()),
                 ..Style::default()
             },
+            clear: None,
         }],
     }))
     .unwrap();

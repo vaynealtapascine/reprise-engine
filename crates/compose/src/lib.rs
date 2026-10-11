@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 mod authored;
 mod greedy;
+mod indent;
 mod marks;
 mod optimal;
 mod para;
@@ -26,6 +27,7 @@ mod walk;
 
 pub use authored::{AuthoredBreak, Turnover};
 pub use greedy::{Greedy, MAX_CONSECUTIVE_SKIPS};
+pub use indent::{Indented, Indents};
 pub use marks::{INVISIBLE_GLYPH, MAX_TAB_WORK, compose_marks};
 pub use optimal::{Limits, Mode, Optimal};
 pub use para::is_word_space;

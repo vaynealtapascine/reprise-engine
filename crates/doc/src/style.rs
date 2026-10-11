@@ -148,16 +148,47 @@ impl LengthExpr {
 pub enum Property {
     Size,
     LineHeight,
+    /// Paragraph geometry (see `docs/paragraph-styles.md`). Logical: start and
+    /// end follow the paragraph's base direction.
+    IndentStart,
+    IndentEnd,
+    /// Added to `indent-start` on the paragraph's first line; negative values
+    /// hang, bounded by `indent-start` at layout.
+    IndentFirst,
+    SpaceBefore,
+    SpaceAfter,
 }
 
 impl Property {
-    pub const ALL: [Property; 2] = [Property::Size, Property::LineHeight];
+    pub const ALL: [Property; 7] = [
+        Property::Size,
+        Property::LineHeight,
+        Property::IndentStart,
+        Property::IndentEnd,
+        Property::IndentFirst,
+        Property::SpaceBefore,
+        Property::SpaceAfter,
+    ];
+    /// The paragraph geometry properties, which resolve after `size` and
+    /// `line-height` and may use both `em` and `lh`.
+    pub const PARAGRAPH: [Property; 5] = [
+        Property::IndentStart,
+        Property::IndentEnd,
+        Property::IndentFirst,
+        Property::SpaceBefore,
+        Property::SpaceAfter,
+    ];
 
     /// The name used in the document, in `explain` and in diagnostics.
     pub fn name(self) -> &'static str {
         match self {
             Property::Size => "size",
             Property::LineHeight => "line-height",
+            Property::IndentStart => "indent-start",
+            Property::IndentEnd => "indent-end",
+            Property::IndentFirst => "indent-first",
+            Property::SpaceBefore => "space-before",
+            Property::SpaceAfter => "space-after",
         }
     }
 
@@ -166,26 +197,44 @@ impl Property {
         match self {
             Property::Size => "the inherited font size",
             Property::LineHeight => "the element's font size",
+            _ => "the block's inline size",
         }
+    }
+
+    /// Whether a negative used value is clamped to zero (and reported).
+    /// A negative first-line indent is a hanging indent, bounded at layout.
+    pub fn clamps_negative(self) -> bool {
+        self != Property::IndentFirst
     }
 
     /// The name of `em` in this property, for explanations.
     fn font_term(self) -> &'static str {
         match self {
             Property::Size => "inherited font size",
-            Property::LineHeight => "font size",
+            _ => "font size",
         }
     }
 
     /// What the terms of an expression refer to when a layer is taken on its
     /// own: `em` is left for the used stage, which supplies the inherited size
     /// for `size` and the final size for `line-height`, and a percentage is of
-    /// that same size.
+    /// that same size. Paragraph geometry leaves `lh` for the used stage too
+    /// (it never feeds the line height) and binds `%` to the block's inline
+    /// size.
     fn own_scope(self) -> Scope {
-        Scope {
-            em: Term::Free,
-            lh: Term::Cyclic,
-            percent: Term::Bound(ComputedLength::EmRelative(1000)),
+        match self {
+            Property::Size | Property::LineHeight => Scope {
+                em: Term::Free,
+                lh: Term::Cyclic,
+                percent: Term::Bound(ComputedLength::EmRelative(1000)),
+            },
+            _ => Scope {
+                em: Term::Free,
+                lh: Term::Free,
+                percent: Expr::parse("block-width").map_or(Term::Unavailable, |e| {
+                    Term::Bound(ComputedLength::Symbolic(e))
+                }),
+            },
         }
     }
 }
@@ -299,7 +348,71 @@ pub struct Style {
     /// the same property in the same style (34).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub unparsed_keywords: BTreeMap<String, String>,
+
+    /// Keep the paragraph's last line in the same frame as the next block's
+    /// first lines (`docs/paragraph-styles.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_with_next: Option<bool>,
+    /// Never split the paragraph between frames when moving it helps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_together: Option<bool>,
+    /// The fewest lines of a split paragraph at the top of a frame, 1..=32.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widows: Option<u8>,
+    /// The fewest lines of a split paragraph at the bottom of a frame, 1..=32.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orphans: Option<u8>,
+    /// Paragraph shading behind its lines: red, green, blue, alpha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<[u8; 4]>,
 }
+
+/// The largest widow or orphan count.
+pub const MAX_LINE_KEEP: u8 = 32;
+
+/// Every property key a style can store, in a fixed order: the flat
+/// vocabulary of `styles1`, `para1` and the facade's `clear` lists.
+pub const STORED_KEYS: [&str; 24] = [
+    "parent",
+    "family",
+    "families",
+    "alignment",
+    "tabs",
+    "weight",
+    "slant",
+    "underline",
+    "strike",
+    "color",
+    "size",
+    "line-height",
+    "indent-start",
+    "indent-end",
+    "indent-first",
+    "space-before",
+    "space-after",
+    TEXT_ORIENTATION,
+    TEXT_COMBINE_UPRIGHT,
+    "keep-with-next",
+    "keep-together",
+    "widows",
+    "orphans",
+    "background",
+];
+
+/// The keys this work introduced; their presence needs the paragraph-style
+/// package bit.
+pub const PARAGRAPH_KEYS: [&str; 10] = [
+    "indent-start",
+    "indent-end",
+    "indent-first",
+    "space-before",
+    "space-after",
+    "keep-with-next",
+    "keep-together",
+    "widows",
+    "orphans",
+    "background",
+];
 
 /// The stored and explained name of the `text-orientation` property.
 pub const TEXT_ORIENTATION: &str = "text-orientation";
@@ -313,16 +426,22 @@ impl Style {
             let simple = match p {
                 Property::Size => self.size,
                 Property::LineHeight => self.line_height,
+                _ => None,
             };
             simple.map(Authored::Legacy)
         })
     }
 
-    /// Sets a property, in the simple field if it fits there.
+    /// Sets a property, in the simple field if it fits there. Paragraph
+    /// geometry has no simple field: every form is held in `values`.
     pub fn set(&mut self, p: Property, value: Authored) {
         let slot = match p {
             Property::Size => &mut self.size,
             Property::LineHeight => &mut self.line_height,
+            _ => {
+                self.values.insert(p, value);
+                return;
+            }
         };
         match value {
             Authored::Legacy(l) => {
@@ -334,6 +453,203 @@ impl Style {
                 self.values.insert(p, other);
             }
         }
+    }
+
+    /// Removes a property wherever it is held, so the layer inherits it.
+    pub fn unset(&mut self, key: &str) {
+        self.unparsed_keywords.remove(key);
+        match key {
+            "parent" => self.parent = None,
+            "family" => self.family = None,
+            "families" => {
+                self.families = None;
+                self.unparsed_families = None;
+            }
+            "alignment" => self.alignment = None,
+            "tabs" => self.tabs = None,
+            "weight" => self.weight = None,
+            "slant" => self.slant = None,
+            "underline" => self.decoration.underline = None,
+            "strike" => self.decoration.strike = None,
+            "color" => self.color = None,
+            TEXT_ORIENTATION => self.text_orientation = None,
+            TEXT_COMBINE_UPRIGHT => self.text_combine_upright = None,
+            "keep-with-next" => self.keep_with_next = None,
+            "keep-together" => self.keep_together = None,
+            "widows" => self.widows = None,
+            "orphans" => self.orphans = None,
+            "background" => self.background = None,
+            other => {
+                if let Some(p) = Property::ALL.into_iter().find(|p| p.name() == other) {
+                    self.values.remove(&p);
+                    match p {
+                        Property::Size => self.size = None,
+                        Property::LineHeight => self.line_height = None,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// The stored string of one property key, if this style sets it. An
+    /// unreadable stored value is returned verbatim, so it survives (34).
+    pub fn stored(&self, key: &str) -> Option<String> {
+        if let Some(raw) = self.unparsed_keywords.get(key) {
+            return Some(raw.clone());
+        }
+        let bool_text = |b: bool| if b { "true" } else { "false" }.to_string();
+        match key {
+            "parent" => self.parent.clone(),
+            "family" => self.family.clone(),
+            "families" => match (&self.unparsed_families, &self.families) {
+                (Some(raw), _) => Some(raw.clone()),
+                (None, Some(chain)) => serde_json::to_string(chain)
+                    .ok()
+                    .map(|v| format!("families1:{v}")),
+                (None, None) => None,
+            },
+            "alignment" => self.alignment.map(|v| v.keyword().to_string()),
+            "tabs" => self
+                .tabs
+                .as_ref()
+                .and_then(|v| serde_json::to_string(v).ok())
+                .map(|v| format!("tabs1:{v}")),
+            "weight" => self.weight.map(|v| v.to_string()),
+            "slant" => self.slant.map(|v| v.keyword().to_string()),
+            "underline" => self.decoration.underline.map(|v| v.to_string()),
+            "strike" => self.decoration.strike.map(|v| v.to_string()),
+            "color" => self.color.and_then(|v| serde_json::to_string(&v).ok()),
+            TEXT_ORIENTATION => self.text_orientation.map(|o| o.keyword().to_string()),
+            TEXT_COMBINE_UPRIGHT => self.text_combine_upright.map(|c| c.keyword()),
+            "keep-with-next" => self.keep_with_next.map(bool_text),
+            "keep-together" => self.keep_together.map(bool_text),
+            "widows" => self.widows.map(|v| v.to_string()),
+            "orphans" => self.orphans.map(|v| v.to_string()),
+            "background" => self.background.and_then(|v| serde_json::to_string(&v).ok()),
+            other => Property::ALL
+                .into_iter()
+                .find(|p| p.name() == other)
+                .and_then(|p| self.get(p))
+                .map(|v| v.to_stored()),
+        }
+    }
+
+    /// Reads one stored property into this style, replacing what it held for
+    /// that key. Text that can't be read is kept verbatim and reported at
+    /// resolution, never dropped (34). Unknown keys are ignored.
+    pub fn apply_stored(&mut self, key: &str, raw: String) {
+        self.unset(key);
+        let keep = |s: &mut Style, raw: String| {
+            s.unparsed_keywords.insert(key.to_string(), raw);
+        };
+        let flag = |raw: &str| match raw {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        };
+        let count = |raw: &str| {
+            raw.parse::<u8>()
+                .ok()
+                .filter(|n| (1..=MAX_LINE_KEEP).contains(n))
+        };
+        let rgba = |raw: &str| {
+            if raw.len() <= 64 {
+                serde_json::from_str::<[u8; 4]>(raw).ok()
+            } else {
+                None
+            }
+        };
+        match key {
+            "parent" => self.parent = Some(raw),
+            "family" => self.family = Some(raw),
+            "families" => match raw
+                .strip_prefix("families1:")
+                .and_then(|json| serde_json::from_str(json).ok())
+            {
+                Some(chain) => self.families = Some(chain),
+                None => self.unparsed_families = Some(raw),
+            },
+            "alignment" => match crate::marks::Alignment::parse(&raw) {
+                Some(a) => self.alignment = Some(a),
+                None => keep(self, raw),
+            },
+            "tabs" => {
+                let tabs = (raw.len() <= 32 * 1024)
+                    .then(|| {
+                        raw.strip_prefix("tabs1:")
+                            .and_then(|v| serde_json::from_str::<crate::marks::TabStops>(v).ok())
+                            .filter(|v| v.validate().is_ok())
+                    })
+                    .flatten();
+                match tabs {
+                    Some(t) => self.tabs = Some(t),
+                    None => keep(self, raw),
+                }
+            }
+            "weight" => match raw.parse().ok().filter(|w| (1..=1000).contains(w)) {
+                Some(w) => self.weight = Some(w),
+                None => keep(self, raw),
+            },
+            "slant" => {
+                match serde_json::from_value::<crate::TextSlant>(serde_json::Value::String(
+                    raw.clone(),
+                )) {
+                    Ok(v) => self.slant = Some(v),
+                    Err(_) => keep(self, raw),
+                }
+            }
+            "underline" => match raw.parse() {
+                Ok(v) => self.decoration.underline = Some(v),
+                Err(_) => keep(self, raw),
+            },
+            "strike" => match raw.parse() {
+                Ok(v) => self.decoration.strike = Some(v),
+                Err(_) => keep(self, raw),
+            },
+            "color" => match rgba(&raw) {
+                Some(v) => self.color = Some(v),
+                None => keep(self, raw),
+            },
+            TEXT_ORIENTATION => match TextOrientation::parse(&raw) {
+                Some(o) => self.text_orientation = Some(o),
+                None => keep(self, raw),
+            },
+            TEXT_COMBINE_UPRIGHT => match TextCombineUpright::parse(&raw) {
+                Some(c) => self.text_combine_upright = Some(c),
+                None => keep(self, raw),
+            },
+            "keep-with-next" => match flag(&raw) {
+                Some(v) => self.keep_with_next = Some(v),
+                None => keep(self, raw),
+            },
+            "keep-together" => match flag(&raw) {
+                Some(v) => self.keep_together = Some(v),
+                None => keep(self, raw),
+            },
+            "widows" => match count(&raw) {
+                Some(v) => self.widows = Some(v),
+                None => keep(self, raw),
+            },
+            "orphans" => match count(&raw) {
+                Some(v) => self.orphans = Some(v),
+                None => keep(self, raw),
+            },
+            "background" => match rgba(&raw) {
+                Some(v) => self.background = Some(v),
+                None => keep(self, raw),
+            },
+            other => {
+                if let Some(p) = Property::ALL.into_iter().find(|p| p.name() == other) {
+                    self.set(p, Authored::from_stored(&raw));
+                }
+            }
+        }
+    }
+
+    /// Whether any property is set.
+    pub fn is_empty(&self) -> bool {
+        STORED_KEYS.iter().all(|k| self.stored(k).is_none())
     }
 
     /// Sets a property to the expression written as `text`.
@@ -404,6 +720,18 @@ impl Style {
                 map.insert(name, raw.as_str())?;
             } else if let Some(keyword) = known {
                 map.insert(name, keyword.as_str())?;
+            }
+        }
+        // Written last, so styles without them write exactly what they did.
+        for name in [
+            "keep-with-next",
+            "keep-together",
+            "widows",
+            "orphans",
+            "background",
+        ] {
+            if let Some(value) = self.stored(name) {
+                map.insert(name, value.as_str())?;
             }
         }
         Ok(())
@@ -506,6 +834,17 @@ impl Style {
                 }
             }
         }
+        for name in [
+            "keep-with-next",
+            "keep-together",
+            "widows",
+            "orphans",
+            "background",
+        ] {
+            if let Some(raw) = get_str(map, name) {
+                style.apply_stored(name, raw);
+            }
+        }
         style
     }
 }
@@ -554,6 +893,67 @@ pub struct ComputedStyle {
     /// Left out of JSON when `none`, the default.
     #[serde(default, skip_serializing_if = "is_no_combination")]
     pub text_combine_upright: TextCombineUpright,
+
+    // Paragraph properties (`docs/paragraph-styles.md`). Each is left out of
+    // JSON at its default, so styles that don't use them serialise as before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub indent_start: Length,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub indent_end: Length,
+    /// May be negative: a hanging indent, bounded by `indent_start` at layout.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub indent_first: Length,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub space_before: Length,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub space_after: Length,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep_with_next: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep_together: bool,
+    /// `None` is 1: no widow control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widows: Option<u8>,
+    /// `None` is 1: no orphan control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orphans: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<[u8; 4]>,
+}
+
+impl ComputedStyle {
+    /// The used length of one property.
+    pub fn length(&self, p: Property) -> Length {
+        match p {
+            Property::Size => self.size,
+            Property::LineHeight => self.line_height,
+            Property::IndentStart => self.indent_start,
+            Property::IndentEnd => self.indent_end,
+            Property::IndentFirst => self.indent_first,
+            Property::SpaceBefore => self.space_before,
+            Property::SpaceAfter => self.space_after,
+        }
+    }
+
+    /// The minimum widow and orphan counts, at least 1.
+    pub fn widows(&self) -> usize {
+        usize::from(self.widows.unwrap_or(1).clamp(1, MAX_LINE_KEEP))
+    }
+    pub fn orphans(&self) -> usize {
+        usize::from(self.orphans.unwrap_or(1).clamp(1, MAX_LINE_KEEP))
+    }
+    /// Whether any breaking rule asks layout to look ahead.
+    pub fn has_keeps(&self) -> bool {
+        self.keep_with_next || self.keep_together || self.widows() > 1 || self.orphans() > 1
+    }
+}
+
+fn is_zero(l: &Length) -> bool {
+    *l == Length::ZERO
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn is_mixed(o: &TextOrientation) -> bool {
@@ -598,18 +998,68 @@ pub struct Specified {
 }
 
 pub(crate) fn specify(doc: &Document, block: &Block) -> Specified {
+    specify_parts(doc, block.style.clone(), &block.overrides)
+}
+
+/// Stage 1 for a style name and direct overrides, without a block: what
+/// every block with these two inputs resolves (cached per style by hosts).
+pub fn specify_parts(doc: &Document, style: Option<String>, overrides: &Style) -> Specified {
+    let (chain, notes) = style_chain(doc, style);
+    let mut layers = vec![Layer {
+        name: "default".into(),
+        style: default_style(),
+    }];
+    layers.extend(
+        chain
+            .into_iter()
+            .rev()
+            .filter_map(|(n, r)| r.filter(|r| r.status == StyleStatus::Live).map(|r| (n, r)))
+            .map(|(n, r)| Layer {
+                name: format!("style {n}"),
+                style: r.style,
+            }),
+    );
+    layers.push(Layer {
+        name: "direct".into(),
+        style: overrides.clone(),
+    });
+    Specified { layers, notes }
+}
+
+/// Every name a style chain visits, from `start`, with its record (`None`
+/// when it is not defined): the live styles that become layers, and the
+/// deleted and renamed ones it passes through. Resolution and incremental
+/// layout's input keys both read exactly this. A parent cycle, a missing
+/// parent, a forward loop and a chain over [`MAX_CHAIN`] cut it, reported.
+pub fn style_chain(
+    doc: &Document,
+    start: Option<String>,
+) -> (Vec<(String, Option<StyleRecord>)>, Vec<Note>) {
     let mut notes = Vec::new();
-    let mut chain: Vec<(String, Style)> = Vec::new();
-    let mut next = block.style.clone();
+    let mut chain: Vec<(String, Option<StyleRecord>)> = Vec::new();
+    let mut next = start;
     let mut from = "the block".to_string();
+    let mut renamed = false;
+    let mut from_builtin = false;
     while let Some(name) = next.take() {
         if chain.iter().any(|(n, _)| n == &name) {
+            let (code, what) = if renamed {
+                (
+                    codes::STYLE_RENAME_CYCLE,
+                    "renamed styles forward in a loop",
+                )
+            } else {
+                (codes::STYLE_PARENT_CYCLE, "is its own ancestor")
+            };
             notes.push(Note::warning(
-                codes::STYLE_PARENT_CYCLE,
-                format!(
-                    "style {name} is its own ancestor (reached from {from}); \
-                     the chain stops before it repeats"
-                ),
+                code,
+                if renamed {
+                    format!("style {name}: {what} (reached from {from}); the chain stops there")
+                } else {
+                    format!(
+                        "style {name} {what} (reached from {from}); the chain stops before it repeats"
+                    )
+                },
             ));
             break;
         }
@@ -617,36 +1067,49 @@ pub(crate) fn specify(doc: &Document, block: &Block) -> Specified {
             notes.push(Note::warning(
                 codes::STYLE_CHAIN_TOO_LONG,
                 format!(
-                    "more than {MAX_CHAIN} styles in one chain; \
-                     {from} refers to {name}, which is ignored"
+                    "more than {MAX_CHAIN} styles in one chain; {from} refers to {name}, which is ignored"
                 ),
             ));
             break;
         }
-        let Some(style) = doc.style(&name) else {
-            notes.push(Note::warning(
-                codes::STYLE_PARENT_MISSING,
-                format!("{from} refers to style {name}, which is not defined"),
-            ));
+        let Some(record) = doc.style_record(&name) else {
+            // Built-ins name the document base, which bare engine documents
+            // don't define: that is not the author's problem.
+            if !(from_builtin && name.is_empty()) {
+                notes.push(Note::warning(
+                    codes::STYLE_PARENT_MISSING,
+                    format!("{from} refers to style {name}, which is not defined"),
+                ));
+            }
+            chain.push((name, None));
             break;
         };
-        next = style.parent.clone();
-        from = format!("style {name}");
-        chain.push((name, style));
+        renamed = false;
+        from_builtin = record.builtin;
+        match &record.status {
+            StyleStatus::Live => {
+                next = record.style.parent.clone();
+                from = format!("style {name}");
+            }
+            StyleStatus::Deleted => {
+                notes.push(Note::warning(
+                    codes::STYLE_DELETED,
+                    format!(
+                        "{from} refers to style {name}, which was deleted; its parent is used instead"
+                    ),
+                ));
+                next = record.style.parent.clone();
+                from = format!("deleted style {name}");
+            }
+            StyleStatus::Renamed(to) => {
+                next = Some(to.clone());
+                renamed = true;
+                from = format!("style {name} (renamed to {to})");
+            }
+        }
+        chain.push((name, Some(record)));
     }
-    let mut layers = vec![Layer {
-        name: "default".into(),
-        style: default_style(),
-    }];
-    layers.extend(chain.into_iter().rev().map(|(n, s)| Layer {
-        name: format!("style {n}"),
-        style: s,
-    }));
-    layers.push(Layer {
-        name: "direct".into(),
-        style: block.overrides.clone(),
-    });
-    Specified { layers, notes }
+    (chain, notes)
 }
 
 // ---------------------------------------------------------------------------
@@ -703,6 +1166,13 @@ pub struct Computed {
     /// Problems found so far: the chain's, and any layer's value that could not
     /// be computed. A layer that failed is not in the chain.
     pub notes: Vec<Note>,
+    /// The paragraph geometry chains, by property ([`Property::PARAGRAPH`]).
+    pub paragraph: BTreeMap<Property, PropertyChain>,
+    pub keep_with_next: bool,
+    pub keep_together: bool,
+    pub widows: Option<u8>,
+    pub orphans: Option<u8>,
+    pub background: Option<[u8; 4]>,
 }
 
 impl Specified {
@@ -746,6 +1216,8 @@ impl Specified {
         let mut slant = None;
         let mut decoration = crate::Decoration::default();
         let mut color = None;
+        let (mut keep_with_next, mut keep_together) = (false, false);
+        let (mut widows, mut orphans, mut background) = (None, None, None);
         let mut keyword_layers = BTreeMap::new();
         for layer in &self.layers {
             let unparsed = &layer.style.unparsed_keywords;
@@ -827,11 +1299,64 @@ impl Specified {
                 text_combine_upright = c;
                 keyword_layers.insert(TEXT_COMBINE_UPRIGHT, layer.name.clone());
             }
+            let style = &layer.style;
+            if !unparsed.contains_key("keep-with-next")
+                && let Some(v) = style.keep_with_next
+            {
+                keep_with_next = v;
+                keyword_layers.insert("keep-with-next", layer.name.clone());
+            }
+            if !unparsed.contains_key("keep-together")
+                && let Some(v) = style.keep_together
+            {
+                keep_together = v;
+                keyword_layers.insert("keep-together", layer.name.clone());
+            }
+            for (name, value, slot) in [
+                ("widows", style.widows, &mut widows),
+                ("orphans", style.orphans, &mut orphans),
+            ] {
+                if unparsed.contains_key(name) {
+                    continue;
+                }
+                if let Some(v) = value {
+                    if (1..=MAX_LINE_KEEP).contains(&v) {
+                        *slot = Some(v);
+                        keyword_layers.insert(name, layer.name.clone());
+                    } else {
+                        notes.push(Note::warning(
+                            codes::STYLE_UNPARSED,
+                            format!(
+                                "{name} in {}: {v} is outside 1..{MAX_LINE_KEEP}; \
+                                 the inherited value is kept",
+                                layer.name
+                            ),
+                        ));
+                    }
+                }
+            }
+            if !unparsed.contains_key("background")
+                && let Some(v) = style.background
+            {
+                background = Some(v);
+                keyword_layers.insert("background", layer.name.clone());
+            }
         }
         let mut chain = |p: Property| compute_property(p, &self.layers, functions, &mut notes);
         let size = chain(Property::Size);
         let line_height = chain(Property::LineHeight);
+        let paragraph = Property::PARAGRAPH
+            .into_iter()
+            .map(|p| (p, chain(p)))
+            .filter(|(_, c)| !c.steps.is_empty())
+            .collect();
         Computed {
+            paragraph,
+            keep_with_next,
+            keep_together,
+            widows,
+            orphans,
+            background,
             alignment,
             tabs,
             weight,
@@ -897,7 +1422,6 @@ fn compute_property(
             Authored::Legacy(LengthExpr::Em(m)) => {
                 let own = ComputedLength::EmRelative(*m);
                 let value = match (p, &inherited) {
-                    (Property::LineHeight, _) => own.clone(),
                     (Property::Size, None) => {
                         ComputedLength::Absolute(Length::ZERO.mul_ratio(*m, 1000))
                     }
@@ -908,6 +1432,7 @@ fn compute_property(
                         bake(&LengthExpr::Em(*m).to_expr(), inherited.as_ref(), functions)
                             .unwrap_or_else(|| own.clone())
                     }
+                    _ => own.clone(),
                 };
                 (own, value, None)
             }
@@ -915,7 +1440,7 @@ fn compute_property(
                 Ok(own) => {
                     let value = match p {
                         Property::Size => bake(e, inherited.as_ref(), functions),
-                        Property::LineHeight => None,
+                        _ => None,
                     }
                     .unwrap_or_else(|| own.clone());
                     let basis = e
@@ -981,10 +1506,14 @@ impl Computed {
         functions: &FunctionRegistry,
     ) -> BTreeMap<String, BTreeSet<Dependency>> {
         let mut out = BTreeMap::new();
+        let paragraph = self.paragraph.iter().map(|(p, c)| (*p, c));
         for (p, chain) in [
             (Property::Size, &self.size),
             (Property::LineHeight, &self.line_height),
-        ] {
+        ]
+        .into_iter()
+        .chain(paragraph)
+        {
             let deps: BTreeSet<Dependency> = chain
                 .steps
                 .iter()
@@ -1018,7 +1547,7 @@ impl Computed {
             &self.size,
             functions,
             context,
-            None,
+            (None, None),
             &mut notes,
         );
         // Line height resolves against the size before clamping, as it always
@@ -1028,7 +1557,7 @@ impl Computed {
             &self.line_height,
             functions,
             context,
-            Some(size.value),
+            (Some(size.value), None),
             &mut notes,
         );
 
@@ -1045,10 +1574,33 @@ impl Computed {
             used("size", size.value),
             used("line-height", line_height.value),
         );
-        for (p, r, value) in [
-            (Property::Size, &size, size_used),
-            (Property::LineHeight, &line_height, line_used),
-        ] {
+        // Paragraph geometry resolves against the final, clamped size and
+        // line height: `em` and `lh` never depend on it.
+        let mut resolved = vec![
+            (Property::Size, size, size_used),
+            (Property::LineHeight, line_height, line_used),
+        ];
+        let mut lengths = BTreeMap::new();
+        for (p, chain) in &self.paragraph {
+            let r = self.resolve(
+                *p,
+                chain,
+                functions,
+                context,
+                (Some(size_used), Some(line_used)),
+                &mut notes,
+            );
+            let value = if p.clamps_negative() {
+                used(p.name(), r.value)
+            } else {
+                r.value
+            };
+            lengths.insert(*p, value);
+            resolved.push((*p, r, value));
+        }
+        let length = |p: Property| lengths.get(&p).copied().unwrap_or_default();
+        for (p, r, value) in &resolved {
+            let (p, value) = (*p, *value);
             let name = p.name().to_string();
             if let Some(layer) = &r.layer {
                 explain.insert(name.clone(), layer.clone());
@@ -1086,6 +1638,16 @@ impl Computed {
                 notes,
                 text_orientation: self.text_orientation,
                 text_combine_upright: self.text_combine_upright,
+                indent_start: length(Property::IndentStart),
+                indent_end: length(Property::IndentEnd),
+                indent_first: length(Property::IndentFirst),
+                space_before: length(Property::SpaceBefore),
+                space_after: length(Property::SpaceAfter),
+                keep_with_next: self.keep_with_next,
+                keep_together: self.keep_together,
+                widows: self.widows,
+                orphans: self.orphans,
+                background: self.background,
             },
             stages,
         }
@@ -1095,21 +1657,23 @@ impl Computed {
     /// being what the layers before it left; a layer that can't be used is
     /// skipped, so a later layer is applied to the value that survived.
     /// `line-height` takes the last layer that can be used, against the final
-    /// size (`line_em`).
+    /// size (`line_em`); paragraph geometry does the same, with the final line
+    /// height as `lh`.
     fn resolve(
         &self,
         p: Property,
         chain: &PropertyChain,
         functions: &FunctionRegistry,
         context: &ResolutionContext,
-        line_em: Option<Length>,
+        // `em` and `lh` as the used stage supplies them (see above).
+        (line_em, lh): (Option<Length>, Option<Length>),
         notes: &mut Vec<Note>,
     ) -> Chosen {
         let env = |em| UsedEnv {
             functions,
             context,
             em,
-            lh: None,
+            lh,
         };
         let mut chosen = Chosen::default();
         match p {
@@ -1131,7 +1695,7 @@ impl Computed {
                     running = u.value;
                 }
             }
-            Property::LineHeight => {
+            _ => {
                 for (i, step) in chain.steps.iter().enumerate().rev() {
                     let u = step.own.used(&env(line_em));
                     let skip = u.degraded && i > 0;
@@ -1243,6 +1807,15 @@ impl fmt::Display for StageExplanation {
         )
     }
 }
+
+mod builtin;
+mod store;
+
+pub use builtin::{BUILTIN_STYLES, builtin_style};
+pub use store::{
+    MAX_STYLE_NAME, MAX_STYLES, StylePatch, StyleRecord, StyleStatus,
+    check_name as check_style_name,
+};
 
 #[cfg(test)]
 mod tests;

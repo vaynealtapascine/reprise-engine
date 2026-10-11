@@ -77,6 +77,12 @@ pub struct State {
     pub page_setup: PageSetup,
     pub blocks: Vec<Block>,
     pub diagnostics: Vec<Diagnostic>,
+    /// The live named styles, built-ins included, sorted by name (at most
+    /// 1,024; a `bindings.limit` diagnostic says when more were left out).
+    pub styles: Vec<NamedStyle>,
+    /// The distinct resolved paragraph styles that `blocks[].style.resolved`
+    /// indexes. Blocks sharing a style share an entry.
+    pub resolved: Vec<ResolvedStyle>,
 }
 /// Integer physical page setup; absent patch fields remain unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -142,6 +148,8 @@ pub struct Block {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub formatting: Option<Vec<TextRun>>,
+    /// The block's paragraph style: the one additive per-block field.
+    pub style: BlockStyle,
 }
 /// Character formatting over `start..end`, UTF-8 byte offsets into the block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -194,6 +202,120 @@ pub struct Style {
     pub families: Option<Vec<String>>,
     pub size: Option<String>,
     pub line_height: Option<String>,
+
+    // Paragraph properties (`docs/paragraph-styles.md`). Lengths take the
+    // style expression syntax (`12pt`, `1.5em`, `1lh`, `5%`, `calc`-like).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub indent_start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub indent_end: Option<String>,
+    /// Negative values hang, bounded by `indent_start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub indent_first: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub space_before: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub space_after: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub keep_with_next: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub keep_together: Option<bool>,
+    /// 1..=32 lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub widows: Option<u8>,
+    /// 1..=32 lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub orphans: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub background: Option<[u8; 4]>,
+}
+/// One property, for `clear` lists: the single representation of "inherit"
+/// across `set-style`, `update-style` and `format-text` (`set-alignment`'s
+/// `alignment: null` is the same as clearing `alignment`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum StyleProperty {
+    Parent,
+    Families,
+    Size,
+    LineHeight,
+    Alignment,
+    Tabs,
+    Weight,
+    Slant,
+    Underline,
+    Strike,
+    Color,
+    IndentStart,
+    IndentEnd,
+    IndentFirst,
+    SpaceBefore,
+    SpaceAfter,
+    KeepWithNext,
+    KeepTogether,
+    Widows,
+    Orphans,
+    Background,
+    /// Character formatting only.
+    Language,
+    /// Character formatting only.
+    Features,
+}
+/// A named style as `State` lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct NamedStyle {
+    pub name: String,
+    pub parent: Option<String>,
+    /// Engine data the document has not redefined.
+    pub builtin: bool,
+    /// The authored properties of this style alone (not inherited ones).
+    pub style: Style,
+}
+/// A block's paragraph style in `State`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BlockStyle {
+    /// The named style, as stored (the empty name is the document base). A
+    /// renamed style is reported under its new name.
+    pub name: String,
+    /// The block's direct overrides.
+    pub direct: Style,
+    /// Index into `State.resolved`.
+    pub resolved: u32,
+}
+/// A resolved (used) paragraph style. Lengths are 1/1024 pt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ResolvedStyle {
+    pub family: String,
+    /// Empty for a legacy single-family chain.
+    pub families: Vec<String>,
+    pub size: i32,
+    pub line_height: i32,
+    pub alignment: Option<Alignment>,
+    pub tabs: Option<TabStops>,
+    pub indent_start: i32,
+    pub indent_end: i32,
+    pub indent_first: i32,
+    pub space_before: i32,
+    pub space_after: i32,
+    pub keep_with_next: bool,
+    pub keep_together: bool,
+    pub widows: u8,
+    pub orphans: u8,
+    pub weight: Option<u16>,
+    pub slant: Option<FontStyle>,
+    pub decoration: Decoration,
+    pub color: Option<[u8; 4]>,
+    pub background: Option<[u8; 4]>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
@@ -210,10 +332,12 @@ pub enum Command {
         node: String,
         at: u32,
     },
+    /// `alignment: null` removes it: the paragraph's direct alignment for
+    /// `at: null`, the line default for a point.
     SetAlignment {
         node: String,
         at: Option<u32>,
-        alignment: Alignment,
+        alignment: Option<Alignment>,
     },
     SetTabStops {
         node: String,
@@ -273,15 +397,51 @@ pub enum Command {
         parent: Option<String>,
         index: u32,
     },
+    /// Without `clear`, replaces the direct overrides. With `clear` (even
+    /// empty), patches: supplied fields are set, listed ones cleared (they
+    /// inherit), the rest kept.
     SetStyle {
         node: String,
         style: Style,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        clear: Option<Vec<StyleProperty>>,
     },
     FormatText {
         node: String,
         start: u32,
         end: u32,
         style: TextStyle,
+    },
+    /// Defines `name` as exactly `style` with `parent`.
+    DefineStyle {
+        name: String,
+        parent: Option<String>,
+        style: Style,
+    },
+    /// Sets the supplied properties of a live style (built-ins included)
+    /// and clears the listed ones. `parent` absent keeps it.
+    UpdateStyle {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        parent: Option<String>,
+        style: Style,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(as = "Option<Vec<StyleProperty>>", optional)]
+        clear: Vec<StyleProperty>,
+    },
+    RenameStyle {
+        from: String,
+        to: String,
+    },
+    DeleteStyle {
+        name: String,
+    },
+    /// `style: null` returns the block to the document base.
+    ApplyStyle {
+        node: String,
+        style: Option<String>,
     },
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -306,6 +466,11 @@ pub struct TextStyle {
     pub language: Option<String>,
     pub features: Option<Vec<TextFeature>>,
     pub reset: bool,
+    /// Character fields this action clears (they reveal the paragraph
+    /// style) without a full `reset`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<StyleProperty>>", optional)]
+    pub clear: Vec<StyleProperty>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default, deny_unknown_fields)]
@@ -1125,6 +1290,8 @@ pub enum Alignment {
     Start,
     Centre,
     End,
+    /// Paragraphs only; not a tab stop alignment.
+    Justify,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]

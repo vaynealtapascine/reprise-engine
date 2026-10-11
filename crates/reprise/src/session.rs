@@ -105,6 +105,17 @@ pub struct DocumentSession {
     workers: std::sync::Arc<dyn reprise_layout::workers::Workers>,
     /// Set when a contained call panicked; see [`DocumentSession::contain`].
     poisoned: Option<String>,
+    /// Resolved paragraph styles for `state`, per (style, overrides), valid
+    /// for one revision and session generation.
+    style_cache: std::cell::RefCell<StyleCache>,
+}
+
+/// Paragraph styles resolved for `State` (`docs/paragraph-styles.md`):
+/// blocks sharing a style and overrides resolve once per revision.
+#[derive(Default)]
+struct StyleCache {
+    key: Option<(reprise_doc::Revision, u64)>,
+    resolved: BTreeMap<(Option<String>, String), ResolvedStyle>,
 }
 impl DocumentSession {
     /// Runs `f` on this session and turns a panic inside it into
@@ -156,6 +167,7 @@ impl DocumentSession {
             selection: None,
             workers: std::sync::Arc::new(reprise_layout::workers::Serial),
             poisoned: None,
+            style_cache: Default::default(),
         }
     }
     fn doc(&self) -> &Document {
@@ -186,6 +198,17 @@ impl DocumentSession {
         // A peer can write a node whose envelope doesn't read (collaboration
         // invariant I2): leave it out, keep its children, and say so.
         let mut malformed = Vec::new();
+        let mut cache = self.style_cache.borrow_mut();
+        let key = (self.doc().revision(), self.generation);
+        if cache.key.as_ref() != Some(&key) {
+            *cache = StyleCache {
+                key: Some(key),
+                resolved: BTreeMap::new(),
+            };
+        }
+        let context = self.engine.paragraph_context(self.doc());
+        let mut table: Vec<ResolvedStyle> = Vec::new();
+        let mut indices: BTreeMap<(Option<String>, String), u32> = BTreeMap::new();
         while let Some((node, depth)) = todo.pop() {
             if blocks.len() >= 100_000 || depth > 1024 {
                 return Err(Error::Limit("document tree".into()));
@@ -217,6 +240,43 @@ impl DocumentSession {
                 text: block.text.to_string(),
                 // Unreadable formatting is reported by layout diagnostics.
                 formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
+                style: {
+                    let overrides = serde_json::to_string(&block.overrides).unwrap_or_default();
+                    let k = (block.style.clone(), overrides);
+                    let index = match indices.get(&k) {
+                        Some(i) => *i,
+                        None => {
+                            let resolved = cache
+                                .resolved
+                                .entry(k.clone())
+                                .or_insert_with(|| {
+                                    let used = reprise_doc::specify_parts(
+                                        self.doc(),
+                                        block.style.clone(),
+                                        &block.overrides,
+                                    )
+                                    .compute(&self.engine.functions)
+                                    .used(&context, &self.engine.functions)
+                                    .style;
+                                    cv::resolved_style(&used)
+                                })
+                                .clone();
+                            let i = u32::try_from(table.len()).unwrap_or(u32::MAX);
+                            table.push(resolved);
+                            indices.insert(k, i);
+                            i
+                        }
+                    };
+                    BlockStyle {
+                        name: block
+                            .style
+                            .as_deref()
+                            .map(|n| self.doc().current_style_name(n))
+                            .unwrap_or_default(),
+                        direct: cv::style_out(&block.overrides),
+                        resolved: index,
+                    }
+                },
             });
         }
         let page = self.engine.page_setup(self.doc());
@@ -257,7 +317,36 @@ impl DocumentSession {
             start: None,
             end: None,
         }));
+        drop(cache);
+        let (names, cut) = self.doc().style_names();
+        if cut {
+            diagnostics.push(Diagnostic {
+                code: "bindings.limit".into(),
+                severity: Severity::Warning,
+                message: format!(
+                    "more than {} named styles; the listing is cut short",
+                    reprise_doc::MAX_STYLES
+                ),
+                subject: None,
+                start: None,
+                end: None,
+            });
+        }
+        let styles = names
+            .into_iter()
+            .filter_map(|name| {
+                let record = self.doc().style_record(&name)?;
+                Some(NamedStyle {
+                    parent: record.style.parent.clone(),
+                    builtin: record.builtin,
+                    style: cv::style_out(&record.style),
+                    name,
+                })
+            })
+            .collect();
         Ok(Payload::new(State {
+            styles,
+            resolved: table,
             document_id: self.document_id.clone(),
             peer_id: self.peer_id.clone(),
             revision: cv::revision(&self.doc().revision()),

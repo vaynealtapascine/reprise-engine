@@ -338,6 +338,22 @@ impl Editor {
                 self.doc.restore_relation(id)?;
             }
             Step::RemoveRelation { id } => self.doc.delete_relation(*id)?,
+            Step::DefineStyle { name, style } => self.doc.define_named_style(name, style)?,
+            Step::PatchStyle { name, patch } => self.doc.patch_named_style(name, patch)?,
+            Step::RenameStyle { from, to } => self.doc.rename_named_style(from, to)?,
+            Step::DeleteStyle { name } => self.doc.delete_named_style(name)?,
+            Step::SetStyleName { node, name } => self.doc.set_style_name(*node, name)?,
+            Step::PatchOverrides { node, patch } => self.doc.patch_overrides(*node, patch)?,
+            Step::ClearAlignment { node } => self.doc.patch_overrides(
+                *node,
+                &reprise_doc::StylePatch {
+                    clear: ["alignment".to_string()].into(),
+                    ..Default::default()
+                },
+            )?,
+            Step::ClearLineAlignment { node, at } => {
+                self.doc.clear_line_alignment(*node, *at)?;
+            }
         }
         Ok(())
     }
