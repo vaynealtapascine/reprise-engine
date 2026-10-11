@@ -153,6 +153,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         page_setup_letter_landscape()?,
         page_setup_conflicting_margins()?,
         font_host_oblique()?,
+        plumbing_mark_facts()?,
     ])
 }
 
@@ -2902,4 +2903,44 @@ pub fn font_host_oblique() -> Result<Fixture, DocError> {
         })
         .expect("bounded fixture settings");
     Ok(fixture)
+}
+
+/// Anchor facts under attack: a three-pin ring, two pins on one line, a pin whose
+/// target was deleted, and a pin that cannot fit. Each mark must name its edge,
+/// target and diagnostic, and layout must still place everything else.
+pub fn plumbing_mark_facts() -> Result<Fixture, DocError> {
+    use reprise_doc::marks::{AnchorEdge, LineEdge};
+    let doc = document()?;
+    let ring: Vec<_> = ["ring één", "ring twee", "ring drie"]
+        .into_iter()
+        .map(|t| doc.append_block(BlockKind::Paragraph, "body", t))
+        .collect::<Result<_, _>>()?;
+    for i in 0..ring.len() {
+        let next = ring[(i + 1) % ring.len()];
+        doc.pin_line(ring[i], 0, LineEdge::Start, next, 0, AnchorEdge::LineEnd)?;
+    }
+    let busy = doc.append_block(BlockKind::Paragraph, "body", "two pins, one line")?;
+    let anchor = doc.append_block(BlockKind::Paragraph, "body", "אבג anchor")?;
+    doc.pin_line(busy, 0, LineEdge::Start, anchor, 0, AnchorEdge::Position)?;
+    doc.pin_line(busy, 4, LineEdge::End, anchor, 2, AnchorEdge::LineEnd)?;
+    let doomed = doc.append_block(BlockKind::Paragraph, "body", "going away")?;
+    let orphan = doc.append_block(BlockKind::Paragraph, "body", "pinned to nothing soon")?;
+    doc.pin_line(orphan, 0, LineEdge::End, doomed, 2, AnchorEdge::Position)?;
+    let long = "m".repeat(20);
+    let wide = doc.append_block(BlockKind::Paragraph, "body", &long)?;
+    let far = doc.append_block(BlockKind::Paragraph, "body", &long)?;
+    doc.pin_line(far, 0, LineEdge::Start, wide, 0, AnchorEdge::LineEnd)?;
+    doc.commit();
+    doc.delete_block(doomed)?;
+    doc.commit();
+    Ok(Fixture::new(
+        "plumbing_mark_facts",
+        doc,
+        &[
+            "relation.alignment-cycle",
+            "relation.alignment-conflict",
+            "relation.alignment-outside",
+            "relation.missing-target",
+        ],
+    ))
 }
