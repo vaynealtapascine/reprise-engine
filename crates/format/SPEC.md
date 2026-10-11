@@ -258,3 +258,12 @@ projection/validation is described in `docs/contracts.md`. A reader whose known
 required mask predates bit 12 refuses before decoding the document section.
 Untouched documents, empty page patches, and refused commands retain their old
 required mask. No container version or frozen template JSON envelope changes.
+
+## Annotations feature (required bit 13)
+
+`REQUIRED_ANNOTATIONS` is declared whenever any persistent range carries an
+`annot1` annotation envelope or an `annot-restore1` restore hint, including
+removed (tombstoned), unreadable and future-kind records. An older reader would
+show such ranges as bare ranges and copy them without their data, so it must
+refuse the package. Documents without annotations keep their old required mask.
+See `docs/annotations.md`. Bit numbers may be renumbered at integration.

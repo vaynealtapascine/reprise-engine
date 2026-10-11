@@ -408,3 +408,58 @@ mod page_setup_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+    use reprise_doc::annotation::{AnnotationData, LinkTarget};
+    use reprise_doc::{BlockKind, Document, PersistenceMode};
+
+    #[test]
+    fn old_reader_refuses_annotations_even_after_removal() {
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "a link").unwrap();
+        let old = crate::features::KNOWN_REQUIRED & !crate::features::REQUIRED_ANNOTATIONS;
+        let save = || {
+            crate::Package::new(&doc, DocumentId([7; 16]), PersistenceMode::History)
+                .unwrap()
+                .save()
+                .unwrap()
+        };
+        Container::decode_known(&save(), Limits::default(), old).unwrap();
+        let link = AnnotationData::Link(LinkTarget::Url {
+            url: "https://example.com".into(),
+        });
+        let id = doc.add_annotation(node, 2..6, &link).unwrap();
+        doc.commit();
+        let with = save();
+        doc.remove_annotation(id).unwrap();
+        doc.commit();
+        for bytes in [with, save()] {
+            assert!(matches!(
+                Container::decode_known(&bytes, Limits::default(), old),
+                Err(FormatError::RequiredFeatures(bits)) if bits == crate::features::REQUIRED_ANNOTATIONS
+            ));
+            let opened = crate::Package::open(
+                &bytes,
+                2,
+                Limits::default(),
+                &crate::MigrationRegistry::builtin(),
+            )
+            .unwrap()
+            .into_document()
+            .unwrap();
+            assert!(opened.has_annotations());
+        }
+        let back = crate::Package::open(
+            &save(),
+            2,
+            Limits::default(),
+            &crate::MigrationRegistry::builtin(),
+        )
+        .unwrap()
+        .into_document()
+        .unwrap();
+        assert!(back.annotation(id).is_none());
+    }
+}
