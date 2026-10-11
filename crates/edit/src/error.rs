@@ -93,4 +93,6 @@ pub enum Reason {
     DeadRange(RangeId),
     #[error("the document refused a validated change: {0}")]
     Store(String),
+    #[error("the selection no longer resolves to any block")]
+    SelectionGone,
 }

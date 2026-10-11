@@ -191,7 +191,7 @@ impl Editor {
     /// Writes a validated plan. Validation made every check, and the document
     /// applies the steps the model applied, so a failure here would be a bug
     /// in this crate or the store; it is reported, never panicked on (37).
-    fn write(&self, plan: Plan) -> Result<Applied, EditError> {
+    pub(crate) fn write(&self, plan: Plan) -> Result<Applied, EditError> {
         if let Some(paste) = plan.paste {
             return crate::paste::write(&self.doc, &self.schemas, paste).map(|p| p.applied);
         }
