@@ -178,7 +178,11 @@ impl LayoutSnapshot {
         let mut resolver = SpanResolver::new(self);
         let mut out = Vec::new();
         for &id in ids.iter().take(reprise_doc::annotation::MAX_QUERY_RESULTS) {
-            let Some(annotation) = view.get(id) else {
+            // A link whose text is all gone (`Gone`) is not reported.
+            let Some(annotation) = view
+                .get(id)
+                .filter(|a| !matches!(a.state, AnnotationState::Gone))
+            else {
                 continue;
             };
             if stale {

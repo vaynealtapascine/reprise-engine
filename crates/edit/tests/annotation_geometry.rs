@@ -242,10 +242,12 @@ fn an_orphaned_comment_is_one_zero_width_point() {
     assert_eq!(point.rects.len(), 1);
     assert_eq!(point.rects[0].frame_rect.width.0, 0);
     assert_eq!(point.unplaced, 0);
-    // The point is where the text that is left ends.
-    let line = snapshot.line(point.rects[0].line).unwrap();
-    let last = line.runs.last().unwrap();
-    assert_eq!(point.rects[0].frame_rect.origin.x, last.x + last.width);
+    // The point is where the text before it ends.
+    let before = snapshot.span_geometry(&[(p, 0..4)]);
+    assert_eq!(
+        point.rects[0].frame_rect.origin.x,
+        before.rects[0].frame_rect.max_x()
+    );
     assert!(point.top.is_some());
 }
 
