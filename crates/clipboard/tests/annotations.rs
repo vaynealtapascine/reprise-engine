@@ -7,8 +7,8 @@ mod checker;
 
 use checker::check;
 use reprise_clipboard::{
-    Disposition, ExportOptions, Exporter, Feature, Html, ImportLimits, Native, NativeFragment,
-    PdfWithAssets, PlainText, import_html,
+    ExportOptions, Exporter, Html, ImportLimits, Native, NativeFragment, PdfWithAssets, PlainText,
+    import_html,
 };
 use reprise_doc::annotation::{
     AnnotationData, AnnotationState, CommentAnchor, Kind, LINK_LENGTH, LINK_SCHEME, LinkTarget,
@@ -45,6 +45,18 @@ fn options(schemas: &SchemaRegistry) -> ExportOptions<'_> {
         schemas,
         fonts: None,
     }
+}
+
+/// The `export.annotations` notes of a loss report, as (severity, message).
+fn annotation_losses(
+    losses: &reprise_clipboard::LossReport,
+) -> Vec<(reprise_diag::Severity, String)> {
+    losses
+        .notes
+        .iter()
+        .filter(|n| n.code.as_str() == "export.annotations")
+        .map(|n| (n.severity, n.message.clone()))
+        .collect()
 }
 
 fn html_of(doc: &Document) -> (String, reprise_clipboard::LossReport) {
@@ -113,12 +125,8 @@ fn html_export_wraps_linked_text_in_anchors_and_round_trips() {
         "{html}"
     );
     assert_eq!(html.matches("<a ").count(), html.matches("</a>").count());
-    let annotations = losses
-        .features
-        .iter()
-        .find(|l| l.feature == Feature::Annotations)
-        .unwrap();
-    assert_eq!(annotations.disposition, Disposition::Preserved);
+    // Nothing was lost, so nothing is reported.
+    assert!(annotation_losses(&losses).is_empty(), "{:?}", losses.notes);
 
     let (editor, import) = pasted(&html);
     assert!(
@@ -320,13 +328,19 @@ fn overlapping_links_export_without_nested_anchors_and_say_so() {
             ("gamma ".to_string(), url("https://two.example")),
         ]
     );
-    let annotations = losses
-        .features
-        .iter()
-        .find(|l| l.feature == Feature::Annotations)
-        .unwrap();
-    assert_eq!(annotations.disposition, Disposition::Approximated);
-    assert!(annotations.detail.contains("comment anchors are omitted"));
+    let reported = annotation_losses(&losses);
+    assert!(
+        reported
+            .iter()
+            .any(|(sev, m)| *sev == reprise_diag::Severity::Warning && m.contains("overlapping")),
+        "{reported:?}"
+    );
+    assert!(
+        reported
+            .iter()
+            .any(|(sev, m)| *sev == reprise_diag::Severity::Info && m.contains("comment anchors")),
+        "{reported:?}"
+    );
 }
 
 #[test]
@@ -338,25 +352,14 @@ fn plain_text_keeps_link_text_and_reports_the_loss() {
     let schemas = SchemaRegistry::builtin();
     let out = PlainText.export(&doc, None, &options(&schemas)).unwrap();
     assert_eq!(String::from_utf8(out.bytes).unwrap(), "see the docs");
-    let loss = out
-        .losses
-        .features
-        .iter()
-        .find(|l| l.feature == Feature::Annotations)
-        .unwrap();
-    assert_eq!(loss.disposition, Disposition::Dropped);
+    let reported = annotation_losses(&out.losses);
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert_eq!(reported[0].0, reprise_diag::Severity::Info);
+    assert!(reported[0].1.contains("link addresses"));
     // A document with none loses nothing.
     let (plain, _) = document(&["nothing here"]);
     let out = PlainText.export(&plain, None, &options(&schemas)).unwrap();
-    assert_eq!(
-        out.losses
-            .features
-            .iter()
-            .find(|l| l.feature == Feature::Annotations)
-            .unwrap()
-            .disposition,
-        Disposition::Preserved
-    );
+    assert!(annotation_losses(&out.losses).is_empty());
 }
 
 #[test]
@@ -369,13 +372,14 @@ fn native_copy_carries_links_with_new_ids_and_leaves_comments_behind() {
     doc.commit();
     let schemas = SchemaRegistry::builtin();
     let out = Native.export(&doc, None, &options(&schemas)).unwrap();
-    let loss = out
-        .losses
-        .features
-        .iter()
-        .find(|l| l.feature == Feature::Annotations)
-        .unwrap();
-    assert_eq!(loss.disposition, Disposition::Approximated);
+    // The comment anchor stays behind, and the copy says so.
+    assert!(
+        out.losses
+            .notes
+            .iter()
+            .any(|n| n.code == reprise_doc::fragment::ANNOTATION_DROPPED
+                && n.severity == reprise_diag::Severity::Info)
+    );
     let decoded = NativeFragment::decode(&out.bytes).unwrap();
     let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
     let pasted = decoded.paste(&mut editor, None, "elsewhere").unwrap();
@@ -463,16 +467,9 @@ fn the_pdf_has_link_elements_with_annotations_and_alt_text() {
     // The text is still tagged once and the file still claims PDF/UA.
     assert!(report.text.contains("Read the manual"));
     assert!(report.xmp.contains("pdfuaid"), "{}", report.xmp);
-    let loss = losses
-        .features
-        .iter()
-        .find(|l| l.feature == Feature::Annotations)
-        .unwrap();
-    assert_eq!(
-        loss.disposition,
-        Disposition::Approximated,
-        "the comment is omitted"
-    );
+    let reported = annotation_losses(&losses);
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert!(reported[0].1.contains("comment anchors"), "the comment is omitted");
 }
 
 #[test]

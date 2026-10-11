@@ -185,7 +185,11 @@ same; geometry will then cover them.
     `#r<node>` and the target paragraph gets that `id` (only targets do). A
     link across paragraphs becomes one anchor per paragraph; where links overlap
     the first keeps the shared text (HTML has no nested anchors); comment
-    anchors are omitted. Each is reported in the `export.annotations` loss.
+    anchors are omitted. What a format cannot hold is reported as an
+    `export.annotations` note on the loss report: `Info` for a limit of the
+    format (plain text has no addresses, no format has comments), `Warning` where
+    a link the format could hold was changed (overlap flattening). The report's
+    ten features are unchanged; a document with no links or comments gets no note.
 -   **HTML import:** `<a href>` goes through the same validation as authoring.
     A refused address (`javascript:`, `data:`, entity-obfuscated forms, relative
     or oversized URLs) keeps its text and reports the refusal's own code
@@ -200,7 +204,7 @@ same; geometry will then cover them.
     references keep precedence over links on shared text and the first of two
     overlapping links keeps what they share (`pdf.link-unresolved` Warning says
     so, also when an internal target is not on a page).
--   **Plain text:** link text only; the loss is reported (`export.annotations`).
+-   **Plain text:** link text only; the loss is reported (`export.annotations` Info).
 -   **Native:** annotations travel in the fragment. `FragmentRange.annotation` is
     an optional field absent from fragments without annotations, so their bytes
     are unchanged; a strict older reader refuses a fragment that has one (see the

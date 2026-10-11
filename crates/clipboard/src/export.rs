@@ -22,11 +22,9 @@ pub enum Feature {
     Fonts,
     Assets,
     EditingStructure,
-    /// Links and comment anchors (`docs/annotations.md`).
-    Annotations,
 }
 impl Feature {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::Relations,
         Self::ReadingOrder,
         Self::Transforms,
@@ -37,7 +35,6 @@ impl Feature {
         Self::Fonts,
         Self::Assets,
         Self::EditingStructure,
-        Self::Annotations,
     ];
     pub fn code(self) -> Code {
         Code::new(match self {
@@ -51,7 +48,6 @@ impl Feature {
             Self::Fonts => "export.fonts",
             Self::Assets => "export.assets",
             Self::EditingStructure => "export.editing-structure",
-            Self::Annotations => "export.annotations",
         })
     }
 }
@@ -123,7 +119,7 @@ pub(crate) fn inferred_base(text: &str) -> u8 {
         .number()
 }
 
-fn report(dispositions: [Disposition; 11], details: [&str; 11]) -> LossReport {
+fn report(dispositions: [Disposition; 10], details: [&str; 10]) -> LossReport {
     LossReport {
         features: Feature::ALL
             .into_iter()
@@ -271,11 +267,6 @@ impl Exporter for PlainText {
                 Dropped,
                 Dropped,
                 Dropped,
-                if presence.links || presence.comments {
-                    Dropped
-                } else {
-                    Preserved
-                },
             ],
             [
                 "relations are flattened to their text",
@@ -288,7 +279,6 @@ impl Exporter for PlainText {
                 "font bytes and identities are omitted",
                 "non-text assets are omitted",
                 "IDs, ranges, undo and collaboration history are omitted",
-                "link text is kept and its address is omitted; comment anchors are omitted",
             ],
         );
         if let Some(layout) = layout {
@@ -300,11 +290,44 @@ impl Exporter for PlainText {
                     .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
             );
         }
+        losses.notes.extend(annotation_notes(
+            presence,
+            Some("link addresses are not in plain text; the linked text is kept"),
+            None,
+            "comment anchors are not in plain text",
+        ));
         Ok(ExportResult {
             bytes: out.into_bytes(),
             losses,
         })
     }
+}
+
+/// What a format leaves out of links and comment anchors, as notes. The loss
+/// report's ten features are fixed, so annotations report through its notes
+/// (`export.annotations`): `Info` for what the format cannot hold at all, as
+/// every format lacks something, and `Warning` where a link the format could
+/// hold was changed. A document with neither produces no note.
+pub(crate) fn annotation_notes(
+    presence: crate::links::Presence,
+    link_detail: Option<&str>,
+    changed: Option<&str>,
+    comments_detail: &str,
+) -> Vec<reprise_diag::Note> {
+    const CODE: Code = Code::new("export.annotations");
+    let mut notes = Vec::new();
+    if presence.links
+        && let Some(detail) = link_detail
+    {
+        notes.push(reprise_diag::Note::info(CODE, detail));
+    }
+    if let Some(detail) = changed {
+        notes.push(reprise_diag::Note::warning(CODE, detail));
+    }
+    if presence.comments {
+        notes.push(reprise_diag::Note::info(CODE, comments_detail));
+    }
+    notes
 }
 
 pub(crate) fn escape(text: &str) -> String {
@@ -645,11 +668,6 @@ impl Exporter for Html {
                 Approximated,
                 Dropped,
                 Dropped,
-                if presence.comments || links.approximated.get() {
-                    Approximated
-                } else {
-                    Preserved
-                },
             ],
             [
                 "authored relations are omitted",
@@ -662,7 +680,6 @@ impl Exporter for Html {
                 "CSS family names retained; pinned identities and font bytes omitted",
                 "assets have no HTML representation",
                 "IDs, ranges, undo and collaboration history omitted",
-                "links are anchors (<a href>) around their text, with internal links as #id of the target paragraph; a link across paragraphs becomes one anchor per paragraph and where links overlap the first keeps the shared text; comment anchors are omitted",
             ],
         );
         if let Some(layout) = layout {
@@ -674,6 +691,14 @@ impl Exporter for Html {
                     .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
             );
         }
+        losses.notes.extend(annotation_notes(
+            presence,
+            None,
+            links.approximated.get().then_some(
+                "overlapping links were flattened (the first keeps the shared text) or a link to missing text was left as text",
+            ),
+            "comment anchors are not in HTML",
+        ));
         Ok(ExportResult {
             bytes: out.into_bytes(),
             losses,
@@ -697,7 +722,6 @@ impl Exporter for Native {
             options.fonts,
         )?;
         use Disposition::*;
-        let presence = crate::links::LinkIndex::new(doc).presence();
         let mut losses = report(
             [
                 Approximated,
@@ -718,17 +742,6 @@ impl Exporter for Native {
                 },
                 Approximated,
                 Approximated,
-                if presence.comments
-                    || fragment
-                        .fragment
-                        .notes
-                        .iter()
-                        .any(|n| n.code == reprise_doc::fragment::ANNOTATION_DROPPED)
-                {
-                    Approximated
-                } else {
-                    Preserved
-                },
             ],
             [
                 "schema copy policies apply; external targets require the source document; historical targets carry no history",
@@ -741,7 +754,6 @@ impl Exporter for Native {
                 "available used font bytes and pinned identities bundled; missing resources reported",
                 "host may attach assets by content hash; no authored image usage graph yet",
                 "live authored structure retained; new IDs allocated on paste; tombstones and undo/history omitted",
-                "links travel with their text and get new IDs on paste; a link to a block outside the copy is kept only within one document; comment anchors stay with the document (a thread has one anchor)",
             ],
         );
         losses.notes = fragment.notes.clone();
@@ -799,11 +811,6 @@ pub fn export_pdf(
             Preserved,
             Approximated,
             Dropped,
-            if presence.comments {
-                Approximated
-            } else {
-                Preserved
-            },
         ],
         [
             "relation graph omitted; visible results retained",
@@ -820,10 +827,15 @@ pub fn export_pdf(
             "rendered used fonts embedded by the PDF backend",
             "displayed content only; image alt text becomes Figure /Alt, and an image without it is an artifact; resource ownership omitted",
             "IDs, ranges, editable tree, undo and collaboration history omitted",
-            "links become Link elements holding their text and a link annotation with /Contents (a URI action or a destination for internal links); comment anchors are omitted",
         ],
     );
     losses.notes.extend(notes);
+    losses.notes.extend(annotation_notes(
+        presence,
+        None,
+        None,
+        "comment anchors are not in the PDF",
+    ));
     losses.notes.extend(
         layout
             .diagnostics

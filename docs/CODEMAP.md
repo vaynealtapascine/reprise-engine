@@ -316,7 +316,7 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `doc` | `src/hostile.rs` (`corrupt_annotation`) | A hostile peer's overwritten annotation envelope | 37 |
 | `layout` | `src/span.rs` | Span geometry: rectangles per line fragment (frame space, page bounds, exact page corners), `top`, orphan points, batched annotation geometry, `page_links`; equal to the navigator's selection rectangles | 20, 30, 33, 37 |
 | `display` | `src/pdf/tags.rs`, `src/pdf.rs` (`Role::Link`, `DocLink`, `LinkTo`) | Link elements with URI and destination annotations and `/Contents` | 32, 33 |
-| `clipboard` | `src/links.rs`, `src/export.rs`, `src/html.rs`, `src/pdf_tags.rs` | Links in HTML (`<a href>`, `id` for internal targets, validated import), plain text, native and the tagged PDF; `Feature::Annotations` loss | 33, 35, 37 |
+| `clipboard` | `src/links.rs`, `src/export.rs`, `src/html.rs`, `src/pdf_tags.rs` | Links in HTML (`<a href>`, `id` for internal targets, validated import), plain text, native and the tagged PDF; `export.annotations` loss notes | 33, 35, 37 |
 | `clipboard` | `tests/annotations.rs` | HTML round trip, refusal of `javascript:` and friends, anchor repair, overlap, native copy, PDF link annotations and tags | 33, 35, 37 |
 | `edit` | `src/command.rs`, `src/plan.rs`, `src/editor.rs`, `src/paste.rs` (`AddAnnotation`, `UpdateAnnotation`, `RemoveAnnotation`, pasted annotations) | Annotation commands as kernel commands; paste writes annotation data after IDs are known | 07, 12, 29, 35 |
 | `edit` | `tests/annotations.rs`, `tests/annotation_geometry.rs` | Commands, undo, edge behaviour, paste; geometry across page breaks, RTL, vertical and rotated frames, parity with selection rectangles | 12, 20, 29, 30, 35 |
