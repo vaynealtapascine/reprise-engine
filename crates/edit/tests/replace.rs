@@ -220,3 +220,56 @@ fn a_selection_ending_in_a_child_keeps_the_subtree() {
     assert!(e.undo().unwrap());
     assert_eq!(e.document().block(parent).unwrap().text.to_string(), "parent");
 }
+
+#[test]
+fn thousands_of_blocks_replace_in_one_bounded_step() {
+    let owned: Vec<String> = (0..3000).map(|i| format!("block {i}")).collect();
+    let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let (doc, ids) = base(&refs);
+    let mut e = Editor::new(doc, engine().schemas.clone());
+    let s = select(e.document(), (ids[0], 2), (ids[2999], 3));
+    replace(&mut e, &s, &fragment(&["X"]));
+    assert_eq!(texts(&e), ["blXck 2999"]);
+    assert_eq!(e.undo_count(), 1);
+    assert!(e.undo().unwrap());
+    assert_eq!(texts(&e).len(), 3000);
+}
+
+#[test]
+fn an_oversized_fragment_is_refused_before_anything_is_deleted() {
+    let (doc, ids) = base(&["keep this"]);
+    let mut e = Editor::new(doc, engine().schemas.clone());
+    let mut big = fragment(&["x"]);
+    big.blocks[0].text = "x".repeat(reprise_edit::MAX_TRANSACTION_BYTES + 1);
+    let revision = e.document().revision();
+    let refused = e
+        .stage_replacement(&big, "target")
+        .err()
+        .or_else(|| {
+            let s = select(e.document(), (ids[0], 0), (ids[0], 4));
+            let staged = e.stage_replacement(&big, "target").ok()?;
+            e.replace_selection(&s, &staged).err()
+        })
+        .expect("one of the two stages refuses");
+    assert!(matches!(refused.reason, Reason::Fragment(_)), "{refused:?}");
+    assert_eq!(texts(&e), ["keep this"]);
+    assert_eq!(e.document().revision(), revision);
+    assert!(!e.can_undo());
+}
+
+#[test]
+fn a_foreign_or_garbage_anchor_never_panics() {
+    let (doc, ids) = base(&["abc"]);
+    let mut e = Editor::new(doc, engine().schemas.clone());
+    let mut s = select(e.document(), (ids[0], 1), (ids[0], 2));
+    s.anchor.anchor = vec![0xff; 40];
+    s.focus.anchor = Vec::new();
+    // Bad anchors fall back like any stable caret; the replacement still
+    // lands in one step or is refused whole.
+    let staged = e.stage_replacement(&fragment(&["Z"]), "target").unwrap();
+    let before = e.undo_count();
+    match e.replace_selection(&s, &staged) {
+        Ok(_) => assert_eq!(e.undo_count(), before + 1),
+        Err(_) => assert_eq!(e.undo_count(), before),
+    }
+}

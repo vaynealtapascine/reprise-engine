@@ -285,3 +285,27 @@ fn replacing_keeps_the_hosts_anchored_selection_at_the_caret() {
     let local = s.local_selection().data.unwrap();
     assert_eq!((local.anchor.offset, local.focus.offset), (8, 8));
 }
+
+#[test]
+fn a_batch_past_the_command_bound_is_refused_whole() {
+    let mut s = session("1");
+    let node = tx(&mut s, vec![block("x", 0)]).data.blocks[0].clone();
+    let state = s.state().unwrap().data;
+    let commands = vec![
+        Command::InsertText {
+            node,
+            at: 0,
+            text: "y".into(),
+        };
+        10_001
+    ];
+    let error = s
+        .batch(&Payload::new(Batch {
+            commands,
+            expected_revision: None,
+            selection: None,
+        }))
+        .unwrap_err();
+    assert_eq!(error.code(), "bindings.limit");
+    assert_eq!(s.state().unwrap().data, state);
+}
