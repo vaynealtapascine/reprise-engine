@@ -28,6 +28,9 @@ pub fn is_word_space(c: char) -> bool {
 
 pub(crate) struct Para<'r, 'a> {
     pub request: &'r ComposeRequest<'a>,
+    /// Per-line metrics for inline objects; `None` keeps every line at the
+    /// request's line height.
+    pub(crate) extents: Option<crate::LineExtents>,
     pub(crate) tabs: Option<reprise_doc::marks::TabStops>,
     pub(crate) tab_positions: Vec<usize>,
     pub(crate) tab_work: Cell<usize>,
@@ -159,6 +162,7 @@ impl<'r, 'a> Para<'r, 'a> {
             .collect();
 
         Para {
+            extents: None,
             request,
             tabs: None,
             tab_positions: Vec::new(),

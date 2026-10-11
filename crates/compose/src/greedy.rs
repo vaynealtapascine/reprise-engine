@@ -126,8 +126,15 @@ pub(crate) fn first_fit(
     // Empty text still gets one line; otherwise stop when the text runs out.
     let unfinished =
         |out: &Composition, pos: usize| pos < len || (len == 0 && out.lines.is_empty());
+    let mut height = request.line_height;
+    let mut attempts = 0u32;
+    // Where the current line started, for a retry at a taller height.
+    let mut line_start: Option<(Walk, usize, usize, usize)> = None;
     while unfinished(out, pos) {
-        let intervals = match walk.next_line(request, &out.lines) {
+        if line_start.is_none() {
+            line_start = Some((*walk, pos, out.lines.len(), out.notes.len()));
+        }
+        let intervals = match walk.next_line_at(request, height, &out.lines) {
             Step::Room(intervals) => intervals,
             Step::Moved => continue,
             Step::End => {
@@ -140,6 +147,7 @@ pub(crate) fn first_fit(
                 break;
             }
         };
+        let first = pos;
         for (k, &interval) in intervals.iter().enumerate() {
             if !unfinished(out, pos) {
                 break;
@@ -183,7 +191,28 @@ pub(crate) fn first_fit(
                 break;
             }
         }
-        walk.advance(request.line_height);
+        if let (Some(extents), Some((at, start, lines, notes))) = (&para.extents, line_start) {
+            let need = extents.height(first..pos, request.line_height);
+            if need > height && attempts.saturating_add(1) < crate::MAX_LINE_HEIGHT_ATTEMPTS {
+                // Compose the line again where it began, asking geometry
+                // for the room a line this tall has.
+                *walk = at;
+                pos = start;
+                out.lines.truncate(lines);
+                out.notes.truncate(notes);
+                height = need;
+                attempts += 1;
+                continue;
+            }
+            height = height.max(need);
+            for line in out.lines.get_mut(lines..).unwrap_or_default() {
+                line.height = height;
+            }
+        }
+        walk.advance(height);
+        height = request.line_height;
+        attempts = 0;
+        line_start = None;
     }
     out.block_end = walk.y;
 }

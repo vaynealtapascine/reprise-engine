@@ -85,11 +85,16 @@ impl Walk {
         self.line = self.line.saturating_add(1);
     }
 
-    /// Asks until geometry gives a line, ends or stalls.
-    pub fn next_line(&mut self, request: &ComposeRequest<'_>, previous: &[LineFragment]) -> Step {
+    /// Asks until geometry gives a line of `line_height`, ends or stalls.
+    pub fn next_line_at(
+        &mut self,
+        request: &ComposeRequest<'_>,
+        line_height: Length,
+        previous: &[LineFragment],
+    ) -> Step {
         loop {
-            let answer = self.query(request.geometry, request.line_height, previous);
-            match self.apply(answer, request.line_height) {
+            let answer = self.query(request.geometry, line_height, previous);
+            match self.apply(answer, line_height) {
                 Step::Moved => continue,
                 step => return step,
             }

@@ -26,7 +26,7 @@ mod walk;
 
 pub use authored::{AuthoredBreak, Turnover};
 pub use greedy::{Greedy, MAX_CONSECUTIVE_SKIPS};
-pub use marks::{INVISIBLE_GLYPH, MAX_TAB_WORK, compose_marks};
+pub use marks::{ATOM_GLYPH, INVISIBLE_GLYPH, MAX_TAB_WORK, compose_marks, compose_marks_with};
 pub use optimal::{Limits, Mode, Optimal};
 pub use para::is_word_space;
 pub use polygon::{Polygon, Runaround};
@@ -50,6 +50,49 @@ pub mod codes {
     /// it set first-fit have no score. Info: the output is still what the
     /// author asked for; only the engine's choice among valid breaks changed.
     pub const FALLBACK: Code = Code::new("compose.fallback");
+}
+
+/// How many times one line is composed again at a taller height when its
+/// inline objects need more room than it was given.
+pub const MAX_LINE_HEIGHT_ATTEMPTS: u32 = 4;
+
+/// Per-line metrics for a paragraph with inline objects (see
+/// `docs/inline.md`): a line is as tall as its strut, or more when an object
+/// on it rises above the strut's ascent or sinks below its descent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LineExtents {
+    /// The strut's extent above and below the baseline. Their sum is
+    /// normally the request's line height.
+    pub strut_top: Length,
+    pub strut_bottom: Length,
+    /// Each object's byte offset, ascent and descent, sorted by offset.
+    pub objects: Vec<(usize, Length, Length)>,
+}
+
+impl LineExtents {
+    /// Whether any object needs more than the strut, so lines differ.
+    pub fn varies(&self) -> bool {
+        self.objects
+            .iter()
+            .any(|&(_, a, d)| a > self.strut_top || d > self.strut_bottom)
+    }
+
+    /// The extent above and below the baseline of a line holding `bytes`.
+    pub fn line(&self, bytes: Range<usize>) -> (Length, Length) {
+        let from = self.objects.partition_point(|o| o.0 < bytes.start);
+        self.objects[from..]
+            .iter()
+            .take_while(|o| o.0 < bytes.end)
+            .fold((self.strut_top, self.strut_bottom), |(t, b), &(_, a, d)| {
+                (t.max(a), b.max(d))
+            })
+    }
+
+    /// The height of a line holding `bytes`: never less than `strut`.
+    pub fn height(&self, bytes: Range<usize>, strut: Length) -> Length {
+        let (top, bottom) = self.line(bytes);
+        (top + bottom).max(strut)
+    }
 }
 
 /// A span of the inline axis a line may use.
