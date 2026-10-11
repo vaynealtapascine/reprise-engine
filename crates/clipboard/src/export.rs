@@ -718,7 +718,13 @@ impl Exporter for Native {
                 },
                 Approximated,
                 Approximated,
-                if presence.comments || fragment.fragment.notes.iter().any(|n| n.code == reprise_doc::fragment::ANNOTATION_DROPPED) {
+                if presence.comments
+                    || fragment
+                        .fragment
+                        .notes
+                        .iter()
+                        .any(|n| n.code == reprise_doc::fragment::ANNOTATION_DROPPED)
+                {
                     Approximated
                 } else {
                     Preserved

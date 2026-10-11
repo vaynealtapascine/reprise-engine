@@ -418,7 +418,9 @@ mod annotation_tests {
     #[test]
     fn old_reader_refuses_annotations_even_after_removal() {
         let doc = Document::new(1).unwrap();
-        let node = doc.append_block(BlockKind::Paragraph, "", "a link").unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "", "a link")
+            .unwrap();
         let old = crate::features::KNOWN_REQUIRED & !crate::features::REQUIRED_ANNOTATIONS;
         let save = || {
             crate::Package::new(&doc, DocumentId([7; 16]), PersistenceMode::History)

@@ -574,11 +574,10 @@ impl Reader {
         }
         for (bytes, dest) in std::mem::take(&mut self.pending_links) {
             match dest {
-                Dest::Url(url) if self.links.len() < MAX_HTML_LINKS => self.links.push((
-                    node,
-                    bytes,
-                    AnnotationData::Link(LinkTarget::Url { url }),
-                )),
+                Dest::Url(url) if self.links.len() < MAX_HTML_LINKS => {
+                    self.links
+                        .push((node, bytes, AnnotationData::Link(LinkTarget::Url { url })))
+                }
                 Dest::Fragment(id) if self.links.len() + self.internal.len() < MAX_HTML_LINKS => {
                     self.internal.push((node, bytes, id));
                 }
@@ -1064,7 +1063,10 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
                     );
                 }
                 // An anchor closed by its parent's end tag ends there.
-                if stack.get(at.saturating_add(1)..).is_some_and(|t| t.iter().any(|n| n == "a")) {
+                if stack
+                    .get(at.saturating_add(1)..)
+                    .is_some_and(|t| t.iter().any(|n| n == "a"))
+                {
                     reader.close_link();
                 }
                 stack.truncate(at);

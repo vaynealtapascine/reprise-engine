@@ -626,13 +626,21 @@ fn document_links_are_link_elements_with_uri_or_destination_annotations() {
             vec![
                 part(0, 1, 0..6),
                 node(
-                    link(10, tags::LinkTo::Uri("https://site.example/?a=1&b=2".into()), "site: https://site.example"),
+                    link(
+                        10,
+                        tags::LinkTo::Uri("https://site.example/?a=1&b=2".into()),
+                        "site: https://site.example",
+                    ),
                     vec![part(0, 1, 6..14)],
                 ),
             ],
         ),
         node(
-            link(40, tags::LinkTo::Uri("mailto:me@example.com".into()), "mail: me@example.com"),
+            link(
+                40,
+                tags::LinkTo::Uri("mailto:me@example.com".into()),
+                "mail: me@example.com",
+            ),
             vec![leaf(0, 2)],
         ),
         node(
@@ -660,7 +668,11 @@ fn document_links_are_link_elements_with_uri_or_destination_annotations() {
     assert_eq!(r.link_destinations, 1);
     assert_eq!(
         r.link_contents,
-        ["site: https://site.example", "mail: me@example.com", "back up: Title"]
+        [
+            "site: https://site.example",
+            "mail: me@example.com",
+            "back up: Title"
+        ]
     );
     // The unlinked one still reads, tagged as a plain Span.
     assert!(r.text.contains("lost"));

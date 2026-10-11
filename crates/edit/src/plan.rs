@@ -696,9 +696,7 @@ impl Model<'_> {
                 self.plan.steps.push(Step::RemoveRelation { id: *id });
                 Ok(())
             }
-            Command::AddAnnotation { node, range, data } => {
-                self.add_annotation(*node, range, data)
-            }
+            Command::AddAnnotation { node, range, data } => self.add_annotation(*node, range, data),
             Command::UpdateAnnotation { id, data } => {
                 self.annotation_unremoved(*id)?;
                 self.doc

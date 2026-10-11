@@ -127,10 +127,7 @@ impl<'a> LinkIndex<'a> {
             };
             let start = bytes.start.max(covered);
             let end = bytes.end.min(text.len());
-            if start >= end
-                || !text.is_char_boundary(start)
-                || !text.is_char_boundary(end)
-            {
+            if start >= end || !text.is_char_boundary(start) || !text.is_char_boundary(end) {
                 if bytes.start < covered || start < end {
                     self.approximated.set(true);
                 }

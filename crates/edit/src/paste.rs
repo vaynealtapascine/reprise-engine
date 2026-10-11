@@ -263,7 +263,10 @@ pub(crate) fn prepare(
         let Some(data) = &range.annotation else {
             continue;
         };
-        if data.remapped(&copied_ids, prepared.same_namespace).is_none() {
+        if data
+            .remapped(&copied_ids, prepared.same_namespace)
+            .is_none()
+        {
             range.annotation = None;
             prepared.notes.push(Note::warning(
                 reprise_doc::fragment::ANNOTATION_DROPPED,
@@ -910,8 +913,7 @@ fn stage_annotations(
     same_namespace: bool,
 ) -> Result<(), EditError> {
     for range in &fragment.ranges {
-        let (Some(data), Some(&new)) = (&range.annotation, result.ids.ranges.get(&range.id))
-        else {
+        let (Some(data), Some(&new)) = (&range.annotation, result.ids.ranges.get(&range.id)) else {
             continue;
         };
         let Some(data) = data.remapped(&result.ids, same_namespace) else {

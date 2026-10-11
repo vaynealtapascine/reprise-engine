@@ -458,10 +458,7 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             range: *start as usize..*end as usize,
             data: annotation_data(annotation)?,
         },
-        Command::UpdateAnnotation {
-            id: s,
-            annotation,
-        } => C::UpdateAnnotation {
+        Command::UpdateAnnotation { id: s, annotation } => C::UpdateAnnotation {
             id: range_id(s)?,
             data: annotation_data(annotation)?,
         },

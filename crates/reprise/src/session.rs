@@ -1386,7 +1386,10 @@ impl DocumentSession {
     }
     /// The annotations over a byte of a block (`start <= at < end`), and the
     /// orphans at it, in start order. At most 4,096.
-    pub fn annotations_at(&self, request: &Payload<AnnotationsAt>) -> Result<Payload<AnnotationList>> {
+    pub fn annotations_at(
+        &self,
+        request: &Payload<AnnotationsAt>,
+    ) -> Result<Payload<AnnotationList>> {
         let r = validate(request)?;
         let node = cv::id(&r.node)?;
         Ok(Payload::new(cv::annotation_list(
@@ -1394,7 +1397,10 @@ impl DocumentSession {
         )))
     }
     /// The annotations overlapping a byte range of a block, in start order.
-    pub fn annotations_in(&self, request: &Payload<AnnotationsIn>) -> Result<Payload<AnnotationList>> {
+    pub fn annotations_in(
+        &self,
+        request: &Payload<AnnotationsIn>,
+    ) -> Result<Payload<AnnotationList>> {
         let r = validate(request)?;
         let node = cv::id(&r.node)?;
         Ok(Payload::new(cv::annotation_list(

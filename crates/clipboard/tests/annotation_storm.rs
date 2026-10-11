@@ -45,7 +45,11 @@ fn replicas_agree_and_the_two_bad_envelopes_are_reported_and_kept() {
     for doc in [&f.doc, replica] {
         let notes = doc.annotation_notes();
         let unreadable = notes.iter().find(|n| n.code == UNREADABLE).unwrap();
-        assert!(unreadable.message.starts_with("2 "), "{}", unreadable.message);
+        assert!(
+            unreadable.message.starts_with("2 "),
+            "{}",
+            unreadable.message
+        );
         assert!(doc.has_annotations());
     }
     // The hostile `javascript:` link is neither queryable nor applied.
@@ -88,8 +92,14 @@ fn geometry_and_link_areas_are_deterministic_and_inside_the_pages() {
         assert!(!geometry.stale);
         for r in &geometry.rects {
             let page = a.pages[r.page];
-            assert!(r.bounds.origin.x.0 >= 0 && r.bounds.max_x().0 <= page.width.0, "{r:?}");
-            assert!(r.bounds.origin.y.0 >= 0 && r.bounds.max_y().0 <= page.height.0, "{r:?}");
+            assert!(
+                r.bounds.origin.x.0 >= 0 && r.bounds.max_x().0 <= page.width.0,
+                "{r:?}"
+            );
+            assert!(
+                r.bounds.origin.y.0 >= 0 && r.bounds.max_y().0 <= page.height.0,
+                "{r:?}"
+            );
         }
         placed += usize::from(!geometry.rects.is_empty());
     }
@@ -130,10 +140,8 @@ fn every_format_and_the_package_carry_what_is_readable() {
     let layout = f.engine.layout(&f.doc);
 
     // HTML: valid nesting, and re-importing it keeps links (not the comments).
-    let html = String::from_utf8(
-        Html.export(&f.doc, Some(&layout), &options).unwrap().bytes,
-    )
-    .unwrap();
+    let html =
+        String::from_utf8(Html.export(&f.doc, Some(&layout), &options).unwrap().bytes).unwrap();
     let mut depth = 0i32;
     for part in html.split('<') {
         if part.starts_with("a ") {
@@ -179,17 +187,17 @@ fn every_format_and_the_package_carry_what_is_readable() {
     // Native copy and paste: links duplicate, comments stay, the bad ones are
     // reported as left out.
     let copied: NativeFragment = copy_all(&f.doc, "storm", &schemas, Some(&layout), None).unwrap();
-    assert!(
-        copied
-            .fragment
-            .notes
-            .iter()
-            .any(|n| n.code == UNREADABLE)
-    );
+    assert!(copied.fragment.notes.iter().any(|n| n.code == UNREADABLE));
     let mut editor = Editor::new(Document::new(9).unwrap(), SchemaRegistry::builtin());
     copied.paste(&mut editor, None, "elsewhere").unwrap();
     assert_eq!(active_links(editor.document()), active_links(&f.doc));
-    assert!(editor.document().annotations_of_kind(Kind::Comment).annotations.is_empty());
+    assert!(
+        editor
+            .document()
+            .annotations_of_kind(Kind::Comment)
+            .annotations
+            .is_empty()
+    );
 }
 
 #[test]

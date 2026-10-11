@@ -893,9 +893,7 @@ fn build(
                 PlannedTarget::Destination(to_page, to_point) => {
                     Target::Destination(XyzDestination::new(*to_page, *to_point).into())
                 }
-                PlannedTarget::Uri(uri) => {
-                    Target::Action(LinkAction::new(uri.clone()).into())
-                }
+                PlannedTarget::Uri(uri) => Target::Action(LinkAction::new(uri.clone()).into()),
             };
             let link = LinkAnnotation::new(*area, target);
             let id = page.add_tagged_annotation(Annotation::new_link(link, Some(alt.clone())));

@@ -426,10 +426,7 @@ impl Document {
                         Some(data)
                     }
                     Some(Ok(data)) => {
-                        let message = format!(
-                            "{} annotations are not copied",
-                            data.kind().name()
-                        );
+                        let message = format!("{} annotations are not copied", data.kind().name());
                         if !fragment.notes.iter().any(|n| n.message == message) {
                             fragment
                                 .notes

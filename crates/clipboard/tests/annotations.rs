@@ -158,7 +158,10 @@ fn internal_links_get_ids_and_survive_a_round_trip_inside_the_html() {
     let AnnotationData::Link(LinkTarget::Node { node }) = &links[0].1 else {
         panic!("{links:?}");
     };
-    assert_eq!(editor.document().block(*node).unwrap().text.to_string(), "Introduction");
+    assert_eq!(
+        editor.document().block(*node).unwrap().text.to_string(),
+        "Introduction"
+    );
     // A link to an id that is not in the pasted HTML is text, with a note.
     let (editor, import) = pasted("<p>go <a href=\"#nowhere\">there</a></p>");
     assert!(links_of(editor.document()).is_empty());
@@ -237,7 +240,8 @@ fn anchors_nest_and_close_deterministically() {
         ]
     );
     // An anchor around several paragraphs is a link in each.
-    let (editor, _) = pasted("<a href=\"https://c.example\"><p>first</p><p>second</p></a><p>third</p>");
+    let (editor, _) =
+        pasted("<a href=\"https://c.example\"><p>first</p><p>second</p></a><p>third</p>");
     assert_eq!(
         links_of(editor.document()),
         vec![
@@ -286,12 +290,17 @@ fn a_page_of_links_is_bounded_and_keeps_the_text() {
 fn overlapping_links_export_without_nested_anchors_and_say_so() {
     let (doc, ids) = document(&["alpha beta gamma delta"]);
     let p = ids[0];
-    doc.add_annotation(p, 0..11, &url("https://one.example")).unwrap();
-    doc.add_annotation(p, 6..17, &url("https://two.example")).unwrap();
+    doc.add_annotation(p, 0..11, &url("https://one.example"))
+        .unwrap();
+    doc.add_annotation(p, 6..17, &url("https://two.example"))
+        .unwrap();
     doc.add_annotation(p, 0..5, &comment("c1")).unwrap();
     doc.commit();
     let (html, losses) = html_of(&doc);
-    assert!(!html.contains("<a href=\"https://one.example\"><a"), "{html}");
+    assert!(
+        !html.contains("<a href=\"https://one.example\"><a"),
+        "{html}"
+    );
     // Depth never exceeds one anchor.
     let mut depth = 0i32;
     for part in html.split('<') {
@@ -323,7 +332,8 @@ fn overlapping_links_export_without_nested_anchors_and_say_so() {
 #[test]
 fn plain_text_keeps_link_text_and_reports_the_loss() {
     let (doc, ids) = document(&["see the docs"]);
-    doc.add_annotation(ids[0], 8..12, &url("https://docs.example")).unwrap();
+    doc.add_annotation(ids[0], 8..12, &url("https://docs.example"))
+        .unwrap();
     doc.commit();
     let schemas = SchemaRegistry::builtin();
     let out = PlainText.export(&doc, None, &options(&schemas)).unwrap();
@@ -352,7 +362,9 @@ fn plain_text_keeps_link_text_and_reports_the_loss() {
 #[test]
 fn native_copy_carries_links_with_new_ids_and_leaves_comments_behind() {
     let (doc, ids) = document(&["one two three"]);
-    let link = doc.add_annotation(ids[0], 4..7, &url("https://n.example")).unwrap();
+    let link = doc
+        .add_annotation(ids[0], 4..7, &url("https://n.example"))
+        .unwrap();
     let note = doc.add_annotation(ids[0], 0..3, &comment("t1")).unwrap();
     doc.commit();
     let schemas = SchemaRegistry::builtin();
@@ -374,7 +386,13 @@ fn native_copy_carries_links_with_new_ids_and_leaves_comments_behind() {
         url("https://n.example")
     );
     assert!(!pasted.ids.ranges.contains_key(&note));
-    assert!(editor.document().annotations_of_kind(Kind::Comment).annotations.is_empty());
+    assert!(
+        editor
+            .document()
+            .annotations_of_kind(Kind::Comment)
+            .annotations
+            .is_empty()
+    );
 }
 
 fn pdf_of(doc: &Document) -> (checker::Report, reprise_clipboard::LossReport) {
@@ -411,8 +429,10 @@ fn the_pdf_has_link_elements_with_annotations_and_alt_text() {
         &AnnotationData::Link(LinkTarget::Heading { node: ids[0] }),
     )
     .unwrap();
-    doc.add_annotation(body, 43..55, &url("mailto:team@example.com")).unwrap();
-    doc.add_annotation(body, 0..4, &comment("not-exported")).unwrap();
+    doc.add_annotation(body, 43..55, &url("mailto:team@example.com"))
+        .unwrap();
+    doc.add_annotation(body, 0..4, &comment("not-exported"))
+        .unwrap();
     doc.commit();
     let (report, losses) = pdf_of(&doc);
     assert_eq!(report.links, 3, "{report:?}");
@@ -428,8 +448,18 @@ fn the_pdf_has_link_elements_with_annotations_and_alt_text() {
     assert_eq!(report.link_destinations, 1);
     // /Contents says what each is, for assistive technology.
     assert!(report.link_contents.iter().all(|c| !c.trim().is_empty()));
-    assert!(report.link_contents.iter().any(|c| c.contains("manual") && c.contains("https://manual.example")));
-    assert!(report.link_contents.iter().any(|c| c.contains("Introduction")));
+    assert!(
+        report
+            .link_contents
+            .iter()
+            .any(|c| c.contains("manual") && c.contains("https://manual.example"))
+    );
+    assert!(
+        report
+            .link_contents
+            .iter()
+            .any(|c| c.contains("Introduction"))
+    );
     // The text is still tagged once and the file still claims PDF/UA.
     assert!(report.text.contains("Read the manual"));
     assert!(report.xmp.contains("pdfuaid"), "{}", report.xmp);
@@ -438,14 +468,19 @@ fn the_pdf_has_link_elements_with_annotations_and_alt_text() {
         .iter()
         .find(|l| l.feature == Feature::Annotations)
         .unwrap();
-    assert_eq!(loss.disposition, Disposition::Approximated, "the comment is omitted");
+    assert_eq!(
+        loss.disposition,
+        Disposition::Approximated,
+        "the comment is omitted"
+    );
 }
 
 #[test]
 fn a_link_over_several_lines_has_an_annotation_for_each_and_one_tag_per_run() {
     let long = "word ".repeat(120);
     let (doc, ids) = document(&[&long]);
-    doc.add_annotation(ids[0], 3..400, &url("https://long.example")).unwrap();
+    doc.add_annotation(ids[0], 3..400, &url("https://long.example"))
+        .unwrap();
     doc.commit();
     let layout = engine().layout(&doc);
     let lines = layout.block(ids[0]).unwrap().lines.len();
@@ -459,7 +494,11 @@ fn a_link_over_several_lines_has_an_annotation_for_each_and_one_tag_per_run() {
 
 #[test]
 fn links_in_right_to_left_and_rotated_text_still_export_a_checked_pdf() {
-    for fixture in [hostile::rtl_mixed().unwrap(), hostile::transformed_rtl().unwrap(), hostile::vertical_rl().unwrap()] {
+    for fixture in [
+        hostile::rtl_mixed().unwrap(),
+        hostile::transformed_rtl().unwrap(),
+        hostile::vertical_rl().unwrap(),
+    ] {
         let snapshot = fixture.engine.layout(&fixture.doc);
         let node = snapshot.blocks[0].node;
         let len = snapshot.block(node).unwrap().text.len();
@@ -502,10 +541,16 @@ fn links_in_right_to_left_and_rotated_text_still_export_a_checked_pdf() {
 fn overlapping_and_off_page_links_are_reported_not_broken() {
     let (doc, ids) = document(&["alpha beta gamma delta", "other"]);
     let p = ids[0];
-    doc.add_annotation(p, 0..11, &url("https://one.example")).unwrap();
-    doc.add_annotation(p, 6..17, &url("https://two.example")).unwrap();
-    doc.add_annotation(p, 0..5, &AnnotationData::Link(LinkTarget::Node { node: ids[1] }))
+    doc.add_annotation(p, 0..11, &url("https://one.example"))
         .unwrap();
+    doc.add_annotation(p, 6..17, &url("https://two.example"))
+        .unwrap();
+    doc.add_annotation(
+        p,
+        0..5,
+        &AnnotationData::Link(LinkTarget::Node { node: ids[1] }),
+    )
+    .unwrap();
     doc.commit();
     // The target block disappears: the link is text, with a warning.
     doc.delete_block(ids[1]).unwrap();

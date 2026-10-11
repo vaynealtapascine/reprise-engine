@@ -88,7 +88,10 @@ fn add_update_remove_and_undo_through_apply() {
             add(&p, 0, 4, thread("t-1")),
         ],
     );
-    let (link, note) = (applied.annotations[0].clone(), applied.annotations[1].clone());
+    let (link, note) = (
+        applied.annotations[0].clone(),
+        applied.annotations[1].clone(),
+    );
     assert_eq!(applied.annotations.len(), 2);
     let a = get(&s, &link).unwrap();
     assert_eq!(a.author, "1");
@@ -126,7 +129,10 @@ fn add_update_remove_and_undo_through_apply() {
             annotation: url("https://other.example"),
         }],
     );
-    assert_eq!(get(&s, &link).unwrap().payload, url("https://other.example"));
+    assert_eq!(
+        get(&s, &link).unwrap().payload,
+        url("https://other.example")
+    );
     // A kind cannot change.
     let e = refused(
         &mut s,
@@ -141,7 +147,10 @@ fn add_update_remove_and_undo_through_apply() {
     assert_eq!(s.state().unwrap().data.annotations.len(), 1);
     // Each was one undo step; the ID comes back each time.
     assert!(s.undo().unwrap().data);
-    assert_eq!(get(&s, &link).unwrap().payload, url("https://other.example"));
+    assert_eq!(
+        get(&s, &link).unwrap().payload,
+        url("https://other.example")
+    );
     assert!(s.undo().unwrap().data);
     assert_eq!(get(&s, &link).unwrap().payload, url("https://docs.example"));
     assert!(s.undo().unwrap().data);
@@ -178,7 +187,10 @@ fn a_link_with_its_style_is_one_undo_step() {
     let link = applied.annotations[0].clone();
     let state = s.state().unwrap().data;
     let runs = state.blocks[0].formatting.clone().unwrap();
-    assert!(runs.iter().any(|r| r.start == 10 && r.style.decoration.underline == Some(true)));
+    assert!(
+        runs.iter()
+            .any(|r| r.start == 10 && r.style.decoration.underline == Some(true))
+    );
     assert!(s.undo().unwrap().data);
     assert!(get(&s, &link).is_none());
     assert!(s.state().unwrap().data.blocks[0].formatting.is_none());
@@ -193,7 +205,10 @@ fn refusals_carry_stable_codes_and_change_nothing() {
         (url("javascript:alert(1)"), "annotation.link-scheme"),
         (url("data:text/html,x"), "annotation.link-scheme"),
         (url("/relative"), "annotation.link-invalid"),
-        (url(&format!("https://a.example/{}", "x".repeat(9000))), "annotation.link-length"),
+        (
+            url(&format!("https://a.example/{}", "x".repeat(9000))),
+            "annotation.link-length",
+        ),
         (thread("has space"), "annotation.payload-invalid"),
         (thread(""), "annotation.payload-invalid"),
     ] {
@@ -208,10 +223,7 @@ fn refusals_carry_stable_codes_and_change_nothing() {
         }))
         .is_err()
     );
-    let e = refused(
-        &mut s,
-        vec![Command::RemoveAnnotation { id: "3@9".into() }],
-    );
+    let e = refused(&mut s, vec![Command::RemoveAnnotation { id: "3@9".into() }]);
     assert_eq!(e.code(), "annotation.missing");
     let e = refused(
         &mut s,
@@ -230,7 +242,13 @@ fn refusals_carry_stable_codes_and_change_nothing() {
     );
     assert_eq!(e.code(), "annotation.link-scheme");
     assert!(
-        matches!(&e, Error::Core { command: Some(1), .. }),
+        matches!(
+            &e,
+            Error::Core {
+                command: Some(1),
+                ..
+            }
+        ),
         "the refused command is named: {e:?}"
     );
     assert_eq!(s.state().unwrap().data.revision, before);
@@ -259,7 +277,12 @@ fn queries_report_what_is_at_a_place() {
         .unwrap()
         .data
     };
-    let ids_of = |list: &AnnotationList| list.annotations.iter().map(|a| a.id.clone()).collect::<Vec<_>>();
+    let ids_of = |list: &AnnotationList| {
+        list.annotations
+            .iter()
+            .map(|a| a.id.clone())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(ids_of(&at(&a, 5)), vec![ids[0].clone(), ids[1].clone()]);
     assert_eq!(ids_of(&at(&a, 2)), vec![ids[0].clone()]);
     assert_eq!(ids_of(&at(&a, 7)), vec![ids[1].clone()], "end is exclusive");
@@ -304,7 +327,10 @@ fn a_deleted_comment_is_orphaned_and_undo_brings_the_anchor_back() {
             add(&p, 5, 18, url("https://gone.example")),
         ],
     );
-    let (note, link) = (applied.annotations[0].clone(), applied.annotations[1].clone());
+    let (note, link) = (
+        applied.annotations[0].clone(),
+        applied.annotations[1].clone(),
+    );
     apply(
         &mut s,
         vec![Command::DeleteText {
@@ -323,7 +349,10 @@ fn a_deleted_comment_is_orphaned_and_undo_brings_the_anchor_back() {
             end: 4
         }]
     );
-    assert!(get(&s, &link).is_none(), "a link whose text is gone disappears");
+    assert!(
+        get(&s, &link).is_none(),
+        "a link whose text is gone disappears"
+    );
     let state = s.state().unwrap().data;
     assert_eq!(state.annotations.len(), 1);
     assert_eq!(state.annotations[0].status, AnnotationStatus::Orphaned);
@@ -354,13 +383,21 @@ fn geometry_and_link_areas_need_a_layout_and_follow_the_text() {
             add(&p, 0, 4, thread("t-1")),
         ],
     );
-    let (link, note) = (applied.annotations[0].clone(), applied.annotations[1].clone());
+    let (link, note) = (
+        applied.annotations[0].clone(),
+        applied.annotations[1].clone(),
+    );
     // No layout yet.
     assert_eq!(
-        s.annotation_geometry(&Payload::new(link.clone())).unwrap_err().code(),
+        s.annotation_geometry(&Payload::new(link.clone()))
+            .unwrap_err()
+            .code(),
         "bindings.layout-required"
     );
-    assert_eq!(s.page_links(0).unwrap_err().code(), "bindings.layout-required");
+    assert_eq!(
+        s.page_links(0).unwrap_err().code(),
+        "bindings.layout-required"
+    );
     finish(&mut s);
     let geometry = s
         .annotation_geometry(&Payload::new(link.clone()))
@@ -392,7 +429,11 @@ fn geometry_and_link_areas_need_a_layout_and_follow_the_text() {
     apply(&mut s, vec![Command::RemoveAnnotation { id: link.clone() }]);
     finish(&mut s);
     assert!(s.display_page(0).unwrap().data.links.is_empty());
-    assert_eq!(s.display_json(0).unwrap().data, json_with, "links never paint");
+    assert_eq!(
+        s.display_json(0).unwrap().data,
+        json_with,
+        "links never paint"
+    );
     // The comment has geometry too, and a missing one is null.
     assert!(
         s.annotation_geometry(&Payload::new(note))
@@ -468,9 +509,14 @@ fn a_copied_document_keeps_links_and_comments_with_new_identities() {
         vec![
             add(&p, 17, 21, url("https://copy.example")),
             add(&p, 28, 35, thread("t-9")),
-            add(&q, 0, 6, AnnotationPayload::Link {
-                target: LinkDestination::Heading { node: p.clone() },
-            }),
+            add(
+                &q,
+                0,
+                6,
+                AnnotationPayload::Link {
+                    target: LinkDestination::Heading { node: p.clone() },
+                },
+            ),
             add(&q, 7, 16, thread("t-orphan")),
         ],
     );
@@ -497,11 +543,22 @@ fn a_copied_document_keeps_links_and_comments_with_new_identities() {
         .unwrap();
     let state = copy.state().unwrap().data;
     assert_eq!(state.annotations.len(), 4, "{:?}", state.annotations);
-    let originals: Vec<String> = s.state().unwrap().data.annotations.iter().map(|a| a.id.clone()).collect();
+    let originals: Vec<String> = s
+        .state()
+        .unwrap()
+        .data
+        .annotations
+        .iter()
+        .map(|a| a.id.clone())
+        .collect();
     for a in &state.annotations {
         assert!(!originals.contains(&a.id), "new identity: {}", a.id);
     }
-    let kinds: Vec<_> = state.annotations.iter().map(|a| (a.kind, a.status)).collect();
+    let kinds: Vec<_> = state
+        .annotations
+        .iter()
+        .map(|a| (a.kind, a.status))
+        .collect();
     assert_eq!(
         kinds.iter().filter(|k| k.0 == AnnotationKind::Link).count(),
         2
@@ -535,7 +592,10 @@ fn a_copied_document_keeps_links_and_comments_with_new_identities() {
 fn copy_as_html_carries_links_of_the_copied_part_only() {
     let mut s = session("1");
     let p = paragraph(&mut s, "visit the site today");
-    apply(&mut s, vec![add(&p, 10, 14, url("https://site.example/?a=1&b=2"))]);
+    apply(
+        &mut s,
+        vec![add(&p, 10, 14, url("https://site.example/?a=1&b=2"))],
+    );
     finish(&mut s);
     let selection = |start: u32, end: u32| Selection {
         anchor: Caret {
@@ -557,7 +617,10 @@ fn copy_as_html_carries_links_of_the_copied_part_only() {
         .unwrap()
         .data;
     let html = String::from_utf8(exported.content.bytes).unwrap();
-    assert!(html.contains("<a href=\"https://site.example/?a=1&amp;b=2\">"), "{html}");
+    assert!(
+        html.contains("<a href=\"https://site.example/?a=1&amp;b=2\">"),
+        "{html}"
+    );
     // Copying a part that does not include the link leaves it out.
     let exported = s
         .copy_as(&Payload::new(CopyAs {
@@ -566,7 +629,11 @@ fn copy_as_html_carries_links_of_the_copied_part_only() {
         }))
         .unwrap()
         .data;
-    assert!(!String::from_utf8(exported.content.bytes).unwrap().contains("<a "));
+    assert!(
+        !String::from_utf8(exported.content.bytes)
+            .unwrap()
+            .contains("<a ")
+    );
 }
 
 #[test]
@@ -576,7 +643,12 @@ fn state_lists_a_bounded_number_and_the_queries_the_rest() {
     let p = paragraph(&mut s, &text);
     let mut commands = Vec::new();
     for i in 0..(MAX_STATE_ANNOTATIONS as u32 + 40) {
-        commands.push(add(&p, (i % 3000) / 2 * 2, (i % 3000) / 2 * 2 + 1, thread(&format!("t{i}"))));
+        commands.push(add(
+            &p,
+            (i % 3000) / 2 * 2,
+            (i % 3000) / 2 * 2 + 1,
+            thread(&format!("t{i}")),
+        ));
     }
     for chunk in commands.chunks(500) {
         apply(&mut s, chunk.to_vec());
@@ -658,7 +730,12 @@ fn unreadable_annotations_show_up_in_state_and_diagnostics_for() {
     .save()
     .unwrap();
     let s = Workspace::new()
-        .open(&Payload::new(Open { peer_id: "2".into() }), &bytes)
+        .open(
+            &Payload::new(Open {
+                peer_id: "2".into(),
+            }),
+            &bytes,
+        )
         .unwrap();
     let state = s.state().unwrap().data;
     assert_eq!(state.annotations.len(), 1);
@@ -674,7 +751,12 @@ fn unreadable_annotations_show_up_in_state_and_diagnostics_for() {
     assert_eq!(list.diagnostics.len(), 1, "{:?}", list.diagnostics);
     assert_eq!(list.diagnostics[0].code, "annotation.unreadable");
     assert_eq!(list.diagnostics[0].severity, Severity::Warning);
-    assert!(state.diagnostics.iter().any(|d| d.code == "annotation.unreadable"));
+    assert!(
+        state
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "annotation.unreadable")
+    );
     // It cannot be edited either: the record is a newer engine's, not ours.
     let mut s = s;
     let e = refused(
@@ -690,7 +772,10 @@ fn unreadable_annotations_show_up_in_state_and_diagnostics_for() {
 #[test]
 fn links_leave_the_reading_order_ranges_whole() {
     let mut s = session("1");
-    let a = paragraph(&mut s, "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda");
+    let a = paragraph(
+        &mut s,
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda",
+    );
     let b = paragraph(&mut s, "second block with a link in it");
     apply(
         &mut s,

@@ -153,11 +153,7 @@ impl LayoutSnapshot {
     /// The geometry of one annotation, or `None` when the document has no
     /// readable live annotation with that ID. `stale` when `doc` is not the
     /// revision this snapshot was made from.
-    pub fn annotation_geometry(
-        &self,
-        doc: &Document,
-        id: AnnotationId,
-    ) -> Option<SpanGeometry> {
+    pub fn annotation_geometry(&self, doc: &Document, id: AnnotationId) -> Option<SpanGeometry> {
         self.annotation_geometries(doc, &[id])
             .into_iter()
             .next()
@@ -203,9 +199,7 @@ impl LayoutSnapshot {
                     node: Some(node),
                     at,
                 } => vec![(*node, *at..*at)],
-                AnnotationState::Orphaned { node: None, .. } | AnnotationState::Gone => {
-                    Vec::new()
-                }
+                AnnotationState::Orphaned { node: None, .. } | AnnotationState::Gone => Vec::new(),
             };
             let mut geometry = resolver.geometry(&pieces);
             if pieces.is_empty() {
@@ -256,8 +250,7 @@ impl LayoutSnapshot {
                 else {
                     continue;
                 };
-                let reprise_doc::annotation::AnnotationData::Link(target) = &annotation.data
-                else {
+                let reprise_doc::annotation::AnnotationData::Link(target) = &annotation.data else {
                     continue;
                 };
                 let mut rects = Vec::new();

@@ -100,7 +100,10 @@ fn typing_at_edges_and_inside_follows_each_kind() {
     insert(&mut ed, 7, "!"); // end
     insert(&mut ed, 4, "<"); // start
     insert(&mut ed, 6, "w"); // inside
-    assert_eq!(ed.document().block(p).unwrap().text.to_string(), "one <twwo! three");
+    assert_eq!(
+        ed.document().block(p).unwrap().text.to_string(),
+        "one <twwo! three"
+    );
     assert_eq!(span(ed.document(), ids[0]), Some(vec![(p, 5..9)]));
     assert_eq!(span(ed.document(), ids[1]), Some(vec![(p, 5..10)]));
 }
@@ -130,7 +133,13 @@ fn deleting_a_comments_text_then_undo_restores_the_anchor() {
             at: 4
         }
     );
-    assert_eq!(ed.document().annotations_of_kind(Kind::Comment).annotations.len(), 1);
+    assert_eq!(
+        ed.document()
+            .annotations_of_kind(Kind::Comment)
+            .annotations
+            .len(),
+        1
+    );
     ed.undo().unwrap();
     assert_eq!(span(ed.document(), id), Some(vec![(p, 5..18)]));
     ed.redo().unwrap();
@@ -196,7 +205,11 @@ fn paste_duplicates_links_drops_comments_and_remaps_internal_targets() {
     let whole = src.document().copy_all_fragment("doc-a", &schemas).unwrap();
     assert!(whole.notes.iter().any(|n| n.code == ANNOTATION_DROPPED));
     assert_eq!(
-        whole.ranges.iter().filter(|r| r.annotation.is_some()).count(),
+        whole
+            .ranges
+            .iter()
+            .filter(|r| r.annotation.is_some())
+            .count(),
         2
     );
     // Into another document: the heading came along, so the link follows it.
@@ -213,7 +226,12 @@ fn paste_duplicates_links_drops_comments_and_remaps_internal_targets() {
         dst.document().annotation(web).unwrap().data,
         url("https://docs.example")
     );
-    assert!(dst.document().annotations_of_kind(Kind::Comment).annotations.is_empty());
+    assert!(
+        dst.document()
+            .annotations_of_kind(Kind::Comment)
+            .annotations
+            .is_empty()
+    );
     dst.undo().unwrap();
     assert!(dst.document().annotation(web).is_none());
     dst.redo().unwrap();
@@ -234,7 +252,12 @@ fn paste_duplicates_links_drops_comments_and_remaps_internal_targets() {
     let (mut other, _) = editor(&[]);
     let pasted = other.paste(&part, None, "doc-b").unwrap();
     assert!(pasted.notes.iter().any(|n| n.code == ANNOTATION_DROPPED));
-    assert!(other.document().annotation(pasted.ids.ranges[&ids[0]]).is_none());
+    assert!(
+        other
+            .document()
+            .annotation(pasted.ids.ranges[&ids[0]])
+            .is_none()
+    );
     // The same document keeps the outside target.
     let pasted = src.paste(&part, Some((intro, 5)), "doc-a").unwrap();
     assert_eq!(

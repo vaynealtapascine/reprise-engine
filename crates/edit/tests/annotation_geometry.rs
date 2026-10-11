@@ -109,7 +109,9 @@ fn an_annotation_across_a_page_break_has_rectangles_on_both_pages() {
     define_styles(&doc).unwrap();
     doc.set_page_template(&two_columns()).unwrap();
     let text = long_text(6);
-    let p = doc.append_block(BlockKind::Paragraph, "body", &text).unwrap();
+    let p = doc
+        .append_block(BlockKind::Paragraph, "body", &text)
+        .unwrap();
     doc.commit();
     let snapshot = engine().layout(&doc);
     assert!(snapshot.pages.len() >= 2, "the text needs several pages");
@@ -146,7 +148,8 @@ fn an_annotation_across_a_page_break_has_rectangles_on_both_pages() {
         .unwrap();
     assert_eq!(top.y, min);
     // Several frames (columns) are involved, each rectangle names its own.
-    let frames: std::collections::BTreeSet<usize> = geometry.rects.iter().map(|r| r.frame).collect();
+    let frames: std::collections::BTreeSet<usize> =
+        geometry.rects.iter().map(|r| r.frame).collect();
     assert!(frames.len() >= 2);
     for r in &geometry.rects {
         assert_eq!(snapshot.frames[r.frame].page, r.page);
@@ -165,7 +168,9 @@ fn a_hebrew_link_sits_where_the_hebrew_is_drawn() {
     let text = snapshot.block(node).unwrap().text.clone();
     let from = text.find('\u{5E2}').unwrap();
     let to = from + "\u{5E2}\u{5D1}\u{5E8}\u{5D9}\u{5EA}".len();
-    let id = doc.add_annotation(node, from..to, &url("https://he.example")).unwrap();
+    let id = doc
+        .add_annotation(node, from..to, &url("https://he.example"))
+        .unwrap();
     doc.commit();
     let snapshot = fixture.engine.layout(doc);
     let geometry = snapshot.annotation_geometry(doc, id).unwrap();
@@ -191,7 +196,9 @@ fn vertical_and_rotated_frames_give_exact_corners() {
     let doc = &fixture.doc;
     let snapshot = fixture.engine.layout(doc);
     let node = snapshot.blocks[0].node;
-    let id = doc.add_annotation(node, 4..30, &url("https://v.example")).unwrap();
+    let id = doc
+        .add_annotation(node, 4..30, &url("https://v.example"))
+        .unwrap();
     doc.commit();
     let snapshot = fixture.engine.layout(doc);
     let geometry = snapshot.annotation_geometry(doc, id).unwrap();
@@ -255,7 +262,9 @@ fn an_orphaned_comment_is_one_zero_width_point() {
 fn a_stale_snapshot_places_nothing_and_a_missing_annotation_is_none() {
     let (doc, ids) = paragraph_doc(&["hello there world"]);
     let p = ids[0];
-    let id = doc.add_annotation(p, 0..5, &url("https://a.example")).unwrap();
+    let id = doc
+        .add_annotation(p, 0..5, &url("https://a.example"))
+        .unwrap();
     doc.commit();
     let snapshot = engine().layout(&doc);
     doc.block(p).unwrap().text.insert(0, "x").unwrap();
@@ -270,7 +279,8 @@ fn a_stale_snapshot_places_nothing_and_a_missing_annotation_is_none() {
             .is_none()
     );
     // A link whose text was all deleted has no geometry (it is gone).
-    doc.delete_text(p, 0..doc.block(p).unwrap().text.len()).unwrap();
+    doc.delete_text(p, 0..doc.block(p).unwrap().text.len())
+        .unwrap();
     doc.commit();
     let fresh = engine().layout(&doc);
     assert!(fresh.annotation_geometry(&doc, id).is_none());
@@ -282,7 +292,9 @@ fn page_links_list_each_link_once_per_page_with_its_rectangles() {
     define_styles(&doc).unwrap();
     doc.set_page_template(&two_columns()).unwrap();
     let text = long_text(6);
-    let p = doc.append_block(BlockKind::Paragraph, "body", &text).unwrap();
+    let p = doc
+        .append_block(BlockKind::Paragraph, "body", &text)
+        .unwrap();
     doc.commit();
     let snapshot = engine().layout(&doc);
     let block = snapshot.block(p).unwrap();
@@ -291,12 +303,21 @@ fn page_links_list_each_link_once_per_page_with_its_rectangles() {
         .iter()
         .filter(|l| snapshot.frames[l.frame].page == 0)
         .collect();
-    let spanning = first_page.last().unwrap().text.start..block.lines
-        [block.lines.iter().position(|l| snapshot.frames[l.frame].page == 1).unwrap() + 1]
+    let spanning = first_page.last().unwrap().text.start
+        ..block.lines[block
+            .lines
+            .iter()
+            .position(|l| snapshot.frames[l.frame].page == 1)
+            .unwrap()
+            + 1]
         .text
         .end;
-    let small = doc.add_annotation(p, 0..4, &url("https://small.example")).unwrap();
-    let wide = doc.add_annotation(p, spanning, &url("https://wide.example")).unwrap();
+    let small = doc
+        .add_annotation(p, 0..4, &url("https://small.example"))
+        .unwrap();
+    let wide = doc
+        .add_annotation(p, spanning, &url("https://wide.example"))
+        .unwrap();
     let note = doc.add_annotation(p, 0..10, &comment("c")).unwrap();
     doc.commit();
     let snapshot = engine().layout(&doc);
@@ -337,7 +358,10 @@ fn geometry_is_bounded_and_deterministic() {
     assert!(a.rects.len() <= MAX_SPAN_RECTS);
     // Many annotations share one pass.
     let many: Vec<_> = (0..200)
-        .map(|i| doc.add_annotation(p, i * 4..i * 4 + 3, &comment("c")).unwrap())
+        .map(|i| {
+            doc.add_annotation(p, i * 4..i * 4 + 3, &comment("c"))
+                .unwrap()
+        })
         .collect();
     doc.commit();
     let snapshot = engine().layout(&doc);

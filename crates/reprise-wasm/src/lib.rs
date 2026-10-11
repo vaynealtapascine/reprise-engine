@@ -664,7 +664,10 @@ impl WasmDocument {
     pub fn marks(&self, page: u32) -> Result<MarksPagePayload, JsValue> {
         Ok(encode(self.inner.marks(page))?.unchecked_into())
     }
-    pub fn annotation(&self, request: &StringPayload) -> Result<OptionalAnnotationPayload, JsValue> {
+    pub fn annotation(
+        &self,
+        request: &StringPayload,
+    ) -> Result<OptionalAnnotationPayload, JsValue> {
         Ok(encode(self.inner.annotation(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn annotations_at(
