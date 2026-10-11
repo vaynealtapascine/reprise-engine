@@ -581,3 +581,67 @@ fn overlapping_and_off_page_links_are_reported_not_broken() {
     );
     assert!(report.text.contains("alpha beta gamma delta"));
 }
+
+#[test]
+fn a_hostile_native_fragment_is_refused_whole() {
+    let (doc, ids) = document(&["one two three four"]);
+    doc.add_annotation(ids[0], 4..7, &url("https://fine.example"))
+        .unwrap();
+    doc.commit();
+    let schemas = SchemaRegistry::builtin();
+    let honest = reprise_clipboard::copy_all(&doc, "source", &schemas, None, None).unwrap();
+    let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
+    let attacks: Vec<(&str, Box<dyn Fn(&mut NativeFragment)>)> = vec![
+        (
+            "a forbidden scheme",
+            Box::new(|f| {
+                for r in &mut f.fragment.ranges {
+                    r.annotation = Some(url("javascript:alert(1)"));
+                }
+            }),
+        ),
+        (
+            "an oversized thread id",
+            Box::new(|f| {
+                for r in &mut f.fragment.ranges {
+                    r.annotation = Some(comment(&"t".repeat(5000)));
+                }
+            }),
+        ),
+        (
+            "an empty annotated span",
+            Box::new(|f| {
+                for r in &mut f.fragment.ranges {
+                    r.annotation = Some(url("https://a.example"));
+                    r.bytes = 2..2;
+                }
+            }),
+        ),
+        (
+            "more annotations than a document holds",
+            Box::new(|f| {
+                let template = f.fragment.ranges[0].clone();
+                for i in 0..70_000u32 {
+                    let mut r = template.clone();
+                    r.id = reprise_doc::RangeId::parse(&format!("{i}@77")).unwrap();
+                    f.fragment.ranges.push(r);
+                }
+            }),
+        ),
+    ];
+    for (name, attack) in attacks {
+        let mut hostile = honest.clone();
+        attack(&mut hostile);
+        let refused = hostile.fragment.validate().is_err()
+            || hostile
+                .encode()
+                .ok()
+                .and_then(|bytes| NativeFragment::decode(&bytes).ok())
+                .is_none_or(|decoded| decoded.paste(&mut editor, None, "elsewhere").is_err());
+        assert!(refused, "{name}");
+        assert!(
+            editor.document().blocks().is_empty() && !editor.document().has_annotations(),
+            "{name}: nothing was written"
+        );
+    }
+}
