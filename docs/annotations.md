@@ -107,12 +107,22 @@ always an orphan, never an intended point.
     peer after the hint. The rebind and the hint update are one excluded
     commit, so repeated undo/redo cycles keep working. At most 8 hints are kept
     per annotation, newest first.
+-   **Shallow packages:** a shallow package keeps no history, so a character
+    deleted before it cannot be found again. An annotation whose end was
+    already rebound onto other text reports as rebound at the start of the text,
+    as every persistent range does (`Resolved::Tombstoned(0)`); annotations
+    whose ends are live come back exactly. History packages keep everything.
 -   **Concurrency:** edits inside the span merge as text does. One peer deleting
     the text while another edits the payload: both survive; a comment is then
     an orphan with the new thread payload, a link is gone with its new URL
     retained. Concurrent overlapping additions are independent ranges.
 
 ## Bounds and diagnostics
+
+The index is rebuilt once per document revision, so reading annotations costs
+one pass over the annotation records after each edit (not per query). A host
+that edits at typing speed with tens of thousands of annotations pays that pass
+per keystroke; the cap below bounds it, and an incremental index is a follow-up.
 
 -   At most `MAX_ANNOTATIONS` (65,536) live annotation records are indexed, in
     ID order; more is reported as `annotation.limit` Warning and local
