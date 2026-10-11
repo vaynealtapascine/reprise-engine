@@ -341,6 +341,7 @@ impl Flow<'_> {
             &subject,
             &mut composition_notes,
             self.evaluation,
+            &self.fields(),
         );
         if composed.lines.is_empty() {
             self.snapshot.diagnostics.extend(composition_notes);

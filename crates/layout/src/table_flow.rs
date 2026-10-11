@@ -634,6 +634,7 @@ impl Flow<'_> {
                 &subject,
                 diagnostics,
                 self.evaluation,
+                &self.fields(),
             );
             if composed.lines.is_empty() {
                 break;

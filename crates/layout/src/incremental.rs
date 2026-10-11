@@ -186,6 +186,9 @@ struct Inputs {
     overrides: Style,
     formatting: reprise_doc::formatting::TextFormats,
     styles: Vec<(String, Option<Style>)>,
+    /// Inline objects and their parameters: resizing one changes layout
+    /// without changing the text.
+    inline: Vec<(reprise_doc::InlineId, reprise_doc::InlineObject)>,
 }
 impl Inputs {
     fn read(doc: &Document, node: NodeId) -> Option<Self> {
@@ -211,6 +214,12 @@ impl Inputs {
             overrides: block.overrides,
             formatting: doc.text_formats(node).ok()?,
             styles,
+            inline: doc
+                .inline_objects(node)
+                .ok()?
+                .into_iter()
+                .map(|e| (e.id, e.object))
+                .collect(),
         })
     }
     fn dependencies(&self, engine: &Engine, node: NodeId) -> BTreeSet<Dependency> {
@@ -249,6 +258,7 @@ impl Inputs {
             || self.overrides != old.overrides
             || self.image != old.image
             || self.formatting != old.formatting
+            || self.inline != old.inline
         {
             out.insert(Dependency::Node(node));
         }
@@ -1241,6 +1251,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             diagnostics: Vec::new(),
         };
         let template = crate::template::resolve(engine, doc, &mut base.diagnostics);
+        crate::inline::audit(doc, &mut base.diagnostics);
         base.template = TemplateUsed {
             name: template.name.clone(),
             source: template.source,
@@ -1366,12 +1377,14 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                     }
                 }
                 Pass::RegionFeedback => {
-                    let next = self.session.evaluation.allocate(
+                    let mut next = self.session.evaluation.allocate(
                         engine,
                         self.doc,
                         &self.template,
                         &self.snapshot,
                     );
+                    next.fields =
+                        crate::inline::next_fields(self.doc, &self.snapshot, &self.plan.fields);
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
                     if outcome == crate::regions::Feedback::Continue {
@@ -1394,6 +1407,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             next,
                             outcome,
                         );
+                        crate::inline::field_notes(self.doc, &mut self.snapshot);
                         self.pass = Pass::Relations;
                     }
                 }

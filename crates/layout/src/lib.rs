@@ -23,6 +23,7 @@ mod flow;
 pub mod geometry;
 mod image;
 pub mod incremental;
+mod inline;
 pub mod marks;
 mod notes;
 pub mod plugins;
@@ -49,6 +50,7 @@ use reprise_shape::{HarfRust, ShapingAdapter};
 use serde::{Deserialize, Serialize};
 
 pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
+pub use inline::{AtomLayout, AtomPaint, AtomRole};
 pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
@@ -178,6 +180,7 @@ impl Engine {
             diagnostics: Vec::new(),
         };
         let template = template::resolve(self, doc, &mut snapshot.diagnostics);
+        inline::audit(doc, &mut snapshot.diagnostics);
         snapshot.template = TemplateUsed {
             name: template.name.clone(),
             source: template.source,

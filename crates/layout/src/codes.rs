@@ -11,6 +11,19 @@ pub const IMAGE_MISSING: Code = Code::new("layout.image-missing");
 pub const IMAGE_HEADER: Code = Code::new("layout.image-header");
 pub const IMAGE_LIMIT: Code = Code::new("layout.image-limit");
 pub const IMAGE_SIZE: Code = Code::new("layout.image-size");
+/// A U+FFFC without a readable inline object record was hidden (37).
+pub const INLINE_ORPHAN_MARKER: Code = Code::new("layout.inline-orphan-marker");
+/// An inline object record whose marker is gone was ignored. Info: what is
+/// drawn is what the document's live text asks for.
+pub const INLINE_ORPHAN_RECORD: Code = Code::new("layout.inline-orphan-record");
+/// An inline object of an unknown kind, or with unreadable parameters, was
+/// kept and drawn as an empty box.
+pub const INLINE_KIND: Code = Code::new("layout.inline-kind");
+/// Field text and pagination didn't settle within the pass limit; the last
+/// complete pass is published.
+pub const FIELD_UNSETTLED: Code = Code::new("layout.field-unsettled");
+/// A field couldn't be resolved, such as a `page-of` whose target is gone.
+pub const FIELD_TARGET: Code = Code::new("layout.field-target");
 
 /// A block couldn't be read from the document.
 pub const MALFORMED_BLOCK: Code = Code::new("layout.malformed-block");

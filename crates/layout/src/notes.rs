@@ -168,6 +168,11 @@ impl Notes {
                 &Subject::Node(owner),
                 &mut out.diagnostics,
                 evaluation,
+                &crate::inline::FieldEnv {
+                    page,
+                    pages: page.saturating_add(1),
+                    values: None,
+                },
             );
             if !composed.lines.is_empty() {
                 if overflow {

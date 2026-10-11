@@ -175,6 +175,10 @@ pub struct LineLayout {
     pub explanation: Explanation,
     /// In visual order, left to right along the inline axis.
     pub runs: Vec<PositionedRun>,
+    /// Inline objects on this line, in visual order (see `docs/inline.md`).
+    /// Left out of JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub atoms: Vec<crate::AtomLayout>,
 }
 
 /// A run of glyphs placed on a line.

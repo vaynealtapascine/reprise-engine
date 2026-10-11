@@ -27,10 +27,17 @@ pub(crate) struct Plan {
     pub applied: BTreeSet<RelationId>,
     pub pages: usize,
     pub diagnostics: Vec<Diagnostic>,
+    /// Field texts a finished pass resolved, for the next pass to compose
+    /// with (see `docs/inline.md`). Derived; never stored in the document.
+    pub fields: BTreeMap<reprise_doc::InlineId, String>,
 }
 
 impl Plan {
     pub(crate) fn equivalent(&self, other: &Self) -> bool {
+        self.regions_equivalent(other) && self.fields == other.fields
+    }
+
+    fn regions_equivalent(&self, other: &Self) -> bool {
         self.exclusions == other.exclusions
             && self.reservations == other.reservations
             && self.blocks == other.blocks
@@ -72,7 +79,8 @@ pub(crate) fn run(
             crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
             return snapshot;
         }
-        let next = allocate(engine, doc, template, &snapshot, None);
+        let mut next = allocate(engine, doc, template, &snapshot, None);
+        next.fields = crate::inline::next_fields(doc, &snapshot, &plan.fields);
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
             let applied = if outcome == Feedback::Converged {
@@ -81,6 +89,7 @@ pub(crate) fn run(
                 plan.applied.clone()
             };
             finish_feedback(&mut snapshot, &plan, next, outcome);
+            crate::inline::field_notes(doc, &mut snapshot);
             crate::relations::run(engine, doc, &mut snapshot, pending, &applied);
             return snapshot;
         }
@@ -90,8 +99,11 @@ pub(crate) fn run(
     base
 }
 
+/// Region relations and inline objects (whose fields depend on pagination)
+/// take part in feedback.
 pub(crate) fn active(engine: &Engine, doc: &Document) -> bool {
-    doc.relations().iter().any(|(_, r)| {
+    doc.has_inline_objects()
+        || doc.relations().iter().any(|(_, r)| {
         r.as_ref()
             .is_ok_and(|r| is_region(r) && engine.schemas.get(&r.schema).is_some())
     })
@@ -124,11 +136,22 @@ pub(crate) fn finish_feedback(
         snapshot.blocks.extend(next.blocks);
         snapshot.diagnostics.extend(next.diagnostics);
     } else {
+        let fields = plan.fields != next.fields;
         snapshot.blocks.extend(plan.blocks.clone());
         snapshot.diagnostics.extend(plan.diagnostics.clone());
-        snapshot.diagnostics.push(Diagnostic::new(Severity::Warning,
-            if outcome == Feedback::Oscillated { codes::REGION_CYCLE } else { codes::REGION_LIMIT },
-            Subject::Document, "region feedback did not converge; last complete input allocation frozen, anchors may differ"));
+        if !plan.regions_equivalent(&next) || !fields {
+            snapshot.diagnostics.push(Diagnostic::new(Severity::Warning,
+                if outcome == Feedback::Oscillated { codes::REGION_CYCLE } else { codes::REGION_LIMIT },
+                Subject::Document, "region feedback did not converge; last complete input allocation frozen, anchors may differ"));
+        }
+        if fields {
+            snapshot.diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                codes::FIELD_UNSETTLED,
+                Subject::Document,
+                "field text and pagination did not settle; the last complete pass is published",
+            ));
+        }
     }
 }
 

@@ -118,6 +118,11 @@ impl Floats {
                     &Subject::Node(owner),
                     &mut candidate_diagnostics,
                     evaluation,
+                    &crate::inline::FieldEnv {
+                        page,
+                        pages: page.saturating_add(1),
+                        values: None,
+                    },
                 );
                 let height = composed.block_end;
                 let free = self.next.get(&index).copied().unwrap_or_default();

@@ -642,6 +642,10 @@ impl Flow<'_> {
             &subject,
             &mut self.snapshot.diagnostics,
             self.evaluation,
+            &crate::inline::FieldEnv {
+                values: Some(&self.plan.fields),
+                ..crate::inline::FieldEnv::UNPLACED
+            },
         );
         if let Some(rest) = composed.rest {
             unplaced(
@@ -745,6 +749,15 @@ impl Flow<'_> {
             fills: self.fills.get(tail..).unwrap_or_default().to_vec(),
         }
     }
+    /// What fields compose with on the page being filled.
+    pub(crate) fn fields(&self) -> crate::inline::FieldEnv<'_> {
+        crate::inline::FieldEnv {
+            page: self.page,
+            pages: self.page.saturating_add(1),
+            values: Some(&self.plan.fields),
+        }
+    }
+
     pub(crate) fn plan(&self) -> &Plan {
         self.plan
     }
@@ -825,6 +838,9 @@ pub(crate) struct Prepared {
     /// Empty lines take their vertical metrics from the style's own face.
     fallback: Option<(FaceId, Length)>,
     image: Option<crate::ImageLayout>,
+    /// Inline objects (see `docs/inline.md`) and the frame they are sized for.
+    pub(crate) atoms: Vec<crate::inline::PreparedAtom>,
+    pub(crate) atom_frame: crate::inline::AtomFrame,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -913,6 +929,7 @@ impl Prepared {
         subject: &Subject,
         diagnostics: &mut Vec<Diagnostic>,
         evaluation: Option<&crate::incremental::Evaluation>,
+        fields: &crate::inline::FieldEnv<'_>,
     ) -> Composed {
         if let Some(image) = &self.image {
             use reprise_compose::{Available, BreakReason, Explanation, LineQuery};
@@ -952,6 +969,7 @@ impl Prepared {
                     baseline: block_start,
                     width: image.rect.width,
                     runs: Vec::new(),
+                    atoms: Vec::new(),
                     explanation: Explanation {
                         reason: BreakReason::End,
                         score: None,
@@ -972,25 +990,63 @@ impl Prepared {
             fonts: &engine.fonts,
             adapter: engine.shaper.as_ref(),
         };
+        // Inline objects become advance cells of their boxes' advance.
+        let sized = crate::inline::size_atoms(
+            engine,
+            &self.atoms,
+            &self.items,
+            self.style.size,
+            self.atom_frame,
+            fields,
+            start,
+            subject,
+            diagnostics,
+        );
+        let substituted;
+        let shaped = if sized.is_empty() {
+            &self.shaped
+        } else {
+            let mut copy = self.shaped.clone();
+            crate::inline::substitute(&mut copy.runs, &sized);
+            substituted = copy;
+            &substituted
+        };
+        let reshape = crate::inline::AtomReshape {
+            inner: &shaper,
+            sized: &sized,
+        };
         let request = ComposeRequest {
             text: &self.text,
-            shaped: &self.shaped,
-            reshape: &shaper,
+            shaped,
+            reshape: &reshape,
             breaks: &self.breaks,
             line_height: self.style.line_height,
             geometry,
             start,
             block_start,
         };
+        let extents = (!sized.is_empty()).then(|| {
+            let (top, bottom) = self.strut(engine);
+            reprise_compose::LineExtents {
+                strut_top: top,
+                strut_bottom: bottom,
+                objects: sized
+                    .iter()
+                    .map(|(&at, s)| (at, s.size.ascent, s.size.descent))
+                    .collect(),
+            }
+        });
         let composition = if self
             .text
             .chars()
             .any(|c| c == '\t' || reprise_doc::marks::is_line_break(c))
+            || extents.as_ref().is_some_and(|e| e.varies())
         {
-            reprise_compose::compose_marks(
+            reprise_compose::compose_marks_with(
                 &request,
                 &self.style.tabs.clone().unwrap_or_default(),
                 engine.composer.as_ref(),
+                extents.as_ref(),
             )
         } else {
             engine.composer.compose(&request)
@@ -1008,11 +1064,32 @@ impl Prepared {
             lines: composition
                 .lines
                 .into_iter()
-                .map(|l| line_layout(engine, self, frame, l, subject, diagnostics))
+                .map(|l| line_layout(engine, self, frame, l, subject, diagnostics, &sized))
                 .collect(),
             rest: composition.rest,
             block_end: composition.block_end,
         }
+    }
+
+    /// The strut's extent above and below the baseline: half-leading
+    /// around the paragraph face's ascent and descent.
+    fn strut(&self, engine: &Engine) -> (Length, Length) {
+        let face = self
+            .fallback
+            .clone()
+            .or_else(|| self.items.first().map(|i| (i.face.clone(), i.size)));
+        let (ascent, descent) = face
+            .and_then(|(face, size)| {
+                let m = engine.fonts.get(&face).ok()?.metrics();
+                Some((
+                    Length::from_font_units(m.ascent, size, m.units_per_em),
+                    Length::from_font_units(m.descent, size, m.units_per_em),
+                ))
+            })
+            .unwrap_or_default();
+        let height = self.style.line_height;
+        let top = (height - ascent - descent).mul_ratio(1, 2) + ascent;
+        (top, height - top)
     }
 
     pub(crate) fn into_block(self, lines: Vec<LineLayout>) -> BlockLayout {
@@ -1040,6 +1117,7 @@ fn line_layout(
     fragment: LineFragment,
     subject: &Subject,
     diagnostics: &mut Vec<Diagnostic>,
+    sized: &std::collections::BTreeMap<usize, crate::inline::Sized>,
 ) -> LineLayout {
     let text = &prepared.text;
     let fallback = prepared.fallback.as_ref();
@@ -1064,7 +1142,19 @@ fn line_layout(
     }
     let ascent = extents.iter().map(|e| e.0).max().unwrap_or_default();
     let descent = extents.iter().map(|e| e.1).max().unwrap_or_default();
-    let half_leading = (fragment.height - ascent - descent).mul_ratio(1, 2);
+    // A line with inline objects keeps the strut's baseline unless an
+    // object rises above it; composition made the line tall enough.
+    let atom_top = sized
+        .range(fragment.text.clone())
+        .map(|(_, s)| s.size.ascent)
+        .max();
+    let half_leading = match atom_top {
+        None => (fragment.height - ascent - descent).mul_ratio(1, 2),
+        Some(top) => {
+            let strut_top = (prepared.style.line_height - ascent - descent).mul_ratio(1, 2);
+            strut_top.max(top - ascent)
+        }
+    };
 
     let mut visual_runs = match reorder_line(
         text,
@@ -1134,7 +1224,7 @@ fn line_layout(
         _ => Length::ZERO,
     };
     let mut x = fragment.available.start + shift - hanging_left;
-    let runs = visual_runs
+    let runs: Vec<PositionedRun> = visual_runs
         .into_iter()
         .map(|run| {
             let width = run.width();
@@ -1188,6 +1278,8 @@ fn line_layout(
         },
         fragment.height,
     );
+    let baseline = fragment.block_offset + half_leading + ascent;
+    let atoms = place_atoms(prepared, &runs, sized, baseline);
     LineLayout {
         available: fragment.available,
         alignment: prepared.style.alignment,
@@ -1199,11 +1291,56 @@ fn line_layout(
             .to_string(),
         text: fragment.text,
         rect,
-        baseline: fragment.block_offset + half_leading + ascent,
+        baseline,
         width,
         explanation: fragment.explanation,
         runs,
+        atoms,
     }
+}
+
+/// The objects whose advance cells are on a line, at their cells' pen
+/// positions, in visual order.
+fn place_atoms(
+    prepared: &Prepared,
+    runs: &[PositionedRun],
+    sized: &std::collections::BTreeMap<usize, crate::inline::Sized>,
+    baseline: Length,
+) -> Vec<crate::AtomLayout> {
+    if sized.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for run in runs {
+        let mut pen = run.x;
+        for glyph in &run.glyphs {
+            let at = glyph.cluster as usize;
+            if glyph.id == reprise_compose::ATOM_GLYPH
+                && let Some(atom) = sized.get(&at)
+            {
+                let color = prepared
+                    .paint
+                    .iter()
+                    .find(|p| p.range.contains(&at))
+                    .map_or([0, 0, 0, 255], |p| p.color);
+                out.push(crate::AtomLayout {
+                    id: atom.id,
+                    at,
+                    kind: atom.kind.clone(),
+                    rect: Rect::new(
+                        Point::new(pen, baseline - atom.size.ascent),
+                        atom.size.advance,
+                        atom.size.ascent + atom.size.descent,
+                    ),
+                    baseline,
+                    color,
+                    paint: atom.paint.clone(),
+                });
+            }
+            pen += glyph.advance;
+        }
+    }
+    out
 }
 
 /// Tab leader glyphs occupy the existing tab cell; they add no source positions.
@@ -1488,6 +1625,7 @@ mod tests {
             fragment,
             &Subject::Node(node),
             &mut diagnostics,
+            &Default::default(),
         );
         assert_eq!(line.width, Length(52));
         assert_eq!(line.runs[0].width, Length(72));
@@ -1642,6 +1780,7 @@ mod tests {
             fragment,
             &Subject::Node(node),
             &mut diagnostics,
+            &Default::default(),
         );
         assert!(line.runs.is_empty());
         let note = diagnostics
