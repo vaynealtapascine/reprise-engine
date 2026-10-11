@@ -241,6 +241,23 @@ pub fn validate_url(url: &str) -> Result<(), AnnotationError> {
             "whitespace, control characters or backslashes",
         ));
     }
+    // Invisible and bidirectional controls make an address read as another.
+    if url.chars().any(|c| {
+        matches!(
+            c,
+            '\u{ad}'
+                | '\u{34f}'
+                | '\u{61c}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+        )
+    }) {
+        return Err(AnnotationError::LinkInvalid(
+            "invisible or bidirectional control characters",
+        ));
+    }
     let Some((scheme, rest)) = url.split_once(':') else {
         return Err(AnnotationError::LinkInvalid("no scheme"));
     };

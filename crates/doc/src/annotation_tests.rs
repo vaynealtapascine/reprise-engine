@@ -71,6 +71,10 @@ fn url_validation_allowlists_schemes() {
         ("https://a\u{0}b", LINK_INVALID),
         ("http:\\\\evil", LINK_INVALID),
         ("mailto:", LINK_INVALID),
+        ("https://exa\u{202e}mple.com", LINK_INVALID),
+        ("https://a\u{200b}b.example", LINK_INVALID),
+        ("https://a.example/\u{feff}", LINK_INVALID),
+        ("https://a.example/\u{2066}x\u{2069}", LINK_INVALID),
     ] {
         assert_eq!(validate_url(bad).unwrap_err().code(), Some(code), "{bad:?}");
     }

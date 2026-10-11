@@ -138,8 +138,8 @@ per keystroke; the cap below bounds it, and an incremental index is a follow-up.
 
 Authoring refusals carry stable codes: `annotation.link-scheme` (a scheme
 outside `http`, `https`, `mailto`, `tel`, such as `javascript:` or `data:`),
-`annotation.link-invalid` (empty, relative, whitespace or control characters,
-no host for http(s)), `annotation.link-length`, `annotation.payload-invalid`,
+`annotation.link-invalid` (empty, relative, whitespace, control, invisible or
+bidirectional characters, no host for http(s)), `annotation.link-length`, `annotation.payload-invalid`,
 `annotation.empty`, `annotation.missing` and `annotation.limit`. The same checks
 run on HTML import.
 
