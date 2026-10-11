@@ -614,3 +614,100 @@ fn hostile_payloads_are_refused_at_the_boundary() {
     .unwrap();
     assert!(matches!(ok.data.commands[0], Command::AddAnnotation { .. }));
 }
+
+#[test]
+fn unreadable_annotations_show_up_in_state_and_diagnostics_for() {
+    use reprise_doc::annotation::{AnnotationData, LinkTarget};
+    // A hostile peer's envelope: a forbidden scheme in a record that is
+    // otherwise a fine annotation. It is kept, reported and never applied.
+    let doc = reprise_doc::Document::new(1).unwrap();
+    let node = doc
+        .append_block(reprise_doc::BlockKind::Paragraph, "", "some linked text")
+        .unwrap();
+    let good = doc
+        .add_annotation(
+            node,
+            0..4,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://fine.example".into(),
+            }),
+        )
+        .unwrap();
+    let bad = doc
+        .add_annotation(
+            node,
+            5..11,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://fine.example/2".into(),
+            }),
+        )
+        .unwrap();
+    doc.commit();
+    reprise_doc::hostile::corrupt_annotation(
+        &doc,
+        bad,
+        r#"{"version":1,"kind":"link","payload":{"type":"url","url":"javascript:alert(1)"}}"#,
+    )
+    .unwrap();
+    let bytes = reprise_format::Package::new(
+        &doc,
+        reprise_format::DocumentId([7; 16]),
+        reprise_doc::PersistenceMode::History,
+    )
+    .unwrap()
+    .save()
+    .unwrap();
+    let s = Workspace::new()
+        .open(&Payload::new(Open { peer_id: "2".into() }), &bytes)
+        .unwrap();
+    let state = s.state().unwrap().data;
+    assert_eq!(state.annotations.len(), 1);
+    assert_eq!(state.annotations[0].id, good.to_string());
+    assert!(get(&s, &bad.to_string()).is_none());
+    let list = s
+        .diagnostics_for(&Payload::new(DiagnosticFilter {
+            code_prefix: Some("annotation.".into()),
+            ..DiagnosticFilter::default()
+        }))
+        .unwrap()
+        .data;
+    assert_eq!(list.diagnostics.len(), 1, "{:?}", list.diagnostics);
+    assert_eq!(list.diagnostics[0].code, "annotation.unreadable");
+    assert_eq!(list.diagnostics[0].severity, Severity::Warning);
+    assert!(state.diagnostics.iter().any(|d| d.code == "annotation.unreadable"));
+    // It cannot be edited either: the record is a newer engine's, not ours.
+    let mut s = s;
+    let e = refused(
+        &mut s,
+        vec![Command::UpdateAnnotation {
+            id: bad.to_string(),
+            annotation: url("https://fine.example/3"),
+        }],
+    );
+    assert_eq!(e.code(), "annotation.payload-invalid");
+}
+
+#[test]
+fn links_leave_the_reading_order_ranges_whole() {
+    let mut s = session("1");
+    let a = paragraph(&mut s, "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda");
+    let b = paragraph(&mut s, "second block with a link in it");
+    apply(
+        &mut s,
+        vec![
+            add(&a, 6, 40, url("https://one.example")),
+            add(&b, 7, 12, thread("t")),
+        ],
+    );
+    finish(&mut s);
+    let state = s.state().unwrap().data;
+    let steps = s.reading_order().unwrap().data;
+    for block in &state.blocks {
+        let mut at = 0u32;
+        for step in steps.iter().filter(|st| st.node == block.id) {
+            assert_eq!(step.start, at, "lines of {} tile its text", block.id);
+            at = step.end;
+        }
+        assert_eq!(at as usize, block.text.len());
+    }
+}
