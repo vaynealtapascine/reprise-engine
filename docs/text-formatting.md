@@ -96,3 +96,15 @@ native fragments, HTML `<span>` export/import (`clipboard/src/text_css.rs`), the
 `State.blocks[].formatting`. Plain text reports formatting as dropped. Mixed
 sizes enlarge the paragraph-wide strut to 1.2× the largest inline size; per-line
 metrics are a later composer change.
+
+## Clearing one field
+
+A formatting action may list fields in `clear` (`families`, `size`,
+`language`, `features`, `weight`, `slant`, `underline`, `strike`, `color`).
+It masks earlier actions' values for exactly those fields, revealing the
+paragraph style, and leaves every other field to earlier actions: a per-field
+`reset`. A field may not be both set and cleared. The envelope stays format1;
+`clear` is absent when empty, so other envelopes are byte-identical, and a
+retained clearing action declares required package bit 13 (older format1
+readers would reject the envelope and drop the action). The facade spells it
+`TextStyle.clear: StyleProperty[]` (`docs/paragraph-styles.md`).

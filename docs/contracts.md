@@ -51,9 +51,9 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit` |
-| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing` |
+| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.indent-clamped`, `layout.keep-unsatisfied` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
-| style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit` |
+| style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit`, `style.deleted`, `style.rename-cycle` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 | edit | `edit.page-setup-invalid`, `edit.limit`, `edit.invalid-command`, `edit.store` |
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
@@ -1029,3 +1029,43 @@ one-em box. Source byte offsets remain available for text edits and authored ran
   envelope and destination checks precede staging or writes. An emptied root is
   retained, including its required package feature bit. Capture never authors
   a page root or resolves against a layout medium.
+
+## Paragraph style additions (08, 17, 18, 23, 24, 29, 34, 37)
+
+Additive; the design is `docs/paragraph-styles.md`.
+
+-   **Properties.** `Property` gains `IndentStart`, `IndentEnd`, `IndentFirst`,
+    `SpaceBefore` and `SpaceAfter` (held in `Style.values`, every stored form,
+    `em`/`lh`/`%` of the block's inline size and expressions). `Style` gains
+    `keep_with_next`, `keep_together`, `widows`, `orphans` (1..=32) and
+    `background` (RGBA); `ComputedStyle` gains the used values, each left out
+    of JSON at its default, so existing snapshots are unchanged. Used lengths
+    other than `indent-first` clamp to zero (`layout.style-clamped`); a
+    negative `indent-first` hangs, bounded by `indent-start`.
+    `marks::Alignment` gains `Justify` (refused as a tab stop alignment).
+-   **Storage.** Named-style properties may also be flat `styles1` keys
+    (`<property>/<name>`, `state/<name>` = `defined`, `deleted` or
+    `renamed:<to>`) and block patches flat `para1` keys (`<node>/<property>`;
+    `alignment` and `tabs` stay in `marks1`). Clearing deletes keys; no
+    container is created to clear. `Document::style` follows renames and
+    returns `None` for deleted styles; `style_record` reads one name as
+    stored. Built-in `Normal`, `Title`, `Subtitle`, `Heading 1`–`6` apply only
+    to names with no nested definition.
+-   **Resolution.** A chain passes deleted styles through their parent
+    (`style.deleted`, Warning) and follows renames; a forward loop is cut
+    (`style.rename-cycle`, Warning). Both count toward the 32-style bound.
+-   **Layout.** Indents (`compose::Indented`, logical, mirrored for RTL) are
+    reduced to leave a quarter of the measure (`layout.indent-clamped`,
+    Warning). Spacing collapses to the larger value and is truncated at every
+    frame start. `justify` composes with `Optimal` justified. Keeps, widows
+    and orphans use bounded lookahead (a paragraph moves at most once; chains
+    stop at 32 blocks); an unmet rule reports `layout.keep-unsatisfied`
+    (Warning) and breaks normally.
+-   **Formatting.** `formatting::TextStyle.clear` masks earlier actions' fields
+    (`CLEARABLE`), absent when empty.
+-   **Editing.** `reprise-edit` gains `DefineStyle`, `PatchStyle`,
+    `RenameStyle`, `DeleteStyle`, `SetStyleName`, `PatchOverrides` and
+    `ClearAlignment`, with `Reason::Style` and `Reason::StyleLimit` (1,024
+    live styles).
+-   **Package.** Required bit 13, `REQUIRED_PARAGRAPH_STYLES` (see
+    `crates/format/SPEC.md`).

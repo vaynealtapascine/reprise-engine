@@ -260,5 +260,49 @@ collide with parallel workstreams; 13 is the next free bit after 8495a66.
 
 ## Extension point: adding a paragraph property
 
-(Completed with the implementation; see the section of the same name at the
-end of this file.)
+`background` (paragraph shading) was added last, end to end, by exactly
+these steps; follow them for the next property (a list marker, a border, a
+heading role). Each step names the enum or table the property joins.
+
+1.  **Store it** (`crates/doc/src/style.rs`). A length joins `Property` (and
+    `Property::ALL`/`PARAGRAPH`): it then gets every stored form, the four
+    stages, `em`/`lh`/`%` and expressions for free, with its percentage basis
+    in `percent_basis`/`own_scope` and its sign rule in `clamps_negative`. A
+    keyword becomes an `Option` field on `Style` (`background: Option<[u8;
+    4]>`) with its stored key in `STORED_KEYS` (and `PARAGRAPH_KEYS` if it is
+    new), a writer in `Style::stored`, a reader in `Style::apply_stored`
+    (unreadable text goes to `unparsed_keywords`, kept verbatim), and an
+    `unset` arm. `Style::write`/`read` pick it up from the same tables, and
+    flat `styles1`/`para1` storage, patches and clears need nothing more.
+2.  **Resolve it.** Inherit it in `Specified::compute` (the last readable
+    layer wins, recorded in `keyword_layers` for `explain`), carry it on
+    `Computed`, and publish the used value on `ComputedStyle` with
+    `skip_serializing_if` at its default, so existing snapshots don't move.
+3.  **Lay it out.** Geometry that changes line room belongs in the room a
+    frame offers a paragraph (`flow::keeps::Flow::room`, `compose::Indented`);
+    breaking behaviour belongs in the paragraph machine's keep step
+    (`flow/paragraph.rs`); paint belongs in `layout/src/display.rs`. Shading
+    is one filled path per line over its available interval, drawn first;
+    because it adds display items, `background_items` keeps PDF reading
+    addresses in step. Anything a paragraph's placement reads outside its own
+    inputs must join `FlowKey` (as keep-with-next lookahead does).
+4.  **Expose it** (`crates/reprise`). Add the field to the `Style` DTO (an
+    optional, nullable field), to `ResolvedStyle`, to `StyleProperty` for
+    `clear`, and map it in `convert::style`, `style_out`, `resolved_style`
+    and `style_keys`; regenerate `types.d.ts`
+    (`cargo run -p reprise --example generate_types`).
+5.  **Export it.** HTML export writes it in `paragraph_css`
+    (`clipboard/src/export.rs`, only when set) and HTML import reads it back
+    in `html.rs`'s `css`. Native copy and paste carry `Style` as is. PDF gets
+    it from the display list.
+6.  **Declare it.** A new stored key joins `PARAGRAPH_KEYS`, so
+    `Document::has_paragraph_styles` declares required bit 13 and older
+    engines refuse the package. A property whose old-reader behaviour must
+    differ from these (for example one an older reader may safely ignore)
+    takes its own bit in `format/src/features.rs`.
+7.  **Test it** in all three writing directions (`fixtures/tests/
+    paragraph_styles.rs`), through the facade, and in a hostile fixture.
+
+A note on clearing: clearing a property of a style whose base is a built-in
+reveals the built-in's value (that is what "inherit" means for that layer);
+set the property explicitly to turn a built-in's keep off.

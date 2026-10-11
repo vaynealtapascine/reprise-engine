@@ -519,3 +519,46 @@ content; a nonempty target keeps its page. Partial copies omit page setup.
 The optional native-fragment field is absent from older fragments, and strict
 older readers refuse new fragments that contain it. It carries authored
 properties rather than geometry resolved for a particular viewport.
+
+## Paragraph styles (`docs/paragraph-styles.md`)
+
+Commands, all ordinary transaction commands with one undo step per
+transaction:
+
+-   `define-style { name, parent, style }` defines `name` as exactly `style`
+    (a built-in of that name no longer applies).
+-   `update-style { name, parent?, style, clear? }` sets the supplied
+    properties of a live style (built-ins included, property by property) and
+    clears the listed ones; `parent` absent keeps it, `clear: ["parent"]`
+    removes it.
+-   `rename-style { from, to }`: blocks and child styles naming `from` follow.
+-   `delete-style { name }`: whatever names it resolves through its parent
+    (`style.deleted`). The base (empty name) can't be renamed or deleted.
+-   `apply-style { node, style }`: `null` returns the block to the base.
+-   `set-style { node, style, clear? }`: without `clear` it replaces the
+    direct overrides, as before; with `clear` (even `[]`) it patches.
+-   `format-text` takes `style.clear` for character fields.
+-   `set-alignment` takes `alignment: null`: at `at: null` it removes the
+    paragraph's direct alignment, at a point it removes that line's default.
+
+"Inherit" is always a `StyleProperty` name in a `clear` list (kebab-case:
+`parent`, `families`, `size`, `line-height`, `alignment`, `tabs`, `weight`,
+`slant`, `underline`, `strike`, `color`, `indent-start`, `indent-end`,
+`indent-first`, `space-before`, `space-after`, `keep-with-next`,
+`keep-together`, `widows`, `orphans`, `background`, and for `format-text`
+only `language` and `features`). `null` keeps meaning "unchanged" in
+`TextStyle`, so existing callers are unaffected.
+
+`Style` gains optional `indent_start`, `indent_end`, `indent_first`,
+`space_before`, `space_after` (expression text: `12pt`, `1.5em`, `1lh`, `5%`
+of the block's inline size), `keep_with_next`, `keep_together`, `widows`,
+`orphans` (1..32) and `background` (RGBA); `Alignment` gains `justify`.
+
+`State` gains `styles` (live named styles, built-ins included, sorted, at
+most 1,024 with `bindings.limit` past that) and `resolved` (distinct resolved
+paragraph styles, lengths in 1/1024 pt). Each block gains its one additive
+field `style: { name, direct, resolved }`, where `resolved` indexes
+`State.resolved`; blocks sharing a style and overrides share an entry, and
+the session resolves each (style, overrides) pair once per revision. Styles
+resolve in the first main frame of the effective page template, so a
+percentage indent shows its value there.
