@@ -338,3 +338,57 @@ fn a_batch_past_the_command_bound_is_refused_whole() {
     assert_eq!(error.code(), "bindings.limit");
     assert_eq!(s.state().unwrap().data, state);
 }
+
+/// "Make heading" as one batch (`docs/plumbing.md`, consumers): define a style
+/// and apply it, one undo step; a refused style command applies nothing.
+#[test]
+fn a_style_batch_is_one_step_and_all_or_nothing() {
+    let mut s = session("1");
+    let node = tx(&mut s, vec![block("a heading", 0)]).data.blocks[0].clone();
+    let before = s.state().unwrap().data;
+    let error = s
+        .batch(&Payload::new(Batch {
+            commands: vec![
+                Command::ApplyStyle {
+                    node: node.clone(),
+                    style: Some("Heading 1".into()),
+                },
+                // The base can't be deleted, so the batch is refused whole.
+                Command::DeleteStyle { name: "".into() },
+            ],
+            expected_revision: None,
+            selection: None,
+        }))
+        .unwrap_err();
+    assert_eq!(error.payload().data.command, Some(1));
+    assert_eq!(s.state().unwrap().data, before);
+    s.batch(&Payload::new(Batch {
+        commands: vec![
+            Command::DefineStyle {
+                name: "Chapter".into(),
+                parent: Some("Heading 1".into()),
+                style: Style {
+                    space_before: Some("2lh".into()),
+                    ..Style::default()
+                },
+            },
+            Command::ApplyStyle {
+                node: node.clone(),
+                style: Some("Chapter".into()),
+            },
+        ],
+        expected_revision: None,
+        selection: None,
+    }))
+    .unwrap();
+    let state = s.state().unwrap().data;
+    assert_eq!(state.blocks[0].style.name, "Chapter");
+    assert!(state.resolved[state.blocks[0].style.resolved as usize].keep_with_next);
+    s.undo().unwrap();
+    let after = s.state().unwrap().data;
+    assert_eq!(
+        (after.blocks, after.styles, after.resolved),
+        (before.blocks, before.styles, before.resolved),
+        "one undo removes both the definition and its use"
+    );
+}

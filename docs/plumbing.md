@@ -85,6 +85,13 @@ with a **new document identity**. The copy is rebuilt, not cloned:
 -   *Dropped:* the CRDT history, undo stacks, presence, and the source's
     document id and peers.
 
+Named styles (`docs/paragraph-styles.md`) are copied as the source resolves
+them: a document-defined style as its effective definition, a patched
+built-in as the same patch (so it keeps following the engine's built-in for
+the properties it did not change), and an untouched built-in not at all. A
+built-in the source deleted or renamed away stays deleted, and a copy needs
+the paragraph-style package bit only if its source did.
+
 The content is replayed (through the native fragment of the whole document,
 plus every named style) into a fresh CRDT document authored by the copy's own
 peer. A clone with history would share operation ids with the source: any peer

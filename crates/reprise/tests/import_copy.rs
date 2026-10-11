@@ -291,3 +291,81 @@ fn identity_must_change_and_input_is_bounded() {
         .unwrap();
     assert_eq!(reopened.state().unwrap().data.document_id, SOURCE);
 }
+
+/// Paragraph styles (`docs/paragraph-styles.md`) survive a copy as the
+/// source resolves them: a defined style with paragraph properties, a
+/// patched built-in, a deleted built-in and an unreferenced style.
+#[test]
+fn a_copy_keeps_paragraph_styles() {
+    let mut s = session(SOURCE, "1");
+    let ids = tx(&mut s, vec![block("quoted", 0), block("heading", 1)])
+        .data
+        .blocks;
+    tx(
+        &mut s,
+        vec![
+            Command::DefineStyle {
+                name: "Quote".into(),
+                parent: Some("".into()),
+                style: Style {
+                    indent_start: Some("24pt".into()),
+                    space_before: Some("1lh".into()),
+                    keep_together: Some(true),
+                    ..Style::default()
+                },
+            },
+            Command::DefineStyle {
+                name: "Unused".into(),
+                parent: Some("".into()),
+                style: Style {
+                    indent_end: Some("3pt".into()),
+                    ..Style::default()
+                },
+            },
+            Command::ApplyStyle {
+                node: ids[0].clone(),
+                style: Some("Quote".into()),
+            },
+            Command::ApplyStyle {
+                node: ids[1].clone(),
+                style: Some("Heading 2".into()),
+            },
+            Command::UpdateStyle {
+                name: "Heading 2".into(),
+                parent: None,
+                style: Style {
+                    color: Some([0, 0, 255, 255]),
+                    ..Style::default()
+                },
+                clear: Vec::new(),
+            },
+            Command::DeleteStyle {
+                name: "Subtitle".into(),
+            },
+        ],
+    );
+    let bytes = s.save().unwrap().data.bytes;
+    let copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let (a, b) = (s.state().unwrap().data, copy.state().unwrap().data);
+    assert_eq!(b.styles, a.styles);
+    assert!(b.styles.iter().any(|n| n.name == "Unused"));
+    assert!(!b.styles.iter().any(|n| n.name == "Subtitle"));
+    let style_of = |st: &State, i: usize| {
+        let block = &st.blocks[i];
+        (
+            block.style.name.clone(),
+            st.resolved[block.style.resolved as usize].clone(),
+        )
+    };
+    for i in 0..2 {
+        assert_eq!(style_of(&b, i), style_of(&a, i));
+    }
+}
