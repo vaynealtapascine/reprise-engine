@@ -238,6 +238,7 @@ impl Document {
             text: tail,
         })?;
         self.split_block_into(id, at, new)?;
+        self.copy_semantics_to(id, new)?;
         Ok(new)
     }
 

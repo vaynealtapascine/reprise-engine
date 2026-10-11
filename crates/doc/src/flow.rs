@@ -501,6 +501,7 @@ impl Document {
         if self.flow(id.node).is_none() {
             return Err(DocError::Malformed(id, "not in a flow"));
         }
+        let source = self.meta_of(id)?;
         let pos = self
             .flow_split_position(id, at)?
             .ok_or(DocError::Malformed(
@@ -515,7 +516,9 @@ impl Document {
                     .overrides
                     .write(&rec.insert_container("overrides", LoroMap::new())?)?;
             }
-            Ok(())
+            // Role and list membership ride with the record (see
+            // `docs/roles-and-lists.md`).
+            crate::roles::copy_semantics(&source, rec)
         })
     }
 
@@ -746,6 +749,7 @@ impl Document {
         let formatting = self.prepare_format_copy(id, 0..len, Some(staged))?;
         self.put(staged, placement)?;
         self.restore_block(staged)?;
+        self.copy_semantics_to(id, staged)?;
         self.record_transfer(id, 0, staged, 0, len)?;
         self.supersede(id, staged)?;
         self.delete_block(id)?;
