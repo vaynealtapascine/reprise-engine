@@ -1046,6 +1046,47 @@ impl DocumentSession {
         }
         Payload::new(notes)
     }
+    /// A bounded, filtered view of [`DocumentSession::diagnostics`], so a host
+    /// can ask about one relation or one code without a full dump. Order is the
+    /// order of `diagnostics()`.
+    pub fn diagnostics_for(
+        &self,
+        request: &Payload<DiagnosticFilter>,
+    ) -> Result<Payload<DiagnosticList>> {
+        let f = validate(request)?;
+        let rank = |s: Severity| match s {
+            Severity::Info => 0,
+            Severity::Warning => 1,
+            Severity::Error => 2,
+        };
+        let limit = f.limit.unwrap_or(MAX_DIAGNOSTICS).min(MAX_DIAGNOSTICS) as usize;
+        let mut out = Vec::new();
+        let mut truncated = false;
+        for d in self.diagnostics().data {
+            let subject_ok = f.subject.as_ref().is_none_or(|want| {
+                d.subject.as_deref().is_some_and(|have| {
+                    have == want || have.split_once(':').is_some_and(|(_, id)| id == want)
+                })
+            });
+            if !subject_ok
+                || f.code_prefix
+                    .as_ref()
+                    .is_some_and(|p| !d.code.starts_with(p.as_str()))
+                || f.min_severity.is_some_and(|m| rank(d.severity) < rank(m))
+            {
+                continue;
+            }
+            if out.len() >= limit {
+                truncated = true;
+                break;
+            }
+            out.push(d);
+        }
+        Ok(Payload::new(DiagnosticList {
+            diagnostics: out,
+            truncated,
+        }))
+    }
     pub fn sync_info(&self) -> Payload<SyncInfo> {
         Payload::new(SyncInfo {
             document_id: self.document_id.clone(),

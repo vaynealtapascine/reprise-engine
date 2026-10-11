@@ -1190,6 +1190,40 @@ pub struct Mark {
     pub relation: Option<String>,
     pub state: Option<RelationState>,
     pub applied: bool,
+    /// Anchors: the authored source edge.
+    pub edge: Option<LineEdge>,
+    /// Anchors: the target's block and UTF-8 byte offset, when it resolved.
+    pub target_node: Option<String>,
+    pub target_offset: Option<u32>,
+    /// Anchors: the authored target edge.
+    pub target_edge: Option<AnchorEdge>,
+    /// Anchors: the stable code of the layout diagnostic that explains an
+    /// unapplied or suspect pin (`relation.alignment-cycle`, `-limit`,
+    /// `-outside`, `-conflict` or `-invalid`).
+    pub diagnostic: Option<String>,
+}
+/// Which diagnostics `diagnostics_for` returns. Every field narrows the result.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct DiagnosticFilter {
+    /// Keep codes starting with this text, such as `relation.` or
+    /// `relation.alignment-cycle`.
+    pub code_prefix: Option<String>,
+    /// Keep this severity and worse.
+    pub min_severity: Option<Severity>,
+    /// Keep one subject: `relation:<id>`, `node:<id>`, `range:<id>`,
+    /// `document`, or a bare id.
+    pub subject: Option<String>,
+    /// At most this many (default and ceiling 1000).
+    pub limit: Option<u32>,
+}
+/// The most diagnostics one `diagnostics_for` call returns.
+pub const MAX_DIAGNOSTICS: u32 = 1000;
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DiagnosticList {
+    pub diagnostics: Vec<Diagnostic>,
+    /// More matched than `limit` allowed.
+    pub truncated: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct MarksPage {

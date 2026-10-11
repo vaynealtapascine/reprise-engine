@@ -685,5 +685,21 @@ pub(crate) fn mark(m: reprise_layout::marks::Mark) -> Mark {
             reprise_layout::RelationStatus::Deleted => RelationState::Deleted,
         }),
         applied: m.applied,
+        edge: m.edge.map(|e| match e {
+            reprise_doc::marks::LineEdge::Start => LineEdge::Start,
+            reprise_doc::marks::LineEdge::End => LineEdge::End,
+        }),
+        target_node: m.target_node.map(|n| n.to_string()),
+        target_offset: m
+            .target_offset
+            .map(|o| u32::try_from(o).unwrap_or(u32::MAX)),
+        target_edge: m.target_edge.map(|e| match e {
+            reprise_doc::marks::AnchorEdge::Position => AnchorEdge::Position,
+            reprise_doc::marks::AnchorEdge::GapStart => AnchorEdge::GapStart,
+            reprise_doc::marks::AnchorEdge::GapEnd => AnchorEdge::GapEnd,
+            reprise_doc::marks::AnchorEdge::LineStart => AnchorEdge::LineStart,
+            reprise_doc::marks::AnchorEdge::LineEnd => AnchorEdge::LineEnd,
+        }),
+        diagnostic: m.diagnostic.map(|c| c.to_string()),
     }
 }

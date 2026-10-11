@@ -372,5 +372,11 @@ pub fn declarations() -> String {
     text.push_str("export ");
     text.push_str(&MarksPage::decl(&cfg));
     text.push('\n');
+    text.push_str("export ");
+    text.push_str(&DiagnosticFilter::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&DiagnosticList::decl(&cfg));
+    text.push('\n');
     text
 }
