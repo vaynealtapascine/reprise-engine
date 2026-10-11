@@ -6,11 +6,16 @@ pub fn contain<T>(f: impl FnOnce() -> Result<T>) -> Result<T>
 pub const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_AWARENESS_BYTES: usize = 64 * 1024;
+pub const MAX_PACKET_BYTES: usize = reprise_doc::sync::MAX_PACKET_BYTES;
 pub fn validate<T>(payload: &Payload<T>) -> Result<&T>
 pub fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<Payload<T>>
 session
 pub fn new() -> Self
+pub fn declare_font( &self, request: &Payload<FontDeclaration>, bytes: &[u8], ) -> Result<Payload<Face>>
+pub fn set_font_settings(&self, request: &Payload<FontSettings>) -> Result<Payload<()>>
+pub fn font_handles(&self, face: &Face) -> Option<usize>
 pub fn create(&self, request: &Payload<Create>) -> Result<DocumentSession>
+pub fn import_copy( &self, request: &Payload<ImportCopy>, bytes: &[u8], ) -> Result<DocumentSession>
 pub fn open(&self, request: &Payload<Open>, bytes: &[u8]) -> Result<DocumentSession>
 pub fn contain<T>(&mut self, f: impl FnOnce(&mut DocumentSession) -> Result<T>) -> Result<T>
 pub fn is_poisoned(&self) -> bool
@@ -33,6 +38,9 @@ pub fn copy(&self, request: &Payload<Selection>) -> Result<Payload<Bytes>>
 pub fn copy_as(&self, request: &Payload<CopyAs>) -> Result<Payload<Exported>>
 pub fn resources(&self) -> Result<Payload<Vec<Resource>>>
 pub fn resource_bytes(&self, request: &Payload<String>) -> Result<Payload<Bytes>>
+pub fn replace_selection( &mut self, request: &Payload<ReplaceSelection>, bytes: &[u8], ) -> Result<Payload<Replaced>>
+pub fn replace_text(&mut self, request: &Payload<ReplaceText>) -> Result<Payload<Replaced>>
+pub fn batch(&mut self, request: &Payload<Batch>) -> Result<Payload<BatchReport>>
 pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>>
 pub fn import_text(&mut self, request: &Payload<TextImport>) -> Result<Payload<Applied>>
 pub fn save(&mut self) -> Result<Payload<Bytes>>
@@ -46,6 +54,7 @@ pub fn svg(&self, page: u32) -> Result<Payload<String>>
 pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>>
 pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>>
 pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>>
+pub fn diagnostics_for( &self, request: &Payload<DiagnosticFilter>, ) -> Result<Payload<DiagnosticList>>
 pub fn sync_info(&self) -> Payload<SyncInfo>
 pub fn export_updates(&self) -> Result<Payload<SyncUpdate>>
 pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>>
@@ -68,6 +77,7 @@ pub const API_VERSION: u32 = 1;
 pub fn new(data: T) -> Self
 pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error>
 pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error>
+pub const MAX_DIAGNOSTICS: u32 = 1000;
 collab
 pub fn sync_export(&self, request: &Payload<SyncRequest>) -> Result<Payload<SyncPacket>>
 pub fn sync_import(&mut self, request: &Payload<SyncPacket>) -> Result<Payload<SyncReport>>
