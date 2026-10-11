@@ -649,3 +649,19 @@ fn a_hostile_native_fragment_is_refused_whole() {
         );
     }
 }
+
+#[test]
+fn links_inside_table_cells_are_kept() {
+    let (editor, _) = pasted(
+        "<table><tr><td>plain</td><td>see <a href=\"https://cell.example/\">the cell</a></td></tr></table>",
+    );
+    assert_eq!(
+        links_of(editor.document()),
+        vec![("the cell".to_string(), url("https://cell.example/"))]
+    );
+    let (html, _) = html_of(editor.document());
+    assert!(
+        html.contains("<a href=\"https://cell.example/\">"),
+        "{html}"
+    );
+}
