@@ -233,8 +233,17 @@ impl Editor {
             command: None,
             reason: Reason::SelectionGone,
         })?;
-        let (nodes, rank) = order(&self.doc)?;
+        // A selection inside one block, the common case of typing over a
+        // word, needs no document order.
+        let (nodes, rank) = if resolved.anchor.node == resolved.focus.node {
+            (Vec::new(), BTreeMap::new())
+        } else {
+            order(&self.doc)?
+        };
         let key = |c: &crate::Caret| {
+            if resolved.anchor.node == resolved.focus.node {
+                return Ok((0, c.offset, c.node));
+            }
             rank.get(&c.node)
                 .map(|&r| (r, c.offset, c.node))
                 .ok_or(EditError {
