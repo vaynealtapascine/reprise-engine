@@ -236,8 +236,7 @@ fresh IDs and remaps the items.
 
 ### Package bit
 
-Required bit **13** (`REQUIRED_BLOCK_SEMANTICS`, the next free bit after 12 in
-8495a66) is set when any paragraph metadata or break record holds `role1`,
+Required bit **14** (`REQUIRED_BLOCK_SEMANTICS`; bit 13 is paragraph styles) is set when any paragraph metadata or break record holds `role1`,
 `list1`, `level1` or `restart1`, or the `lists` tree has a node. Documents that
 never used roles or lists keep their exact bytes and masks.
 

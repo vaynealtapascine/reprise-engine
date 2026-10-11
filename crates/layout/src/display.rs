@@ -200,6 +200,7 @@ impl LayoutSnapshot {
                         node: block.node,
                         line: line_index,
                     };
+                    child = child.saturating_add(background_items(block, line));
                     if block.image.is_some() {
                         addresses.entry(at).or_default().push(PdfReadingRun {
                             run: reprise_display::pdf::ReadingRun {
@@ -257,6 +258,7 @@ impl LayoutSnapshot {
                 .flat_map(|h| h.blocks.iter())
             {
                 for line in block.lines.iter().filter(|l| l.frame == frame_index) {
+                    child = child.saturating_add(background_items(block, line));
                     if block.image.is_some() {
                         copies.push(reprise_display::pdf::ReadingRun {
                             page: frame.page,
@@ -329,6 +331,7 @@ impl LayoutSnapshot {
                     children.push(debug_path(Path::rect(r(bounds)), BLOCK));
                 }
                 for line in lines {
+                    children.extend(background(block, line));
                     if let Some(image) = &block.image {
                         children.push(Item::Image {
                             asset: image.asset.clone(),
@@ -648,6 +651,30 @@ fn diagnostic_overlay(
             color,
         ));
     }
+}
+
+/// Paragraph shading (`docs/paragraph-styles.md`): one filled rectangle per
+/// line over its whole available interval (the indented measure), drawn
+/// before the line's content. Lines of a block meet edge to edge.
+fn background(block: &crate::BlockLayout, line: &LineLayout) -> Option<Item> {
+    let [red, green, blue, alpha] = block.style.background?;
+    let rect = Rect::new(
+        Point::new(line.available.start, line.rect.origin.y),
+        line.available.width(),
+        line.rect.height,
+    );
+    Some(Item::Path {
+        path: Path::rect(rect),
+        fill: Some(Color(red, green, blue, alpha)),
+        stroke: None,
+        layer: Layer::Content,
+    })
+}
+
+/// How many items [`background`] adds before a line's content, for reading
+/// addresses.
+fn background_items(block: &crate::BlockLayout, line: &LineLayout) -> usize {
+    usize::from(background(block, line).is_some())
 }
 
 fn decoration_paths(run: &PositionedRun, line: &LineLayout, mode: WritingMode) -> Vec<Item> {

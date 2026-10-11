@@ -43,9 +43,9 @@ use crate::{Color, DisplayList, GlyphRun, Item, Path, RenderError, Segment};
 pub mod tags;
 
 use tags::{
-    CellRole, Child, Content, Numbering, DEFAULT_LANG, DEFAULT_TITLE, FIGURE_ALT_MISSING, HEADING_LEVEL, Link,
-    MAX_DEPTH, Node, REFERENCE_UNLINKED, RUN_SPLIT, Role, STRUCTURE_DEPTH, Scope, Structure,
-    UA_NOT_MET,
+    CellRole, Child, Content, DEFAULT_LANG, DEFAULT_TITLE, FIGURE_ALT_MISSING, HEADING_LEVEL, Link,
+    MAX_DEPTH, Node, Numbering, REFERENCE_UNLINKED, RUN_SPLIT, Role, STRUCTURE_DEPTH, Scope,
+    Structure, UA_NOT_MET,
 };
 
 fn pt(l: Length) -> f32 {

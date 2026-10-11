@@ -28,15 +28,19 @@ pub const REQUIRED_TEXT_EMPHASIS: u64 = 1 << 10;
 pub const REQUIRED_MARKS: u64 = 1 << 11;
 /// Older readers must refuse retained authored page-property history.
 pub const REQUIRED_PAGE_SETUP: u64 = 1 << 12;
+/// Older readers must refuse paragraph properties, flat named-style records
+/// and clearing formatting actions (`docs/paragraph-styles.md`).
+pub const REQUIRED_PARAGRAPH_STYLES: u64 = 1 << 13;
 /// Older readers must refuse paragraph roles, list membership and list
 /// definitions, retained history included (see `docs/roles-and-lists.md`).
-pub const REQUIRED_BLOCK_SEMANTICS: u64 = 1 << 13;
+pub const REQUIRED_BLOCK_SEMANTICS: u64 = 1 << 14;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
     | REQUIRED_TEXT_EMPHASIS
     | REQUIRED_MARKS
     | REQUIRED_PAGE_SETUP
+    | REQUIRED_PARAGRAPH_STYLES
     | REQUIRED_BLOCK_SEMANTICS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
@@ -50,6 +54,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if document.has_page_setup() {
         flags.required |= REQUIRED_PAGE_SETUP;
+    }
+    if document.has_paragraph_styles() {
+        flags.required |= REQUIRED_PARAGRAPH_STYLES;
     }
     if document.has_block_semantics() {
         flags.required |= REQUIRED_BLOCK_SEMANTICS;

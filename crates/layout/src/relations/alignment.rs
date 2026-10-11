@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use reprise_diag::Severity;
 use reprise_doc::{
     Document, Param, RelationId,
-    marks::{ALIGNMENT, Alignment},
+    marks::{ALIGNMENT, Alignment, AnchorEdge, LineEdge},
 };
 use reprise_geom::{FrameSpace, Length, Point};
 
@@ -181,11 +181,29 @@ pub(crate) fn run(engine: &Engine, doc: &Document, snapshot: &mut LayoutSnapshot
                     Some((to, Point::new(x, line.baseline)))
                 });
                 if let Some(from) = from {
+                    let target_edge = keyword(&relation.params, "target-edge", "position");
                     result.anchor = Some(AnchorGuide {
                         source,
                         offset: at,
                         from,
                         target: target_point,
+                        edge: if keyword(&relation.params, "edge", "start") == "end" {
+                            LineEdge::End
+                        } else {
+                            LineEdge::Start
+                        },
+                        target_node: to.map(|(line, _)| line.node),
+                        target_offset: to.map(|(_, offset)| offset),
+                        target_edge: [
+                            AnchorEdge::GapStart,
+                            AnchorEdge::GapEnd,
+                            AnchorEdge::LineStart,
+                            AnchorEdge::LineEnd,
+                        ]
+                        .into_iter()
+                        .find(|e| e.keyword() == target_edge)
+                        .unwrap_or_default(),
+                        diagnostic: None,
                     });
                     if let Some((target, target_point)) = target_point.filter(|_| valid_edge) {
                         pins.push(Pin {
@@ -409,7 +427,20 @@ fn refresh_guides(doc: &Document, snapshot: &mut LayoutSnapshot) {
             Some((result.id, updated))
         })
         .collect();
-    for (id, guide) in guides {
+    let explaining = [
+        codes::ALIGNMENT_CYCLE,
+        codes::ALIGNMENT_LIMIT,
+        codes::ALIGNMENT_OUTSIDE,
+        codes::ALIGNMENT_CONFLICT,
+        codes::ALIGNMENT_INVALID,
+    ];
+    for (id, mut guide) in guides {
+        // The first diagnostic of the pin, in report order, explains it.
+        guide.diagnostic = snapshot
+            .diagnostics
+            .iter()
+            .find(|d| d.subject == Subject::Relation(id) && explaining.contains(&d.code))
+            .map(|d| d.code.clone());
         if let Some(r) = snapshot.relations.iter_mut().find(|r| r.id == id) {
             r.anchor = Some(guide);
         }

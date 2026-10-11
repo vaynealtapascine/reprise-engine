@@ -162,7 +162,10 @@ fn undo_restores_roles_lists_and_definition_ids() {
     doc.delete_list(list).unwrap();
     doc.commit_step();
     assert_eq!(markers(&doc, &ids), ["-", "-"]);
-    assert_eq!(note_codes(&doc, ids[0]), [codes::LIST_DEFINITION_MISSING.as_str()]);
+    assert_eq!(
+        note_codes(&doc, ids[0]),
+        [codes::LIST_DEFINITION_MISSING.as_str()]
+    );
     assert!(undo.undo().unwrap());
     assert_eq!(markers(&doc, &ids), ["1.", "2."]);
 }
@@ -220,7 +223,10 @@ fn deleting_a_definition_while_another_peer_adds_an_item() {
             note_codes(doc, ids[1]),
             [codes::LIST_DEFINITION_MISSING.as_str()]
         );
-        assert_eq!(doc.list_membership(ids[1]).unwrap().unwrap().list, Some(list));
+        assert_eq!(
+            doc.list_membership(ids[1]).unwrap().unwrap().list,
+            Some(list)
+        );
     }
 }
 
@@ -252,7 +258,10 @@ fn hostile_membership_and_definitions_are_reported_never_panic() {
     doc.set_list_item(ids[0], list, 0).unwrap();
     doc.meta_of(ids[0]).unwrap().insert(LEVEL, 99i64).unwrap();
     // Unreadable list ID and a dangling one.
-    doc.meta_of(ids[1]).unwrap().insert(LIST, "not an id").unwrap();
+    doc.meta_of(ids[1])
+        .unwrap()
+        .insert(LIST, "not an id")
+        .unwrap();
     doc.meta_of(ids[2]).unwrap().insert(LIST, "999@77").unwrap();
     // Enormous restart values, and roman past 3,999.
     let roman = doc
@@ -274,16 +283,31 @@ fn hostile_membership_and_definitions_are_reported_never_panic() {
     doc.set_list_item(ids[5], list, 0).unwrap();
     doc.set_list_restart(ids[5], Some(i64::MAX)).unwrap();
     // Unknown role and an unknown format.
-    doc.meta_of(ids[1]).unwrap().insert(ROLE, "sidebar").unwrap();
+    doc.meta_of(ids[1])
+        .unwrap()
+        .insert(ROLE, "sidebar")
+        .unwrap();
     doc.commit();
     let n = doc.list_numbering();
     assert_eq!(n.items[&ids[0]].level, 8);
-    assert_eq!(note_codes(&doc, ids[0]), [codes::LIST_LEVEL_CLAMPED.as_str()]);
-    assert_eq!(note_codes(&doc, ids[1]), [codes::LIST_DEFINITION_MISSING.as_str()]);
-    assert_eq!(note_codes(&doc, ids[2]), [codes::LIST_DEFINITION_MISSING.as_str()]);
+    assert_eq!(
+        note_codes(&doc, ids[0]),
+        [codes::LIST_LEVEL_CLAMPED.as_str()]
+    );
+    assert_eq!(
+        note_codes(&doc, ids[1]),
+        [codes::LIST_DEFINITION_MISSING.as_str()]
+    );
+    assert_eq!(
+        note_codes(&doc, ids[2]),
+        [codes::LIST_DEFINITION_MISSING.as_str()]
+    );
     assert_eq!(n.items[&ids[3]].marker, "MMMCMXCIX.");
     assert_eq!(n.items[&ids[4]].marker, "4000.");
-    assert_eq!(note_codes(&doc, ids[4]), [codes::LIST_COUNTER_RANGE.as_str()]);
+    assert_eq!(
+        note_codes(&doc, ids[4]),
+        [codes::LIST_COUNTER_RANGE.as_str()]
+    );
     assert_eq!(n.items[&ids[5]].marker, format!("{}.", i64::MAX));
     let stored = doc.stored_role(ids[1]).unwrap();
     assert_eq!(stored.role, Role::Body);
@@ -295,7 +319,10 @@ fn hostile_membership_and_definitions_are_reported_never_panic() {
     assert_eq!(doc.list_item(g).unwrap().value, i64::MAX);
     // Restart written as the wrong type is ignored.
     doc.meta_of(g).unwrap().insert(RESTART, "x").unwrap();
-    doc.meta_of(g).unwrap().insert(LEVEL, LoroValue::Null).unwrap();
+    doc.meta_of(g)
+        .unwrap()
+        .insert(LEVEL, LoroValue::Null)
+        .unwrap();
     doc.commit();
     assert_eq!(doc.list_item(g).unwrap().level, 0);
 }
@@ -329,11 +356,17 @@ fn cyclic_and_missing_bases_stop_inheritance() {
     doc.set_list_item(ids[1], y, 0).unwrap();
     doc.commit();
     assert_eq!(markers(&doc, &ids), ["A.", "A."]);
-    assert_eq!(note_codes(&doc, ids[0]), [codes::LIST_DEFINITION_CYCLE.as_str()]);
+    assert_eq!(
+        note_codes(&doc, ids[0]),
+        [codes::LIST_DEFINITION_CYCLE.as_str()]
+    );
     doc.delete_list(y).unwrap();
     doc.commit();
     assert_eq!(markers(&doc, &ids), ["1.", "-"]);
-    assert_eq!(note_codes(&doc, ids[0]), [codes::LIST_DEFINITION_MISSING.as_str()]);
+    assert_eq!(
+        note_codes(&doc, ids[0]),
+        [codes::LIST_DEFINITION_MISSING.as_str()]
+    );
 }
 
 #[test]
@@ -352,7 +385,10 @@ fn a_hundred_thousand_items_number_in_one_pass() {
     // Level 1 items restart under each level-0 item.
     assert_eq!(n.items[&last.unwrap()].marker, "a.");
     assert_eq!(n.items[&n.sequence[99_998]].marker, "50000.");
-    assert!(std::sync::Arc::ptr_eq(&n, &doc.list_numbering()), "cached per revision");
+    assert!(
+        std::sync::Arc::ptr_eq(&n, &doc.list_numbering()),
+        "cached per revision"
+    );
 }
 
 #[test]
@@ -381,7 +417,10 @@ fn feature_detection_tracks_roles_lists_and_history() {
     // A dangling membership without any lists tree is still reported.
     doc.meta_of(ids[0]).unwrap().insert(LIST, "3@9").unwrap();
     doc.commit();
-    assert_eq!(note_codes(&doc, ids[0]), [codes::LIST_DEFINITION_MISSING.as_str()]);
+    assert_eq!(
+        note_codes(&doc, ids[0]),
+        [codes::LIST_DEFINITION_MISSING.as_str()]
+    );
     doc.meta_of(ids[0]).unwrap().insert(LIST, "").unwrap();
     doc.set_role(ids[1], Role::Body).unwrap();
     doc.commit();

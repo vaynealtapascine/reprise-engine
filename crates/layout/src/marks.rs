@@ -1,9 +1,10 @@
 //! Read-only formatting marks in page units. This query paints nothing.
 use std::collections::BTreeMap;
 
+use reprise_diag::Code;
 use reprise_doc::{
     NodeId, RelationId,
-    marks::{Alignment, is_line_break},
+    marks::{Alignment, AnchorEdge, LineEdge, is_line_break},
 };
 use reprise_geom::{FrameSpace, Length, PageSpace, Point};
 use serde::Serialize;
@@ -32,6 +33,17 @@ pub struct Mark {
     pub relation: Option<RelationId>,
     pub state: Option<RelationStatus>,
     pub applied: bool,
+    /// Anchors only: the source line edge the author chose.
+    pub edge: Option<LineEdge>,
+    /// Anchors only: the target's block and byte offset, when it resolved.
+    pub target_node: Option<NodeId>,
+    pub target_offset: Option<usize>,
+    /// Anchors only: which edge of the target the author chose.
+    pub target_edge: Option<AnchorEdge>,
+    /// Anchors only: the code of the layout diagnostic that explains why the
+    /// pin is unapplied or suspect (cycle, limit, out of reach, conflict or
+    /// invalid), when there is one.
+    pub diagnostic: Option<Code>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnchorGuide {
@@ -39,6 +51,11 @@ pub struct AnchorGuide {
     pub offset: usize,
     pub from: Point<FrameSpace>,
     pub target: Option<(LineRef, Point<FrameSpace>)>,
+    pub edge: LineEdge,
+    pub target_node: Option<NodeId>,
+    pub target_offset: Option<usize>,
+    pub target_edge: AnchorEdge,
+    pub diagnostic: Option<Code>,
 }
 
 /// Logical content edges, including expanded tabs, excluding hanging whitespace.
@@ -165,6 +182,11 @@ impl LayoutSnapshot {
                     relation: None,
                     state: None,
                     applied: true,
+                    edge: None,
+                    target_node: None,
+                    target_offset: None,
+                    target_edge: None,
+                    diagnostic: None,
                 };
                 for (relative, c) in block
                     .text
@@ -241,6 +263,11 @@ impl LayoutSnapshot {
                 relation: Some(relation.id),
                 state: Some(relation.status),
                 applied: relation.applied,
+                edge: Some(guide.edge),
+                target_node: guide.target_node,
+                target_offset: guide.target_offset,
+                target_edge: Some(guide.target_edge),
+                diagnostic: guide.diagnostic.clone(),
             });
         }
         out

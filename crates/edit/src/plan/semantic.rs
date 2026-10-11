@@ -170,7 +170,9 @@ impl Model<'_> {
         }
         self.list_live(list)?;
         self.members.insert(node, Some((list, level)));
-        self.plan.steps.push(Step::SetListItem { node, list, level });
+        self.plan
+            .steps
+            .push(Step::SetListItem { node, list, level });
         Ok(())
     }
 
@@ -183,7 +185,9 @@ impl Model<'_> {
         let (list, _) = self.item(node)?.ok_or(Reason::NotAListItem(node))?;
         let numbering = self.doc.list_numbering();
         if numbering.items.get(&node).is_some_and(|i| i.restart) {
-            self.plan.steps.push(Step::SetListRestart { node, value: None });
+            self.plan
+                .steps
+                .push(Step::SetListRestart { node, value: None });
         }
         let ListRef::Existing(own) = list else {
             return Ok(());

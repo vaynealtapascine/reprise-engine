@@ -176,7 +176,11 @@ impl ListWriter {
         Ok(())
     }
 
-    fn push(&mut self, item: &reprise_doc::ListItem, out: &mut String) -> Result<(), ClipboardError> {
+    fn push(
+        &mut self,
+        item: &reprise_doc::ListItem,
+        out: &mut String,
+    ) -> Result<(), ClipboardError> {
         let ordered = item.format.is_ordered();
         let (style, kind) = list_style(&item.format, &item.marker);
         let mut attrs = format!(
@@ -204,7 +208,14 @@ impl ListWriter {
 
     fn pop(&mut self, out: &mut String) -> Result<(), ClipboardError> {
         if let Some(o) = self.open.pop() {
-            crate::export::append(out, if o.ordered { "</li></ol>" } else { "</li></ul>" })?;
+            crate::export::append(
+                out,
+                if o.ordered {
+                    "</li></ol>"
+                } else {
+                    "</li></ul>"
+                },
+            )?;
         }
         Ok(())
     }

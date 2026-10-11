@@ -152,14 +152,16 @@ fn split_and_join_across_roles() {
         .unwrap();
     let tail = applied.blocks[0];
     let doc = ed.document();
-    assert_eq!(doc.role(tail).unwrap(), Role::Heading(1), "Enter keeps the role");
+    assert_eq!(
+        doc.role(tail).unwrap(),
+        Role::Heading(1),
+        "Enter keeps the role"
+    );
     // The app's "Enter at the end of a heading" policy, in one step.
-    ed.apply(
-        &Transaction::new().with(Command::SetRole {
-            node: tail,
-            role: Role::Body,
-        }),
-    )
+    ed.apply(&Transaction::new().with(Command::SetRole {
+        node: tail,
+        role: Role::Body,
+    }))
     .unwrap();
     ed.apply_command(Command::JoinBlocks {
         first: ids[0],
@@ -282,10 +284,16 @@ fn two_peers_indent_different_items() {
     let (mut a, ids) = editor(&["x", "y", "z"]);
     listify(&mut a, &ids);
     let mut b = Editor::new(a.document().fork(2).unwrap(), SchemaRegistry::builtin());
-    a.apply_command(Command::IndentListItem { node: ids[1], by: 1 })
-        .unwrap();
-    b.apply_command(Command::IndentListItem { node: ids[2], by: 1 })
-        .unwrap();
+    a.apply_command(Command::IndentListItem {
+        node: ids[1],
+        by: 1,
+    })
+    .unwrap();
+    b.apply_command(Command::IndentListItem {
+        node: ids[2],
+        by: 1,
+    })
+    .unwrap();
     let (da, db) = (a.document().fork(3).unwrap(), b.document().fork(4).unwrap());
     a.merge(&db).unwrap();
     b.merge(&da).unwrap();

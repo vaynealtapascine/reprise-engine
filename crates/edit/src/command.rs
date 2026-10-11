@@ -116,6 +116,43 @@ pub enum Command {
         id: RelationId,
     },
 
+    // Named paragraph styles (`docs/paragraph-styles.md`).
+    /// Defines `name` as exactly `style` (including its parent); a built-in
+    /// of that name no longer applies.
+    DefineStyle {
+        name: String,
+        style: Style,
+    },
+    /// Sets the supplied properties of `name` and clears the listed ones.
+    PatchStyle {
+        name: String,
+        patch: reprise_doc::StylePatch,
+    },
+    /// `from` forwards to `to`, which gets `from`'s effective properties.
+    RenameStyle {
+        from: String,
+        to: String,
+    },
+    /// Blocks and styles naming it resolve through its parent.
+    DeleteStyle {
+        name: String,
+    },
+    /// Names the block's style; the empty name is the document base.
+    SetStyleName {
+        node: NodeId,
+        name: String,
+    },
+    /// Sets and clears direct overrides property by property, keeping the rest.
+    PatchOverrides {
+        node: NodeId,
+        patch: reprise_doc::StylePatch,
+    },
+    /// `None` clears the paragraph's direct alignment; a point removes the
+    /// line defaults of the authored line containing it.
+    ClearAlignment {
+        node: NodeId,
+        at: Option<usize>,
+    },
     // Roles and lists (see `docs/roles-and-lists.md`).
     /// Sets what a paragraph is. Appearance is a separate style change.
     SetRole {

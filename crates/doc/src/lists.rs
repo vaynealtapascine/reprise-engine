@@ -266,11 +266,9 @@ impl ListDefinition {
             if n > MAX_LEVEL {
                 return bad("list levels are 0 to 8");
             }
-            if level
-                .text
-                .as_ref()
-                .is_some_and(|t| t.chars().count() > MAX_TEMPLATE || t.contains(reprise_text::BREAK))
-            {
+            if level.text.as_ref().is_some_and(|t| {
+                t.chars().count() > MAX_TEMPLATE || t.contains(reprise_text::BREAK)
+            }) {
                 return bad("a marker template is too long or contains a reserved character");
             }
             if matches!(level.format, Some(NumberFormat::Unknown(_))) {
@@ -428,7 +426,10 @@ fn read_definition(meta: &LoroMap) -> Result<(ListDefinition, Vec<Note>), ()> {
             Ok(v) => level.start = v,
             Err(()) => unreadable(key(n, "start")),
         }
-        for (property, slot) in [("indent", &mut level.indent), ("hanging", &mut level.hanging)] {
+        for (property, slot) in [
+            ("indent", &mut level.indent),
+            ("hanging", &mut level.hanging),
+        ] {
             match get_i64(meta, &key(n, property)) {
                 Ok(v) => {
                     *slot = v.map(|v| Length(v.clamp(0, i64::from(i32::MAX)) as i32));
@@ -516,9 +517,12 @@ impl Document {
 
     fn list_flagged(&self, id: ListId) -> bool {
         let tree = self.lists_tree();
-        tree.get_meta(id.0)
-            .ok()
-            .is_none_or(|m| !matches!(m.get(DELETED), Some(ValueOrContainer::Value(LoroValue::Bool(false)))))
+        tree.get_meta(id.0).ok().is_none_or(|m| {
+            !matches!(
+                m.get(DELETED),
+                Some(ValueOrContainer::Value(LoroValue::Bool(false)))
+            )
+        })
     }
 
     /// Whether a definition exists, is not deleted and is readable.
@@ -559,14 +563,11 @@ impl Document {
         ids.sort();
         ids.into_iter()
             .map(|id| {
-                let read = tree
-                    .get_meta(id)
-                    .map_err(|e| e.to_string())
-                    .and_then(|m| {
-                        read_definition(&m)
-                            .map(|(d, _)| d)
-                            .map_err(|()| "unreadable list definition".to_string())
-                    });
+                let read = tree.get_meta(id).map_err(|e| e.to_string()).and_then(|m| {
+                    read_definition(&m)
+                        .map(|(d, _)| d)
+                        .map_err(|()| "unreadable list definition".to_string())
+                });
                 (ListId(id), read)
             })
             .collect()
@@ -636,7 +637,10 @@ impl Document {
     fn check_item(&self, id: NodeId) -> Result<(), DocError> {
         let block = self.block(id)?;
         if !matches!(block.kind, BlockKind::Paragraph | BlockKind::Annotation) {
-            return Err(DocError::Malformed(id, "only text blocks can be list items"));
+            return Err(DocError::Malformed(
+                id,
+                "only text blocks can be list items",
+            ));
         }
         Ok(())
     }
@@ -866,9 +870,9 @@ impl Document {
                 continue;
             };
             let values = counters.entry(list).or_insert([None; LEVELS]);
-            let value = membership.restart.unwrap_or_else(|| {
-                values[index].map_or(spec.start, |v| v.saturating_add(1))
-            });
+            let value = membership
+                .restart
+                .unwrap_or_else(|| values[index].map_or(spec.start, |v| v.saturating_add(1)));
             values[index] = Some(value);
             for deeper in values.iter_mut().skip(index + 1) {
                 *deeper = None;

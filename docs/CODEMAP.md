@@ -227,6 +227,8 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
     1.  Add the field to `Style` and `ComputedStyle` in `doc/src/style.rs`.
     2.  Add it to `Property` and resolve it in `Computed` (`style.rs`), recording its source in `explain` and
         clamping it if negative values make no sense.
+    3.  For a paragraph property, follow the end-to-end recipe (storage, layout, facade,
+        export, package bit) in `docs/paragraph-styles.md`.
 -   **Add a diagnostic:** add a `Code` constant to the reporting crate's `codes` module
     (`layout/src/codes.rs` for layout) and to the table in `contracts.md`.
 -   **Add a page template feature (a frame role, a frame property):**
@@ -286,3 +288,26 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `display` | `src/lib.rs`, `svg.rs`, `png.rs`, `pdf.rs`, `tests/ink_bounds.rs`, `tests/pdf_text.rs`, `tests/pdf_tags.rs` | Synthetic outline paint, integer ink bounds with an exact rational rounding regression, PDF text transforms retaining extraction and split tags; default-false fixture constructors | 19, 21, 32, 33, 38 |
 | `fixtures` | `src/hostile.rs`, `tests/hostile.rs`, `tests/host_fonts.rs`, `tests/snapshots/host_fonts__oblique_ink_bounds.snap`, `tests/snapshots/hostile__font_host_oblique.snap`, `tests/snapshots/hostile__content_font_host_oblique.snap`; `fixtures/fonts/PaperMono-TestSubset.ttf`, `subset_paper_mono.py`, `PaperMono-OFL.txt`, `PaperMono-LICENSE.txt`, `AtkinsonHyperlegibleNext-Regular.ttf`, `AtkinsonHyperlegibleNext-OFL.txt`, `README.md` | Small licensed static test faces, fallback/RTL/vertical/transformed/incremental/ink hostile coverage | 20, 21, 37, 38, 39 |
 | `reprise`, `reprise-wasm` | `reprise/src/session.rs`, `dto.rs`, `typescript.rs`, `tests/formatting_glyphs.rs`, `API.txt`; `reprise-wasm/src/lib.rs`, `ts/types.d.ts`, `ts/reprise_wasm.d.ts`, `ts/worker.ts`, `ts/smoke.cjs`, `ts/worker-smoke.cjs`; `docs/bindings.md`, `docs/contracts.md`, `docs/text-formatting.md` | Host settings setter and worker job invalidation, additive styled-outline API and generated native/WASM wire declarations | 02, 05, 21, 38 |
+
+| Crate | Files | Responsibility | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/style.rs`, `src/style/store.rs`, `src/style/store/tests.rs`, `src/style/builtin.rs`, `src/codes.rs`, `src/formatting.rs`, `src/marks.rs`, `src/lib.rs` | Paragraph properties (indents, spacing, keeps, widows/orphans, background) through the four stages; flat `styles1`/`para1` storage, define/patch/rename/delete, built-in Normal/Title/Subtitle/Heading 1–6, `style_chain` shared with incremental keys, per-field format clears, `justify`, bit-13 detection | 05, 08, 17, 18, 29, 34, 37 |
+| `compose` | `src/indent.rs`, `src/marks.rs` | `Indented`/`Indents`: logical, RTL-mirrored indents bounded to leave a quarter of the measure | 20, 23, 37 |
+| `layout` | `src/flow.rs`, `src/flow/paragraph.rs`, `src/flow/keeps.rs`, `src/display.rs`, `src/incremental.rs`, `src/codes.rs`, `src/lib.rs` | Collapsing/truncating spacing, justified composer choice, bounded keep/widow/orphan lookahead, paragraph shading, lookahead-aware flow memo keys, `Engine::paragraph_context` | 23, 24, 26, 27, 32, 37 |
+| `edit` | `src/command.rs`, `src/plan.rs`, `src/editor.rs`, `src/error.rs` | Style commands validated against the transaction model; `Reason::Style`/`StyleLimit` | 07, 29, 37 |
+| `format` | `src/features.rs`, `src/container.rs`, `SPEC.md` | Required paragraph-style bit 13 and old-reader refusal | 34 |
+| `clipboard` | `src/export.rs`, `src/html.rs`, `tests/paragraph_styles.rs` | Paragraph CSS export/import and native round trip | 35 |
+| `reprise`, `reprise-wasm` | `reprise/src/{dto,convert,session,typescript}.rs`, `reprise/tests/paragraph_styles.rs`, `reprise-wasm/ts/types.d.ts` | Style commands, `clear` lists, nullable `set-alignment`, `State.styles`/`resolved`/`blocks[].style` with a per-revision cache | 02, 29, 38 |
+| `fixtures` | `tests/paragraph_styles.rs`, `src/hostile.rs` (`paragraph_style_storm`), `tests/hostile.rs`, `tests/snapshots/paragraph_styles__*.snap`, `tests/snapshots/hostile__{content_,}paragraph_style_storm.snap` | Writing-mode goldens, keeps across pages, widows/orphans, incremental parity, hostile storms | 20, 24, 27, 37–39 |
+| docs | `docs/paragraph-styles.md`, `docs/bindings.md`, `docs/contracts.md`, `docs/text-formatting.md`, `docs/marks.md` | Design, extension recipe, API and codes | 08, 17, 18, 34 |
+
+| Crate | Files | Responsibility | Decisions |
+| --- | --- | --- | --- |
+| `edit` | `src/replace.rs`, `src/paste.rs` (`Pasted::end`), `src/editor.rs` (`write` visibility), `src/error.rs` (`Reason::SelectionGone`), `tests/replace.rs` | Stage and commit replacing a stable selection with a fragment: one transaction, one undo step, resolved inside the transaction | 07, 29, 35 |
+| `reprise` | `src/session.rs` (`Workspace` fonts and `import_copy`, `replace_*`, `batch`, `diagnostics_for`, `reading_order` ranges), `src/session/collab.rs` (`refuse_source`), `src/lib.rs` (`MAX_PACKET_BYTES`), `tests/{workspace_fonts,plumbing_edit,plumbing_marks,plumbing_reading,import_copy}.rs` | Shared workspace fonts, import as a copy, atomic replace, batch with precondition and mapped selection, bounded diagnostics query, reading steps with byte ranges, the one packet bound | 07, 21, 29, 33, 34, 35 |
+| `reprise-wasm` | `src/lib.rs`, `ts/{worker.ts,smoke.cjs,worker-smoke.cjs,types.d.ts,reprise_wasm.d.ts}` | Binary workspace font path, `import_copy`, `batch`, `replace_*`, `diagnostics_for`, `maxPacketBytes`; worker request kinds | 02, 04, 21 |
+| `layout` | `src/marks.rs`, `src/relations/alignment.rs` | `Mark` and `AnchorGuide` carry the authored edge, target node, offset and edge, and the explaining diagnostic code | 15, 26, 33 |
+| `font` | `src/lib.rs` (`FontStore::add_shared`) | Share a parsed face between stores without copying bytes | 21 |
+| `doc` | `src/persist.rs` (`Document::style_names`) | Every named style, for a copy | 08, 34 |
+| `fixtures` | `src/hostile.rs` (`plumbing_mark_facts`), `tests/hostile.rs` | Ring, conflict, deleted-target and overflow pins in one document | 15, 37 |
+| docs | `docs/plumbing.md`, `docs/facade-review.md` | Design note and the facade shape review | 04 |

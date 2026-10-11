@@ -259,12 +259,24 @@ required mask predates bit 12 refuses before decoding the document section.
 Untouched documents, empty page patches, and refused commands retain their old
 required mask. No container version or frozen template JSON envelope changes.
 
-## Block semantics feature (required bit 13)
+## Paragraph styles feature (required bit 13)
+
+`REQUIRED_PARAGRAPH_STYLES` is declared when the flat `styles1` (named-style
+properties and states) or `para1` (per-block property patches) roots are
+retained, even emptied by undo; when any nested style or override map holds a
+paragraph key (`indent-start`, `indent-end`, `indent-first`, `space-before`,
+`space-after`, `keep-with-next`, `keep-together`, `widows`, `orphans`,
+`background`); when `alignment` is `justify` anywhere, `marks1` included; and
+when a `format1` envelope carries `clear`. An older reader would silently drop
+those properties, styles or masks, so it must refuse. Untouched documents,
+including those that only name built-in styles, keep their old mask. See
+`docs/paragraph-styles.md`; the bit number may be renumbered on integration.
+## Block semantics feature (required bit 14)
 
 `REQUIRED_BLOCK_SEMANTICS` is declared whenever any paragraph metadata or break
 record holds a role (`role1`) or list membership (`list1`, `level1`,
 `restart1`), or the `lists` tree of list definitions exists, including deleted
 definitions and values reset to body whose history is retained. A reader whose
-known required mask predates bit 13 refuses before decoding the document
+known required mask predates bit 14 refuses before decoding the document
 section. Documents that never used roles or lists retain their old required
 mask. Numbering is derived and never persisted. See `docs/roles-and-lists.md`.

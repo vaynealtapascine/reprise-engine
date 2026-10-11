@@ -301,11 +301,9 @@ impl Exporter for PlainText {
 /// a space. Empty for other blocks.
 fn item_prefix(doc: &Document, node: NodeId) -> String {
     match doc.list_item(node) {
-        Some(item) if !item.marker.is_empty() => format!(
-            "{}{} ",
-            "    ".repeat(usize::from(item.level)),
-            item.marker
-        ),
+        Some(item) if !item.marker.is_empty() => {
+            format!("{}{} ", "    ".repeat(usize::from(item.level)), item.marker)
+        }
         Some(item) => "    ".repeat(usize::from(item.level)),
         None => String::new(),
     }
@@ -370,9 +368,7 @@ fn paragraph(
         out,
         &format!(
             "<{tag}{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
-            class
-                .map(|c| format!(" class=\"{c}\""))
-                .unwrap_or_default(),
+            class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default(),
             if base % 2 == 1 { "rtl" } else { "ltr" },
             escape(&family),
             points(style.size),
@@ -385,9 +381,15 @@ fn paragraph(
                         reprise_doc::marks::Alignment::Centre => "center",
                         reprise_doc::marks::Alignment::Start => "start",
                         reprise_doc::marks::Alignment::End => "end",
+                        reprise_doc::marks::Alignment::Justify => "justify",
                     }
                 ))
                 .unwrap_or_default()
+                + &paragraph_css(
+                    layout
+                        .and_then(|l| l.blocks.iter().find(|b| b.node == node))
+                        .map_or(&style, |b| &b.style)
+                )
         ),
     )?;
     let formats = doc
@@ -771,4 +773,42 @@ pub fn export_pdf(
             .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
     );
     Ok(ExportResult { bytes, losses })
+}
+
+/// Paragraph geometry and breaking as CSS, appended only for values that
+/// differ from the defaults, so existing exports are byte-identical. Logical
+/// margins follow the paragraph's `dir`; vertical margins collapse in a
+/// browser exactly as layout collapses them (`docs/paragraph-styles.md`).
+fn paragraph_css(style: &reprise_doc::ComputedStyle) -> String {
+    use reprise_geom::Length;
+    let mut css = String::new();
+    for (name, value) in [
+        ("margin-inline-start", style.indent_start),
+        ("margin-inline-end", style.indent_end),
+        ("text-indent", style.indent_first),
+        ("margin-top", style.space_before),
+        ("margin-bottom", style.space_after),
+    ] {
+        if value != Length::ZERO {
+            css.push_str(&format!("; {name}: {}pt", points(value)));
+        }
+    }
+    if style.keep_with_next {
+        css.push_str("; break-after: avoid");
+    }
+    if style.keep_together {
+        css.push_str("; break-inside: avoid");
+    }
+    if let Some(n) = style.widows {
+        css.push_str(&format!("; widows: {n}"));
+    }
+    if let Some(n) = style.orphans {
+        css.push_str(&format!("; orphans: {n}"));
+    }
+    if let Some([r, g, b, a]) = style.background {
+        css.push_str(&format!(
+            "; background-color: #{r:02x}{g:02x}{b:02x}{a:02x}"
+        ));
+    }
+    css
 }

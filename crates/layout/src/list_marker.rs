@@ -267,7 +267,11 @@ impl GeometryProvider for Inset<'_> {
 }
 
 /// Places a marker on the first line of its item, on that line's baseline.
-pub(crate) fn place(marker: &PreparedMarker, line: &LineLayout, edges: Edges) -> Option<MarkerLayout> {
+pub(crate) fn place(
+    marker: &PreparedMarker,
+    line: &LineLayout,
+    edges: Edges,
+) -> Option<MarkerLayout> {
     if marker.runs.is_empty() {
         return None;
     }
@@ -353,7 +357,10 @@ mod tests {
         let inset = Inset::new(&measure, &ltr, true, Length::from_pt(12));
         assert_eq!(
             ask(&inset, 0),
-            Available::Room(vec![Interval::new(Length::from_pt(36), Length::from_pt(200))])
+            Available::Room(vec![Interval::new(
+                Length::from_pt(36),
+                Length::from_pt(200)
+            )])
         );
         assert_eq!(
             inset.first_edges(Length::ZERO),

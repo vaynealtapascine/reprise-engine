@@ -50,6 +50,11 @@ pub(crate) fn style(s: &Style) -> Result<reprise_doc::Style> {
     for (property, text) in [
         (reprise_doc::Property::Size, &s.size),
         (reprise_doc::Property::LineHeight, &s.line_height),
+        (reprise_doc::Property::IndentStart, &s.indent_start),
+        (reprise_doc::Property::IndentEnd, &s.indent_end),
+        (reprise_doc::Property::IndentFirst, &s.indent_first),
+        (reprise_doc::Property::SpaceBefore, &s.space_before),
+        (reprise_doc::Property::SpaceAfter, &s.space_after),
     ] {
         if let Some(text) = text {
             out = out
@@ -66,7 +71,167 @@ pub(crate) fn style(s: &Style) -> Result<reprise_doc::Style> {
     out.slant = s.slant.map(slant);
     out.decoration = decoration(s.decoration);
     out.color = s.color;
+    for n in [s.widows, s.orphans].into_iter().flatten() {
+        if !(1..=reprise_doc::MAX_LINE_KEEP).contains(&n) {
+            return Err(Error::Invalid("widows and orphans must be in 1..32".into()));
+        }
+    }
+    out.keep_with_next = s.keep_with_next;
+    out.keep_together = s.keep_together;
+    out.widows = s.widows;
+    out.orphans = s.orphans;
+    out.background = s.background;
     Ok(out)
+}
+
+/// A used paragraph style as the facade reports it.
+pub(crate) fn resolved_style(s: &reprise_doc::ComputedStyle) -> ResolvedStyle {
+    ResolvedStyle {
+        family: s.family.clone(),
+        families: s.families.clone(),
+        size: s.size.0,
+        line_height: s.line_height.0,
+        alignment: s.alignment.map(alignment_out),
+        tabs: s.tabs.as_ref().map(tabs_out),
+        indent_start: s.indent_start.0,
+        indent_end: s.indent_end.0,
+        indent_first: s.indent_first.0,
+        space_before: s.space_before.0,
+        space_after: s.space_after.0,
+        keep_with_next: s.keep_with_next,
+        keep_together: s.keep_together,
+        widows: u8::try_from(s.widows()).unwrap_or(1),
+        orphans: u8::try_from(s.orphans()).unwrap_or(1),
+        weight: s.weight,
+        slant: s.slant.map(slant_out),
+        decoration: Decoration {
+            underline: s.decoration.underline,
+            strike: s.decoration.strike,
+        },
+        color: s.color,
+        background: s.background,
+    }
+}
+
+/// A document style as the facade's DTO: the authored values, lengths in the
+/// expression syntax. A legacy single family is reported as a one-family chain.
+pub(crate) fn style_out(s: &reprise_doc::Style) -> Style {
+    use reprise_doc::Property as P;
+    let text = |p: P| s.get(p).map(|v| v.describe());
+    Style {
+        alignment: s.alignment.map(alignment_out),
+        tabs: s.tabs.as_ref().map(tabs_out),
+        weight: s.weight,
+        slant: s.slant.map(slant_out),
+        decoration: Decoration {
+            underline: s.decoration.underline,
+            strike: s.decoration.strike,
+        },
+        color: s.color,
+        families: s
+            .families
+            .clone()
+            .or_else(|| s.family.clone().map(|f| vec![f])),
+        size: text(P::Size),
+        line_height: text(P::LineHeight),
+        indent_start: text(P::IndentStart),
+        indent_end: text(P::IndentEnd),
+        indent_first: text(P::IndentFirst),
+        space_before: text(P::SpaceBefore),
+        space_after: text(P::SpaceAfter),
+        keep_with_next: s.keep_with_next,
+        keep_together: s.keep_together,
+        widows: s.widows,
+        orphans: s.orphans,
+        background: s.background,
+    }
+}
+
+fn tabs_out(t: &reprise_doc::marks::TabStops) -> TabStops {
+    TabStops {
+        interval: t.interval.0,
+        stops: t
+            .stops
+            .iter()
+            .map(|s| TabStop {
+                position: s.position.map(|l| l.0),
+                alignment: alignment_out(s.alignment),
+                leader: s.leader.map(String::from),
+            })
+            .collect(),
+    }
+}
+
+/// The stored keys one facade property clears in a paragraph style.
+fn style_keys(p: StyleProperty) -> Result<&'static [&'static str]> {
+    use StyleProperty as S;
+    Ok(match p {
+        S::Parent => &["parent"],
+        S::Families => &["family", "families"],
+        S::Size => &["size"],
+        S::LineHeight => &["line-height"],
+        S::Alignment => &["alignment"],
+        S::Tabs => &["tabs"],
+        S::Weight => &["weight"],
+        S::Slant => &["slant"],
+        S::Underline => &["underline"],
+        S::Strike => &["strike"],
+        S::Color => &["color"],
+        S::IndentStart => &["indent-start"],
+        S::IndentEnd => &["indent-end"],
+        S::IndentFirst => &["indent-first"],
+        S::SpaceBefore => &["space-before"],
+        S::SpaceAfter => &["space-after"],
+        S::KeepWithNext => &["keep-with-next"],
+        S::KeepTogether => &["keep-together"],
+        S::Widows => &["widows"],
+        S::Orphans => &["orphans"],
+        S::Background => &["background"],
+        S::Language | S::Features => {
+            return Err(Error::Invalid(
+                "language and features are character formatting".into(),
+            ));
+        }
+    })
+}
+
+/// A paragraph-style patch: the style's supplied fields, and `clear`.
+pub(crate) fn style_patch(
+    s: &Style,
+    parent: Option<&String>,
+    clear: &[StyleProperty],
+) -> Result<reprise_doc::StylePatch> {
+    if clear.len() > 64 {
+        return Err(Error::Limit("cleared properties".into()));
+    }
+    let mut set = style(s)?;
+    set.parent = parent.cloned();
+    let mut keys = std::collections::BTreeSet::new();
+    for p in clear {
+        keys.extend(style_keys(*p)?.iter().map(|k| k.to_string()));
+    }
+    Ok(reprise_doc::StylePatch { set, clear: keys })
+}
+
+/// The character fields one facade property clears in `format-text`.
+fn text_key(p: StyleProperty) -> Result<&'static str> {
+    use StyleProperty as S;
+    Ok(match p {
+        S::Families => "families",
+        S::Size => "size",
+        S::Language => "language",
+        S::Features => "features",
+        S::Weight => "weight",
+        S::Slant => "slant",
+        S::Underline => "underline",
+        S::Strike => "strike",
+        S::Color => "color",
+        _ => {
+            return Err(Error::Invalid(
+                "format-text clears character properties only".into(),
+            ));
+        }
+    })
 }
 fn slant(s: FontStyle) -> reprise_doc::TextSlant {
     match s {
@@ -121,11 +286,19 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
         Command::SetAlignment {
             node,
             at,
-            alignment: a,
+            alignment: Some(a),
         } => C::SetAlignment {
             node: id(node)?,
             at: at.map(|v| v as usize),
             alignment: alignment(*a),
+        },
+        Command::SetAlignment {
+            node,
+            at,
+            alignment: None,
+        } => C::ClearAlignment {
+            node: id(node)?,
+            at: at.map(|v| v as usize),
         },
         Command::SetTabStops { node, tabs: t } => C::SetTabStops {
             node: id(node)?,
@@ -220,9 +393,50 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             parent: parent.as_deref().map(id).transpose()?,
             index: *index as usize,
         },
-        Command::SetStyle { node, style: s } => C::SetStyleOverride {
+        Command::SetStyle {
+            node,
+            style: s,
+            clear: None,
+        } => C::SetStyleOverride {
             node: id(node)?,
             style: style(s)?,
+        },
+        Command::SetStyle {
+            node,
+            style: s,
+            clear: Some(clear),
+        } => C::PatchOverrides {
+            node: id(node)?,
+            patch: style_patch(s, None, clear)?,
+        },
+        Command::DefineStyle {
+            name,
+            parent,
+            style: s,
+        } => C::DefineStyle {
+            name: name.clone(),
+            style: reprise_doc::Style {
+                parent: parent.clone(),
+                ..style(s)?
+            },
+        },
+        Command::UpdateStyle {
+            name,
+            parent,
+            style: s,
+            clear,
+        } => C::PatchStyle {
+            name: name.clone(),
+            patch: style_patch(s, parent.as_ref(), clear)?,
+        },
+        Command::RenameStyle { from, to } => C::RenameStyle {
+            from: from.clone(),
+            to: to.clone(),
+        },
+        Command::DeleteStyle { name } => C::DeleteStyle { name: name.clone() },
+        Command::ApplyStyle { node, style: name } => C::SetStyleName {
+            node: id(node)?,
+            name: name.clone().unwrap_or_default(),
         },
         Command::FormatText {
             node,
@@ -267,6 +481,11 @@ fn text_style(s: &TextStyle) -> Result<reprise_doc::formatting::TextStyle> {
         decoration: decoration(s.decoration),
         color: s.color,
         reset: s.reset,
+        clear: s
+            .clear
+            .iter()
+            .map(|p| text_key(*p).map(String::from))
+            .collect::<Result<_>>()?,
     })
 }
 pub(crate) fn text_runs(f: reprise_doc::formatting::TextFormats) -> Option<Vec<TextRun>> {
@@ -296,6 +515,7 @@ pub(crate) fn text_runs(f: reprise_doc::formatting::TextFormats) -> Option<Vec<T
                     },
                     color: run.style.color,
                     reset: false,
+                    clear: Vec::new(),
                 },
             })
             .collect()
@@ -611,6 +831,7 @@ pub(crate) fn alignment(a: Alignment) -> reprise_doc::marks::Alignment {
         Alignment::Start => reprise_doc::marks::Alignment::Start,
         Alignment::Centre => reprise_doc::marks::Alignment::Centre,
         Alignment::End => reprise_doc::marks::Alignment::End,
+        Alignment::Justify => reprise_doc::marks::Alignment::Justify,
     }
 }
 fn alignment_out(a: reprise_doc::marks::Alignment) -> Alignment {
@@ -618,6 +839,7 @@ fn alignment_out(a: reprise_doc::marks::Alignment) -> Alignment {
         reprise_doc::marks::Alignment::Start => Alignment::Start,
         reprise_doc::marks::Alignment::Centre => Alignment::Centre,
         reprise_doc::marks::Alignment::End => Alignment::End,
+        reprise_doc::marks::Alignment::Justify => Alignment::Justify,
     }
 }
 pub(crate) fn tabs(t: &TabStops) -> Result<reprise_doc::marks::TabStops> {
@@ -685,5 +907,56 @@ pub(crate) fn mark(m: reprise_layout::marks::Mark) -> Mark {
             reprise_layout::RelationStatus::Deleted => RelationState::Deleted,
         }),
         applied: m.applied,
+        edge: m.edge.map(|e| match e {
+            reprise_doc::marks::LineEdge::Start => LineEdge::Start,
+            reprise_doc::marks::LineEdge::End => LineEdge::End,
+        }),
+        target_node: m.target_node.map(|n| n.to_string()),
+        target_offset: m
+            .target_offset
+            .map(|o| u32::try_from(o).unwrap_or(u32::MAX)),
+        target_edge: m.target_edge.map(|e| match e {
+            reprise_doc::marks::AnchorEdge::Position => AnchorEdge::Position,
+            reprise_doc::marks::AnchorEdge::GapStart => AnchorEdge::GapStart,
+            reprise_doc::marks::AnchorEdge::GapEnd => AnchorEdge::GapEnd,
+            reprise_doc::marks::AnchorEdge::LineStart => AnchorEdge::LineStart,
+            reprise_doc::marks::AnchorEdge::LineEnd => AnchorEdge::LineEnd,
+        }),
+        diagnostic: m.diagnostic.map(|c| c.to_string()),
+    }
+}
+
+pub(crate) fn font_declaration(r: &FontDeclaration) -> reprise_font::FontDeclaration {
+    reprise_font::FontDeclaration {
+        family: r.family.clone(),
+        descriptors: reprise_font::Descriptors {
+            weight: r.weight,
+            stretch: r.stretch,
+            style: match r.style {
+                FontStyle::Normal => reprise_font::FontStyle::Normal,
+                FontStyle::Italic => reprise_font::FontStyle::Italic,
+                FontStyle::Oblique => reprise_font::FontStyle::Oblique,
+            },
+        },
+        face_index: r.face_index,
+    }
+}
+pub(crate) fn font_settings(r: &FontSettings) -> reprise_font::FontSettings {
+    reprise_font::FontSettings {
+        generics: r
+            .generics
+            .iter()
+            .map(|(g, name)| {
+                let g = match g {
+                    GenericFamily::Serif => reprise_font::GenericFamily::Serif,
+                    GenericFamily::SansSerif => reprise_font::GenericFamily::SansSerif,
+                    GenericFamily::Monospace => reprise_font::GenericFamily::Monospace,
+                    GenericFamily::Script => reprise_font::GenericFamily::Script,
+                };
+                (g, name.clone())
+            })
+            .collect(),
+        fallbacks: r.fallbacks.clone(),
+        synthetic_oblique: r.synthetic_oblique,
     }
 }

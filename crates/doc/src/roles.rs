@@ -244,7 +244,12 @@ impl Document {
         if roots.contains_key(crate::lists::LISTS) {
             return true;
         }
-        let keys = [ROLE, crate::lists::LIST, crate::lists::LEVEL, crate::lists::RESTART];
+        let keys = [
+            ROLE,
+            crate::lists::LIST,
+            crate::lists::LEVEL,
+            crate::lists::RESTART,
+        ];
         let marked = |meta: &LoroMap| keys.iter().any(|k| meta.get(k).is_some());
         let mut visited = 0usize;
         if roots.contains_key(crate::flow::BREAKS)
@@ -328,7 +333,14 @@ mod tests {
             assert_eq!(Role::parse(&role.token()), Some(role));
             assert!(role.is_valid());
         }
-        for bad in ["heading-0", "heading-7", "heading-12", "heading-", "Heading-1", ""] {
+        for bad in [
+            "heading-0",
+            "heading-7",
+            "heading-12",
+            "heading-",
+            "Heading-1",
+            "",
+        ] {
             assert_eq!(Role::parse(bad), None, "{bad}");
         }
         assert!(!Role::Heading(0).is_valid());

@@ -191,6 +191,7 @@ fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Result<Style,
                         "start" | "left" => Some(reprise_doc::marks::Alignment::Start),
                         "center" => Some(reprise_doc::marks::Alignment::Centre),
                         "end" | "right" => Some(reprise_doc::marks::Alignment::End),
+                        "justify" => Some(reprise_doc::marks::Alignment::Justify),
                         _ => None,
                     };
                     if style.alignment.is_none() {
@@ -202,6 +203,65 @@ fn css(attrs: &BTreeMap<String, String>, notes: &mut Vec<Note>) -> Result<Style,
                         );
                     }
                 }
+                // Paragraph geometry and breaking (`docs/paragraph-styles.md`):
+                // logical margins, the first-line indent and vertical margins,
+                // which collapse in layout as they do in a browser.
+                "margin-inline-start"
+                | "margin-inline-end"
+                | "text-indent"
+                | "margin-top"
+                | "margin-bottom" => {
+                    let property = match key.as_str() {
+                        "margin-inline-start" => reprise_doc::Property::IndentStart,
+                        "margin-inline-end" => reprise_doc::Property::IndentEnd,
+                        "text-indent" => reprise_doc::Property::IndentFirst,
+                        "margin-top" => reprise_doc::Property::SpaceBefore,
+                        _ => reprise_doc::Property::SpaceAfter,
+                    };
+                    match css_length(value) {
+                        Some(length) => style.set(
+                            property,
+                            reprise_doc::Authored::Legacy(LengthExpr::Pt(length)),
+                        ),
+                        None => once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "unsupported CSS length omitted",
+                            false,
+                        ),
+                    }
+                }
+                "break-after" | "page-break-after" if value == "avoid" => {
+                    style.keep_with_next = Some(true);
+                }
+                "break-inside" | "page-break-inside" if value == "avoid" => {
+                    style.keep_together = Some(true);
+                }
+                "widows" | "orphans" => {
+                    match value
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|n| (1..=reprise_doc::MAX_LINE_KEEP).contains(n))
+                    {
+                        Some(n) if key == "widows" => style.widows = Some(n),
+                        Some(n) => style.orphans = Some(n),
+                        None => once(
+                            notes,
+                            codes::HTML_APPROXIMATED,
+                            "widows and orphans outside 1..32 omitted",
+                            false,
+                        ),
+                    }
+                }
+                "background-color" => match crate::text_css::color(value) {
+                    Some(c) => style.background = Some(c),
+                    None => once(
+                        notes,
+                        codes::HTML_APPROXIMATED,
+                        "unsupported paragraph background omitted",
+                        false,
+                    ),
+                },
                 "font-family" => {
                     let value = value.trim_matches(['\'', '"']);
                     if !value.contains(['\\', ',']) {

@@ -21,6 +21,10 @@ pub struct Pasted {
     /// Relation IDs are separate because the frozen IdMap maps nodes and ranges only.
     pub relations: BTreeMap<RelationId, RelationId>,
     pub notes: Vec<Note>,
+    /// Where the pasted content ends (before any text that followed the
+    /// caret): the block and byte offset a caret should take. `None` if the
+    /// fragment had no blocks.
+    pub end: Option<(NodeId, usize)>,
 }
 
 #[derive(Debug)]
@@ -564,7 +568,12 @@ pub(crate) fn write(
     } else {
         BTreeMap::new()
     };
-    write_semantics(doc, &fragment, &mut result, join_first.then_some(first).flatten())?;
+    write_semantics(
+        doc,
+        &fragment,
+        &mut result,
+        join_first.then_some(first).flatten(),
+    )?;
     // The first pasted paragraph joined the caret's paragraph, which it
     // replaces here: it keeps that paragraph's role and membership.
     if join_first
@@ -574,6 +583,13 @@ pub(crate) fn write(
         doc.copy_semantics_to(host, new).map_err(store)?;
     }
     write_formats(doc, &fragment, &result.ids, &shifts)?;
+    result.end = roots.last().and_then(|b| {
+        let shift = shifts.get(&b.id).copied().unwrap_or(0);
+        Some((
+            result.ids.nodes.get(&b.id).copied()?,
+            b.text.len().saturating_add(shift),
+        ))
+    });
     Ok(result)
 }
 
@@ -879,6 +895,18 @@ fn write_into_flow(
     let kept = if join_first { first } else { None };
     write_semantics(doc, &fragment, &mut result, kept)?;
     write_formats(doc, &fragment, &result.ids, &joined)?;
+    result.end = fragment
+        .blocks
+        .iter()
+        .rev()
+        .find(|b| b.parent.is_none())
+        .and_then(|b| {
+            let shift = joined.get(&b.id).copied().unwrap_or(0);
+            Some((
+                result.ids.nodes.get(&b.id).copied()?,
+                b.text.len().saturating_add(shift),
+            ))
+        });
     Ok(result)
 }
 

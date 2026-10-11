@@ -151,7 +151,7 @@ fn tabs_align_fields_and_fill_to_interval_end() {
             .map(|g| g.advance)
             .sum();
         let offset = match alignment {
-            Alignment::Start => Length::ZERO,
+            Alignment::Start | Alignment::Justify => Length::ZERO,
             Alignment::Centre => field.mul_ratio(1, 2),
             Alignment::End => field,
         };
