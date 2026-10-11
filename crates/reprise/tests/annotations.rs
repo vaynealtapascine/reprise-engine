@@ -145,10 +145,11 @@ fn add_update_remove_and_undo_through_apply() {
     assert!(s.undo().unwrap().data);
     assert_eq!(get(&s, &link).unwrap().payload, url("https://docs.example"));
     assert!(s.undo().unwrap().data);
-    assert!(s.undo().unwrap().data);
     assert!(s.state().unwrap().data.annotations.is_empty());
+    assert!(get(&s, &note).is_none());
     assert!(s.redo().unwrap().data);
     assert_eq!(get(&s, &link).unwrap().payload, url("https://docs.example"));
+    assert!(get(&s, &note).is_some());
 }
 
 #[test]
@@ -531,7 +532,7 @@ fn a_copied_document_keeps_links_and_comments_with_new_identities() {
 }
 
 #[test]
-fn copy_as_html_carries_links_and_an_old_engine_refuses_the_package() {
+fn copy_as_html_carries_links_of_the_copied_part_only() {
     let mut s = session("1");
     let p = paragraph(&mut s, "visit the site today");
     apply(&mut s, vec![add(&p, 10, 14, url("https://site.example/?a=1&b=2"))]);
