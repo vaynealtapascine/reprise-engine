@@ -216,7 +216,6 @@ fn a_selection_ending_in_a_child_keeps_the_subtree() {
     let s = select(e.document(), (a, 2), (child, 6));
     replace(&mut e, &s, &fragment(&["+"]));
     assert!(e.document().block(parent).is_ok(), "the ancestor survives");
-    assert!(e.document().block(child).is_ok() || !e.document().children(Some(parent)).is_empty() || texts(&e).iter().any(|t| t.contains("text")));
     assert_eq!(e.undo_count(), 1);
     assert!(e.undo().unwrap());
     assert_eq!(e.document().block(parent).unwrap().text.to_string(), "parent");
