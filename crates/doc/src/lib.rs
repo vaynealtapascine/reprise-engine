@@ -97,7 +97,7 @@ pub use style::{
     Authored, BUILTIN_STYLES, Computed, ComputedStyle, LengthExpr, MAX_LINE_KEEP, MAX_STYLE_NAME,
     MAX_STYLES, PARAGRAPH_KEYS, Property, STORED_KEYS, Specified, StageExplanation, Style,
     StylePatch, StyleRecord, StyleResolution, StyleStatus, TEXT_COMBINE_UPRIGHT, TEXT_ORIENTATION,
-    builtin_style, default_style, style_chain,
+    builtin_style, check_style_name, default_style, specify_parts, style_chain,
 };
 pub use table::{CellInfo, Column, ColumnWidth, RowInfo, TableColumns, TableRole};
 pub use table_grid::{

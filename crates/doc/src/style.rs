@@ -998,7 +998,13 @@ pub struct Specified {
 }
 
 pub(crate) fn specify(doc: &Document, block: &Block) -> Specified {
-    let (chain, notes) = style_chain(doc, block.style.clone());
+    specify_parts(doc, block.style.clone(), &block.overrides)
+}
+
+/// Stage 1 for a style name and direct overrides, without a block: what
+/// every block with these two inputs resolves (cached per style by hosts).
+pub fn specify_parts(doc: &Document, style: Option<String>, overrides: &Style) -> Specified {
+    let (chain, notes) = style_chain(doc, style);
     let mut layers = vec![Layer {
         name: "default".into(),
         style: default_style(),
@@ -1015,7 +1021,7 @@ pub(crate) fn specify(doc: &Document, block: &Block) -> Specified {
     );
     layers.push(Layer {
         name: "direct".into(),
-        style: block.overrides.clone(),
+        style: overrides.clone(),
     });
     Specified { layers, notes }
 }
@@ -1809,7 +1815,10 @@ mod builtin;
 mod store;
 
 pub use builtin::{BUILTIN_STYLES, builtin_style};
-pub use store::{MAX_STYLE_NAME, MAX_STYLES, StylePatch, StyleRecord, StyleStatus};
+pub use store::{
+    MAX_STYLE_NAME, MAX_STYLES, StylePatch, StyleRecord, StyleStatus,
+    check_name as check_style_name,
+};
 
 #[cfg(test)]
 mod tests;

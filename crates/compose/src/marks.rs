@@ -181,7 +181,8 @@ impl Para<'_, '_> {
             };
             let desired = position
                 - match alignment {
-                    Alignment::Start => Length::ZERO,
+                    // Validation refuses justified stops; read as start.
+                    Alignment::Start | Alignment::Justify => Length::ZERO,
                     Alignment::Centre => field.mul_ratio(1, 2),
                     Alignment::End => field,
                 };

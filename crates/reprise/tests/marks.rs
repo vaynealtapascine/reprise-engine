@@ -63,7 +63,7 @@ fn full_marks_editor_clipboard_package_loop() {
             Command::SetAlignment {
                 node: node.clone(),
                 at: Some(4),
-                alignment: Alignment::Centre,
+                alignment: Some(Alignment::Centre),
             },
         ],
     );
@@ -236,7 +236,7 @@ fn refused_marks_transaction_is_atomic_and_style_commands_patch() {
         vec![Command::SetAlignment {
             node,
             at: None,
-            alignment: Alignment::End,
+            alignment: Some(Alignment::End),
         }],
     );
     finish(&mut s);

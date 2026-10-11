@@ -206,6 +206,19 @@ impl Document {
         None
     }
 
+    /// The name `name` resolves to after following renames (itself when it
+    /// is not renamed, or the forwards loop or run too long).
+    pub fn current_style_name(&self, name: &str) -> String {
+        let mut current = name.to_string();
+        for _ in 0..=MAX_CHAIN {
+            match self.style_record(&current).map(|r| r.status) {
+                Some(StyleStatus::Renamed(to)) if to != name => current = to,
+                _ => return current,
+            }
+        }
+        name.to_string()
+    }
+
     /// The live named styles, built-ins included, sorted by name, at most
     /// [`MAX_STYLES`]. The flag says the listing was cut short.
     pub fn style_names(&self) -> (Vec<String>, bool) {
