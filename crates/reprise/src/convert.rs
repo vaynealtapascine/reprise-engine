@@ -448,7 +448,191 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             range: *start as usize..*end as usize,
             style: text_style(style)?,
         },
+        Command::AddAnnotation {
+            node,
+            start,
+            end,
+            annotation,
+        } => C::AddAnnotation {
+            node: id(node)?,
+            range: *start as usize..*end as usize,
+            data: annotation_data(annotation)?,
+        },
+        Command::UpdateAnnotation {
+            id: s,
+            annotation,
+        } => C::UpdateAnnotation {
+            id: range_id(s)?,
+            data: annotation_data(annotation)?,
+        },
+        Command::RemoveAnnotation { id: s } => C::RemoveAnnotation { id: range_id(s)? },
     })
+}
+
+/// The kernel's annotation data for the wire form; ids are parsed here and
+/// the payload is validated by the kernel.
+pub(crate) fn annotation_data(
+    p: &AnnotationPayload,
+) -> Result<reprise_doc::annotation::AnnotationData> {
+    use reprise_doc::annotation::{AnnotationData, CommentAnchor, LinkTarget};
+    Ok(match p {
+        AnnotationPayload::Link { target } => AnnotationData::Link(match target {
+            LinkDestination::Url { url } => LinkTarget::Url { url: url.clone() },
+            LinkDestination::Node { node } => LinkTarget::Node { node: id(node)? },
+            LinkDestination::Heading { node } => LinkTarget::Heading { node: id(node)? },
+            LinkDestination::Range { range } => LinkTarget::Range {
+                range: range_id(range)?,
+            },
+        }),
+        AnnotationPayload::Comment { thread } => AnnotationData::Comment(CommentAnchor {
+            thread: thread.clone(),
+        }),
+    })
+}
+
+fn link_destination(t: &reprise_doc::annotation::LinkTarget) -> LinkDestination {
+    use reprise_doc::annotation::LinkTarget;
+    match t {
+        LinkTarget::Url { url } => LinkDestination::Url { url: url.clone() },
+        LinkTarget::Node { node } => LinkDestination::Node {
+            node: node.to_string(),
+        },
+        LinkTarget::Heading { node } => LinkDestination::Heading {
+            node: node.to_string(),
+        },
+        LinkTarget::Range { range } => LinkDestination::Range {
+            range: range.to_string(),
+        },
+    }
+}
+
+pub(crate) fn annotation_payload(d: &reprise_doc::annotation::AnnotationData) -> AnnotationPayload {
+    use reprise_doc::annotation::AnnotationData;
+    match d {
+        AnnotationData::Link(t) => AnnotationPayload::Link {
+            target: link_destination(t),
+        },
+        AnnotationData::Comment(c) => AnnotationPayload::Comment {
+            thread: c.thread.clone(),
+        },
+    }
+}
+
+fn clamp_u32(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// The spans and status of an annotation.
+fn annotation_where(
+    state: &reprise_doc::annotation::AnnotationState,
+) -> Option<(AnnotationStatus, Vec<AnnotationSpan>)> {
+    use reprise_doc::annotation::AnnotationState;
+    Some(match state {
+        AnnotationState::Active { pieces, .. } => (
+            AnnotationStatus::Active,
+            pieces
+                .iter()
+                .map(|p| AnnotationSpan {
+                    node: p.node.to_string(),
+                    start: clamp_u32(p.bytes.start),
+                    end: clamp_u32(p.bytes.end),
+                })
+                .collect(),
+        ),
+        AnnotationState::Orphaned { node, at } => (
+            AnnotationStatus::Orphaned,
+            node.iter()
+                .map(|n| AnnotationSpan {
+                    node: n.to_string(),
+                    start: clamp_u32(*at),
+                    end: clamp_u32(*at),
+                })
+                .collect(),
+        ),
+        // A link whose text is all gone is not reported.
+        AnnotationState::Gone => return None,
+    })
+}
+
+pub(crate) fn annotation_out(a: &reprise_doc::annotation::Annotation) -> Option<Annotation> {
+    let (status, spans) = annotation_where(&a.state)?;
+    Some(Annotation {
+        id: a.id.to_string(),
+        author: a.author.to_string(),
+        status,
+        spans,
+        payload: annotation_payload(&a.data),
+    })
+}
+
+pub(crate) fn annotation_brief(a: &reprise_doc::annotation::Annotation) -> Option<AnnotationBrief> {
+    use reprise_doc::annotation::{AnnotationData, Kind};
+    let (status, spans) = annotation_where(&a.state)?;
+    Some(AnnotationBrief {
+        id: a.id.to_string(),
+        kind: match a.kind() {
+            Kind::Link => AnnotationKind::Link,
+            Kind::Comment => AnnotationKind::Comment,
+        },
+        status,
+        spans,
+        thread: match &a.data {
+            AnnotationData::Comment(c) => Some(c.thread.clone()),
+            AnnotationData::Link(_) => None,
+        },
+    })
+}
+
+pub(crate) fn annotation_kind(k: AnnotationKind) -> reprise_doc::annotation::Kind {
+    match k {
+        AnnotationKind::Link => reprise_doc::annotation::Kind::Link,
+        AnnotationKind::Comment => reprise_doc::annotation::Kind::Comment,
+    }
+}
+
+pub(crate) fn annotation_list(l: reprise_doc::annotation::AnnotationList) -> AnnotationList {
+    AnnotationList {
+        annotations: l.annotations.iter().filter_map(annotation_out).collect(),
+        truncated: l.truncated,
+    }
+}
+
+pub(crate) fn span_rect(r: &reprise_layout::span::SpanRect) -> SpanRect {
+    let point = |p: reprise_geom::Point<reprise_geom::PageSpace>| Point { x: p.x.0, y: p.y.0 };
+    SpanRect {
+        page: clamp_u32(r.page),
+        frame: clamp_u32(r.frame),
+        node: r.line.node.to_string(),
+        line: clamp_u32(r.line.line),
+        frame_rect: rect(r.frame_rect),
+        bounds: rect(r.bounds),
+        corners: r.corners.map(point),
+        repeated: r.repeated,
+    }
+}
+
+pub(crate) fn annotation_geometry(
+    id: &reprise_doc::annotation::AnnotationId,
+    g: &reprise_layout::span::SpanGeometry,
+) -> AnnotationGeometry {
+    AnnotationGeometry {
+        id: id.to_string(),
+        rects: g.rects.iter().map(span_rect).collect(),
+        top: g.top.map(|t| SpanTop {
+            page: clamp_u32(t.page),
+            y: t.y.0,
+        }),
+        truncated: g.truncated,
+        unplaced: clamp_u32(g.unplaced),
+    }
+}
+
+pub(crate) fn page_link(l: &reprise_layout::span::PageLink) -> PageLink {
+    PageLink {
+        id: l.id.to_string(),
+        target: link_destination(&l.target),
+        rects: l.rects.iter().map(span_rect).collect(),
+    }
 }
 fn text_style(s: &TextStyle) -> Result<reprise_doc::formatting::TextStyle> {
     let features = s
@@ -525,6 +709,7 @@ pub(crate) fn applied(a: reprise_edit::Applied, notes: Vec<reprise_diag::Note>) 
     Applied {
         blocks: a.blocks.iter().map(ToString::to_string).collect(),
         relations: a.relations.iter().map(ToString::to_string).collect(),
+        annotations: a.annotations.iter().map(ToString::to_string).collect(),
         effects: a
             .effects
             .into_iter()
@@ -685,6 +870,9 @@ fn relation_id(s: &str) -> Result<reprise_doc::RelationId> {
         return Err(Error::InvalidId(s.into()));
     }
     Ok(id)
+}
+pub(crate) fn range_id_of(s: &str) -> Result<reprise_doc::RangeId> {
+    range_id(s)
 }
 fn range_id(s: &str) -> Result<reprise_doc::RangeId> {
     if s.len() > 40 {

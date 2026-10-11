@@ -3,6 +3,7 @@ pub mod codes;
 mod export;
 mod html;
 mod image_export;
+mod links;
 mod native;
 mod pdf_tags;
 mod text_css;

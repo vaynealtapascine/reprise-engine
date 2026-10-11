@@ -34,6 +34,7 @@ mod relations;
 mod shaping;
 mod snapshot;
 pub mod solver;
+pub mod span;
 mod table;
 mod table_flow;
 #[cfg(test)]

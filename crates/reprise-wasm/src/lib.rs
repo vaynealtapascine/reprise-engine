@@ -31,6 +31,20 @@ extern "C" {
     pub type PageSetupPatchPayload;
     #[wasm_bindgen(typescript_type = "Payload<MarksPage>")]
     pub type MarksPagePayload;
+    #[wasm_bindgen(typescript_type = "Payload<Annotation | null>")]
+    pub type OptionalAnnotationPayload;
+    #[wasm_bindgen(typescript_type = "Payload<AnnotationList>")]
+    pub type AnnotationListPayload;
+    #[wasm_bindgen(typescript_type = "Payload<AnnotationsAt>")]
+    pub type AnnotationsAtPayload;
+    #[wasm_bindgen(typescript_type = "Payload<AnnotationsIn>")]
+    pub type AnnotationsInPayload;
+    #[wasm_bindgen(typescript_type = "Payload<AnnotationKind>")]
+    pub type AnnotationKindPayload;
+    #[wasm_bindgen(typescript_type = "Payload<AnnotationGeometry | null>")]
+    pub type OptionalAnnotationGeometryPayload;
+    #[wasm_bindgen(typescript_type = "Payload<PageLinks>")]
+    pub type PageLinksPayload;
     #[wasm_bindgen(typescript_type = "Payload<SyncRequest>")]
     pub type SyncRequestPayload;
     #[wasm_bindgen(typescript_type = "Payload<SyncPacket>")]
@@ -649,6 +663,36 @@ impl WasmDocument {
     }
     pub fn marks(&self, page: u32) -> Result<MarksPagePayload, JsValue> {
         Ok(encode(self.inner.marks(page))?.unchecked_into())
+    }
+    pub fn annotation(&self, request: &StringPayload) -> Result<OptionalAnnotationPayload, JsValue> {
+        Ok(encode(self.inner.annotation(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn annotations_at(
+        &self,
+        request: &AnnotationsAtPayload,
+    ) -> Result<AnnotationListPayload, JsValue> {
+        Ok(encode(self.inner.annotations_at(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn annotations_in(
+        &self,
+        request: &AnnotationsInPayload,
+    ) -> Result<AnnotationListPayload, JsValue> {
+        Ok(encode(self.inner.annotations_in(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn annotations_of_kind(
+        &self,
+        request: &AnnotationKindPayload,
+    ) -> Result<AnnotationListPayload, JsValue> {
+        Ok(encode(self.inner.annotations_of_kind(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn annotation_geometry(
+        &self,
+        request: &StringPayload,
+    ) -> Result<OptionalAnnotationGeometryPayload, JsValue> {
+        Ok(encode(self.inner.annotation_geometry(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn page_links(&self, page: u32) -> Result<PageLinksPayload, JsValue> {
+        Ok(encode(self.inner.page_links(page))?.unchecked_into())
     }
     pub fn display_page(&self, page: u32) -> Result<DisplayPagePayload, JsValue> {
         Ok(encode(self.inner.display_page(page))?.unchecked_into())

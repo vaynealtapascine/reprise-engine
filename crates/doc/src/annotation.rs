@@ -433,7 +433,48 @@ pub(crate) struct AnnotationIndex {
     pub(crate) notes: Vec<Note>,
 }
 
+/// Every annotation of one revision, for readers that make many lookups
+/// (layout asking for the links of each block on a page). Cheap to clone and
+/// to get: the index is built once per revision and shared.
+#[derive(Clone)]
+pub struct AnnotationView(Arc<AnnotationIndex>);
+
+/// An annotation's part in one paragraph. For an orphan the span is empty.
+pub type NodePieces = [(Range<usize>, AnnotationId)];
+
+impl AnnotationView {
+    /// A readable live annotation.
+    pub fn get(&self, id: AnnotationId) -> Option<&Annotation> {
+        self.0.entries.get(&id)
+    }
+
+    /// The annotation parts in `node`, sorted by `(start, end, ID)`, and
+    /// orphan points. Empty for a block with none.
+    pub fn pieces(&self, node: NodeId) -> &NodePieces {
+        self.0.by_node.get(&node).map_or(&[], Vec::as_slice)
+    }
+
+    /// Readable live annotations in ID order.
+    pub fn iter(&self) -> impl Iterator<Item = &Annotation> {
+        self.0.entries.values()
+    }
+
+    /// How many readable live annotations there are.
+    pub fn len(&self) -> usize {
+        self.0.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.entries.is_empty()
+    }
+}
+
 impl Document {
+    /// This revision's annotations (see [`AnnotationView`]).
+    pub fn annotation_view(&self) -> AnnotationView {
+        AnnotationView(self.annotation_index())
+    }
+
     pub(crate) fn annotation_index(&self) -> Arc<AnnotationIndex> {
         if self.doc.get_pending_txn_len() > 0 {
             return Arc::new(self.build_annotation_index());
@@ -820,6 +861,35 @@ impl Document {
         data: &AnnotationData,
     ) -> Result<AnnotationId, AnnotationError> {
         self.check_annotation(node, bytes.clone(), data, 0)?;
+        self.write_annotation(node, bytes, data)
+    }
+
+    /// [`Document::add_annotation`] for a caller that has already checked
+    /// capacity with [`Document::check_annotation_data`] (the editing kernel
+    /// plans a whole transaction first). It still checks the span and the
+    /// target, which are cheap, but not the annotation count: counting means
+    /// reading the index, which a transaction in progress forces to be rebuilt
+    /// for every addition.
+    pub fn add_annotation_prechecked(
+        &self,
+        node: NodeId,
+        bytes: Range<usize>,
+        data: &AnnotationData,
+    ) -> Result<AnnotationId, AnnotationError> {
+        if bytes.is_empty() {
+            return Err(AnnotationError::Empty);
+        }
+        self.block(node)?.text.slice(bytes.clone())?;
+        self.check_target(data)?;
+        self.write_annotation(node, bytes, data)
+    }
+
+    fn write_annotation(
+        &self,
+        node: NodeId,
+        bytes: Range<usize>,
+        data: &AnnotationData,
+    ) -> Result<AnnotationId, AnnotationError> {
         let raw = data.envelope()?;
         let id = self.stage_fragment_range(node, bytes, data.kind().spec().policy)?;
         self.doc

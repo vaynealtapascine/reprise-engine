@@ -5,6 +5,7 @@ use std::ops::Range;
 use loro::{Container, LoroValue, ValueOrContainer};
 use serde::{Deserialize, Serialize};
 
+use crate::annotation::OnEmpty;
 use crate::relation::{CopyAction, CopySet, plan_copy};
 use crate::text::{Affinity, Empty, RangePolicy};
 use crate::{
@@ -49,6 +50,17 @@ pub struct FragmentRange {
     /// refuse a fragment that has one rather than paste a bare range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotation: Option<crate::annotation::AnnotationData>,
+}
+
+/// What a copy is for. It decides which annotations come along.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyScope {
+    /// Text the user copies to paste somewhere: annotation kinds whose
+    /// [`CopyPolicy`] is `Drop` (a comment thread has one anchor) stay behind.
+    Clipboard,
+    /// The whole document rebuilt as another (a duplicate): every readable
+    /// annotation comes along, orphaned ones included, with new identities.
+    Document,
 }
 
 /// An annotation was left out of a copy or paste: a kind that is not
@@ -175,7 +187,7 @@ impl Fragment {
                 if annotations > crate::annotation::MAX_ANNOTATIONS {
                     return Err(FragmentError::Limit("annotations"));
                 }
-                if range.bytes.is_empty() {
+                if range.bytes.is_empty() && data.kind().spec().on_empty != OnEmpty::Orphan {
                     return Err(FragmentError::Invalid("empty annotation range".into()));
                 }
                 data.validate()
@@ -243,6 +255,17 @@ impl Document {
         source: &str,
         selection: &[CopyBlock],
         schemas: &SchemaRegistry,
+    ) -> Result<Fragment, FragmentError> {
+        self.copy_fragment_scoped(source, selection, schemas, CopyScope::Clipboard)
+    }
+
+    /// [`Document::copy_fragment`] for a stated purpose (see [`CopyScope`]).
+    pub fn copy_fragment_scoped(
+        &self,
+        source: &str,
+        selection: &[CopyBlock],
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
     ) -> Result<Fragment, FragmentError> {
         let bad = |e: DocError| FragmentError::Invalid(e.to_string());
         let mut fragment = Fragment {
@@ -391,10 +414,13 @@ impl Document {
                 None if meta.get(crate::annotation::KEY).is_none() => None,
                 raw => match raw.map(|r| crate::annotation::AnnotationData::read(&r)) {
                     Some(Ok(data))
-                        if data.kind().spec().copy
-                            == crate::annotation::CopyPolicy::Duplicate =>
+                        if scope == CopyScope::Document
+                            || data.kind().spec().copy
+                                == crate::annotation::CopyPolicy::Duplicate =>
                     {
-                        if start == end {
+                        // An empty span is an orphan: only kinds that keep
+                        // their point can be copied that way.
+                        if start == end && data.kind().spec().on_empty != OnEmpty::Orphan {
                             continue;
                         }
                         Some(data)
@@ -497,12 +523,31 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
     ) -> Result<Fragment, FragmentError> {
+        self.copy_all_scoped(source, schemas, CopyScope::Clipboard)
+    }
+
+    /// The whole document as a fragment to rebuild it elsewhere (a duplicate):
+    /// [`CopyScope::Document`], so every readable annotation comes along.
+    pub fn copy_document_fragment(
+        &self,
+        source: &str,
+        schemas: &SchemaRegistry,
+    ) -> Result<Fragment, FragmentError> {
+        self.copy_all_scoped(source, schemas, CopyScope::Document)
+    }
+
+    fn copy_all_scoped(
+        &self,
+        source: &str,
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
+    ) -> Result<Fragment, FragmentError> {
         let selection: Vec<_> = self
             .blocks()
             .into_iter()
             .map(|node| CopyBlock { node, bytes: None })
             .collect();
-        let mut fragment = self.copy_fragment(source, &selection, schemas)?;
+        let mut fragment = self.copy_fragment_scoped(source, &selection, schemas, scope)?;
         let map = self.doc.get_map("page_templates");
         for key in map.keys() {
             if let Some(ValueOrContainer::Value(LoroValue::String(raw))) = map.get(&key) {

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::ops::Range;
 
 use reprise_diag::Code;
 use reprise_doc::{Document, NodeId, SchemaRegistry, TableRole};
@@ -21,9 +22,11 @@ pub enum Feature {
     Fonts,
     Assets,
     EditingStructure,
+    /// Links and comment anchors (`docs/annotations.md`).
+    Annotations,
 }
 impl Feature {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Relations,
         Self::ReadingOrder,
         Self::Transforms,
@@ -34,6 +37,7 @@ impl Feature {
         Self::Fonts,
         Self::Assets,
         Self::EditingStructure,
+        Self::Annotations,
     ];
     pub fn code(self) -> Code {
         Code::new(match self {
@@ -47,6 +51,7 @@ impl Feature {
             Self::Fonts => "export.fonts",
             Self::Assets => "export.assets",
             Self::EditingStructure => "export.editing-structure",
+            Self::Annotations => "export.annotations",
         })
     }
 }
@@ -118,7 +123,7 @@ pub(crate) fn inferred_base(text: &str) -> u8 {
         .number()
 }
 
-fn report(dispositions: [Disposition; 10], details: [&str; 10]) -> LossReport {
+fn report(dispositions: [Disposition; 11], details: [&str; 11]) -> LossReport {
     LossReport {
         features: Feature::ALL
             .into_iter()
@@ -253,6 +258,7 @@ impl Exporter for PlainText {
             unplaced |= layout.is_some();
         }
         use Disposition::*;
+        let presence = crate::links::LinkIndex::new(doc).presence();
         let mut losses = report(
             [
                 Dropped,
@@ -265,6 +271,11 @@ impl Exporter for PlainText {
                 Dropped,
                 Dropped,
                 Dropped,
+                if presence.links || presence.comments {
+                    Dropped
+                } else {
+                    Preserved
+                },
             ],
             [
                 "relations are flattened to their text",
@@ -277,6 +288,7 @@ impl Exporter for PlainText {
                 "font bytes and identities are omitted",
                 "non-text assets are omitted",
                 "IDs, ranges, undo and collaboration history are omitted",
+                "link text is kept and its address is omitted; comment anchors are omitted",
             ],
         );
         if let Some(layout) = layout {
@@ -330,6 +342,7 @@ fn paragraph(
     doc: &Document,
     node: NodeId,
     layout: Option<&LayoutSnapshot>,
+    links: &crate::links::LinkIndex<'_>,
     out: &mut String,
 ) -> Result<(), ClipboardError> {
     let block = doc
@@ -352,7 +365,12 @@ fn paragraph(
     append(
         out,
         &format!(
-            "<p dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            "<p{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            if links.is_target(node) {
+                format!(" id=\"{}\"", crate::links::target_id(node))
+            } else {
+                String::new()
+            },
             if base % 2 == 1 { "rtl" } else { "ltr" },
             escape(&family),
             points(style.size),
@@ -379,7 +397,63 @@ fn paragraph(
     let formats = doc
         .text_formats(node)
         .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+    let stretches = links.stretches(node, &text);
+    // The link open around the segments being written: its stretch index.
+    let mut open: Option<usize> = None;
     for run in formats.runs {
+        // The run, cut where links start and stop. Each piece is written as
+        // its own span, inside the anchor that covers it.
+        let mut pieces: Vec<(Range<usize>, Option<usize>)> = Vec::new();
+        let mut at = run.bytes.start;
+        for (i, stretch) in stretches.iter().enumerate() {
+            if stretch.bytes.end <= at || stretch.bytes.start >= run.bytes.end {
+                continue;
+            }
+            let (from, to) = (
+                stretch.bytes.start.max(at),
+                stretch.bytes.end.min(run.bytes.end),
+            );
+            if at < from {
+                pieces.push((at..from, None));
+            }
+            pieces.push((from..to, Some(i)));
+            at = to;
+        }
+        if at < run.bytes.end || pieces.is_empty() {
+            pieces.push((at..run.bytes.end, None));
+        }
+        let run_style = run.style.clone();
+        for (bytes, link) in pieces {
+            if link != open {
+                if open.is_some() {
+                    append(out, "</a>")?;
+                }
+                if let Some(i) = link {
+                    append(out, &format!("<a href=\"{}\">", escape(&stretches[i].href)))?;
+                }
+                open = link;
+            }
+            let run = reprise_doc::formatting::FormatRun {
+                bytes,
+                style: run_style.clone(),
+            };
+            html_run(&run, &text, &style, out)?;
+        }
+    }
+    if open.is_some() {
+        append(out, "</a>")?;
+    }
+    append(out, "</p>")
+}
+
+/// One formatted stretch of a paragraph, as a span when it has formatting.
+fn html_run(
+    run: &reprise_doc::formatting::FormatRun,
+    text: &str,
+    style: &reprise_doc::ComputedStyle,
+    out: &mut String,
+) -> Result<(), ClipboardError> {
+    {
         let mut css = String::new();
         if let Some(families) = &run.style.families {
             let families: Vec<_> = families.iter().map(|f| css_string(f)).collect();
@@ -428,13 +502,14 @@ fn paragraph(
         }
         append(
             out,
-            &escape(&text[run.bytes]).replace(['\n', '\u{2028}'], "<br>"),
+            &escape(text.get(run.bytes.clone()).unwrap_or_default())
+                .replace(['\n', '\u{2028}'], "<br>"),
         )?;
         if span {
             append(out, "</span>")?;
         }
     }
-    append(out, "</p>")
+    Ok(())
 }
 
 /// A CSS quoted string, subsequently escaped for its HTML attribute context.
@@ -457,6 +532,7 @@ fn html_node(
     doc: &Document,
     node: NodeId,
     layout: Option<&LayoutSnapshot>,
+    links: &crate::links::LinkIndex<'_>,
     out: &mut String,
     depth: usize,
     grid: Option<&reprise_doc::TableGrid>,
@@ -509,10 +585,10 @@ fn html_node(
     if let Some(open) = &open {
         append(out, open)?;
     } else {
-        paragraph(doc, node, layout, out)?;
+        paragraph(doc, node, layout, links, out)?;
     }
     for child in doc.children(Some(node)) {
-        html_node(doc, child, layout, out, depth + 1, grid)?;
+        html_node(doc, child, layout, links, out, depth + 1, grid)?;
     }
     if let Some(close) = close {
         append(out, close)?;
@@ -550,10 +626,12 @@ impl Exporter for Html {
             }
         }
         let mut out = String::from("<!doctype html><html><body>");
+        let links = crate::links::LinkIndex::new(doc);
         for node in roots {
-            html_node(doc, node, layout, &mut out, 0, None)?;
+            html_node(doc, node, layout, &links, &mut out, 0, None)?;
         }
         append(&mut out, "</body></html>")?;
+        let presence = links.presence();
         use Disposition::*;
         let mut losses = report(
             [
@@ -567,6 +645,11 @@ impl Exporter for Html {
                 Approximated,
                 Dropped,
                 Dropped,
+                if presence.comments || links.approximated.get() {
+                    Approximated
+                } else {
+                    Preserved
+                },
             ],
             [
                 "authored relations are omitted",
@@ -579,6 +662,7 @@ impl Exporter for Html {
                 "CSS family names retained; pinned identities and font bytes omitted",
                 "assets have no HTML representation",
                 "IDs, ranges, undo and collaboration history omitted",
+                "links are anchors (<a href>) around their text, with internal links as #id of the target paragraph; a link across paragraphs becomes one anchor per paragraph and where links overlap the first keeps the shared text; comment anchors are omitted",
             ],
         );
         if let Some(layout) = layout {
@@ -613,6 +697,7 @@ impl Exporter for Native {
             options.fonts,
         )?;
         use Disposition::*;
+        let presence = crate::links::LinkIndex::new(doc).presence();
         let mut losses = report(
             [
                 Approximated,
@@ -633,6 +718,11 @@ impl Exporter for Native {
                 },
                 Approximated,
                 Approximated,
+                if presence.comments || fragment.fragment.notes.iter().any(|n| n.code == reprise_doc::fragment::ANNOTATION_DROPPED) {
+                    Approximated
+                } else {
+                    Preserved
+                },
             ],
             [
                 "schema copy policies apply; external targets require the source document; historical targets carry no history",
@@ -645,6 +735,7 @@ impl Exporter for Native {
                 "available used font bytes and pinned identities bundled; missing resources reported",
                 "host may attach assets by content hash; no authored image usage graph yet",
                 "live authored structure retained; new IDs allocated on paste; tombstones and undo/history omitted",
+                "links travel with their text and get new IDs on paste; a link to a block outside the copy is kept only within one document; comment anchors stay with the document (a thread has one anchor)",
             ],
         );
         losses.notes = fragment.notes.clone();
@@ -689,6 +780,7 @@ pub fn export_pdf(
     validate_layout(doc, Some(layout))?;
     let (bytes, notes, ua) = crate::pdf_tags::render(doc, layout, fonts, assets, meta)?;
     use Disposition::*;
+    let presence = crate::links::LinkIndex::new(doc).presence();
     let mut losses = report(
         [
             Dropped,
@@ -701,6 +793,11 @@ pub fn export_pdf(
             Preserved,
             Approximated,
             Dropped,
+            if presence.comments {
+                Approximated
+            } else {
+                Preserved
+            },
         ],
         [
             "relation graph omitted; visible results retained",
@@ -717,6 +814,7 @@ pub fn export_pdf(
             "rendered used fonts embedded by the PDF backend",
             "displayed content only; image alt text becomes Figure /Alt, and an image without it is an artifact; resource ownership omitted",
             "IDs, ranges, editable tree, undo and collaboration history omitted",
+            "links become Link elements holding their text and a link annotation with /Contents (a URI action or a destination for internal links); comment anchors are omitted",
         ],
     );
     losses.notes.extend(notes);

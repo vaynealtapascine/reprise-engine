@@ -171,8 +171,9 @@ impl Workspace {
             .extend(opened.assets.restore_images(&mut engine.assets));
         let mut notes = opened.notes.clone();
         let old = opened.into_document()?;
+        // A duplicate keeps every annotation, comment anchors included.
         let fragment = old
-            .copy_all_fragment(&source_id, &engine.schemas)
+            .copy_document_fragment(&source_id, &engine.schemas)
             .map_err(|e| Error::Invalid(e.to_string()))?;
         // Every named style first, so unreferenced ones survive and the
         // fragment's own styles are identical, not clashing. Each live style
@@ -600,6 +601,25 @@ impl DocumentSession {
                 end: None,
             });
         }
+        let view = self.doc().annotation_view();
+        let mut annotations: Vec<AnnotationBrief> = view
+            .iter()
+            .filter_map(cv::annotation_brief)
+            .take(MAX_STATE_ANNOTATIONS.saturating_add(1))
+            .collect();
+        if annotations.len() > MAX_STATE_ANNOTATIONS {
+            annotations.truncate(MAX_STATE_ANNOTATIONS);
+            diagnostics.push(Diagnostic {
+                code: "bindings.limit".into(),
+                severity: Severity::Warning,
+                message: format!(
+                    "more than {MAX_STATE_ANNOTATIONS} annotations; State lists the first, ask the annotation queries for the rest"
+                ),
+                subject: None,
+                start: None,
+                end: None,
+            });
+        }
         let styles = names
             .into_iter()
             .filter_map(|name| {
@@ -613,6 +633,7 @@ impl DocumentSession {
             })
             .collect();
         Ok(Payload::new(State {
+            annotations,
             styles,
             resolved: table,
             document_id: self.document_id.clone(),
@@ -1330,7 +1351,80 @@ impl DocumentSession {
                 s.to_display_list(page as usize, reprise_layout::DisplayOptions::default())
                     .content_only(),
             )?,
+            links: s
+                .page_links(self.doc(), page as usize)
+                .links
+                .iter()
+                .map(cv::page_link)
+                .collect(),
         }))
+    }
+    /// The links drawn on a page, for hit-testing and hover cards (the same
+    /// list `display_page` carries). Requires a complete layout at this revision.
+    pub fn page_links(&self, page: u32) -> Result<Payload<PageLinks>> {
+        let s = self.current()?;
+        if page as usize >= s.pages.len() {
+            return Err(Error::Invalid("page out of bounds".into()));
+        }
+        let links = s.page_links(self.doc(), page as usize);
+        Ok(Payload::new(PageLinks {
+            token: self.token(),
+            page,
+            truncated: links.truncated,
+            links: links.links.iter().map(cv::page_link).collect(),
+        }))
+    }
+    /// One annotation with its payload, or `null` when there is none (or its
+    /// payload cannot be read, or a link lost all its text).
+    pub fn annotation(&self, request: &Payload<String>) -> Result<Payload<Option<Annotation>>> {
+        let id = cv::range_id_of(validate(request)?)?;
+        Ok(Payload::new(
+            self.doc()
+                .annotation(id)
+                .and_then(|a| cv::annotation_out(&a)),
+        ))
+    }
+    /// The annotations over a byte of a block (`start <= at < end`), and the
+    /// orphans at it, in start order. At most 4,096.
+    pub fn annotations_at(&self, request: &Payload<AnnotationsAt>) -> Result<Payload<AnnotationList>> {
+        let r = validate(request)?;
+        let node = cv::id(&r.node)?;
+        Ok(Payload::new(cv::annotation_list(
+            self.doc().annotations_at(node, r.at as usize),
+        )))
+    }
+    /// The annotations overlapping a byte range of a block, in start order.
+    pub fn annotations_in(&self, request: &Payload<AnnotationsIn>) -> Result<Payload<AnnotationList>> {
+        let r = validate(request)?;
+        let node = cv::id(&r.node)?;
+        Ok(Payload::new(cv::annotation_list(
+            self.doc()
+                .annotations_in(node, r.start as usize..r.end as usize),
+        )))
+    }
+    /// All annotations of a kind that are not gone, in ID order. At most 4,096.
+    pub fn annotations_of_kind(
+        &self,
+        request: &Payload<AnnotationKind>,
+    ) -> Result<Payload<AnnotationList>> {
+        let kind = cv::annotation_kind(*validate(request)?);
+        Ok(Payload::new(cv::annotation_list(
+            self.doc().annotations_of_kind(kind),
+        )))
+    }
+    /// Where an annotation is on the pages: rectangles per line fragment and
+    /// a top y for a sidebar. `null` when there is no such annotation.
+    /// Requires a complete layout at this revision.
+    pub fn annotation_geometry(
+        &self,
+        request: &Payload<String>,
+    ) -> Result<Payload<Option<AnnotationGeometry>>> {
+        let id = cv::range_id_of(validate(request)?)?;
+        let s = self.current()?;
+        Ok(Payload::new(
+            s.annotation_geometry(self.doc(), id)
+                .map(|g| cv::annotation_geometry(&id, &g)),
+        ))
     }
     /// Canonical compact JSON, shared byte for byte with WASM.
     pub fn display_json(&self, page: u32) -> Result<Payload<String>> {
@@ -1498,6 +1592,14 @@ impl DocumentSession {
         if let Some(s) = &self.snapshot {
             notes.extend(s.diagnostics.iter().map(cv::layout_diagnostic));
         }
+        // Annotations this engine could not read or apply (a hostile or
+        // newer peer's), and the limit.
+        notes.extend(
+            self.doc()
+                .annotation_notes()
+                .into_iter()
+                .map(crate::error::diagnostic),
+        );
         Payload::new(notes)
     }
     /// A bounded, filtered view of [`DocumentSession::diagnostics`], so a host
@@ -1890,6 +1992,12 @@ impl LayoutJob {
                     .to_display_list(page as usize, reprise_layout::DisplayOptions::default())
                     .content_only(),
             )?,
+            links: snapshot
+                .page_links(session.doc(), page as usize)
+                .links
+                .iter()
+                .map(cv::page_link)
+                .collect(),
         }))
     }
 }

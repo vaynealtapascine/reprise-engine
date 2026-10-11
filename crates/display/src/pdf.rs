@@ -17,6 +17,7 @@ use std::ops::Range;
 
 use krilla::Document;
 use krilla::SerializeSettings;
+use krilla::action::LinkAction;
 use krilla::annotation::{Annotation, LinkAnnotation, Target};
 use krilla::color::rgb;
 use krilla::configure::{Accessibility, ConfigurationBuilder};
@@ -43,9 +44,9 @@ use crate::{Color, DisplayList, GlyphRun, Item, Path, RenderError, Segment};
 pub mod tags;
 
 use tags::{
-    CellRole, Child, Content, DEFAULT_LANG, DEFAULT_TITLE, FIGURE_ALT_MISSING, HEADING_LEVEL, Link,
-    MAX_DEPTH, Node, REFERENCE_UNLINKED, RUN_SPLIT, Role, STRUCTURE_DEPTH, Scope, Structure,
-    UA_NOT_MET,
+    CellRole, Child, Content, DEFAULT_LANG, DEFAULT_TITLE, DocLink, FIGURE_ALT_MISSING,
+    HEADING_LEVEL, LINK_UNRESOLVED, Link, LinkTo, MAX_DEPTH, Node, REFERENCE_UNLINKED, RUN_SPLIT,
+    Role, STRUCTURE_DEPTH, Scope, Structure, UA_NOT_MET,
 };
 
 fn pt(l: Length) -> f32 {
@@ -677,6 +678,16 @@ impl Tree<'_> {
                     .map(|id| TagId::from(id.bytes()));
                 TagGroup::new(Tag::Note.with_id(id))
             }
+            Role::Link { .. } => match self.links.get(&index) {
+                Some(link) => {
+                    // Link > (content, annotation).
+                    children.push(TagNode::Leaf(*link));
+                    TagGroup::new(Tag::Link)
+                }
+                // A link with no annotation (reported) is only text: a Link
+                // element without its annotation would not be valid.
+                None => TagGroup::new(Tag::Span),
+            },
             Role::Reference { .. } => {
                 if let Some(link) = self.links.get(&index) {
                     // Reference > Link > (content, annotation).
@@ -734,8 +745,16 @@ fn preorder(structure: &Structure) -> Vec<&Node> {
     out
 }
 
-/// A link annotation to add: (node index, area, target page, target point, alt).
-type PlannedLink = (usize, krilla::geom::Rect, usize, Point, String);
+/// Where a planned link annotation goes.
+#[derive(Clone)]
+enum PlannedTarget {
+    /// A page and a point on it.
+    Destination(usize, Point),
+    Uri(String),
+}
+
+/// A link annotation to add: (node index, area, target, alt).
+type PlannedLink = (usize, krilla::geom::Rect, PlannedTarget, String);
 
 fn build(
     pages: &[DisplayList],
@@ -777,11 +796,32 @@ fn build(
     let mut notes = Vec::new();
     let mut link_plan: Vec<Vec<PlannedLink>> = vec![Vec::new(); pages.len()];
     for (index, node) in nodes.iter().enumerate() {
-        let Role::Reference { link } = &node.role else {
-            continue;
-        };
-        let Some(Link { rect, target, alt }) = link else {
-            continue;
+        // A note reference names its note by key; a document link names a
+        // node by key or an address.
+        let (rect, to, alt, unresolved) = match &node.role {
+            Role::Reference {
+                link: Some(Link { rect, target, alt }),
+            } => (
+                rect,
+                LinkTo::Node(*target),
+                alt,
+                Note::info(
+                    REFERENCE_UNLINKED,
+                    "a note reference could not be linked to its note",
+                ),
+            ),
+            Role::Link {
+                link: Some(DocLink { rect, to, alt }),
+            } => (
+                rect,
+                to.clone(),
+                alt,
+                Note::warning(
+                    LINK_UNRESOLVED,
+                    "a link has no clickable area or no target in the document",
+                ),
+            ),
+            _ => continue,
         };
         let first = plan.first_leaf.get(index).copied().flatten();
         let page = first.and_then(|l| plan.leaves.get(l)).map(|l| l.page);
@@ -791,16 +831,19 @@ fn build(
             pt(rect.width),
             pt(rect.height),
         );
-        match (page, area, targets.get(target)) {
-            (Some(page), Some(area), Some((to_page, to_point))) => {
+        let target = match &to {
+            LinkTo::Node(key) => targets
+                .get(key)
+                .map(|(to_page, to_point)| PlannedTarget::Destination(*to_page, *to_point)),
+            LinkTo::Uri(uri) => Some(PlannedTarget::Uri(uri.clone())),
+        };
+        match (page, area, target) {
+            (Some(page), Some(area), Some(target)) => {
                 if let Some(list) = link_plan.get_mut(page) {
-                    list.push((index, area, *to_page, *to_point, alt.clone()));
+                    list.push((index, area, target, alt.clone()));
                 }
             }
-            _ => notes.push(Note::info(
-                REFERENCE_UNLINKED,
-                "a note reference could not be linked to its note",
-            )),
+            _ => notes.push(unresolved),
         }
     }
 
@@ -845,11 +888,16 @@ fn build(
             }
         }
         surface.finish();
-        for (index, area, to_page, to_point, alt) in link_plan.get(p).into_iter().flatten() {
-            let link = LinkAnnotation::new(
-                *area,
-                Target::Destination(XyzDestination::new(*to_page, *to_point).into()),
-            );
+        for (index, area, target, alt) in link_plan.get(p).into_iter().flatten() {
+            let target = match target {
+                PlannedTarget::Destination(to_page, to_point) => {
+                    Target::Destination(XyzDestination::new(*to_page, *to_point).into())
+                }
+                PlannedTarget::Uri(uri) => {
+                    Target::Action(LinkAction::new(uri.clone()).into())
+                }
+            };
+            let link = LinkAnnotation::new(*area, target);
             let id = page.add_tagged_annotation(Annotation::new_link(link, Some(alt.clone())));
             link_ids.insert(*index, id);
         }

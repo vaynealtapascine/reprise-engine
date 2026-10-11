@@ -239,7 +239,7 @@ impl Editor {
                 ),
                 Step::AddAnnotation { node, range, data } => made_annotations.push(
                     self.doc
-                        .add_annotation(*node, range.clone(), data)
+                        .add_annotation_prechecked(*node, range.clone(), data)
                         .map_err(|e| EditError {
                             command: None,
                             reason: Reason::from(e),

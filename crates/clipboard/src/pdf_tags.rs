@@ -16,16 +16,17 @@
 //! rotated, mirrored, vertical and spiral text, notes and floats each appear
 //! once, where the reading order puts them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::rc::Rc;
 
 use reprise_diag::Note;
 use reprise_display::pdf::tags::{
-    self, CellRole, Child, Content, Link, Node, Role, Scope, Structure,
+    self, CellRole, Child, Content, DocLink, Link, LinkTo, Node, Role, Scope, Structure,
 };
+use reprise_doc::annotation::{AnnotationData, AnnotationState, AnnotationView, Kind, LinkTarget};
 use reprise_doc::relation::builtin::{FLOAT, NOTE};
-use reprise_doc::{Document, GridCell, NodeId, TableGrid, TableRole};
+use reprise_doc::{Document, GridCell, NodeId, RangeState, TableGrid, TableRole};
 use reprise_geom::{FrameSpace, Length, PageSpace, Point, Rect};
 use reprise_layout::{
     LayoutSnapshot, LineRef, PdfReadingBlock, PdfReadingRun, RelationStatus, Resolution,
@@ -95,11 +96,42 @@ struct Anchor {
     note: u32,
 }
 
+/// Where a document link goes, before keys are given to its target blocks.
+#[derive(Clone)]
+enum LinkSpec {
+    Uri(String),
+    Block(NodeId),
+}
+
+/// The part of a link in one block, from the annotation index.
+#[derive(Clone)]
+struct LinkCut {
+    bytes: Range<usize>,
+    to: LinkSpec,
+}
+
+/// What a stretch of a run is for.
+#[derive(Clone, Copy)]
+enum Cut {
+    /// The anchor of note `anchors[i]`.
+    Note(usize),
+    /// Linked text: `links[i]`.
+    Link(usize),
+}
+
+/// Keys for blocks that links go to start here, above any note number.
+const LINK_KEY_BASE: u32 = 1 << 24;
+
 struct Builder<'a> {
     doc: &'a Document,
     layout: &'a LayoutSnapshot,
     notes: Vec<Note>,
     grids: BTreeMap<NodeId, Option<Rc<TableGrid>>>,
+    view: AnnotationView,
+    /// Link parts by block.
+    links: BTreeMap<NodeId, Vec<LinkCut>>,
+    /// The key of each block a link goes to.
+    keys: BTreeMap<NodeId, u32>,
 }
 
 /// The structure for `layout`, in reading order, with what was lost doing so.
@@ -114,6 +146,9 @@ pub(crate) fn structure(
         layout,
         notes: Vec::new(),
         grids: BTreeMap::new(),
+        view: doc.annotation_view(),
+        links: BTreeMap::new(),
+        keys: BTreeMap::new(),
     };
     let (children, derived_title) = builder.tree(&blocks);
     let structure = Structure {
@@ -170,6 +205,7 @@ impl Builder<'_> {
                 numbers.insert(block.node, next);
             }
         }
+        self.collect_links(blocks, &numbers);
         let mut anchors: BTreeMap<NodeId, Vec<Anchor>> = BTreeMap::new();
         for (note, (node, bytes)) in &note_anchor {
             if let Some(&number) = numbers.get(note) {
@@ -200,6 +236,12 @@ impl Builder<'_> {
                     .map(Vec::as_slice)
                     .unwrap_or_default(),
             );
+            // The block a link goes to is where the destination lands.
+            if let (Some(key), Some(element)) = (self.keys.get(&block.node), element.as_mut())
+                && element.key.is_none()
+            {
+                element.key = Some(*key);
+            }
             if let Some(Role::Heading { title: t, .. }) = element.as_ref().map(|e| e.role.clone()) {
                 title.get_or_insert(t);
             }
@@ -371,22 +413,91 @@ impl Builder<'_> {
         )
     }
 
-    /// The leaves of a block, with each anchored range as a `Reference` over
-    /// the glyphs that draw it.
+    /// The links of the blocks in `blocks`: each active link annotation's part
+    /// in each block, and a key for every block a link goes to.
+    fn collect_links(&mut self, blocks: &[PdfReadingBlock], numbers: &BTreeMap<NodeId, u32>) {
+        let placed: BTreeSet<NodeId> = blocks
+            .iter()
+            .filter(|b| !b.runs.is_empty())
+            .map(|b| b.node)
+            .collect();
+        let mut next = LINK_KEY_BASE;
+        let mut unresolved = 0usize;
+        for block in blocks {
+            // Copy the pieces out: the view is borrowed while keys are given.
+            let pieces: Vec<_> = self.view.pieces(block.node).to_vec();
+            for (bytes, id) in pieces {
+                let Some(annotation) = self.view.get(id) else {
+                    continue;
+                };
+                let (Kind::Link, AnnotationState::Active { .. }, AnnotationData::Link(target)) =
+                    (annotation.kind(), &annotation.state, &annotation.data)
+                else {
+                    continue;
+                };
+                let to = match target {
+                    LinkTarget::Url { url } => Some(LinkSpec::Uri(url.clone())),
+                    LinkTarget::Node { node } | LinkTarget::Heading { node } => {
+                        Some(LinkSpec::Block(*node))
+                    }
+                    LinkTarget::Range { range } => match self.doc.resolve_range(*range) {
+                        RangeState::Valid { node, .. } | RangeState::Rebound { node, .. } => {
+                            Some(LinkSpec::Block(node))
+                        }
+                        _ => None,
+                    },
+                };
+                // A block target must be on a page to be landed on.
+                let to = to.filter(|to| match to {
+                    LinkSpec::Block(node) => placed.contains(node),
+                    LinkSpec::Uri(_) => true,
+                });
+                let Some(to) = to else {
+                    unresolved += 1;
+                    continue;
+                };
+                if let LinkSpec::Block(node) = &to
+                    && !self.keys.contains_key(node)
+                {
+                    // A note is keyed by its number; any other block gets a new key.
+                    let key = numbers.get(node).copied().unwrap_or_else(|| {
+                        next += 1;
+                        next - 1
+                    });
+                    self.keys.insert(*node, key);
+                }
+                self.links
+                    .entry(block.node)
+                    .or_default()
+                    .push(LinkCut { bytes, to });
+            }
+        }
+        if unresolved > 0 {
+            self.notes.push(Note::warning(
+                tags::LINK_UNRESOLVED,
+                format!("{unresolved} links go to text that is not on a page and were not linked"),
+            ));
+        }
+    }
+
+    /// The leaves of a block, with each anchored range as a `Reference` and
+    /// each linked range as a `Link` over the glyphs that draw it.
     fn content(&mut self, block: &PdfReadingBlock, anchors: &[Anchor]) -> Vec<Child> {
         let Some(text) = self.layout.block(block.node).map(|b| b.text.as_str()) else {
             return Vec::new();
         };
+        let links = self.links.get(&block.node).cloned().unwrap_or_default();
         let mut out = Vec::new();
         // Anchors that a run has already used or that overlap an earlier one.
         let mut used = vec![false; anchors.len()];
+        let mut overlapped = false;
         for run in &block.runs {
             let Some(bytes) = run.bytes.clone() else {
                 out.push(Child::Content(Content::whole(run.run.clone())));
                 continue;
             };
             // The anchored bytes inside this run, in order, without overlaps.
-            let mut cuts: Vec<(Range<usize>, usize)> = Vec::new();
+            let mut cuts: Vec<(Range<usize>, Cut)> = Vec::new();
             for (i, anchor) in anchors.iter().enumerate() {
                 let range = anchor_chars(text, &anchor.bytes);
                 let (start, end) = (range.start.max(bytes.start), range.end.min(bytes.end));
@@ -405,7 +516,36 @@ impl Builder<'_> {
                 }
                 // An anchor that goes on into the next run keeps its end here.
                 used[i] = range.end <= bytes.end;
-                cuts.push((start..end, i));
+                cuts.push((start..end, Cut::Note(i)));
+            }
+            // Linked text takes what the note anchors leave, and the first of
+            // two overlapping links keeps the text they share.
+            for (j, link) in links.iter().enumerate() {
+                let start = link.bytes.start.max(bytes.start);
+                let end = link.bytes.end.min(bytes.end);
+                if start >= end {
+                    continue;
+                }
+                if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+                    overlapped = true;
+                    continue;
+                }
+                let mut free = Vec::new();
+                let mut at = start;
+                for (taken, _) in cuts.iter().filter(|(r, _)| r.start < end && start < r.end) {
+                    if at < taken.start {
+                        free.push(at..taken.start);
+                    }
+                    at = at.max(taken.end);
+                }
+                if at < end {
+                    free.push(at..end);
+                }
+                if free.iter().map(|r| r.len()).sum::<usize>() < end - start {
+                    overlapped = true;
+                }
+                cuts.extend(free.into_iter().map(|r| (r, Cut::Link(j))));
+                cuts.sort_by_key(|(r, _)| (r.start, r.end));
             }
             if cuts.is_empty() {
                 out.push(Child::Content(Content::whole(run.run.clone())));
@@ -416,22 +556,85 @@ impl Builder<'_> {
                 part: Some(r.start - bytes.start..r.end - bytes.start),
             };
             let mut at = bytes.start;
-            for (range, i) in cuts {
+            for (range, cut) in cuts {
                 if at < range.start {
                     out.push(Child::Content(part(at..range.start)));
                 }
-                let link = self.link(run, &range, anchors[i].note);
-                out.push(Child::Node(Node::new(
-                    Role::Reference { link },
-                    vec![Child::Content(part(range.clone()))],
-                )));
+                let inner = vec![Child::Content(part(range.clone()))];
+                match cut {
+                    Cut::Note(i) => {
+                        let link = self.link(run, &range, anchors[i].note);
+                        out.push(Child::Node(Node::new(Role::Reference { link }, inner)));
+                    }
+                    Cut::Link(j) => match links
+                        .get(j)
+                        .and_then(|l| self.doc_link(run, &range, text, l))
+                    {
+                        Some(link) => out.push(Child::Node(Node::new(
+                            Role::Link { link: Some(link) },
+                            inner,
+                        ))),
+                        None => out.extend(inner),
+                    },
+                }
                 at = range.end;
             }
             if at < bytes.end {
                 out.push(Child::Content(part(at..bytes.end)));
             }
         }
+        if overlapped {
+            self.notes.push(Note::warning(
+                tags::LINK_UNRESOLVED,
+                "overlapping links share text; the first keeps it and the others cover the rest",
+            ));
+        }
         out
+    }
+
+    /// The annotation for linked text: its area, its target and its alt text.
+    fn doc_link(
+        &mut self,
+        run: &PdfReadingRun,
+        range: &Range<usize>,
+        text: &str,
+        link: &LinkCut,
+    ) -> Option<DocLink> {
+        let Some(rect) = self.glyph_rect(run, range) else {
+            self.notes.push(Note::warning(
+                tags::LINK_UNRESOLVED,
+                "linked text has no glyphs to make a link area from",
+            ));
+            return None;
+        };
+        let label = snippet(text.get(link.bytes.clone()).unwrap_or_default());
+        let (to, alt) = match &link.to {
+            LinkSpec::Uri(uri) => (
+                LinkTo::Uri(uri.clone()),
+                if label.is_empty() {
+                    uri.clone()
+                } else {
+                    format!("{label}: {uri}")
+                },
+            ),
+            LinkSpec::Block(node) => {
+                let key = *self.keys.get(node)?;
+                let target = self
+                    .layout
+                    .block(*node)
+                    .map(|b| snippet(&b.text))
+                    .unwrap_or_default();
+                (
+                    LinkTo::Node(key),
+                    if target.is_empty() {
+                        label
+                    } else {
+                        format!("{label}: go to {target}")
+                    },
+                )
+            }
+        };
+        Some(DocLink { rect, to, alt })
     }
 
     fn unlinked(&mut self, message: &str) {
