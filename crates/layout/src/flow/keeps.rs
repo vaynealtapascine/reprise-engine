@@ -149,6 +149,7 @@ impl Flow<'_> {
     /// `max(orphans, 1)` lines (all of them if it keeps together). Tables
     /// and flowed images end a chain as fitting; annotations placed by
     /// relations are skipped.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn chain_fits(
         &mut self,
         doc: &Document,

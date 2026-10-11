@@ -87,7 +87,7 @@ fn codes(s: &LayoutSnapshot) -> Vec<&str> {
     s.diagnostics.iter().map(|d| d.code.as_str()).collect()
 }
 
-fn block<'a>(s: &'a LayoutSnapshot, node: NodeId) -> &'a reprise_layout::BlockLayout {
+fn block(s: &LayoutSnapshot, node: NodeId) -> &reprise_layout::BlockLayout {
     s.blocks.iter().find(|b| b.node == node).unwrap()
 }
 

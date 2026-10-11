@@ -1547,8 +1547,7 @@ impl Computed {
             &self.size,
             functions,
             context,
-            None,
-            None,
+            (None, None),
             &mut notes,
         );
         // Line height resolves against the size before clamping, as it always
@@ -1558,8 +1557,7 @@ impl Computed {
             &self.line_height,
             functions,
             context,
-            Some(size.value),
-            None,
+            (Some(size.value), None),
             &mut notes,
         );
 
@@ -1589,8 +1587,7 @@ impl Computed {
                 chain,
                 functions,
                 context,
-                Some(size_used),
-                Some(line_used),
+                (Some(size_used), Some(line_used)),
                 &mut notes,
             );
             let value = if p.clamps_negative() {
@@ -1668,8 +1665,8 @@ impl Computed {
         chain: &PropertyChain,
         functions: &FunctionRegistry,
         context: &ResolutionContext,
-        line_em: Option<Length>,
-        lh: Option<Length>,
+        // `em` and `lh` as the used stage supplies them (see above).
+        (line_em, lh): (Option<Length>, Option<Length>),
         notes: &mut Vec<Note>,
     ) -> Chosen {
         let env = |em| UsedEnv {
