@@ -36,3 +36,8 @@ pub const STYLE_PARENT_CYCLE: Code = Code::new("style.parent-cycle");
 pub const STYLE_PARENT_MISSING: Code = Code::new("style.parent-missing");
 /// A named-style chain is longer than the limit.
 pub const STYLE_CHAIN_TOO_LONG: Code = Code::new("style.chain-too-long");
+/// A block or style names a deleted style; it resolves through that style's
+/// parent instead (`docs/paragraph-styles.md`).
+pub const STYLE_DELETED: Code = Code::new("style.deleted");
+/// Renamed styles forward to each other in a loop; the chain is cut.
+pub const STYLE_RENAME_CYCLE: Code = Code::new("style.rename-cycle");

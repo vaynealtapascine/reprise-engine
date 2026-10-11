@@ -49,16 +49,53 @@ pub struct TextStyle {
     pub color: Option<[u8; 4]>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reset: bool,
+    /// Fields this action clears: it masks earlier actions' values for them,
+    /// revealing the paragraph style, without a full `reset`. Names are
+    /// [`CLEARABLE`]. Absent when empty, so other envelopes are unchanged.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub clear: BTreeSet<String>,
 }
+
+/// The fields a formatting action can clear, in resolution order.
+pub const CLEARABLE: [&str; 9] = [
+    "families",
+    "size",
+    "language",
+    "features",
+    "weight",
+    "slant",
+    "underline",
+    "strike",
+    "color",
+];
 
 impl TextStyle {
     pub fn validate(&self) -> Result<(), DocError> {
-        let valid = self.families.as_ref().is_none_or(|f| {
-            !f.is_empty()
-                && f.len() <= 64
-                && f.iter()
-                    .all(|s| !s.is_empty() && s.len() <= 256 && !s.contains('\0'))
-        }) && self.weight.is_none_or(|w| (1..=1000).contains(&w))
+        let supplied = [
+            self.families.is_some(),
+            self.size.is_some(),
+            self.language.is_some(),
+            self.features.is_some(),
+            self.weight.is_some(),
+            self.slant.is_some(),
+            self.decoration.underline.is_some(),
+            self.decoration.strike.is_some(),
+            self.color.is_some(),
+        ];
+        let clear_valid = self.clear.iter().all(|name| {
+            CLEARABLE
+                .iter()
+                .position(|c| c == name)
+                .is_some_and(|i| !supplied[i])
+        });
+        let valid = clear_valid
+            && self.families.as_ref().is_none_or(|f| {
+                !f.is_empty()
+                    && f.len() <= 64
+                    && f.iter()
+                        .all(|s| !s.is_empty() && s.len() <= 256 && !s.contains('\0'))
+            })
+            && self.weight.is_none_or(|w| (1..=1000).contains(&w))
             && self.size.is_none_or(|s| s > Length::ZERO)
             && self.language.as_ref().is_none_or(|s| {
                 !s.is_empty() && s.len() <= 128 && s.is_ascii() && !s.chars().any(char::is_control)
@@ -199,6 +236,21 @@ impl Document {
         tree.nodes()
             .into_iter()
             .any(|id| tree.get_meta(id).is_ok_and(|m| m.get("format1").is_some()))
+    }
+
+    /// Whether any formatting record, live or not, clears a field: older
+    /// format1 readers would reject that envelope and drop the action.
+    pub fn has_clearing_formats(&self) -> bool {
+        if !self.has_ranges_root() {
+            return false;
+        }
+        let tree = self.tree("ranges");
+        tree.nodes().into_iter().any(|id| {
+            tree.get_meta(id).is_ok_and(|m| match m.get("format1") {
+                None => false,
+                Some(_) => get_str(&m, "format1").is_none_or(|raw| raw.contains("\"clear\"")),
+            })
+        })
     }
 
     /// The live formatting records, grouped by flow host. Built in one pass
@@ -419,6 +471,10 @@ impl Document {
                     patch.color.is_some(),
                     patch.reset,
                 ];
+                let mut present = present;
+                for (slot, name) in present.iter_mut().zip(CLEARABLE) {
+                    *slot |= patch.clear.contains(name);
+                }
                 for (set, present) in active.iter_mut().zip(present) {
                     if present {
                         if insert {
@@ -450,6 +506,7 @@ impl Document {
                 },
                 color: winner(8).and_then(|s| s.color),
                 reset: false,
+                clear: BTreeSet::new(),
             };
             if let Some(last) = out.runs.last_mut()
                 && last.style == style
