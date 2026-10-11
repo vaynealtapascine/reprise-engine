@@ -415,11 +415,15 @@ impl DocumentSession {
         if let [Command::InsertImage { image }] = r.commands.as_slice() {
             return self.insert_image(&Payload::new(image.clone()));
         }
-        if r.commands.len() > reprise_edit::MAX_COMMANDS {
+        let applied = self.apply_commands(&r.commands)?;
+        Ok(Payload::new(cv::applied(applied, Vec::new())))
+    }
+    fn apply_commands(&mut self, commands: &[Command]) -> Result<reprise_edit::Applied> {
+        if commands.len() > reprise_edit::MAX_COMMANDS {
             return Err(Error::Limit("transaction commands".into()));
         }
         let mut bytes = 0usize;
-        for command in &r.commands {
+        for command in commands {
             if let Command::InsertText { text, .. } | Command::InsertBlock { text, .. } = command {
                 bytes = bytes.saturating_add(text.len());
             }
@@ -427,14 +431,13 @@ impl DocumentSession {
         if bytes > reprise_edit::MAX_TRANSACTION_BYTES {
             return Err(Error::Limit("transaction text".into()));
         }
-        let commands = r
-            .commands
+        let kernel = commands
             .iter()
             .map(|c| cv::command(c, self.engine.medium))
             .collect::<Result<Vec<_>>>()?;
-        let applied = self.editor.apply(&commands.into())?;
+        let applied = self.editor.apply(&kernel.into())?;
         self.snapshot = None;
-        Ok(Payload::new(cv::applied(applied, Vec::new())))
+        Ok(applied)
     }
     /// Insert one image through the editing kernel's atomic fragment transaction.
     pub fn insert_image(&mut self, request: &Payload<ImageInsert>) -> Result<Payload<Applied>> {
@@ -824,7 +827,17 @@ impl DocumentSession {
             .transpose()?;
         fragment.validate()?;
         self.sync_fonts()?;
-        // Resource installation must not fail after authored state has committed.
+        let (fonts, assets) = self.preflight_resources(&fragment)?;
+        let result = fragment.paste(&mut self.editor, at, &self.document_id)?;
+        self.install_resources(fonts, assets)?;
+        Ok(Payload::new(cv::applied(result.applied, result.notes)))
+    }
+    /// Resource installation must not fail after authored state has committed,
+    /// so everything fallible happens before the edit.
+    fn preflight_resources(
+        &self,
+        fragment: &reprise_clipboard::NativeFragment,
+    ) -> Result<(Vec<reprise_font::Face>, reprise_display::AssetStore)> {
         let fonts = fragment
             .resources
             .values()
@@ -844,13 +857,118 @@ impl DocumentSession {
             .collect::<Result<Vec<_>>>()?;
         let mut assets = self.engine.assets.clone();
         fragment.install_assets(&mut assets)?;
-        let result = fragment.paste(&mut self.editor, at, &self.document_id)?;
+        Ok((fonts, assets))
+    }
+    fn install_resources(
+        &mut self,
+        fonts: Vec<reprise_font::Face>,
+        assets: reprise_display::AssetStore,
+    ) -> Result<()> {
         for face in fonts {
             self.engine.fonts.add(face);
         }
         self.engine.assets = assets;
-        self.reconfigure()?;
-        Ok(Payload::new(cv::applied(result.applied, result.notes)))
+        self.reconfigure()
+    }
+    fn replace_fragment(
+        &mut self,
+        fragment: reprise_clipboard::NativeFragment,
+        selection: &StableSelection,
+    ) -> Result<Payload<Replaced>> {
+        let stable = collab::selection_in(selection)
+            .ok_or_else(|| Error::Invalid("malformed stable selection".into()))?;
+        fragment.validate()?;
+        self.sync_fonts()?;
+        let (fonts, assets) = self.preflight_resources(&fragment)?;
+        let staged = self
+            .editor
+            .stage_replacement(&fragment.fragment, &self.document_id)?;
+        let mut result = self.editor.replace_selection(&stable, &staged)?;
+        self.install_resources(fonts, assets)?;
+        let caret = result.caret.map(|(node, offset)| reprise_edit::Caret {
+            node,
+            offset,
+            affinity: reprise_edit::Affinity::Downstream,
+        });
+        if self.selection.is_some() {
+            self.selection = caret.and_then(|c| {
+                reprise_edit::StableSelection::anchor(
+                    self.doc(),
+                    &reprise_edit::Selection::collapsed(c),
+                )
+                .ok()
+            });
+        }
+        result.notes.extend(fragment.notes);
+        Ok(Payload::new(Replaced {
+            applied: cv::applied(result.applied, result.notes),
+            selection: caret.map(|c| collab::selection_dto(reprise_edit::Selection::collapsed(c))),
+        }))
+    }
+    /// Replaces an anchored selection with a native clipboard fragment in one
+    /// transaction and one undo step. The selection is resolved inside the
+    /// transaction, so a remote edit cannot land between the delete and the
+    /// insert; an unreadable fragment is refused before anything is deleted.
+    pub fn replace_selection(
+        &mut self,
+        request: &Payload<ReplaceSelection>,
+        bytes: &[u8],
+    ) -> Result<Payload<Replaced>> {
+        let r = validate(request)?;
+        if bytes.len() > 96 * 1024 * 1024 {
+            return Err(Error::Limit("clipboard bytes".into()));
+        }
+        self.replace_fragment(reprise_clipboard::NativeFragment::decode(bytes)?, &r.selection)
+    }
+    /// [`DocumentSession::replace_selection`] with plain text or HTML.
+    pub fn replace_text(&mut self, request: &Payload<ReplaceText>) -> Result<Payload<Replaced>> {
+        let r = validate(request)?;
+        let imported = if r.html {
+            reprise_clipboard::import_html(&r.text, reprise_clipboard::ImportLimits::default())?
+        } else {
+            reprise_clipboard::import_plain(&r.text)?
+        };
+        self.replace_fragment(imported.fragment, &r.selection)
+    }
+    /// Several commands as one transaction and one undo step, all or nothing:
+    /// every command is validated against the document as the commands before
+    /// it leave it, and nothing is written unless all pass (the error names
+    /// the first refused command). `expected_revision` makes it a compare and
+    /// set; `selection` comes back mapped through the batch's effects.
+    pub fn batch(&mut self, request: &Payload<Batch>) -> Result<Payload<BatchReport>> {
+        let r = validate(request)?;
+        if r.commands.is_empty() {
+            return Err(Error::Invalid("empty batch".into()));
+        }
+        if let Some(expected) = &r.expected_revision
+            && *expected != cv::revision(&self.doc().revision())
+        {
+            return Err(Error::Stale);
+        }
+        let selection = match &r.selection {
+            Some(s) => Some((cv::caret(&s.anchor)?, cv::caret(&s.focus)?)),
+            None => None,
+        };
+        let applied = self.apply_commands(&r.commands)?;
+        let mapped = selection.and_then(|(a, f)| {
+            let map = |c: reprise_edit::Caret| {
+                let bias = match c.affinity {
+                    reprise_edit::Affinity::Downstream => reprise_edit::Bias::After,
+                    reprise_edit::Affinity::Upstream => reprise_edit::Bias::Before,
+                };
+                applied
+                    .map_position(c.node, c.offset, bias)
+                    .map(|(node, offset)| reprise_edit::Caret { node, offset, ..c })
+            };
+            Some(collab::selection_dto(reprise_edit::Selection {
+                anchor: map(a)?,
+                focus: map(f)?,
+            }))
+        });
+        Ok(Payload::new(BatchReport {
+            applied: cv::applied(applied, Vec::new()),
+            selection: mapped,
+        }))
     }
     pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>> {
         let r = validate(request)?;

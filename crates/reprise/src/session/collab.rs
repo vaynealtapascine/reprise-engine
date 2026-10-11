@@ -97,14 +97,14 @@ fn stable_in(s: &StableCaret) -> Option<reprise_edit::StableCaret> {
     })
 }
 
-fn selection_in(s: &StableSelection) -> Option<reprise_edit::StableSelection> {
+pub(super) fn selection_in(s: &StableSelection) -> Option<reprise_edit::StableSelection> {
     Some(reprise_edit::StableSelection {
         anchor: stable_in(&s.anchor)?,
         focus: stable_in(&s.focus)?,
     })
 }
 
-fn selection_out(s: &reprise_edit::StableSelection) -> StableSelection {
+pub(super) fn selection_out(s: &reprise_edit::StableSelection) -> StableSelection {
     StableSelection {
         anchor: stable_out(&s.anchor),
         focus: stable_out(&s.focus),
@@ -398,7 +398,7 @@ impl DocumentSession {
     }
 }
 
-fn selection_dto(s: reprise_edit::Selection) -> Selection {
+pub(super) fn selection_dto(s: reprise_edit::Selection) -> Selection {
     Selection {
         anchor: cv::caret_out(s.anchor),
         focus: cv::caret_out(s.focus),

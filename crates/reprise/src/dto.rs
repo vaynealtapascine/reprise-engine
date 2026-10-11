@@ -601,6 +601,48 @@ pub struct TextImport {
     pub html: bool,
     pub at: Option<Caret>,
 }
+/// Replaces an anchored selection with a native clipboard fragment (the bytes
+/// travel beside the request): one transaction, one undo step.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceSelection {
+    pub selection: StableSelection,
+}
+/// Replaces an anchored selection with plain text or HTML, like
+/// [`ReplaceSelection`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceText {
+    pub selection: StableSelection,
+    pub text: String,
+    pub html: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Replaced {
+    /// The deletion's effects, then the paste's: one pass maps a position.
+    pub applied: Applied,
+    /// A collapsed selection at the end of the inserted content (or at the
+    /// start of the replaced range when nothing was inserted).
+    pub selection: Option<Selection>,
+}
+/// Several commands as one transaction and one undo step, all or nothing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct Batch {
+    pub commands: Vec<Command>,
+    /// Refuse with `bindings.stale`, writing nothing, unless the document is
+    /// at exactly this revision (`State.revision`).
+    pub expected_revision: Option<Vec<Clock>>,
+    /// Mapped through the batch's effects and returned in `BatchReport`.
+    pub selection: Option<Selection>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BatchReport {
+    pub applied: Applied,
+    /// `Batch.selection` as the batch left it; `None` when it was not given or
+    /// its block was deleted.
+    pub selection: Option<Selection>,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SyncInfo {
     pub document_id: String,
