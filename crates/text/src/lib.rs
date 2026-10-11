@@ -161,6 +161,12 @@ impl From<loro::LoroError> for TextError {
 /// never show it and [`Text::insert`] refuses it.
 pub const BREAK: char = '\u{FDD0}';
 
+/// The character that holds an inline object's place in a flow paragraph
+/// (see `docs/inline.md`). Like [`BREAK`] it is reserved: [`Text::insert`]
+/// refuses it, and a view shows it only while `reprise-doc` has a live
+/// object for it.
+pub const OBJECT: char = '\u{FFFC}';
+
 /// One visible stretch of a shared text, in UTF-8 bytes and in Unicode
 /// scalars (Loro's unit), both counted from the start of the shared text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,6 +182,16 @@ pub trait Span: Send + Sync {
     /// empty: an empty paragraph is one empty segment at the place where text
     /// typed into it goes. Characters between segments are hidden.
     fn segments(&self) -> Result<Vec<Segment>, TextError>;
+
+    /// Called by [`Text::delete`] before it deletes anything, with the
+    /// shared-text scalar index of every visible [`OBJECT`] character in the
+    /// deleted range. Returns those the deletion must keep: `reprise-doc`
+    /// retires an inline object by deactivating its record, so undo can bring
+    /// the same object back. By default nothing is kept.
+    fn retire(&self, objects: &[usize]) -> Result<Vec<usize>, TextError> {
+        let _ = objects;
+        Ok(Vec::new())
+    }
 }
 
 /// One text sequence, such as the text of a paragraph. Offsets are UTF-8 bytes.
@@ -209,6 +225,22 @@ impl fmt::Display for Text {
             Some(_) => f.write_str(&self.view().map(|v| v.s).unwrap_or_default()),
         }
     }
+}
+
+/// `piece` without the sorted scalar indexes in `kept`.
+fn split_around(piece: Range<usize>, kept: &[usize]) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    let mut start = piece.start;
+    for &k in kept.iter().filter(|&&k| piece.contains(&k)) {
+        if start < k {
+            out.push(start..k);
+        }
+        start = k + 1;
+    }
+    if start < piece.end {
+        out.push(start..piece.end);
+    }
+    out
 }
 
 /// A view's current visible text and where each piece of it is.
@@ -365,7 +397,7 @@ impl Text {
     }
 
     pub fn insert(&self, at: usize, s: &str) -> Result<(), TextError> {
-        if s.contains(BREAK) {
+        if s.contains(BREAK) || s.contains(OBJECT) {
             return Err(TextError::Reserved);
         }
         let v = self.view()?;
@@ -382,7 +414,25 @@ impl Text {
         check(&v.s, range.end)?;
         // Hidden characters inside the range stay: they are inactive breaks
         // that undo may bring back.
-        for piece in v.pieces(range).into_iter().rev() {
+        let mut pieces = v.pieces(range.clone());
+        if let Some(span) = &self.span
+            && let Some(slice) = v.s.get(range.clone())
+            && slice.contains(OBJECT)
+        {
+            let objects: Vec<usize> = slice
+                .char_indices()
+                .filter(|&(_, c)| c == OBJECT)
+                .map(|(i, _)| v.char_at(range.start + i))
+                .collect();
+            let mut kept = span.retire(&objects)?;
+            kept.sort_unstable();
+            kept.dedup();
+            pieces = pieces
+                .into_iter()
+                .flat_map(|piece| split_around(piece, &kept))
+                .collect();
+        }
+        for piece in pieces.into_iter().rev() {
             self.text.delete(piece.start, piece.len())?;
         }
         Ok(())
@@ -785,5 +835,55 @@ mod tests {
         assert_eq!(text.resolve(&start).unwrap(), Resolved::Tombstoned(0));
         // A character that survived still resolves exactly, history or not.
         assert_eq!(text.resolve(&live).unwrap(), Resolved::Live(2));
+    }
+
+    #[test]
+    fn object_characters_are_reserved_like_breaks() {
+        let (_doc, text) = setup("ab");
+        assert!(matches!(
+            text.insert(1, "x\u{FFFC}y"),
+            Err(TextError::Reserved)
+        ));
+        assert_eq!(text.to_string(), "ab");
+    }
+
+    /// A whole-text span that keeps every object it is asked to retire.
+    struct Keep(LoroText, std::sync::Mutex<Vec<usize>>);
+    impl Span for Keep {
+        fn segments(&self) -> Result<Vec<Segment>, TextError> {
+            let s = self.0.to_string();
+            Ok(vec![Segment {
+                bytes: 0..s.len(),
+                chars: 0..s.chars().count(),
+            }])
+        }
+        fn retire(&self, objects: &[usize]) -> Result<Vec<usize>, TextError> {
+            self.1.lock().unwrap().extend_from_slice(objects);
+            Ok(objects.to_vec())
+        }
+    }
+
+    #[test]
+    fn deletion_keeps_the_objects_a_view_retires() {
+        let doc = LoroDoc::new();
+        let raw = doc.get_text("t");
+        raw.insert(0, "a\u{FFFC}bc\u{FFFC}d").unwrap();
+        let span = Arc::new(Keep(raw.clone(), Default::default()));
+        let text = Text::paragraph(raw.clone(), span.clone());
+        text.delete(0..text.len()).unwrap();
+        assert_eq!(raw.to_string(), "\u{FFFC}\u{FFFC}");
+        assert_eq!(*span.1.lock().unwrap(), vec![1, 4]);
+        // Plain texts delete objects like any character.
+        let (_doc, plain) = setup("x");
+        plain.loro().insert(1, "\u{FFFC}").unwrap();
+        plain.delete(0..plain.len()).unwrap();
+        assert!(plain.is_empty());
+    }
+
+    #[test]
+    fn split_around_skips_kept_scalars_at_every_position() {
+        assert_eq!(split_around(0..5, &[0, 2, 4]), vec![1..2, 3..4]);
+        assert_eq!(split_around(3..6, &[0, 9]), vec![3..6]);
+        assert!(split_around(2..3, &[2]).is_empty());
     }
 }
