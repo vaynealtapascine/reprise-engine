@@ -13,8 +13,8 @@
 use std::ops::Range;
 
 use reprise_compose::{
-    Adjustment, Break, ComposeRequest, GeometryProvider, LineFragment, Measure, Polygon, Runaround,
-    break_opportunities, is_word_space,
+    Adjustment, Break, ComposeRequest, Composer, GeometryProvider, Indented, Indents, LineFragment,
+    Measure, Optimal, Polygon, Runaround, break_opportunities, is_word_space,
 };
 use reprise_diag::Severity;
 use reprise_doc::context::{Extent, ResolutionContext};
@@ -26,6 +26,7 @@ use reprise_shape::{
     reorder_line, visual_order,
 };
 
+mod keeps;
 pub(crate) mod paragraph;
 pub(crate) mod stage;
 
@@ -76,6 +77,52 @@ pub(crate) struct Cursor {
     previous: Option<NodeId>,
     /// The block in progress, between units of an incremental job.
     active: Option<Active>,
+    keeps: Keeps,
+}
+
+/// What keep lookahead reuses between paragraphs of one layout: the block
+/// order, and the last few trial preparations (exact `(node, context)`
+/// matches only, so it can't change output).
+#[derive(Clone, Default)]
+pub(crate) struct Keeps {
+    order: Option<std::sync::Arc<BlockOrder>>,
+    trials: Vec<(NodeId, ResolutionContext, std::sync::Arc<Prepared>)>,
+}
+
+/// The document's top-level blocks in order, with each one's position.
+pub(crate) struct BlockOrder {
+    nodes: Vec<NodeId>,
+    index: std::collections::BTreeMap<NodeId, usize>,
+}
+
+/// Trial preparations kept for keep lookahead.
+const MAX_TRIALS: usize = 64;
+/// The most blocks one keep-with-next chain looks ahead through.
+pub const MAX_KEEP_CHAIN: usize = 32;
+
+/// The room a frame offers one paragraph: its measure less the paragraph's
+/// indents, less float exclusions, to `depth`.
+pub(crate) struct FrameRoom {
+    runaround: Runaround<Indented<Measure>>,
+    pub(crate) depth: Length,
+}
+
+impl FrameRoom {
+    pub(crate) fn inner(&self) -> &dyn GeometryProvider {
+        if self.runaround.exclusions.is_empty() {
+            &self.runaround.base
+        } else {
+            &self.runaround
+        }
+    }
+}
+
+/// How a keep-with-next chain fares in the rest of a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Chain {
+    Fits,
+    Fails,
+    TooLong,
 }
 
 /// A block that takes more than one unit.
@@ -154,6 +201,7 @@ impl Cursor {
             pending: Vec::new(),
             region_owners: crate::regions::owners(engine, doc),
             upcoming: &[],
+            keeps: Keeps::default(),
         };
         // Even an empty document gets a page.
         flow.new_page();
@@ -272,6 +320,7 @@ impl Cursor {
             region_owners: self.region_owners,
             previous: self.previous,
             upcoming: &[],
+            keeps: self.keeps,
         }
     }
 }
@@ -283,6 +332,13 @@ pub(crate) struct Fill {
     used: Length,
     /// Nothing is in the frame yet.
     empty: bool,
+    /// The last paragraph's `space-after`, collapsed with the next one's
+    /// `space-before` (the larger wins).
+    after: Length,
+    /// Everything in the frame is a keep-with-next chain leading into the
+    /// next block (true for an empty frame): moving that block to the next
+    /// frame would not help it.
+    anchored: bool,
 }
 
 pub(crate) struct Flow<'a> {
@@ -308,6 +364,7 @@ pub(crate) struct Flow<'a> {
     page: usize,
     pos: usize,
     limit_hit: bool,
+    pub(crate) keeps: Keeps,
 }
 
 impl Flow<'_> {
@@ -474,6 +531,7 @@ impl Flow<'_> {
             region_owners: self.region_owners,
             previous: self.previous,
             active: None,
+            keeps: self.keeps,
         }
     }
 
@@ -494,6 +552,8 @@ impl Flow<'_> {
             self.fills.push(Fill {
                 used: Length::ZERO,
                 empty: true,
+                after: Length::ZERO,
+                anchored: true,
             });
         }
         true
@@ -553,6 +613,8 @@ impl Flow<'_> {
         if let Some(fill) = self.fills.get_mut(index) {
             fill.used = used;
             fill.empty = false;
+            fill.after = Length::ZERO;
+            fill.anchored = false;
         }
     }
 
@@ -633,9 +695,18 @@ impl Flow<'_> {
             &mut self.snapshot.diagnostics,
             self.evaluation,
         )?;
+        let (indents, reduced) = prepared.indents(width);
+        if reduced {
+            self.snapshot.diagnostics.push(indent_clamped(&subject));
+        }
         let composed = prepared.compose(
             engine,
-            &Measure(width),
+            &Indented {
+                base: Measure(width),
+                indents,
+                first_line: true,
+                reversed: prepared.base_level % 2 == 1,
+            },
             0, // Provisional: the relation that places the block sets the frame.
             0,
             Length::ZERO,
@@ -687,6 +758,30 @@ pub(crate) fn unplaced(diagnostics: &mut Vec<Diagnostic>, subject: &Subject, byt
     );
     d.bytes = Some(bytes);
     diagnostics.push(d);
+}
+
+pub(crate) fn indent_clamped(subject: &Subject) -> Diagnostic {
+    Diagnostic::new(
+        Severity::Warning,
+        codes::INDENT_CLAMPED,
+        subject.clone(),
+        "indents would leave less than a quarter of the frame's inline size; they were reduced",
+    )
+}
+
+/// The distinct visual lines of some placed fragments, as `(top, bottom)` on
+/// the block axis, in order. Fragments of one line share their top.
+pub(crate) fn rows(lines: &[LineLayout]) -> Vec<(Length, Length)> {
+    let mut out: Vec<(Length, Length)> = Vec::new();
+    for l in lines {
+        let top = l.rect.origin.y;
+        let bottom = top + l.rect.height;
+        match out.last_mut() {
+            Some(last) if last.0 == top => last.1 = last.1.max(bottom),
+            _ => out.push((top, bottom)),
+        }
+    }
+    out
 }
 
 pub(crate) fn prepare_cached(
@@ -891,6 +986,16 @@ impl Prepared {
             ));
         }
     }
+    /// The paragraph's indents, bounded for a measure of `width`; the flag
+    /// says they had to be reduced (`layout.indent-clamped`).
+    pub(crate) fn indents(&self, width: Length) -> (Indents, bool) {
+        Indents::bounded(
+            self.style.indent_start,
+            self.style.indent_end,
+            self.style.indent_first,
+            width,
+        )
+    }
     pub(crate) fn line_height(&self) -> Length {
         self.image
             .as_ref()
@@ -982,6 +1087,15 @@ impl Prepared {
             start,
             block_start,
         };
+        // Justified paragraphs use the optimal composer's justified mode,
+        // whatever the engine's composer is (`docs/paragraph-styles.md`).
+        let justified = Optimal::justified();
+        let composer: &dyn Composer =
+            if self.style.alignment == Some(reprise_doc::marks::Alignment::Justify) {
+                &justified
+            } else {
+                engine.composer.as_ref()
+            };
         let composition = if self
             .text
             .chars()
@@ -990,10 +1104,10 @@ impl Prepared {
             reprise_compose::compose_marks(
                 &request,
                 &self.style.tabs.clone().unwrap_or_default(),
-                engine.composer.as_ref(),
+                composer,
             )
         } else {
-            engine.composer.compose(&request)
+            composer.compose(&request)
         };
         diagnostics.extend(
             composition
@@ -1130,7 +1244,11 @@ fn line_layout(
         Some(reprise_doc::marks::Alignment::End) if prepared.base_level.is_multiple_of(2) => {
             surplus
         }
-        Some(reprise_doc::marks::Alignment::Start) if prepared.base_level % 2 == 1 => surplus,
+        Some(reprise_doc::marks::Alignment::Start | reprise_doc::marks::Alignment::Justify)
+            if prepared.base_level % 2 == 1 =>
+        {
+            surplus
+        }
         _ => Length::ZERO,
     };
     let mut x = fragment.available.start + shift - hanging_left;

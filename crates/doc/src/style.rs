@@ -1057,7 +1057,7 @@ pub fn style_chain(
                     format!("style {name}: {what} (reached from {from}); the chain stops there")
                 } else {
                     format!(
-                        "style {name} {what} (reached from {from});                          the chain stops before it repeats"
+                        "style {name} {what} (reached from {from}); the chain stops before it repeats"
                     )
                 },
             ));
@@ -1067,7 +1067,7 @@ pub fn style_chain(
             notes.push(Note::warning(
                 codes::STYLE_CHAIN_TOO_LONG,
                 format!(
-                    "more than {MAX_CHAIN} styles in one chain;                      {from} refers to {name}, which is ignored"
+                    "more than {MAX_CHAIN} styles in one chain; {from} refers to {name}, which is ignored"
                 ),
             ));
             break;
@@ -1095,7 +1095,7 @@ pub fn style_chain(
                 notes.push(Note::warning(
                     codes::STYLE_DELETED,
                     format!(
-                        "{from} refers to style {name}, which was deleted;                          its parent is used instead"
+                        "{from} refers to style {name}, which was deleted; its parent is used instead"
                     ),
                 ));
                 next = record.style.parent.clone();
