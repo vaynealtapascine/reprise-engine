@@ -557,6 +557,10 @@ pub struct ReadingStep {
     pub node: String,
     pub line: u32,
     pub page: u32,
+    /// The line's UTF-8 byte range in its block's text (`State.blocks[].text`),
+    /// trailing whitespace included, so a reader can slice without `move`.
+    pub start: u32,
+    pub end: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]

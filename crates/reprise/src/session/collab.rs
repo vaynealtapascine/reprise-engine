@@ -165,7 +165,7 @@ impl DocumentSession {
             ));
         }
         cv::peer(&r.from_peer)?;
-        if r.content.bytes.len() > sync::MAX_PACKET_BYTES.saturating_add(1 << 20) {
+        if r.content.bytes.len() > crate::MAX_PACKET_BYTES.saturating_add(1 << 20) {
             return Err(Error::Limit("sync packet bytes".into()));
         }
         // The frame decides; the mirrored fields must agree with it.

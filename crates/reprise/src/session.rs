@@ -1015,17 +1015,24 @@ impl DocumentSession {
         Ok(Payload::new(Bytes { bytes }))
     }
     pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>> {
-        Ok(Payload::new(
-            self.current()?
-                .reading_order(self.doc())
-                .into_iter()
-                .map(|s| ReadingStep {
+        let layout = self.current()?;
+        let steps = layout
+            .reading_order(self.doc())
+            .into_iter()
+            .map(|s| {
+                let line = layout
+                    .line(s.line)
+                    .ok_or_else(|| Error::Invalid("reading step names a missing line".into()))?;
+                Ok(ReadingStep {
                     node: s.line.node.to_string(),
-                    line: s.line.line as u32,
-                    page: s.page as u32,
+                    line: u32::try_from(s.line.line).unwrap_or(u32::MAX),
+                    page: u32::try_from(s.page).unwrap_or(u32::MAX),
+                    start: u32::try_from(line.text.start).unwrap_or(u32::MAX),
+                    end: u32::try_from(line.text.end).unwrap_or(u32::MAX),
                 })
-                .collect(),
-        ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Payload::new(steps))
     }
     pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>> {
         let mut notes: Vec<_> = self
