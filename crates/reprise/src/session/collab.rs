@@ -156,6 +156,7 @@ impl DocumentSession {
     /// asks the transport for a delta since [`DocumentSession::sync_info`].
     pub fn sync_import(&mut self, request: &Payload<SyncPacket>) -> Result<Payload<SyncReport>> {
         let r = validate(request)?;
+        self.refuse_source(&r.document_id)?;
         if r.document_id != self.document_id {
             return Err(Error::InvalidId(r.document_id.clone()));
         }
@@ -200,6 +201,19 @@ impl DocumentSession {
             selection,
             selection_moved,
         }))
+    }
+
+    /// A copy never takes packets of the document it was copied from.
+    pub(super) fn refuse_source(&self, document_id: &str) -> Result<()> {
+        if self.copied_from.as_deref() == Some(document_id) {
+            return Err(Error::Core {
+                code: "bindings.copy-source".into(),
+                severity: Severity::Error,
+                message: "this document is a copy; it does not sync with its source".into(),
+                command: None,
+            });
+        }
+        Ok(())
     }
 
     /// Anchors the host's current selection, so that `sync_import`,

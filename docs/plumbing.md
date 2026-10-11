@@ -82,16 +82,27 @@ with a **new document identity**. The copy is rebuilt, not cloned:
 -   *Dropped:* the CRDT history, undo stacks, presence, and the source's
     document id and peers.
 
-The content is replayed into a fresh CRDT document, authored by the copy's own
+The content is replayed (through the native fragment of the whole document,
+plus every named style) into a fresh CRDT document authored by the copy's own
 peer. A clone with history would share operation ids with the source: any peer
-that later held both would merge them, and the peer id chosen for the copy
-could collide with one in the source's log. A fresh history has no operation
-the source has, so a source *delta* cannot apply to the copy (it names
-operations the copy lacks), and the session refuses a packet that names the
-source's document id with the same stable `bindings.id` it uses for any other
-foreign document. The relay and the app must also route the copy as a separate
-room; the engine does not authenticate packet senders (see `collaboration.md`),
-so this guards against mistakes, not against a hostile relay.
+that later held both would merge them. A fresh history has no operation the
+source has, so honest traffic cannot cross:
+
+-   the copy refuses a packet that names its source with
+    `bindings.copy-source`; the source refuses the copy's with `bindings.id`
+    (a foreign document), as for any other document;
+-   a source *delta* with a rewritten document id still cannot apply, because it
+    depends on operations the copy lacks.
+
+*Known gap.* A relay that rewrites the document id on a source **snapshot**
+packet makes the copy merge it, because a snapshot carries all its own history.
+Packets are not authenticated (see `collaboration.md`), so the relay must keep
+one room per document id. Closing the gap in-band needs a lineage marker in the
+document, which is a new stored form and so a package feature bit; it is left
+as a follow-up.
+
+The copy may use the same peer id as the source. The two histories are
+independent, so their operation ids can coincide; nothing ever merges them.
 
 ## 3. Fonts once per workspace
 

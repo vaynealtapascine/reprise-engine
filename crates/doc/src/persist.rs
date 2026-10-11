@@ -42,6 +42,20 @@ impl Document {
         Ok(bytes)
     }
 
+    /// The names of all named styles, sorted, referenced or not. A copy of a
+    /// document (`importCopy`) carries every one of them, not only the styles
+    /// its blocks use.
+    pub fn style_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .doc
+            .get_map("styles")
+            .keys()
+            .map(|k| k.to_string())
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
     /// Import a self-contained snapshot, choosing the editing peer explicitly.
     /// Updates with missing dependencies are not document files.
     pub fn import(bytes: &[u8], peer: u64) -> Result<Document, DocError> {

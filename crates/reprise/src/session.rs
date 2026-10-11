@@ -124,6 +124,114 @@ impl Workspace {
             Vec::new(),
         ))
     }
+    /// Imports a package as a new, independent document. See `docs/plumbing.md`.
+    ///
+    /// *Kept:* text and formatting, the block tree, every named style, page
+    /// setup and templates, relations, ranges, tables, images, bundled assets,
+    /// font pins, package settings, extension bytes and unknown sections.
+    /// *Dropped:* CRDT history, undo, presence, the source document id and
+    /// peers. The content is replayed into a fresh CRDT document authored by
+    /// `peer_id`, so the copy shares no operation with the source: a source
+    /// delta cannot apply to it, and a packet naming the source is refused
+    /// with `bindings.copy-source`. The source bytes are not modified.
+    pub fn import_copy(
+        &self,
+        request: &Payload<ImportCopy>,
+        bytes: &[u8],
+    ) -> Result<DocumentSession> {
+        let r = validate(request)?;
+        let id = cv::document_id(&r.document_id)?;
+        let peer = cv::peer(&r.peer_id)?;
+        if bytes.len() > 128 * 1024 * 1024 {
+            return Err(Error::Limit("package bytes".into()));
+        }
+        let mut opened = reprise_format::Package::open(
+            bytes,
+            peer,
+            reprise_format::Limits::default(),
+            &reprise_format::MigrationRegistry::builtin(),
+        )?;
+        if opened.is_read_only() {
+            return Err(Error::ReadOnly);
+        }
+        let source = opened.package().clone();
+        if source.document_id() == id {
+            return Err(Error::InvalidId(r.document_id.clone()));
+        }
+        let source_id: String = source
+            .document_id()
+            .0
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut engine = Engine::new(reprise_font::FontStore::default());
+        opened.restore_fonts(&mut engine.fonts);
+        opened
+            .notes
+            .extend(opened.assets.restore_images(&mut engine.assets));
+        let mut notes = opened.notes.clone();
+        let old = opened.into_document()?;
+        let fragment = old
+            .copy_all_fragment(&source_id, &engine.schemas)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        // Every named style first, so unreferenced ones survive and the
+        // fragment's own styles are identical, not clashing.
+        let fresh = Document::new(peer)?;
+        for name in old.style_names() {
+            if let Some(style) = old.style(&name) {
+                fresh.define_style(&name, &style)?;
+            }
+        }
+        fresh.commit();
+        let mut editor = reprise_edit::Editor::new(fresh, engine.schemas.clone());
+        let pasted = editor
+            .paste(&fragment, None, &r.document_id)
+            .map_err(Error::from)?;
+        notes.extend(pasted.notes);
+        let doc = editor.into_document();
+        doc.commit();
+        ensure_base_style(&doc)?;
+        let mut package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
+        use reprise_format::{ids, Asset, FontPin};
+        let sections = &source.container().sections;
+        package.set_settings(&source.settings()?)?;
+        package.set_optional_features(source.container().header.features.optional)?;
+        if let Some(raw) = sections.get(&ids::FONTS) {
+            let pins: Vec<FontPin> =
+                serde_json::from_slice(&raw.bytes).map_err(|e| Error::Invalid(e.to_string()))?;
+            package.set_fonts(pins)?;
+        }
+        if let Some(raw) = sections.get(&ids::ASSETS) {
+            let assets: Vec<Asset> =
+                serde_json::from_slice(&raw.bytes).map_err(|e| Error::Invalid(e.to_string()))?;
+            let bundles: BTreeMap<_, _> = sections
+                .iter()
+                .filter(|(id, _)| (ids::FIRST_ASSET..=ids::LAST_ASSET).contains(id))
+                .map(|(id, s)| (*id, s.bytes.clone()))
+                .collect();
+            package.set_assets(assets, bundles)?;
+        }
+        if let Some(extensions) = source.extensions() {
+            package.set_extensions(extensions.to_vec())?;
+        }
+        for (section, content) in sections {
+            match package.set_unknown_section(*section, content.clone()) {
+                // Known and derived sections were handled or are rebuilt.
+                Ok(()) | Err(reprise_format::FormatError::Metadata(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let mut session = DocumentSession::new(
+            doc,
+            package,
+            r.document_id.clone(),
+            r.peer_id.clone(),
+            engine,
+            notes,
+        );
+        session.copied_from = Some(source_id);
+        self.adopt(session)
+    }
     pub fn open(&self, request: &Payload<Open>, bytes: &[u8]) -> Result<DocumentSession> {
         let r = validate(request)?;
         let peer = cv::peer(&r.peer_id)?;
@@ -188,6 +296,8 @@ pub struct DocumentSession {
     shared: Option<Fonts>,
     shared_seen: u64,
     settings_local: bool,
+    /// The document this one was copied from (`import_copy`), if any.
+    copied_from: Option<String>,
 }
 impl DocumentSession {
     /// Runs `f` on this session and turns a panic inside it into
@@ -242,6 +352,7 @@ impl DocumentSession {
             shared: None,
             shared_seen: 0,
             settings_local: false,
+            copied_from: None,
         }
     }
     /// Takes the workspace's font changes since last time, sharing its faces
@@ -1329,6 +1440,7 @@ impl DocumentSession {
     }
     pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>> {
         let r = validate(request)?;
+        self.refuse_source(&r.document_id)?;
         if r.document_id != self.document_id {
             return Err(Error::InvalidId(r.document_id.clone()));
         }

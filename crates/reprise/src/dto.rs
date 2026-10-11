@@ -62,6 +62,14 @@ pub struct Create {
     pub document_id: String,
     pub peer_id: String,
 }
+/// Imports a package as an independent document: a new identity and a fresh
+/// history. `document_id` must differ from the package's own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCopy {
+    pub document_id: String,
+    pub peer_id: String,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Open {
