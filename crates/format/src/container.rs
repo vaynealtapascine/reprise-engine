@@ -463,3 +463,87 @@ mod annotation_tests {
         assert!(back.annotation(id).is_none());
     }
 }
+
+#[cfg(test)]
+mod paragraph_style_tests {
+    use super::*;
+    use reprise_doc::{BlockKind, Document, PersistenceMode, Style, StylePatch};
+
+    fn save(doc: &Document) -> Vec<u8> {
+        crate::Package::new(doc, DocumentId([7; 16]), PersistenceMode::History)
+            .unwrap()
+            .save()
+            .unwrap()
+    }
+
+    fn refused(bytes: &[u8]) -> bool {
+        let old = crate::features::KNOWN_REQUIRED & !crate::features::REQUIRED_PARAGRAPH_STYLES;
+        matches!(
+            Container::decode_known(bytes, Limits::default(), old),
+            Err(FormatError::RequiredFeatures(bits))
+                if bits == crate::features::REQUIRED_PARAGRAPH_STYLES
+        )
+    }
+
+    #[test]
+    fn old_reader_refuses_paragraph_styles_even_after_undo_but_not_untouched_documents() {
+        let doc = Document::new(1).unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "Heading 1", "x")
+            .unwrap();
+        doc.commit();
+        // Naming a built-in, resolving and listing write nothing.
+        doc.computed_style(node).unwrap();
+        doc.style_names();
+        assert!(!refused(&save(&doc)));
+        let mut undo = doc.undo_stack();
+        doc.patch_named_style(
+            "Heading 1",
+            &StylePatch {
+                set: Style {
+                    keep_together: Some(false),
+                    ..Style::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        doc.commit();
+        assert!(refused(&save(&doc)));
+        assert!(undo.undo().unwrap());
+        assert!(refused(&save(&doc)), "the operations stay in history");
+        Container::decode(&save(&doc), Limits::default()).unwrap();
+        // Nested forms written through the legacy API need the bit too.
+        for style in [
+            Style {
+                widows: Some(2),
+                ..Style::default()
+            },
+            Style {
+                alignment: Some(reprise_doc::marks::Alignment::Justify),
+                ..Style::default()
+            },
+        ] {
+            let doc = Document::new(1).unwrap();
+            let node = doc.append_block(BlockKind::Paragraph, "", "x").unwrap();
+            doc.set_overrides(node, &style).unwrap();
+            doc.commit();
+            assert!(refused(&save(&doc)));
+        }
+        // A clearing formatting action needs it as well.
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "xyz").unwrap();
+        doc.format_text(
+            node,
+            0..2,
+            &reprise_doc::formatting::TextStyle {
+                clear: ["color".to_string()].into(),
+                ..Default::default()
+            },
+            reprise_doc::text::RangePolicy::EXPANDING,
+        )
+        .unwrap();
+        doc.commit();
+        assert!(refused(&save(&doc)));
+    }
+}

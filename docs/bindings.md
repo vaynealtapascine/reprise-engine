@@ -274,6 +274,7 @@ returns an acknowledgement rather than an error.
 | `bindings.render` | Backend could not render the requested page |
 | `bindings.missing-font` | `glyph_outlines` named a face the session doesn't have |
 | `bindings.poisoned` | The engine panicked; discard the session and reopen it (see below) |
+| `bindings.copy-source` | A document made by `import_copy` was given a packet of the document it was copied from |
 
 Important v1 bounds: JSON 20 MiB/depth 64; JS object graph 100,000 values,
 depth 64, 10,000 array entries, 1,024 own keys/object and 20 Mi UTF-16 units;
@@ -519,3 +520,104 @@ content; a nonempty target keeps its page. Partial copies omit page setup.
 The optional native-fragment field is absent from older fragments, and strict
 older readers refuse new fragments that contain it. It carries authored
 properties rather than geometry resolved for a particular viewport.
+
+## Paragraph styles (`docs/paragraph-styles.md`)
+
+Commands, all ordinary transaction commands with one undo step per
+transaction:
+
+-   `define-style { name, parent, style }` defines `name` as exactly `style`
+    (a built-in of that name no longer applies).
+-   `update-style { name, parent?, style, clear? }` sets the supplied
+    properties of a live style (built-ins included, property by property) and
+    clears the listed ones; `parent` absent keeps it, `clear: ["parent"]`
+    removes it.
+-   `rename-style { from, to }`: blocks and child styles naming `from` follow.
+-   `delete-style { name }`: whatever names it resolves through its parent
+    (`style.deleted`). The base (empty name) can't be renamed or deleted.
+-   `apply-style { node, style }`: `null` returns the block to the base.
+-   `set-style { node, style, clear? }`: without `clear` it replaces the
+    direct overrides, as before; with `clear` (even `[]`) it patches.
+-   `format-text` takes `style.clear` for character fields.
+-   `set-alignment` takes `alignment: null`: at `at: null` it removes the
+    paragraph's direct alignment, at a point it removes that line's default.
+
+"Inherit" is always a `StyleProperty` name in a `clear` list (kebab-case:
+`parent`, `families`, `size`, `line-height`, `alignment`, `tabs`, `weight`,
+`slant`, `underline`, `strike`, `color`, `indent-start`, `indent-end`,
+`indent-first`, `space-before`, `space-after`, `keep-with-next`,
+`keep-together`, `widows`, `orphans`, `background`, and for `format-text`
+only `language` and `features`). `null` keeps meaning "unchanged" in
+`TextStyle`, so existing callers are unaffected.
+
+`Style` gains optional `indent_start`, `indent_end`, `indent_first`,
+`space_before`, `space_after` (expression text: `12pt`, `1.5em`, `1lh`, `5%`
+of the block's inline size), `keep_with_next`, `keep_together`, `widows`,
+`orphans` (1..32) and `background` (RGBA); `Alignment` gains `justify`.
+
+`State` gains `styles` (live named styles, built-ins included, sorted, at
+most 1,024 with `bindings.limit` past that) and `resolved` (distinct resolved
+paragraph styles, lengths in 1/1024 pt). Each block gains its one additive
+field `style: { name, direct, resolved }`, where `resolved` indexes
+`State.resolved`; blocks sharing a style and overrides share an entry, and
+the session resolves each (style, overrides) pair once per revision. Styles
+resolve in the first main frame of the effective page template, so a
+percentage indent shows its value there.
+
+## Transactions and host plumbing
+
+Design and rationale: [plumbing.md](plumbing.md).
+
+**Replace.** `replace_selection(Payload<ReplaceSelection>, bytes)` (native
+clipboard fragment) and `replace_text(Payload<ReplaceText>)` (plain text or
+HTML) replace an anchored `StableSelection` in one transaction and one undo
+step. The selection is resolved inside the transaction, so a remote edit cannot
+land between the delete and the insert; a fragment the engine cannot read is
+refused (`clipboard.*`) before anything is deleted. The result is `Replaced {
+applied, selection }`: the deletion's and the paste's effects in order, and a
+collapsed selection at the end of the inserted content. If the host anchored a
+selection with `set_selection`, it follows. A range spanning blocks is taken in
+document order; reading-order overrides are not consulted.
+
+**Batch.** `batch(Payload<Batch>)` takes `{ commands, expected_revision,
+selection }`. The commands are validated whole, so a refused one (the error's
+`command` is its index) writes nothing, not even a revision. A stale
+`expected_revision` is `bindings.stale` with nothing written. `selection` comes
+back mapped through the effects. A replacement cannot be a batch command.
+
+**Import as a copy.** `Workspace.import_copy(Payload<ImportCopy>, bytes)` opens
+a package under a new document id and a fresh history. Kept: content,
+formatting, structure, every named style, page setup, relations, ranges,
+tables, images, assets, font pins, settings and unknown sections. Dropped:
+history, undo, presence, the source id and peers. A copy refuses packets that
+name its source (`bindings.copy-source`); the engine does not authenticate
+senders, so the relay must keep one room per document id.
+
+**Fonts once per workspace.** `Workspace.declare_font(request, Uint8Array)` and
+`Workspace.set_font_settings(request)` apply to every session the workspace
+opened or opens. A face is parsed once and shared by handle; sessions take new
+faces when they next lay out, save or paste. `Workspace::font_handles(face)`
+counts holders (tests and diagnostics). `DocumentSession.declare_font` remains
+for a face that belongs to one document. A session's own `set_font_settings`
+stops it following the workspace settings. On Tauri, keep one engine thread
+owning one `Workspace`, receive font bytes over Tauri's binary IPC (a raw
+request body, never a JSON array of numbers) and open every session from it.
+
+**Mark facts.** An anchor `Mark` carries `edge` (the authored source edge),
+`target_node`, `target_offset`, `target_edge` and `diagnostic` (the code of the
+layout diagnostic that explains an unapplied or suspect pin:
+`relation.alignment-cycle`, `-limit`, `-outside`, `-conflict` or `-invalid`).
+`diagnostics_for(Payload<DiagnosticFilter>)` filters `diagnostics()` by code
+prefix, minimum severity and subject (`relation:<id>`), capped at 1000.
+
+**Reading order.** Each `ReadingStep` has `start` and `end`, the UTF-8 byte
+range of its line in its block's text. The lines of a block tile it.
+
+**One packet bound.** `MAX_PACKET_BYTES` (Rust), `maxPacketBytes()` and the type
+`PacketBound` (WASM/TypeScript) are 32 MiB, the sync layer's bound on a packet
+body. The relay (32 MiB) already matches; browser persistence (16 MiB) should
+raise its cap to this number so a document the engine and relay accept can be
+stored locally.
+
+The reference worker adds request kinds `import-copy`, `workspace-font`,
+`workspace-font-settings`, `batch`, `replace`, `replace-text` and `diagnostics`.

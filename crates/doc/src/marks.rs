@@ -19,6 +19,9 @@ pub enum Alignment {
     Start,
     Centre,
     End,
+    /// Lines stretch to fill their interval; the last line, and lines ending
+    /// at a hard break, are set at the start (`docs/paragraph-styles.md`).
+    Justify,
 }
 impl Alignment {
     pub fn keyword(self) -> &'static str {
@@ -26,6 +29,7 @@ impl Alignment {
             Self::Start => "start",
             Self::Centre => "centre",
             Self::End => "end",
+            Self::Justify => "justify",
         }
     }
     pub fn parse(raw: &str) -> Option<Self> {
@@ -33,6 +37,7 @@ impl Alignment {
             "start" => Some(Self::Start),
             "centre" => Some(Self::Centre),
             "end" => Some(Self::End),
+            "justify" => Some(Self::Justify),
             _ => None,
         }
     }
@@ -107,6 +112,7 @@ impl TabStops {
         }
         for stop in &self.stops {
             if end_seen
+                || stop.alignment == Alignment::Justify
                 || stop
                     .leader
                     .is_some_and(|c| c.is_control() || c.is_whitespace())

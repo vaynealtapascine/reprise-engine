@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 99);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 101);
 }
 
 hostile_tests!(
@@ -1168,3 +1168,5 @@ hostile_tests!(
     page_setup_conflicting_margins
 );
 hostile_tests!(font_host_oblique);
+hostile_tests!(paragraph_style_storm);
+hostile_tests!(plumbing_mark_facts);

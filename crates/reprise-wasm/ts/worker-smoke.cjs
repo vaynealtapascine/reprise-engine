@@ -86,6 +86,30 @@ function send(data) {
   assert.deepEqual(Array.from(new Set(marksResponse.page.data.marks.map(m => m.kind))).sort(), ["alignment", "anchor", "gap", "line-break", "paragraph-end"]);
   assert.ok(marksResponse.page.data.marks.some(m => m.kind === "anchor" && m.applied && m.state === "valid"));
   assert.equal((await send({ kind: "marks", page: 99 })).kind, "error");
+  // Plumbing: batch, atomic replace, workspace font, diagnostics, import as a copy.
+  const plain = { families: null, size: null, line_height: null };
+  await send({ kind: "create", request: p({ document_id: "20112233445566778899aabbccddeeff", peer_id: "53" }) });
+  const base = await send({ kind: "edit", request: p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "hello world", style: plain }] }) });
+  const baseNode = base.applied.data.blocks[0];
+  const failing = await send({ kind: "batch", request: p({ commands: [
+    { kind: "insert-text", node: baseNode, at: 0, text: ">" },
+    { kind: "insert-block", parent: null, index: 1, block_kind: "paragraph", text: "b", style: plain },
+    { kind: "delete-text", node: baseNode, start: 90, end: 99 }], expected_revision: null, selection: null }) });
+  assert.equal(failing.kind, "error"); assert.equal(failing.error.data.command, 2);
+  const batched = await send({ kind: "batch", request: p({ commands: [{ kind: "insert-text", node: baseNode, at: 0, text: ">> " }], expected_revision: base.state.data.revision, selection: null }) });
+  assert.equal(batched.kind, "batched"); assert.equal(batched.state.data.blocks[0].text, ">> hello world");
+  const anchored = await send({ kind: "selection", request: p({ anchor: { node: baseNode, offset: 9, affinity: "downstream" }, focus: { node: baseNode, offset: 14, affinity: "downstream" } }) });
+  const replaced = await send({ kind: "replace-text", request: p({ selection: anchored.stable.data, text: "there", html: false }) });
+  assert.equal(replaced.kind, "replaced"); assert.equal(replaced.state.data.blocks[0].text, ">> hello there");
+  const diagnostics = await send({ kind: "diagnostics", request: p({ code_prefix: "relation.", min_severity: null, subject: null, limit: 5 }) });
+  assert.equal(diagnostics.kind, "diagnostics"); assert.equal(diagnostics.list.data.truncated, false);
+  const fontBytes = new Uint8Array(fs.readFileSync(path.join(__dirname, "../../../fixtures/fonts/AtkinsonHyperlegibleNext-Regular.ttf")));
+  const face = await send({ kind: "workspace-font", request: p({ family: "Universal", weight: 400, style: "normal", stretch: 1000, face_index: 0 }), bytes: fontBytes });
+  assert.equal(face.kind, "face"); assert.equal(face.face.data.family, "Universal");
+  const saved = await send({ kind: "save" });
+  const copied = await send({ kind: "import-copy", request: p({ document_id: "30112233445566778899aabbccddeeff", peer_id: "54" }), bytes: saved.content.data.bytes });
+  assert.equal(copied.kind, "state"); assert.equal(copied.state.data.document_id, "30112233445566778899aabbccddeeff");
+  assert.equal(copied.state.data.blocks[0].text, ">> hello there");
   assert.equal((await send({ kind: "close" })).kind, "ack");
   console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

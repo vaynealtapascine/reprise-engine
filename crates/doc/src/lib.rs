@@ -98,8 +98,10 @@ pub mod emphasis;
 pub use emphasis::{Decoration, TextSlant};
 
 pub use style::{
-    Authored, Computed, ComputedStyle, LengthExpr, Property, Specified, StageExplanation, Style,
-    StyleResolution, TEXT_COMBINE_UPRIGHT, TEXT_ORIENTATION, default_style,
+    Authored, BUILTIN_STYLES, Computed, ComputedStyle, LengthExpr, MAX_LINE_KEEP, MAX_STYLE_NAME,
+    MAX_STYLES, PARAGRAPH_KEYS, Property, STORED_KEYS, Specified, StageExplanation, Style,
+    StylePatch, StyleRecord, StyleResolution, StyleStatus, TEXT_COMBINE_UPRIGHT, TEXT_ORIENTATION,
+    builtin_style, check_style_name, default_style, specify_parts, style_chain,
 };
 pub use table::{CellInfo, Column, ColumnWidth, RowInfo, TableColumns, TableRole};
 pub use table_grid::{
@@ -422,14 +424,15 @@ impl Document {
             .get_map("styles")
             .insert_container(name, LoroMap::new())?;
         style.write(&map)?;
+        self.reset_flat_style(name)?;
         Ok(())
     }
 
+    /// The live definition of a named style: the document's (nested and
+    /// flat), else the built-in one, following renames. `None` when it is
+    /// undefined or deleted. See `docs/paragraph-styles.md`.
     pub fn style(&self, name: &str) -> Option<Style> {
-        match self.doc.get_map("styles").get(name)? {
-            ValueOrContainer::Container(Container::Map(m)) => Some(Style::read(&m)),
-            _ => None,
-        }
+        self.live_style(name)
     }
 
     /// Appends a top-level block.
@@ -479,6 +482,7 @@ impl Document {
             _ => Style::default(),
         };
         self.read_mark_patches(id, &mut overrides);
+        self.read_para_patches(id, &mut overrides);
         Ok(Block {
             id,
             kind,
@@ -497,6 +501,7 @@ impl Document {
 
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
         self.clear_mark_patches(id)?;
+        self.clear_para_patches(id)?;
         let meta = self.meta_of(id)?;
         let map = meta.insert_container("overrides", LoroMap::new())?;
         style.write(&map)?;

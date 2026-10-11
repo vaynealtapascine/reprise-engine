@@ -259,11 +259,24 @@ required mask predates bit 12 refuses before decoding the document section.
 Untouched documents, empty page patches, and refused commands retain their old
 required mask. No container version or frozen template JSON envelope changes.
 
-## Annotations feature (required bit 13)
+## Paragraph styles feature (required bit 13)
+
+`REQUIRED_PARAGRAPH_STYLES` is declared when the flat `styles1` (named-style
+properties and states) or `para1` (per-block property patches) roots are
+retained, even emptied by undo; when any nested style or override map holds a
+paragraph key (`indent-start`, `indent-end`, `indent-first`, `space-before`,
+`space-after`, `keep-with-next`, `keep-together`, `widows`, `orphans`,
+`background`); when `alignment` is `justify` anywhere, `marks1` included; and
+when a `format1` envelope carries `clear`. An older reader would silently drop
+those properties, styles or masks, so it must refuse. Untouched documents,
+including those that only name built-in styles, keep their old mask. See
+`docs/paragraph-styles.md`; the bit number may be renumbered on integration.
+
+## Annotations feature (required bit 16)
 
 `REQUIRED_ANNOTATIONS` is declared whenever any persistent range carries an
 `annot1` annotation envelope or an `annot-restore1` restore hint, including
 removed (tombstoned), unreadable and future-kind records. An older reader would
 show such ranges as bare ranges and copy them without their data, so it must
 refuse the package. Documents without annotations keep their old required mask.
-See `docs/annotations.md`. Bit numbers may be renumbered at integration.
+See `docs/annotations.md`. Bits 14 and 15 are reserved for lists and inline objects.

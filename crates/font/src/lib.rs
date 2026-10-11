@@ -297,6 +297,14 @@ impl FontStore {
         id
     }
 
+    /// Adds a face another store already holds, sharing it (no byte copy).
+    /// Hosts use this to give every document of a workspace the same faces.
+    pub fn add_shared(&mut self, face: Arc<Face>) -> FaceId {
+        let id = face.id.clone();
+        self.faces.insert(id.clone(), face);
+        id
+    }
+
     pub fn get(&self, id: &FaceId) -> Result<&Arc<Face>, FontError> {
         self.faces
             .get(id)
