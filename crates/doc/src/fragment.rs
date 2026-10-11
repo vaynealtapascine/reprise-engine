@@ -35,6 +35,11 @@ pub struct FragmentBlock {
     /// Effective paragraph-local text overrides, flattened from anchored actions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub formatting: Vec<crate::formatting::FormatRun>,
+    /// The inline objects of `text`'s U+FFFC characters, one each, in order
+    /// (see `docs/inline.md`). Pasting gives them new identity. Older engines
+    /// refuse a fragment that has them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline: Vec<crate::inline::InlineObject>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -131,6 +136,14 @@ impl Fragment {
                 return Err(FragmentError::Invalid(
                     "reserved flow marker in authored text".into(),
                 ));
+            }
+            if block.text.matches(crate::text::OBJECT).count() != block.inline.len() {
+                return Err(FragmentError::Invalid(
+                    "inline objects don't match their markers".into(),
+                ));
+            }
+            for object in &block.inline {
+                object.validate().map_err(FragmentError::Invalid)?;
             }
             let depth = match block.parent {
                 Some(p) => nodes.get(&p).map(|(_, d)| d + 1).ok_or_else(|| {
@@ -309,6 +322,7 @@ impl Document {
                 table: get_str(&meta, "table1"),
                 image: get_str(&meta, "image1"),
                 formatting,
+                inline: self.inline_slice(node, bytes.clone()).map_err(bad)?,
             });
             cuts.insert(node, bytes);
             if cut.is_none() {

@@ -15,8 +15,9 @@ use loro::{
     Container, Frontiers, ID, LoroDoc, LoroMap, LoroText, LoroTree, LoroValue, TreeID,
     TreeParentId, ValueOrContainer,
 };
-use reprise_text::{Anchor, BREAK, Resolved, Segment, Span, Text, TextError};
+use reprise_text::{Anchor, BREAK, OBJECT, Resolved, Segment, Span, Text, TextError};
 
+use crate::inline::{ObjectMark, ObjectState};
 use crate::lifecycle::STAGE_ORIGIN;
 use crate::{BlockKind, DocError, Document, NodeId, get_str};
 
@@ -51,6 +52,8 @@ pub(crate) struct HostFlow {
     /// Every break character with a readable break record, active or not,
     /// with its scalar index, in text order.
     pub(crate) marks: Vec<(NodeId, usize)>,
+    /// Every U+FFFC of the host's text, in text order (see `inline`).
+    pub(crate) objects: Vec<ObjectMark>,
 }
 
 #[derive(Debug)]
@@ -217,6 +220,12 @@ impl Span for ParaSpan {
             .map(|p| p.segs.clone())
             .ok_or(TextError::TextGone)
     }
+
+    fn retire(&self, objects: &[usize]) -> Result<Vec<usize>, TextError> {
+        let doc = Document::wrap_with(self.doc.clone(), self.flows.clone());
+        doc.retire_objects(self.id.node, objects)
+            .map_err(|e| TextError::Store(e.to_string()))
+    }
 }
 
 /// Whether node metadata describes a flow host.
@@ -303,12 +312,20 @@ impl Document {
         let s = text.to_string();
         let mut b = Builder::new(host);
         let mut marks = Vec::new();
-        if s.contains(BREAK) {
+        let mut objects = Vec::new();
+        if s.contains(BREAK) || s.contains(OBJECT) {
             let records = self.break_records();
             let mut seen = HashSet::new();
             let mut u = 0;
             for (byte, c) in s.char_indices() {
-                if c == BREAK {
+                if c == OBJECT {
+                    let id = text.get_cursor(u, Side::Left).and_then(|c| c.id);
+                    let state = id.map_or(ObjectState::Orphan, |id| self.object_state(host, id));
+                    objects.push(ObjectMark { id, u, state });
+                    if state != ObjectState::Visible {
+                        b.hidden(byte, u);
+                    }
+                } else if c == BREAK {
                     let id = text.get_cursor(u, Side::Left).and_then(|c| c.id);
                     let (mark, recorded) = match id {
                         Some(id) => self.classify(&tree, &records, host, id, &mut seen),
@@ -338,13 +355,13 @@ impl Document {
             for p in &mut paras {
                 p.segs = bound(std::mem::take(&mut p.segs), &p.region);
             }
-            return Some(finish(head_live, paras, marks));
+            return Some(finish(head_live, paras, marks, objects));
         }
         let mut paras = b.finish(s.len(), text.len_unicode());
         for p in &mut paras {
             p.segs = bound(std::mem::take(&mut p.segs), &p.region);
         }
-        Some(finish(head_live, paras, marks))
+        Some(finish(head_live, paras, marks, objects))
     }
 
     /// What a break character is: (meaning, whether it has a readable break
@@ -743,6 +760,9 @@ impl Document {
         // The copy is a distinct tree node. Placing it back in the source's
         // own flow cannot create a tree cycle.
         self.check_not_inside(staged, placement)?;
+        // The staged copy's U+FFFC characters become new objects first, so
+        // its text has the copied length before lineage is recorded.
+        self.stage_inline_copies(staged, &self.inline_slice(id, 0..len)?)?;
         let formatting = self.prepare_format_copy(id, 0..len, Some(staged))?;
         self.put(staged, placement)?;
         self.restore_block(staged)?;
@@ -804,12 +824,18 @@ pub(crate) enum Placement {
     Embed { host: TreeID, at: usize },
 }
 
-fn finish(head_live: bool, paras: Vec<Para>, marks: Vec<(NodeId, usize)>) -> HostFlow {
+fn finish(
+    head_live: bool,
+    paras: Vec<Para>,
+    marks: Vec<(NodeId, usize)>,
+    objects: Vec<ObjectMark>,
+) -> HostFlow {
     let index = paras.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
     HostFlow {
         head_live,
         paras,
         index,
         marks,
+        objects,
     }
 }

@@ -40,6 +40,9 @@ pub mod hostile;
 #[cfg(test)]
 mod hostile_tests;
 pub mod image;
+pub mod inline;
+#[cfg(test)]
+mod inline_tests;
 pub mod invariants;
 mod lifecycle;
 pub mod marks;
@@ -72,6 +75,10 @@ pub use flow::MAX_FLOW_DEPTH;
 pub use function::FunctionRegistry;
 pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
+};
+pub use inline::{
+    InlineAlign, InlineAudit, InlineEntry, InlineId, InlineImage, InlineObject, InlinePatch,
+    InlineSize,
 };
 pub use page::{
     Basis, Dim, FrameRole, FrameTemplate, FrameTransform, MAIN_FLOW, Medium, PageTemplate,

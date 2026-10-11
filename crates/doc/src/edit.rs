@@ -231,12 +231,14 @@ impl Document {
         let block = self.block(id)?;
         let tail = block.text.slice(at..block.text.len())?;
         self.prepare_format_copy(id, at..block.text.len(), None)?;
+        let objects = self.inline_slice(id, at..block.text.len())?;
         let new = self.stage_block(&NewBlock {
             kind: block.kind,
             style: block.style.unwrap_or_default(),
             overrides: block.overrides,
             text: tail,
         })?;
+        self.stage_inline_copies(new, &objects)?;
         self.split_block_into(id, at, new)?;
         Ok(new)
     }
@@ -298,7 +300,8 @@ impl Document {
         }
         let at = a.text.len();
         let formatting = self.prepare_format_copy(second, 0..b.text.len(), Some(first))?;
-        a.text.insert(at, &b.text.to_string())?;
+        let objects = self.inline_slice(second, 0..b.text.len())?;
+        self.insert_with_inline(first, at, &b.text.to_string(), &objects)?;
         self.record_transfer(second, 0, first, at, b.text.len())?;
         self.supersede(second, first)?;
         self.delete_block(second)?;

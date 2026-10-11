@@ -385,6 +385,7 @@ pub(crate) fn write(
         if let Some(raw) = &block.image {
             doc.stage_fragment_image(new, raw).map_err(store)?;
         }
+        doc.stage_inline_copies(new, &block.inline).map_err(store)?;
         result.ids.nodes.insert(block.id, new);
         result.applied.blocks.push(new);
     }
@@ -690,11 +691,8 @@ fn write_into_flow(
             continue;
         };
         if !block.text.is_empty() {
-            doc.block(target)
-                .map_err(store)?
-                .text
-                .insert(at, &block.text)
-                .map_err(|e| store(e.into()))?;
+            doc.insert_with_inline(target, at, &block.text, &block.inline)
+                .map_err(store)?;
             result.applied.effects.push(Effect::Text {
                 node: target,
                 at,
@@ -731,6 +729,7 @@ fn write_into_flow(
         if let Some(raw) = &block.image {
             doc.stage_fragment_image(new, raw).map_err(store)?;
         }
+        doc.stage_inline_copies(new, &block.inline).map_err(store)?;
         result.ids.nodes.insert(block.id, new);
         result.applied.blocks.push(new);
     }
