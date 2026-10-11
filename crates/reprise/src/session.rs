@@ -6,6 +6,7 @@ use reprise_layout::incremental::{LayoutCache, LayoutContinuation, LayoutSession
 use reprise_layout::{Engine, LayoutSnapshot};
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 // InsertBlock's empty named style is the session base. Preserve an existing
 // definition, including custom authored defaults in a package.
@@ -23,12 +24,89 @@ fn ensure_base_style(doc: &Document) -> Result<()> {
     Ok(())
 }
 
-/// Workspace factory. Each document owns isolated font/plugin configuration.
+/// Font state shared by every session of one [`Workspace`].
 #[derive(Default)]
-pub struct Workspace;
+struct SharedFonts {
+    /// Parsed once; sessions copy the `Arc`, never the bytes.
+    faces: Vec<Arc<reprise_font::Face>>,
+    settings: Option<reprise_font::FontSettings>,
+    /// Bumped by every change; a session compares it with the one it last saw.
+    generation: u64,
+}
+type Fonts = Arc<Mutex<SharedFonts>>;
+fn lock(fonts: &Fonts) -> MutexGuard<'_, SharedFonts> {
+    // Nothing panics while holding the lock; recover the data regardless.
+    fonts.lock().unwrap_or_else(PoisonError::into_inner)
+}
+/// The most faces one workspace holds (a font menu is far smaller).
+const MAX_WORKSPACE_FACES: usize = 256;
+
+/// Workspace factory. Documents opened from one workspace share its declared
+/// fonts and font settings; plugin configuration stays per document.
+///
+/// Fonts declared here are parsed once and held as shared handles, so opening
+/// a document copies pointers instead of megabytes. A session also keeps its
+/// own `declare_font` for a face that belongs to that document alone.
+#[derive(Default)]
+pub struct Workspace {
+    fonts: Fonts,
+}
 impl Workspace {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+    /// Declares a font for every session of this workspace, present and
+    /// future. Sessions pick it up when they next lay out, save or paste.
+    /// Declaring the same bytes and descriptors again changes nothing.
+    pub fn declare_font(
+        &self,
+        request: &Payload<FontDeclaration>,
+        bytes: &[u8],
+    ) -> Result<Payload<Face>> {
+        let r = validate(request)?;
+        if bytes.len() > 32 * 1024 * 1024 {
+            return Err(Error::Limit("font bytes".into()));
+        }
+        let face = reprise_font::Face::declared(bytes.to_vec(), Some(cv::font_declaration(r)))
+            .map_err(|e| Error::note(e.note()))?;
+        let out = Face {
+            family: face.id().family.clone(),
+            hash: face.id().hash.clone(),
+        };
+        let mut shared = lock(&self.fonts);
+        if !shared.faces.iter().any(|f| f.id() == face.id()) {
+            if shared.faces.len() >= MAX_WORKSPACE_FACES {
+                return Err(Error::Limit("workspace faces".into()));
+            }
+            shared.faces.push(Arc::new(face));
+            shared.generation = shared.generation.saturating_add(1);
+        }
+        Ok(Payload::new(out))
+    }
+    /// Default font settings for every session of this workspace. A session
+    /// that calls its own `set_font_settings` stops following them.
+    pub fn set_font_settings(&self, request: &Payload<FontSettings>) -> Result<Payload<()>> {
+        let settings = cv::font_settings(validate(request)?);
+        settings.validate().map_err(Error::note)?;
+        let mut shared = lock(&self.fonts);
+        shared.settings = Some(settings);
+        shared.generation = shared.generation.saturating_add(1);
+        Ok(Payload::new(()))
+    }
+    /// How many holders share `face`: one for the workspace plus one for each
+    /// session that has picked it up. `None` when the workspace has no such
+    /// face. A count rather than a timing, for tests and diagnostics.
+    pub fn font_handles(&self, face: &Face) -> Option<usize> {
+        lock(&self.fonts)
+            .faces
+            .iter()
+            .find(|f| f.id().family == face.family && f.id().hash == face.hash)
+            .map(Arc::strong_count)
+    }
+    fn adopt(&self, mut session: DocumentSession) -> Result<DocumentSession> {
+        session.shared = Some(self.fonts.clone());
+        session.sync_fonts()?;
+        Ok(session)
     }
     pub fn create(&self, request: &Payload<Create>) -> Result<DocumentSession> {
         let r = validate(request)?;
@@ -37,7 +115,7 @@ impl Workspace {
         let doc = Document::new(peer)?;
         ensure_base_style(&doc)?;
         let package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
-        Ok(DocumentSession::new(
+        self.adopt(DocumentSession::new(
             doc,
             package,
             r.document_id.clone(),
@@ -45,6 +123,153 @@ impl Workspace {
             Engine::new(reprise_font::FontStore::default()),
             Vec::new(),
         ))
+    }
+    /// Imports a package as a new, independent document. See `docs/plumbing.md`.
+    ///
+    /// *Kept:* text and formatting, the block tree, every named style, page
+    /// setup and templates, relations, ranges, tables, images, bundled assets,
+    /// font pins, package settings, extension bytes and unknown sections.
+    /// *Dropped:* CRDT history, undo, presence, the source document id and
+    /// peers. The content is replayed into a fresh CRDT document authored by
+    /// `peer_id`, so the copy shares no operation with the source: a source
+    /// delta cannot apply to it, and a packet naming the source is refused
+    /// with `bindings.copy-source`. The source bytes are not modified.
+    pub fn import_copy(
+        &self,
+        request: &Payload<ImportCopy>,
+        bytes: &[u8],
+    ) -> Result<DocumentSession> {
+        let r = validate(request)?;
+        let id = cv::document_id(&r.document_id)?;
+        let peer = cv::peer(&r.peer_id)?;
+        if bytes.len() > 128 * 1024 * 1024 {
+            return Err(Error::Limit("package bytes".into()));
+        }
+        let mut opened = reprise_format::Package::open(
+            bytes,
+            peer,
+            reprise_format::Limits::default(),
+            &reprise_format::MigrationRegistry::builtin(),
+        )?;
+        if opened.is_read_only() {
+            return Err(Error::ReadOnly);
+        }
+        let source = opened.package().clone();
+        if source.document_id() == id {
+            return Err(Error::InvalidId(r.document_id.clone()));
+        }
+        let source_id: String = source
+            .document_id()
+            .0
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut engine = Engine::new(reprise_font::FontStore::default());
+        opened.restore_fonts(&mut engine.fonts);
+        opened
+            .notes
+            .extend(opened.assets.restore_images(&mut engine.assets));
+        let mut notes = opened.notes.clone();
+        let old = opened.into_document()?;
+        let fragment = old
+            .copy_all_fragment(&source_id, &engine.schemas)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        // Every named style first, so unreferenced ones survive and the
+        // fragment's own styles are identical, not clashing. Each live style
+        // is written as its effective definition (nested and flat patches
+        // folded together); an untouched built-in is left to the engine so
+        // the copy needs no more format features than its source.
+        let fresh = Document::new(peer)?;
+        let (names, cut) = old.style_names();
+        if cut {
+            return Err(Error::Limit("named styles".into()));
+        }
+        for name in &names {
+            let Some(record) = old.style_record(name) else {
+                continue;
+            };
+            let builtin = record
+                .builtin
+                .then(|| reprise_doc::builtin_style(name))
+                .flatten();
+            let Some(base) = builtin else {
+                fresh.define_style(name, &record.style)?;
+                continue;
+            };
+            // A patched built-in stays a patch, so it keeps following the
+            // engine's definition for the properties it did not change.
+            let mut patch = reprise_doc::StylePatch::default();
+            for property in reprise_doc::STORED_KEYS {
+                match (record.style.stored(property), base.stored(property)) {
+                    (mine, theirs) if mine == theirs => {}
+                    (Some(raw), _) => patch.set.apply_stored(property, raw),
+                    (None, _) => {
+                        patch.clear.insert(property.to_string());
+                    }
+                }
+            }
+            if patch != reprise_doc::StylePatch::default() {
+                fresh.patch_named_style(name, &patch)?;
+            }
+        }
+        // A built-in the source deleted or renamed away stays gone.
+        for name in reprise_doc::BUILTIN_STYLES {
+            if old
+                .style_record(name)
+                .is_some_and(|r| r.status != reprise_doc::StyleStatus::Live)
+            {
+                fresh.delete_named_style(name)?;
+            }
+        }
+        fresh.commit();
+        let mut editor = reprise_edit::Editor::new(fresh, engine.schemas.clone());
+        let pasted = editor
+            .paste(&fragment, None, &r.document_id)
+            .map_err(Error::from)?;
+        notes.extend(pasted.notes);
+        let doc = editor.into_document();
+        doc.commit();
+        ensure_base_style(&doc)?;
+        let mut package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
+        use reprise_format::{Asset, FontPin, ids};
+        let sections = &source.container().sections;
+        package.set_settings(&source.settings()?)?;
+        package.set_optional_features(source.container().header.features.optional)?;
+        if let Some(raw) = sections.get(&ids::FONTS) {
+            let pins: Vec<FontPin> =
+                serde_json::from_slice(&raw.bytes).map_err(|e| Error::Invalid(e.to_string()))?;
+            package.set_fonts(pins)?;
+        }
+        if let Some(raw) = sections.get(&ids::ASSETS) {
+            let assets: Vec<Asset> =
+                serde_json::from_slice(&raw.bytes).map_err(|e| Error::Invalid(e.to_string()))?;
+            let bundles: BTreeMap<_, _> = sections
+                .iter()
+                .filter(|(id, _)| (ids::FIRST_ASSET..=ids::LAST_ASSET).contains(id))
+                .map(|(id, s)| (*id, s.bytes.clone()))
+                .collect();
+            package.set_assets(assets, bundles)?;
+        }
+        if let Some(extensions) = source.extensions() {
+            package.set_extensions(extensions.to_vec())?;
+        }
+        for (section, content) in sections {
+            match package.set_unknown_section(*section, content.clone()) {
+                // Known and derived sections were handled or are rebuilt.
+                Ok(()) | Err(reprise_format::FormatError::Metadata(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let mut session = DocumentSession::new(
+            doc,
+            package,
+            r.document_id.clone(),
+            r.peer_id.clone(),
+            engine,
+            notes,
+        );
+        session.copied_from = Some(source_id);
+        self.adopt(session)
     }
     pub fn open(&self, request: &Payload<Open>, bytes: &[u8]) -> Result<DocumentSession> {
         let r = validate(request)?;
@@ -77,7 +302,7 @@ impl Workspace {
         let notes = opened.notes.clone();
         let doc = opened.into_document()?;
         ensure_base_style(&doc)?;
-        Ok(DocumentSession::new(
+        self.adopt(DocumentSession::new(
             doc,
             package,
             id,
@@ -105,6 +330,13 @@ pub struct DocumentSession {
     workers: std::sync::Arc<dyn reprise_layout::workers::Workers>,
     /// Set when a contained call panicked; see [`DocumentSession::contain`].
     poisoned: Option<String>,
+    /// The workspace's shared fonts, and the generation of them this session
+    /// has taken. `settings_local` is set once the session chose its own.
+    shared: Option<Fonts>,
+    shared_seen: u64,
+    settings_local: bool,
+    /// The document this one was copied from (`import_copy`), if any.
+    copied_from: Option<String>,
     /// Resolved paragraph styles for `state`, per (style, overrides), valid
     /// for one revision and session generation.
     style_cache: std::cell::RefCell<StyleCache>,
@@ -167,8 +399,44 @@ impl DocumentSession {
             selection: None,
             workers: std::sync::Arc::new(reprise_layout::workers::Serial),
             poisoned: None,
+            shared: None,
+            shared_seen: 0,
+            settings_local: false,
+            copied_from: None,
             style_cache: Default::default(),
         }
+    }
+    /// Takes the workspace's font changes since last time, sharing its faces
+    /// by handle. Invalidates layout only when something changed.
+    fn sync_fonts(&mut self) -> Result<()> {
+        let Some(shared) = self.shared.clone() else {
+            return Ok(());
+        };
+        let shared = lock(&shared);
+        if shared.generation == self.shared_seen {
+            return Ok(());
+        }
+        for face in &shared.faces {
+            let held = self
+                .engine
+                .fonts
+                .get(face.id())
+                .is_ok_and(|have| Arc::ptr_eq(have, face));
+            if !held {
+                self.engine.fonts.add_shared(face.clone());
+            }
+        }
+        if !self.settings_local
+            && let Some(settings) = &shared.settings
+            && self.engine.fonts.settings() != settings
+        {
+            self.engine
+                .fonts
+                .set_settings(settings.clone())
+                .map_err(Error::note)?;
+        }
+        self.shared_seen = shared.generation;
+        self.reconfigure()
     }
     fn doc(&self) -> &Document {
         self.editor.document()
@@ -386,11 +654,15 @@ impl DocumentSession {
         if let [Command::InsertImage { image }] = r.commands.as_slice() {
             return self.insert_image(&Payload::new(image.clone()));
         }
-        if r.commands.len() > reprise_edit::MAX_COMMANDS {
+        let applied = self.apply_commands(&r.commands)?;
+        Ok(Payload::new(cv::applied(applied, Vec::new())))
+    }
+    fn apply_commands(&mut self, commands: &[Command]) -> Result<reprise_edit::Applied> {
+        if commands.len() > reprise_edit::MAX_COMMANDS {
             return Err(Error::Limit("transaction commands".into()));
         }
         let mut bytes = 0usize;
-        for command in &r.commands {
+        for command in commands {
             if let Command::InsertText { text, .. } | Command::InsertBlock { text, .. } = command {
                 bytes = bytes.saturating_add(text.len());
             }
@@ -398,14 +670,13 @@ impl DocumentSession {
         if bytes > reprise_edit::MAX_TRANSACTION_BYTES {
             return Err(Error::Limit("transaction text".into()));
         }
-        let commands = r
-            .commands
+        let kernel = commands
             .iter()
             .map(|c| cv::command(c, self.engine.medium))
             .collect::<Result<Vec<_>>>()?;
-        let applied = self.editor.apply(&commands.into())?;
+        let applied = self.editor.apply(&kernel.into())?;
         self.snapshot = None;
-        Ok(Payload::new(cv::applied(applied, Vec::new())))
+        Ok(applied)
     }
     /// Insert one image through the editing kernel's atomic fragment transaction.
     pub fn insert_image(&mut self, request: &Payload<ImageInsert>) -> Result<Payload<Applied>> {
@@ -464,19 +735,7 @@ impl DocumentSession {
         if bytes.len() > 32 * 1024 * 1024 {
             return Err(Error::Limit("font bytes".into()));
         }
-        let declaration = reprise_font::FontDeclaration {
-            family: r.family.clone(),
-            descriptors: reprise_font::Descriptors {
-                weight: r.weight,
-                stretch: r.stretch,
-                style: match r.style {
-                    FontStyle::Normal => reprise_font::FontStyle::Normal,
-                    FontStyle::Italic => reprise_font::FontStyle::Italic,
-                    FontStyle::Oblique => reprise_font::FontStyle::Oblique,
-                },
-            },
-            face_index: r.face_index,
-        };
+        let declaration = cv::font_declaration(r);
         let id = self
             .engine
             .fonts
@@ -491,24 +750,9 @@ impl DocumentSession {
     /// Replace host font settings and invalidate revision-bound layout jobs.
     pub fn set_font_settings(&mut self, request: &Payload<FontSettings>) -> Result<Payload<()>> {
         let r = validate(request)?;
-        let settings = reprise_font::FontSettings {
-            generics: r
-                .generics
-                .iter()
-                .map(|(g, name)| {
-                    let g = match g {
-                        GenericFamily::Serif => reprise_font::GenericFamily::Serif,
-                        GenericFamily::SansSerif => reprise_font::GenericFamily::SansSerif,
-                        GenericFamily::Monospace => reprise_font::GenericFamily::Monospace,
-                        GenericFamily::Script => reprise_font::GenericFamily::Script,
-                    };
-                    (g, name.clone())
-                })
-                .collect(),
-            fallbacks: r.fallbacks.clone(),
-            synthetic_oblique: r.synthetic_oblique,
-        };
+        let settings = cv::font_settings(r);
         settings.validate().map_err(Error::note)?;
+        self.settings_local = true;
         self.reconfigure()?;
         self.engine
             .fonts
@@ -576,6 +820,7 @@ impl DocumentSession {
     }
     pub fn start_layout(&mut self, request: &Payload<LayoutOptions>) -> Result<LayoutJob> {
         let r = validate(request)?;
+        self.sync_fonts()?;
         if r.max_pages > 10_000 || r.viewport_start > r.viewport_end || r.viewport_end > 10_000 {
             return Err(Error::Limit("layout pages/viewport".into()));
         }
@@ -820,7 +1065,18 @@ impl DocumentSession {
             .map(|c| cv::caret(c).map(|c| (c.node, c.offset)))
             .transpose()?;
         fragment.validate()?;
-        // Resource installation must not fail after authored state has committed.
+        self.sync_fonts()?;
+        let (fonts, assets) = self.preflight_resources(&fragment)?;
+        let result = fragment.paste(&mut self.editor, at, &self.document_id)?;
+        self.install_resources(fonts, assets)?;
+        Ok(Payload::new(cv::applied(result.applied, result.notes)))
+    }
+    /// Resource installation must not fail after authored state has committed,
+    /// so everything fallible happens before the edit.
+    fn preflight_resources(
+        &self,
+        fragment: &reprise_clipboard::NativeFragment,
+    ) -> Result<(Vec<reprise_font::Face>, reprise_display::AssetStore)> {
         let fonts = fragment
             .resources
             .values()
@@ -840,13 +1096,121 @@ impl DocumentSession {
             .collect::<Result<Vec<_>>>()?;
         let mut assets = self.engine.assets.clone();
         fragment.install_assets(&mut assets)?;
-        let result = fragment.paste(&mut self.editor, at, &self.document_id)?;
+        Ok((fonts, assets))
+    }
+    fn install_resources(
+        &mut self,
+        fonts: Vec<reprise_font::Face>,
+        assets: reprise_display::AssetStore,
+    ) -> Result<()> {
         for face in fonts {
             self.engine.fonts.add(face);
         }
         self.engine.assets = assets;
-        self.reconfigure()?;
-        Ok(Payload::new(cv::applied(result.applied, result.notes)))
+        self.reconfigure()
+    }
+    fn replace_fragment(
+        &mut self,
+        fragment: reprise_clipboard::NativeFragment,
+        selection: &StableSelection,
+    ) -> Result<Payload<Replaced>> {
+        let stable = collab::selection_in(selection)
+            .ok_or_else(|| Error::Invalid("malformed stable selection".into()))?;
+        fragment.validate()?;
+        self.sync_fonts()?;
+        let (fonts, assets) = self.preflight_resources(&fragment)?;
+        let staged = self
+            .editor
+            .stage_replacement(&fragment.fragment, &self.document_id)?;
+        let mut result = self.editor.replace_selection(&stable, &staged)?;
+        self.install_resources(fonts, assets)?;
+        let caret = result.caret.map(|(node, offset)| reprise_edit::Caret {
+            node,
+            offset,
+            affinity: reprise_edit::Affinity::Downstream,
+        });
+        if self.selection.is_some() {
+            self.selection = caret.and_then(|c| {
+                reprise_edit::StableSelection::anchor(
+                    self.doc(),
+                    &reprise_edit::Selection::collapsed(c),
+                )
+                .ok()
+            });
+        }
+        result.notes.extend(fragment.notes);
+        Ok(Payload::new(Replaced {
+            applied: cv::applied(result.applied, result.notes),
+            selection: caret.map(|c| collab::selection_dto(reprise_edit::Selection::collapsed(c))),
+        }))
+    }
+    /// Replaces an anchored selection with a native clipboard fragment in one
+    /// transaction and one undo step. The selection is resolved inside the
+    /// transaction, so a remote edit cannot land between the delete and the
+    /// insert; an unreadable fragment is refused before anything is deleted.
+    pub fn replace_selection(
+        &mut self,
+        request: &Payload<ReplaceSelection>,
+        bytes: &[u8],
+    ) -> Result<Payload<Replaced>> {
+        let r = validate(request)?;
+        if bytes.len() > 96 * 1024 * 1024 {
+            return Err(Error::Limit("clipboard bytes".into()));
+        }
+        self.replace_fragment(
+            reprise_clipboard::NativeFragment::decode(bytes)?,
+            &r.selection,
+        )
+    }
+    /// [`DocumentSession::replace_selection`] with plain text or HTML.
+    pub fn replace_text(&mut self, request: &Payload<ReplaceText>) -> Result<Payload<Replaced>> {
+        let r = validate(request)?;
+        let imported = if r.html {
+            reprise_clipboard::import_html(&r.text, reprise_clipboard::ImportLimits::default())?
+        } else {
+            reprise_clipboard::import_plain(&r.text)?
+        };
+        self.replace_fragment(imported.fragment, &r.selection)
+    }
+    /// Several commands as one transaction and one undo step, all or nothing:
+    /// every command is validated against the document as the commands before
+    /// it leave it, and nothing is written unless all pass (the error names
+    /// the first refused command). `expected_revision` makes it a compare and
+    /// set; `selection` comes back mapped through the batch's effects.
+    pub fn batch(&mut self, request: &Payload<Batch>) -> Result<Payload<BatchReport>> {
+        let r = validate(request)?;
+        if r.commands.is_empty() {
+            return Err(Error::Invalid("empty batch".into()));
+        }
+        if let Some(expected) = &r.expected_revision
+            && *expected != cv::revision(&self.doc().revision())
+        {
+            return Err(Error::Stale);
+        }
+        let selection = match &r.selection {
+            Some(s) => Some((cv::caret(&s.anchor)?, cv::caret(&s.focus)?)),
+            None => None,
+        };
+        let applied = self.apply_commands(&r.commands)?;
+        let mapped = selection.and_then(|(a, f)| {
+            let map = |c: reprise_edit::Caret| {
+                let bias = match c.affinity {
+                    reprise_edit::Affinity::Downstream => reprise_edit::Bias::After,
+                    reprise_edit::Affinity::Upstream => reprise_edit::Bias::Before,
+                };
+                applied
+                    .map_position(c.node, c.offset, bias)
+                    .map(|(node, offset)| reprise_edit::Caret { node, offset, ..c })
+            };
+            Some(collab::selection_dto(reprise_edit::Selection {
+                anchor: map(a)?,
+                focus: map(f)?,
+            }))
+        });
+        Ok(Payload::new(BatchReport {
+            applied: cv::applied(applied, Vec::new()),
+            selection: mapped,
+        }))
     }
     pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>> {
         let r = validate(request)?;
@@ -868,6 +1232,7 @@ impl DocumentSession {
         self.paste_fragment(imported.fragment, r.at.as_ref())
     }
     pub fn save(&mut self) -> Result<Payload<Bytes>> {
+        self.sync_fonts()?;
         // Embedding all used fonts requires current complete layout. Saving always
         // finishes the incremental coordinator, rather than dropping resources.
         if self.snapshot.is_none() {
@@ -1104,17 +1469,24 @@ impl DocumentSession {
         Ok(Payload::new(Bytes { bytes }))
     }
     pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>> {
-        Ok(Payload::new(
-            self.current()?
-                .reading_order(self.doc())
-                .into_iter()
-                .map(|s| ReadingStep {
+        let layout = self.current()?;
+        let steps = layout
+            .reading_order(self.doc())
+            .into_iter()
+            .map(|s| {
+                let line = layout
+                    .line(s.line)
+                    .ok_or_else(|| Error::Invalid("reading step names a missing line".into()))?;
+                Ok(ReadingStep {
                     node: s.line.node.to_string(),
-                    line: s.line.line as u32,
-                    page: s.page as u32,
+                    line: u32::try_from(s.line.line).unwrap_or(u32::MAX),
+                    page: u32::try_from(s.page).unwrap_or(u32::MAX),
+                    start: u32::try_from(line.text.start).unwrap_or(u32::MAX),
+                    end: u32::try_from(line.text.end).unwrap_or(u32::MAX),
                 })
-                .collect(),
-        ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Payload::new(steps))
     }
     pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>> {
         let mut notes: Vec<_> = self
@@ -1127,6 +1499,47 @@ impl DocumentSession {
             notes.extend(s.diagnostics.iter().map(cv::layout_diagnostic));
         }
         Payload::new(notes)
+    }
+    /// A bounded, filtered view of [`DocumentSession::diagnostics`], so a host
+    /// can ask about one relation or one code without a full dump. Order is the
+    /// order of `diagnostics()`.
+    pub fn diagnostics_for(
+        &self,
+        request: &Payload<DiagnosticFilter>,
+    ) -> Result<Payload<DiagnosticList>> {
+        let f = validate(request)?;
+        let rank = |s: Severity| match s {
+            Severity::Info => 0,
+            Severity::Warning => 1,
+            Severity::Error => 2,
+        };
+        let limit = f.limit.unwrap_or(MAX_DIAGNOSTICS).min(MAX_DIAGNOSTICS) as usize;
+        let mut out = Vec::new();
+        let mut truncated = false;
+        for d in self.diagnostics().data {
+            let subject_ok = f.subject.as_ref().is_none_or(|want| {
+                d.subject.as_deref().is_some_and(|have| {
+                    have == want || have.split_once(':').is_some_and(|(_, id)| id == want)
+                })
+            });
+            if !subject_ok
+                || f.code_prefix
+                    .as_ref()
+                    .is_some_and(|p| !d.code.starts_with(p.as_str()))
+                || f.min_severity.is_some_and(|m| rank(d.severity) < rank(m))
+            {
+                continue;
+            }
+            if out.len() >= limit {
+                truncated = true;
+                break;
+            }
+            out.push(d);
+        }
+        Ok(Payload::new(DiagnosticList {
+            diagnostics: out,
+            truncated,
+        }))
     }
     pub fn sync_info(&self) -> Payload<SyncInfo> {
         Payload::new(SyncInfo {
@@ -1158,6 +1571,7 @@ impl DocumentSession {
     }
     pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>> {
         let r = validate(request)?;
+        self.refuse_source(&r.document_id)?;
         if r.document_id != self.document_id {
             return Err(Error::InvalidId(r.document_id.clone()));
         }

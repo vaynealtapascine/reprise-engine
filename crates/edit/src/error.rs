@@ -98,4 +98,6 @@ pub enum Reason {
     Style(String),
     #[error("a document holds at most {max} named styles")]
     StyleLimit { max: usize },
+    #[error("the selection no longer resolves to any block")]
+    SelectionGone,
 }

@@ -907,5 +907,56 @@ pub(crate) fn mark(m: reprise_layout::marks::Mark) -> Mark {
             reprise_layout::RelationStatus::Deleted => RelationState::Deleted,
         }),
         applied: m.applied,
+        edge: m.edge.map(|e| match e {
+            reprise_doc::marks::LineEdge::Start => LineEdge::Start,
+            reprise_doc::marks::LineEdge::End => LineEdge::End,
+        }),
+        target_node: m.target_node.map(|n| n.to_string()),
+        target_offset: m
+            .target_offset
+            .map(|o| u32::try_from(o).unwrap_or(u32::MAX)),
+        target_edge: m.target_edge.map(|e| match e {
+            reprise_doc::marks::AnchorEdge::Position => AnchorEdge::Position,
+            reprise_doc::marks::AnchorEdge::GapStart => AnchorEdge::GapStart,
+            reprise_doc::marks::AnchorEdge::GapEnd => AnchorEdge::GapEnd,
+            reprise_doc::marks::AnchorEdge::LineStart => AnchorEdge::LineStart,
+            reprise_doc::marks::AnchorEdge::LineEnd => AnchorEdge::LineEnd,
+        }),
+        diagnostic: m.diagnostic.map(|c| c.to_string()),
+    }
+}
+
+pub(crate) fn font_declaration(r: &FontDeclaration) -> reprise_font::FontDeclaration {
+    reprise_font::FontDeclaration {
+        family: r.family.clone(),
+        descriptors: reprise_font::Descriptors {
+            weight: r.weight,
+            stretch: r.stretch,
+            style: match r.style {
+                FontStyle::Normal => reprise_font::FontStyle::Normal,
+                FontStyle::Italic => reprise_font::FontStyle::Italic,
+                FontStyle::Oblique => reprise_font::FontStyle::Oblique,
+            },
+        },
+        face_index: r.face_index,
+    }
+}
+pub(crate) fn font_settings(r: &FontSettings) -> reprise_font::FontSettings {
+    reprise_font::FontSettings {
+        generics: r
+            .generics
+            .iter()
+            .map(|(g, name)| {
+                let g = match g {
+                    GenericFamily::Serif => reprise_font::GenericFamily::Serif,
+                    GenericFamily::SansSerif => reprise_font::GenericFamily::SansSerif,
+                    GenericFamily::Monospace => reprise_font::GenericFamily::Monospace,
+                    GenericFamily::Script => reprise_font::GenericFamily::Script,
+                };
+                (g, name.clone())
+            })
+            .collect(),
+        fallbacks: r.fallbacks.clone(),
+        synthetic_oblique: r.synthetic_oblique,
     }
 }

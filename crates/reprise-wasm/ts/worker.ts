@@ -3,11 +3,19 @@
 import init, { Workspace, DocumentSession, setPanicHandler } from "./reprise_wasm.js";
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
   DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, FontSettings, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
-  Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied } from "./types.js";
+  Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied,
+  ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
   | { kind: "open"; request: Payload<Open>; bytes: Uint8Array }
+  | { kind: "import-copy"; request: Payload<ImportCopy>; bytes: Uint8Array }
+  | { kind: "workspace-font"; request: Payload<FontDeclaration>; bytes: Uint8Array }
+  | { kind: "workspace-font-settings"; request: Payload<FontSettings> }
+  | { kind: "batch"; request: Payload<Batch> }
+  | { kind: "replace"; request: Payload<ReplaceSelection>; bytes: Uint8Array }
+  | { kind: "replace-text"; request: Payload<ReplaceText> }
+  | { kind: "diagnostics"; request: Payload<DiagnosticFilter> }
   | { kind: "font"; request: Payload<FontDeclaration>; bytes: Uint8Array }
   | { kind: "font-settings"; request: Payload<FontSettings> }
   | { kind: "asset"; request: Payload<AssetDeclaration>; bytes: Uint8Array }
@@ -33,6 +41,10 @@ type Request = Payload<{ id: string } & (
 export type Response = Payload<{ id: string } & (
   | { kind: "state"; state: Payload<State> }
   | { kind: "edited"; applied: Payload<Applied>; state: Payload<State> }
+  | { kind: "batched"; report: Payload<BatchReport>; state: Payload<State> }
+  | { kind: "replaced"; replaced: Payload<Replaced>; state: Payload<State> }
+  | { kind: "diagnostics"; list: Payload<DiagnosticList> }
+  | { kind: "face"; face: Payload<Face> }
   | { kind: "started"; job: number }
   | { kind: "layout"; job: number; progress: Payload<LayoutProgress>; pages: Payload<DisplayPage>[] }
   | { kind: "marks"; page: Payload<MarksPage> }
@@ -85,10 +97,24 @@ scope.onmessage = (event: MessageEvent<Request>) => {
       }
       const data = request.data;
       switch (data.kind) {
-        case "create": case "open":
-          const candidate = data.kind === "create" ? workspace.create(data.request) : workspace.open(data.request, data.bytes);
+        case "create": case "open": case "import-copy":
+          const candidate = data.kind === "create" ? workspace.create(data.request)
+            : data.kind === "open" ? workspace.open(data.request, data.bytes)
+            : workspace.import_copy(data.request, data.bytes);
           release(); document?.free(); document = candidate;
           post({ id, kind: "state", state: document.state() }); break;
+        // Declared once for the worker's workspace: every session it opens shares the face.
+        case "workspace-font": post({ id, kind: "face", face: workspace.declare_font(data.request, data.bytes) }); break;
+        case "workspace-font-settings": workspace.set_font_settings(data.request); post({ id, kind: "ack" }); break;
+        case "batch": {
+          const report = current().batch(data.request);
+          release(); post({ id, kind: "batched", report, state: current().state() }); break;
+        }
+        case "replace": case "replace-text": {
+          const replaced = data.kind === "replace" ? current().replace_selection(data.request, data.bytes) : current().replace_text(data.request);
+          release(); post({ id, kind: "replaced", replaced, state: current().state() }); break;
+        }
+        case "diagnostics": post({ id, kind: "diagnostics", list: current().diagnostics_for(data.request) }); break;
         case "font": current().declare_font(data.request, data.bytes); release(); post({ id, kind: "ack" }); break;
         case "font-settings": current().set_font_settings(data.request); release(); post({ id, kind: "ack" }); break;
         case "asset": {

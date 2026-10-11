@@ -97,14 +97,14 @@ fn stable_in(s: &StableCaret) -> Option<reprise_edit::StableCaret> {
     })
 }
 
-fn selection_in(s: &StableSelection) -> Option<reprise_edit::StableSelection> {
+pub(super) fn selection_in(s: &StableSelection) -> Option<reprise_edit::StableSelection> {
     Some(reprise_edit::StableSelection {
         anchor: stable_in(&s.anchor)?,
         focus: stable_in(&s.focus)?,
     })
 }
 
-fn selection_out(s: &reprise_edit::StableSelection) -> StableSelection {
+pub(super) fn selection_out(s: &reprise_edit::StableSelection) -> StableSelection {
     StableSelection {
         anchor: stable_out(&s.anchor),
         focus: stable_out(&s.focus),
@@ -156,6 +156,7 @@ impl DocumentSession {
     /// asks the transport for a delta since [`DocumentSession::sync_info`].
     pub fn sync_import(&mut self, request: &Payload<SyncPacket>) -> Result<Payload<SyncReport>> {
         let r = validate(request)?;
+        self.refuse_source(&r.document_id)?;
         if r.document_id != self.document_id {
             return Err(Error::InvalidId(r.document_id.clone()));
         }
@@ -165,7 +166,7 @@ impl DocumentSession {
             ));
         }
         cv::peer(&r.from_peer)?;
-        if r.content.bytes.len() > sync::MAX_PACKET_BYTES.saturating_add(1 << 20) {
+        if r.content.bytes.len() > crate::MAX_PACKET_BYTES.saturating_add(1 << 20) {
             return Err(Error::Limit("sync packet bytes".into()));
         }
         // The frame decides; the mirrored fields must agree with it.
@@ -200,6 +201,19 @@ impl DocumentSession {
             selection,
             selection_moved,
         }))
+    }
+
+    /// A copy never takes packets of the document it was copied from.
+    pub(super) fn refuse_source(&self, document_id: &str) -> Result<()> {
+        if self.copied_from.as_deref() == Some(document_id) {
+            return Err(Error::Core {
+                code: "bindings.copy-source".into(),
+                severity: Severity::Error,
+                message: "this document is a copy; it does not sync with its source".into(),
+                command: None,
+            });
+        }
+        Ok(())
     }
 
     /// Anchors the host's current selection, so that `sync_import`,
@@ -398,7 +412,7 @@ impl DocumentSession {
     }
 }
 
-fn selection_dto(s: reprise_edit::Selection) -> Selection {
+pub(super) fn selection_dto(s: reprise_edit::Selection) -> Selection {
     Selection {
         anchor: cv::caret_out(s.anchor),
         focus: cv::caret_out(s.focus),

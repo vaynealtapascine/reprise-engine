@@ -62,6 +62,14 @@ pub struct Create {
     pub document_id: String,
     pub peer_id: String,
 }
+/// Imports a package as an independent document: a new identity and a fresh
+/// history. `document_id` must differ from the package's own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCopy {
+    pub document_id: String,
+    pub peer_id: String,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Open {
@@ -722,6 +730,10 @@ pub struct ReadingStep {
     pub node: String,
     pub line: u32,
     pub page: u32,
+    /// The line's UTF-8 byte range in its block's text (`State.blocks[].text`),
+    /// trailing whitespace included, so a reader can slice without `move`.
+    pub start: u32,
+    pub end: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -761,6 +773,48 @@ pub struct TextImport {
     pub text: String,
     pub html: bool,
     pub at: Option<Caret>,
+}
+/// Replaces an anchored selection with a native clipboard fragment (the bytes
+/// travel beside the request): one transaction, one undo step.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceSelection {
+    pub selection: StableSelection,
+}
+/// Replaces an anchored selection with plain text or HTML, like
+/// [`ReplaceSelection`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceText {
+    pub selection: StableSelection,
+    pub text: String,
+    pub html: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Replaced {
+    /// The deletion's effects, then the paste's: one pass maps a position.
+    pub applied: Applied,
+    /// A collapsed selection at the end of the inserted content (or at the
+    /// start of the replaced range when nothing was inserted).
+    pub selection: Option<Selection>,
+}
+/// Several commands as one transaction and one undo step, all or nothing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct Batch {
+    pub commands: Vec<Command>,
+    /// Refuse with `bindings.stale`, writing nothing, unless the document is
+    /// at exactly this revision (`State.revision`).
+    pub expected_revision: Option<Vec<Clock>>,
+    /// Mapped through the batch's effects and returned in `BatchReport`.
+    pub selection: Option<Selection>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BatchReport {
+    pub applied: Applied,
+    /// `Batch.selection` as the batch left it; `None` when it was not given or
+    /// its block was deleted.
+    pub selection: Option<Selection>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SyncInfo {
@@ -1353,6 +1407,40 @@ pub struct Mark {
     pub relation: Option<String>,
     pub state: Option<RelationState>,
     pub applied: bool,
+    /// Anchors: the authored source edge.
+    pub edge: Option<LineEdge>,
+    /// Anchors: the target's block and UTF-8 byte offset, when it resolved.
+    pub target_node: Option<String>,
+    pub target_offset: Option<u32>,
+    /// Anchors: the authored target edge.
+    pub target_edge: Option<AnchorEdge>,
+    /// Anchors: the stable code of the layout diagnostic that explains an
+    /// unapplied or suspect pin (`relation.alignment-cycle`, `-limit`,
+    /// `-outside`, `-conflict` or `-invalid`).
+    pub diagnostic: Option<String>,
+}
+/// Which diagnostics `diagnostics_for` returns. Every field narrows the result.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct DiagnosticFilter {
+    /// Keep codes starting with this text, such as `relation.` or
+    /// `relation.alignment-cycle`.
+    pub code_prefix: Option<String>,
+    /// Keep this severity and worse.
+    pub min_severity: Option<Severity>,
+    /// Keep one subject: `relation:<id>`, `node:<id>`, `range:<id>`,
+    /// `document`, or a bare id.
+    pub subject: Option<String>,
+    /// At most this many (default and ceiling 1000).
+    pub limit: Option<u32>,
+}
+/// The most diagnostics one `diagnostics_for` call returns.
+pub const MAX_DIAGNOSTICS: u32 = 1000;
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DiagnosticList {
+    pub diagnostics: Vec<Diagnostic>,
+    /// More matched than `limit` allowed.
+    pub truncated: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct MarksPage {

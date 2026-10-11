@@ -382,5 +382,33 @@ pub fn declarations() -> String {
     text.push_str("export ");
     text.push_str(&MarksPage::decl(&cfg));
     text.push('\n');
+    text.push_str("export ");
+    text.push_str(&DiagnosticFilter::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&DiagnosticList::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&ImportCopy::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&ReplaceSelection::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&ReplaceText::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&Replaced::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&Batch::decl(&cfg));
+    text.push('\n');
+    text.push_str("export ");
+    text.push_str(&BatchReport::decl(&cfg));
+    text.push('\n');
+    text.push_str(&format!(
+        "export type PacketBound = {}\n",
+        crate::MAX_PACKET_BYTES
+    ));
     text
 }

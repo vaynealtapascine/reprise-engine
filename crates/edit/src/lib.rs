@@ -27,6 +27,7 @@ mod movement;
 mod navigator;
 mod paste;
 mod plan;
+mod replace;
 mod select;
 mod stable;
 
@@ -40,4 +41,5 @@ pub use error::{EditError, Reason};
 pub use navigator::Navigator;
 pub use paste::Pasted;
 pub use plan::{MAX_ANCESTORS, MAX_COMMANDS, MAX_INSERT_BYTES, MAX_TRANSACTION_BYTES};
+pub use replace::{Replaced, StagedReplacement};
 pub use stable::{MAX_ANCHOR_BYTES, Resolution, StableCaret, StableError, StableSelection};
