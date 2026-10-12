@@ -392,46 +392,40 @@ fn resizing_an_object_relayouts_like_a_full_layout() {
 }
 
 #[test]
-fn explore_many() {
-    use std::time::Instant;
-    for (n, kind) in [
-        (2000usize, "field"),
-        (2000, "image"),
-        (10000, "field"),
-        (10000, "image"),
-    ] {
-        let (engine, doc, asset) = inline::page(400, 400, WritingMode::default()).unwrap();
-        let p = inline::paragraph(&doc, vec![Part::Text("start ")]).unwrap();
-        let marks: String = std::iter::repeat_n(reprise_doc::text::OBJECT, n).collect();
-        let object = if kind == "field" {
-            inline::page_number()
-        } else {
-            inline::image(&asset, 2, 8, "x")
-        };
-        let t = Instant::now();
-        let end = doc.block(p).unwrap().text.len();
-        doc.insert_with_inline(p, end, &marks, &vec![object; n])
-            .unwrap();
-        doc.commit();
-        let a = t.elapsed();
-        let t = Instant::now();
-        let snapshot = engine.layout(&doc);
-        let b = t.elapsed();
-        let t = Instant::now();
-        let mut session = LayoutSession::new(&engine);
-        session.layout(&doc).unwrap();
-        let c = t.elapsed();
-        let count: usize = snapshot
-            .block(p)
-            .unwrap()
-            .lines
-            .iter()
-            .map(|l| l.atoms.len())
-            .sum();
-        println!(
-            "{kind} n={n}: build {a:?} full layout {b:?} session {c:?}; {} lines {count} atoms {} pages",
-            snapshot.block(p).unwrap().lines.len(),
-            snapshot.pages.len()
-        );
+fn fifty_thousand_objects_in_one_paragraph_lay_out_in_one_pass() {
+    const COUNT: usize = 50_000;
+    let (engine, doc, asset) = inline::page(400, 400, WritingMode::default()).unwrap();
+    let p = inline::paragraph(&doc, vec![Part::Text("start ")]).unwrap();
+    // Alternating tiny images and page numbers, with no text between.
+    let objects: Vec<_> = (0..COUNT)
+        .map(|i| {
+            if i % 2 == 0 {
+                inline::image(&asset, 2, 8, "x")
+            } else {
+                inline::page_number()
+            }
+        })
+        .collect();
+    let marks: String = std::iter::repeat_n(reprise_doc::text::OBJECT, COUNT).collect();
+    let end = doc.block(p).unwrap().text.len();
+    doc.insert_with_inline(p, end, &marks, &objects).unwrap();
+    doc.commit();
+    assert_eq!(doc.inline_objects(p).unwrap().len(), COUNT);
+    let mut session = LayoutSession::new(&engine);
+    let snapshot = session.layout(&doc).unwrap();
+    assert_eq!(session.counters().region_passes, 1);
+    assert!(codes(&snapshot).is_empty(), "{:?}", snapshot.diagnostics);
+    let block = snapshot.block(p).unwrap();
+    let placed: usize = block.lines.iter().map(|l| l.atoms.len()).sum();
+    assert_eq!(placed, COUNT);
+    // The lines tile the text, and every object is on the page it names.
+    assert_eq!(block.lines.last().unwrap().text.end, block.text.len());
+    let pages = snapshot.pages.len();
+    assert!(pages >= 2, "{pages} pages");
+    for line in &block.lines {
+        let page = snapshot.frame(line.frame).unwrap().page;
+        for atom in line.atoms.iter().filter(|a| a.kind == "field") {
+            assert_eq!(atom.text(), (page + 1).to_string());
+        }
     }
 }
