@@ -308,6 +308,13 @@ changes: the loop, convergence, the limit and the diagnostics are shared, and a
 section can restart numbering, a later instance variant (`Section(n)`) joins the
 enum; `FieldKey` and the maps already order by it.
 
+Queries by `(node, offset)` (`atom_rect`, hit testing, selection) address the
+authored placement only, as they do for the derived copies of repeated table
+header rows today: a copy is not authored text and is not in
+`LayoutSnapshot::blocks`. A header's placements are the same kind of derived
+copy, so wave 2 adds a `page` argument to the queries that need one (a handle on
+the footer of page 4) rather than a second identity for the object.
+
 **Known gap.** Fields inside floats and notes are composed with the page they
 are on (so `page-number` is right) but not resolved by the loop: their blocks
 are produced while the next plan is built, after the snapshot the loop reads.
