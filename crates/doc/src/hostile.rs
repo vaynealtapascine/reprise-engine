@@ -355,3 +355,57 @@ pub fn corrupt_annotation(
     doc.commit();
     Ok(())
 }
+
+/// Inserts a bare U+FFFC at byte `at` of a paragraph's text with no record, as
+/// a peer that bypasses the kernel could (`Text::insert` refuses it). Commits.
+pub fn insert_object_marker(
+    doc: &Document,
+    node: crate::NodeId,
+    at: usize,
+) -> Result<(), crate::DocError> {
+    let text = doc.block(node)?.text;
+    let shared = text.to_shared(at)?;
+    text.loro().insert(shared, "\u{FFFC}")?;
+    doc.commit();
+    Ok(())
+}
+
+/// Writes an inline record under `key` (a `host/char` pair that need not name
+/// any character), as a peer that bypasses the kernel could. Commits.
+pub fn write_inline_record(
+    doc: &Document,
+    key: &str,
+    kind: &str,
+    params: &[(&str, &str)],
+) -> loro::LoroResult<()> {
+    let rec = doc
+        .inline_map()
+        .insert_container(key, loro::LoroMap::new())?;
+    rec.insert("v", 1)?;
+    rec.insert("active", true)?;
+    rec.insert("kind", kind)?;
+    for (name, value) in params {
+        rec.insert(&format!("p:{name}"), *value)?;
+    }
+    doc.commit();
+    Ok(())
+}
+
+/// Overwrites one entry of an object's record with a raw value, as a peer that
+/// bypasses the kernel could: `entry` is the whole key, and `v` is written as
+/// a number. Commits.
+pub fn corrupt_inline_record(
+    doc: &Document,
+    id: crate::InlineId,
+    entry: &str,
+    raw: &str,
+) -> loro::LoroResult<()> {
+    if let Some(rec) = doc.inline_record(id.host, id.mark) {
+        match (entry, raw.parse::<i64>()) {
+            ("v", Ok(n)) => rec.insert(entry, n)?,
+            _ => rec.insert(entry, raw)?,
+        }
+    }
+    doc.commit();
+    Ok(())
+}

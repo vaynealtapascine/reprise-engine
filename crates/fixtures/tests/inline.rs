@@ -390,3 +390,48 @@ fn resizing_an_object_relayouts_like_a_full_layout() {
         assert!(first.block(node).is_some());
     }
 }
+
+#[test]
+fn explore_many() {
+    use std::time::Instant;
+    for (n, kind) in [
+        (2000usize, "field"),
+        (2000, "image"),
+        (10000, "field"),
+        (10000, "image"),
+    ] {
+        let (engine, doc, asset) = inline::page(400, 400, WritingMode::default()).unwrap();
+        let p = inline::paragraph(&doc, vec![Part::Text("start ")]).unwrap();
+        let marks: String = std::iter::repeat_n(reprise_doc::text::OBJECT, n).collect();
+        let object = if kind == "field" {
+            inline::page_number()
+        } else {
+            inline::image(&asset, 2, 8, "x")
+        };
+        let t = Instant::now();
+        let end = doc.block(p).unwrap().text.len();
+        doc.insert_with_inline(p, end, &marks, &vec![object; n])
+            .unwrap();
+        doc.commit();
+        let a = t.elapsed();
+        let t = Instant::now();
+        let snapshot = engine.layout(&doc);
+        let b = t.elapsed();
+        let t = Instant::now();
+        let mut session = LayoutSession::new(&engine);
+        session.layout(&doc).unwrap();
+        let c = t.elapsed();
+        let count: usize = snapshot
+            .block(p)
+            .unwrap()
+            .lines
+            .iter()
+            .map(|l| l.atoms.len())
+            .sum();
+        println!(
+            "{kind} n={n}: build {a:?} full layout {b:?} session {c:?}; {} lines {count} atoms {} pages",
+            snapshot.block(p).unwrap().lines.len(),
+            snapshot.pages.len()
+        );
+    }
+}

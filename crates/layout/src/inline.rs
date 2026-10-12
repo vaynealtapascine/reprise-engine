@@ -608,7 +608,7 @@ fn field_blocks(snapshot: &LayoutSnapshot) -> impl Iterator<Item = &crate::Block
 pub(crate) fn resolve_fields(
     doc: &Document,
     snapshot: &LayoutSnapshot,
-) -> (FieldValues, Vec<(NodeId, String)>) {
+) -> (FieldValues, Vec<(NodeId, usize, String)>) {
     let mut out = BTreeMap::new();
     let mut failed = Vec::new();
     let mut objects: BTreeMap<NodeId, BTreeMap<InlineId, reprise_doc::InlineEntry>> =
@@ -650,7 +650,7 @@ pub(crate) fn resolve_fields(
                     }
                     Err(why) => {
                         out.insert(key, atom.text());
-                        failed.push((block.node, why));
+                        failed.push((block.node, atom.at, why));
                     }
                 }
             }
@@ -935,15 +935,40 @@ impl reprise_shape::Reshape for AtomReshape<'_> {
     }
 }
 
-/// Reports fields a finished pass couldn't resolve.
+/// Reports fields a finished pass couldn't resolve, and drops repeats of what
+/// composition reported about an object: a paragraph is composed more than
+/// once per pass (a trial for widows and orphans, one fragment per frame), and
+/// each composition measures its objects again.
 pub(crate) fn field_notes(doc: &Document, snapshot: &mut LayoutSnapshot) {
     let (_, failed) = resolve_fields(doc, snapshot);
-    for (node, why) in failed {
-        snapshot.diagnostics.push(crate::Diagnostic::new(
+    for (node, at, why) in failed {
+        let mut d = crate::Diagnostic::new(
             Severity::Warning,
             codes::FIELD_TARGET,
             crate::Subject::Node(node),
             why,
-        ));
+        );
+        d.bytes = Some(at..at.saturating_add(reprise_text::OBJECT.len_utf8()));
+        snapshot.diagnostics.push(d);
     }
+    let mut seen = std::collections::BTreeSet::new();
+    snapshot.diagnostics.retain(|d| {
+        let about_an_object = d.bytes.is_some()
+            && [
+                codes::INLINE_KIND,
+                codes::IMAGE_SIZE,
+                codes::IMAGE_MISSING,
+                codes::IMAGE_HEADER,
+                codes::IMAGE_LIMIT,
+                codes::FIELD_TARGET,
+            ]
+            .contains(&d.code);
+        !about_an_object
+            || seen.insert((
+                d.code.as_str().to_string(),
+                d.subject.clone(),
+                d.bytes.clone().map(|b| (b.start, b.end)),
+                d.message.clone(),
+            ))
+    });
 }

@@ -406,7 +406,7 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 impl Document {
     /// The record map, created if the document has none: for writes. The
     /// handle is kept, so later reads don't look the root up again.
-    fn inline_map(&self) -> LoroMap {
+    pub(crate) fn inline_map(&self) -> LoroMap {
         let map = self.doc.get_map(INLINE);
         *self.inline_root.lock().unwrap_or_else(|e| e.into_inner()) = Some(map.clone());
         map
@@ -434,7 +434,7 @@ impl Document {
     }
 
     /// A readable record (version 1), active or not.
-    fn inline_record(&self, host: TreeID, mark: ID) -> Option<LoroMap> {
+    pub(crate) fn inline_record(&self, host: TreeID, mark: ID) -> Option<LoroMap> {
         let key = NodeId::at_break(host, mark).to_string();
         match self.read_inline_map()?.get(&key)? {
             ValueOrContainer::Container(Container::Map(m)) if get_i64(&m, VERSION) == Some(1) => {
