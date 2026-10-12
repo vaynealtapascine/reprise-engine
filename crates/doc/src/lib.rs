@@ -338,6 +338,8 @@ pub struct Document {
     formats: std::sync::Mutex<formatting::FormatCache>,
     /// Annotations, per revision (see `annotation`).
     annotations: std::sync::Mutex<annotation::AnnotationCache>,
+    /// The `inline1` record map once it is known to exist (see `inline`).
+    inline_root: std::sync::Mutex<Option<loro::LoroMap>>,
     /// Which editing step this replica's next commits belong to (see
     /// [`UndoStack`]).
     pub(crate) steps: std::sync::Arc<edit::StepLog>,
@@ -360,6 +362,7 @@ impl Document {
             lineage: Default::default(),
             formats: Default::default(),
             annotations: Default::default(),
+            inline_root: Default::default(),
             steps: Default::default(),
         }
     }

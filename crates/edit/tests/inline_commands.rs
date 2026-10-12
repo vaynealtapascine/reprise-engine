@@ -264,7 +264,7 @@ fn invalid_objects_and_patches_are_refused_whole() {
         }
         let err = e.apply(&tx).unwrap_err();
         assert_eq!(err.command, Some(index), "case {i}");
-        assert!(matches!(err.reason, Reason::Store(_)), "case {i}: {err:?}");
+        assert!(matches!(err.reason, Reason::Inline(_)), "case {i}: {err:?}");
         assert_eq!(text(&e, p), TEXT, "case {i}");
         assert!(!e.document().has_inline_objects(), "case {i}");
         assert_eq!(e.undo_count(), 0, "case {i}");
@@ -327,7 +327,7 @@ fn an_object_character_in_inserted_text_refuses_the_whole_batch() {
         )
         .unwrap_err();
     assert_eq!(err.command, Some(1));
-    assert!(matches!(err.reason, Reason::Store(_)));
+    assert!(matches!(err.reason, Reason::Inline(_)));
     assert_eq!(text(&e, p), "ab", "the first insert was not written either");
     assert_eq!(e.undo_count(), 0);
 }

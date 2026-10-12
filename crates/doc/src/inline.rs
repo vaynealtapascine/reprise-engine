@@ -404,19 +404,33 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 }
 
 impl Document {
+    /// The record map, created if the document has none: for writes. The
+    /// handle is kept, so later reads don't look the root up again.
     fn inline_map(&self) -> LoroMap {
-        self.doc.get_map(INLINE)
+        let map = self.doc.get_map(INLINE);
+        *self.inline_root.lock().unwrap_or_else(|e| e.into_inner()) = Some(map.clone());
+        map
     }
 
-    /// Root reads must not create a container: even try_get_map creates roots.
+    /// The record map, if the document has one. A read must not create the
+    /// root (the package would change), and must not call `LoroDoc::get_value`:
+    /// that computes every root's value to tell whether it is empty, so each
+    /// call costs the whole content tree and recurses to its depth (a 1,024-
+    /// deep tree overflowed the stack). Looking the root up by name touches
+    /// only it, but still reads the whole record map to tell whether it is
+    /// empty, so a root found is remembered: a record read per object would
+    /// otherwise make 50,000 objects quadratic. Roots are never removed.
     fn read_inline_map(&self) -> Option<LoroMap> {
-        let LoroValue::Map(roots) = self.doc.get_value() else {
+        let mut known = self.inline_root.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = known.as_ref() {
+            return Some(map.clone());
+        }
+        let ValueOrContainer::Container(Container::Map(map)) = self.doc.get_by_str_path(INLINE)?
+        else {
             return None;
         };
-        if !roots.contains_key(INLINE) {
-            return None;
-        }
-        self.doc.try_get_map(INLINE)
+        *known = Some(map.clone());
+        Some(map)
     }
 
     /// A readable record (version 1), active or not.
