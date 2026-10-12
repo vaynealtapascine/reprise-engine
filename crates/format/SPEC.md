@@ -280,9 +280,8 @@ activated, an object deactivated by deleting its U+FFFC, and anything still in
 history all count. An older reader would drop the object and its character, so
 it must refuse. Documents without inline records keep their old mask, so the
 bit is absent from every existing package and snapshot. Bit 13 is paragraph
-styles (`REQUIRED_PARAGRAPH_STYLES`), so inline objects take 15 because 14 is
-reserved for block semantics on the lists workstream; the integrator may
-renumber. See `docs/inline.md`.
+styles (`REQUIRED_PARAGRAPH_STYLES`), 14 is block semantics (lists) and 16 is
+annotations. See `docs/inline.md`.
 
 ## Annotations feature (required bit 16)
 
