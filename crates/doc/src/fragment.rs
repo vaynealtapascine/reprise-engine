@@ -391,8 +391,15 @@ impl Document {
                     .param("target")
                     .and_then(|raw| self.resolve_field_target(raw))
                     && let Some(cut) = cuts.get(&node)
+                    // Inside the copy; its end belongs to it only when the copy
+                    // runs to the end of the paragraph. A target at the cut
+                    // end of a partial copy is the next character, which stays.
                     && cut.start <= at
-                    && at <= cut.end
+                    && (at < cut.end
+                        || (at == cut.end
+                            && self
+                                .block(node)
+                                .is_ok_and(|b| b.text.len() == cut.end)))
                 {
                     object.params.insert(
                         "target".into(),

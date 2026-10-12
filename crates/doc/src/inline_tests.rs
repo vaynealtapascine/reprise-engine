@@ -311,3 +311,114 @@ fn fifty_thousand_objects_in_one_paragraph() {
     assert_eq!(live[49_999].at, 3 * 49_999);
     assert!(doc.inline_audit().orphan_records.is_empty());
 }
+
+/// A table with two cells, each holding a paragraph, so the paragraphs are in
+/// different flow hosts and moving text between them copies it.
+fn two_cells(first: &str, second: &str) -> (Document, NodeId, NodeId) {
+    let doc = Document::new(1).unwrap();
+    let table = doc
+        .append_table(crate::TableColumns {
+            columns: (0..2)
+                .map(|_| crate::Column {
+                    width: crate::ColumnWidth::Proportional(1),
+                })
+                .collect(),
+        })
+        .unwrap();
+    let row = doc.append_table_row(table, false).unwrap();
+    let left = doc.append_table_cell(row, 0).unwrap();
+    let right = doc.append_table_cell(row, 1).unwrap();
+    let a = doc
+        .append_cell_block(left, BlockKind::Paragraph, "body", first)
+        .unwrap();
+    let b = doc
+        .append_cell_block(right, BlockKind::Paragraph, "body", second)
+        .unwrap();
+    doc.commit();
+    (doc, a, b)
+}
+
+#[test]
+fn a_page_of_follows_its_target_through_a_copying_join() {
+    // Joining paragraphs of different hosts copies the second's text onto the
+    // first. A page-of in it, and a target in it, move with their text.
+    let (doc, a, b) = two_cells("head", "see target");
+    let to_target = doc.field_target(b, 4).unwrap();
+    doc.insert_inline(
+        b,
+        3,
+        &InlineObject::field("page-of").with("target", to_target.clone()),
+    )
+    .unwrap();
+    doc.commit_step();
+    let before = text(&doc, b);
+    doc.join_blocks(a, b).unwrap();
+    doc.commit_step();
+    assert_eq!(text(&doc, a), format!("head{before}"));
+    // The object came along, and its target still names the same character.
+    let moved = doc.inline_objects(a).unwrap();
+    assert_eq!(moved.len(), 1);
+    assert_eq!(moved[0].at, "head".len() + 3);
+    let (node, at) = doc.resolve_field_target(&to_target).unwrap();
+    assert_eq!(node, a);
+    assert_eq!(&text(&doc, a)[at..at + 6], "target");
+}
+
+#[test]
+fn a_page_of_follows_its_target_through_a_copying_split() {
+    let (doc, _, b) = two_cells("head", "see target and more");
+    let to_target = doc.field_target(b, 4).unwrap();
+    doc.insert_inline(
+        b,
+        3,
+        &InlineObject::field("page-of").with("target", to_target.clone()),
+    )
+    .unwrap();
+    doc.commit_step();
+    // Split before the object: the tail, object and target, moves to a new block.
+    let tail = doc.split_block(b, 2).unwrap();
+    doc.commit_step();
+    let (node, at) = doc.resolve_field_target(&to_target).unwrap();
+    assert_eq!(node, tail);
+    assert_eq!(&text(&doc, tail)[at..at + 6], "target");
+    assert_eq!(doc.inline_objects(tail).unwrap().len(), 1);
+    assert!(doc.inline_objects(b).unwrap().is_empty());
+}
+
+#[test]
+fn a_page_of_aimed_at_the_character_after_a_partial_copy_keeps_its_position() {
+    // "Hello World": the target is the space at byte 5. Copying "Hello" ends
+    // there, so the space is not in the copy and the target is left alone;
+    // copying through the space takes it.
+    let (doc, p) = one("Hello World");
+    let target = doc.field_target(p, 5).unwrap();
+    doc.insert_inline(
+        p,
+        0,
+        &InlineObject::field("page-of").with("target", target.clone()),
+    )
+    .unwrap();
+    doc.commit_step();
+    let copy = |bytes: std::ops::Range<usize>| {
+        doc.copy_fragment(
+            "src",
+            &[crate::fragment::CopyBlock {
+                node: p,
+                bytes: Some(bytes),
+            }],
+            &SchemaRegistry::builtin(),
+        )
+        .unwrap()
+        .blocks
+        .remove(0)
+        .inline
+        .remove(0)
+    };
+    // The object is the first three bytes; the space is at 5 + 3 now.
+    assert_eq!(copy(0..8).param("target"), Some(target.as_str()));
+    let through = copy(0..9);
+    assert_eq!(
+        through.param("target"),
+        Some(format!("copy:{p} 8").as_str())
+    );
+}

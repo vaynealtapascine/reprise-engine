@@ -795,12 +795,51 @@ impl Document {
 
     /// Where a `target` parameter points now: its paragraph (following
     /// splits and joins) and byte offset. `None` when unreadable or gone.
+    ///
+    /// Text that a join, split or move across hosts copied keeps its lineage;
+    /// when the targeted character is gone this follows it to the copy, the same
+    /// bounded and ordered walk that carries a caret (`transfer_anchors`), so a
+    /// cross-reference survives its target's paragraph being merged elsewhere.
     pub fn resolve_field_target(&self, raw: &str) -> Option<(NodeId, usize)> {
+        use std::collections::{BTreeSet, VecDeque};
+
+        use crate::text::Resolved;
+        /// The most lineage edges one resolution visits.
+        const MAX_HOPS: usize = 256;
         let (node, anchor) = raw.split_once(' ')?;
         let node = NodeId::parse(node)?;
         let anchor = Anchor::decode(&unhex(anchor)?)?;
-        let (at, resolved) = self.locate(node, &anchor)?;
-        Some((at, resolved.offset()))
+        let mut tombstone = None;
+        match self.locate(node, &anchor) {
+            Some((at, Resolved::Live(offset))) => return Some((at, offset)),
+            Some((at, Resolved::Tombstoned(offset))) => tombstone = Some((at, offset)),
+            None => {}
+        }
+        let mut seen = BTreeSet::from([(node, anchor.encode())]);
+        let mut queue = VecDeque::from([(node, anchor)]);
+        let mut visited = 0usize;
+        while let Some((from, mut current)) = queue.pop_front() {
+            visited += 1;
+            if visited > MAX_HOPS {
+                break;
+            }
+            // Undo can recreate the copied span under new characters.
+            if let Some(text) = self.text_of_any(from)
+                && matches!(text.resolve_shared(&current), Ok(Resolved::Tombstoned(_)))
+                && let Some(restored) = self.restored_transfer_anchor(from, &current)
+            {
+                current = restored;
+            }
+            if let Some((at, Resolved::Live(offset))) = self.locate(from, &current) {
+                return Some((at, offset));
+            }
+            for next in self.transfer_anchors(from, &current) {
+                if queue.len() < MAX_HOPS && seen.insert((next.0, next.1.encode())) {
+                    queue.push_back(next);
+                }
+            }
+        }
+        tombstone
     }
 
     /// Reanchor portable fragment page-of targets after destination text exists.
