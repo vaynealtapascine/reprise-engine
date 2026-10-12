@@ -677,7 +677,7 @@ fn fields_in_notes_resolve_like_fields_in_the_body() {
     assert!(snapshot.pages.len() >= 3, "{} pages", snapshot.pages.len());
     assert!(codes(&snapshot).is_empty(), "{:?}", snapshot.diagnostics);
     let pages = snapshot.pages.len().to_string();
-    assert_eq!(field_texts(&snapshot, body), [pages.clone()]);
+    assert_eq!(field_texts(&snapshot, body), std::slice::from_ref(&pages));
     assert_eq!(field_texts(&snapshot, note), [pages]);
     // The same layout, incrementally.
     let mut session = LayoutSession::new(&engine);

@@ -58,7 +58,10 @@ fn boundaries(text: &str) -> Vec<usize> {
 }
 
 /// Every block's text and objects, for comparing replicas.
-fn state(doc: &Document) -> Vec<(NodeId, String, Vec<(usize, InlineObject)>)> {
+/// A block's identity, text and objects (offset and stored form).
+type BlockState = (NodeId, String, Vec<(usize, InlineObject)>);
+
+fn state(doc: &Document) -> Vec<BlockState> {
     paragraphs(doc)
         .into_iter()
         .map(|n| {
