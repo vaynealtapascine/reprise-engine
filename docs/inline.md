@@ -315,14 +315,14 @@ header rows today: a copy is not authored text and is not in
 copy, so wave 2 adds a `page` argument to the queries that need one (a handle on
 the footer of page 4) rather than a second identity for the object.
 
-**Known gap.** Fields inside floats and notes are composed with the page they
-are on (so `page-number` is right) but not resolved by the loop: their blocks
-are produced while the next plan is built, after the snapshot the loop reads.
-A `page-count` or `page-of` in a note body therefore keeps its guess, and a
-`page-of` whose target is a note body is reported `layout.field-target` (the
-target is not in the pass's blocks). Closing this means resolving `Plan.blocks`
-as well and keying the region cache on the field values; the keying already
-supports it.
+**Notes and floats.** Their blocks are produced while the next plan is built, so
+`allocate` composes them with the plan's field values and then resolves the
+fields of the body and of the placed notes and floats together
+(`next_fields(doc, &scratch, ..)`), and the region cache is keyed on those
+values. A `page-count` in a footnote says how many pages the document has and a
+`page-of` can point into or out of a note (tests
+`fields_in_notes_resolve_like_fields_in_the_body` and
+`a_page_of_can_point_into_a_note_and_out_of_one`).
 
 ## Editing (30)
 

@@ -79,8 +79,7 @@ pub(crate) fn run(
             crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
             return snapshot;
         }
-        let mut next = allocate(engine, doc, template, &snapshot, None);
-        next.fields = crate::inline::next_fields(doc, &snapshot, &plan.fields);
+        let next = allocate(engine, doc, template, &snapshot, None, &plan.fields);
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
             let applied = if outcome == Feedback::Converged {
@@ -161,6 +160,7 @@ pub(crate) fn allocate(
     template: &ResolvedTemplate,
     flowed: &LayoutSnapshot,
     evaluation: Option<&crate::incremental::Evaluation>,
+    fields: &crate::inline::FieldValues,
 ) -> Plan {
     let mut scratch = flowed.clone();
     let mut out = Plan::default();
@@ -257,6 +257,7 @@ pub(crate) fn allocate(
                     &r,
                     anchor,
                     evaluation,
+                    fields,
                 );
             } else {
                 notes.place(
@@ -269,6 +270,7 @@ pub(crate) fn allocate(
                     &r,
                     anchor,
                     evaluation,
+                    fields,
                 );
             }
             progressed = true;
@@ -284,6 +286,9 @@ pub(crate) fn allocate(
         }
     }
     notes.finish(template, &mut out);
+    // What the next pass composes fields with: the body's and the placed
+    // notes' and floats' own, which `scratch` now holds too.
+    out.fields = crate::inline::next_fields(doc, &scratch, fields);
     out.pages = out
         .blocks
         .iter()

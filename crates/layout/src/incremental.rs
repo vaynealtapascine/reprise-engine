@@ -420,6 +420,8 @@ struct PassKey {
     owners: Vec<(NodeId, Option<Inputs>)>,
     template: ResolvedTemplate,
     applied: BTreeSet<RelationId>,
+    /// The field texts a region pass composes its notes and floats with.
+    fields: crate::inline::FieldValues,
 }
 impl PassKey {
     fn changes(&self, old: Option<&Self>) -> BTreeSet<Dependency> {
@@ -501,6 +503,7 @@ impl PassKey {
             owners,
             template: template.clone(),
             applied: applied.clone(),
+            fields: Default::default(),
         }
     }
 }
@@ -902,8 +905,10 @@ impl Evaluation {
         doc: &Document,
         template: &ResolvedTemplate,
         snapshot: &LayoutSnapshot,
+        fields: &crate::inline::FieldValues,
     ) -> Plan {
-        let key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
+        let mut key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
+        key.fields = fields.clone();
         if let Some(plan) = self
             .cache
             .borrow()
@@ -918,7 +923,7 @@ impl Evaluation {
             let mut cache = self.cache.borrow_mut();
             cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
         }
-        let plan = crate::regions::allocate(engine, doc, template, snapshot, Some(self));
+        let plan = crate::regions::allocate(engine, doc, template, snapshot, Some(self), fields);
         let mut cache = self.cache.borrow_mut();
         if cache.regions.len() >= 16 {
             cache.regions.remove(0);
@@ -1396,14 +1401,13 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                     }
                 }
                 Pass::RegionFeedback => {
-                    let mut next = self.session.evaluation.allocate(
+                    let next = self.session.evaluation.allocate(
                         engine,
                         self.doc,
                         &self.template,
                         &self.snapshot,
+                        &self.plan.fields,
                     );
-                    next.fields =
-                        crate::inline::next_fields(self.doc, &self.snapshot, &self.plan.fields);
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
                     if outcome == crate::regions::Feedback::Continue {

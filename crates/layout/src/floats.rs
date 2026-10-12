@@ -26,6 +26,7 @@ impl Floats {
         relation: &Relation,
         anchor: LineRef,
         evaluation: Option<&crate::incremental::Evaluation>,
+        fields: &crate::inline::FieldValues,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(line) = scratch.line(anchor).cloned() else {
@@ -122,7 +123,7 @@ impl Floats {
                         page,
                         pages: page.saturating_add(1),
                         instance: crate::FieldInstance::Single,
-                        values: None,
+                        values: Some(fields),
                     },
                 );
                 let height = composed.block_end;

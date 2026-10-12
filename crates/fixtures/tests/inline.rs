@@ -578,3 +578,167 @@ fn an_unknown_field_function_is_reported_once_and_not_for_its_neighbours() {
     assert_eq!(on_q, [Some(4..7)]);
     let _ = p;
 }
+
+/// A page with a main frame and a notes frame, a body paragraph with a note
+/// on one of its words, and fields in both places.
+fn body_and_note(
+    body_field: reprise_doc::InlineObject,
+    note_field: reprise_doc::InlineObject,
+) -> (
+    reprise_layout::Engine,
+    reprise_doc::Document,
+    NodeId,
+    NodeId,
+) {
+    use reprise_doc::relation::builtin::NOTE;
+    use reprise_doc::text::RangePolicy;
+    use reprise_doc::{BlockKind, Dim, FrameRole, FrameTemplate, PageTemplate, Relation};
+    let (engine, doc, _) = inline::page(100, 60, WritingMode::default()).unwrap();
+    doc.define_style(
+        "note",
+        &reprise_doc::Style {
+            size: Some(reprise_doc::LengthExpr::Pt(pt(8))),
+            line_height: Some(reprise_doc::LengthExpr::Pt(pt(10))),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.set_page_template(
+        &PageTemplate::new("notes", Dim::pt(100), Dim::pt(60))
+            .with_frame(FrameTemplate::new(
+                "body",
+                FrameRole::Flow("main".into()),
+                (Dim::pt(0), Dim::pt(0)),
+                (Dim::pt(100), Dim::pt(40)),
+            ))
+            .with_frame(FrameTemplate::new(
+                "notes",
+                FrameRole::Notes,
+                (Dim::pt(0), Dim::pt(40)),
+                (Dim::pt(100), Dim::pt(20)),
+            )),
+    )
+    .unwrap();
+    let body = inline::paragraph(
+        &doc,
+        vec![
+            Part::Text("Body text with a note. Page "),
+            Part::Object(body_field),
+        ],
+    )
+    .unwrap();
+    let note = doc
+        .append_block(BlockKind::Annotation, "note", "Note on page ")
+        .unwrap();
+    let end = doc.block(note).unwrap().text.len();
+    doc.insert_inline(note, end, &note_field).unwrap();
+    let range = doc.add_range(body, 5..9, RangePolicy::FIXED).unwrap();
+    doc.add_relation(
+        &engine.schemas,
+        &Relation::new(NOTE)
+            .owned_by(note)
+            .target("anchor", reprise_doc::Target::Range(range)),
+    )
+    .unwrap();
+    doc.commit();
+    (engine, doc, body, note)
+}
+
+fn field_texts(snapshot: &LayoutSnapshot, node: NodeId) -> Vec<String> {
+    snapshot
+        .block(node)
+        .map(|b| {
+            b.lines
+                .iter()
+                .flat_map(|l| l.atoms.iter().map(|a| a.text()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn fields_in_notes_resolve_like_fields_in_the_body() {
+    use reprise_doc::InlineObject;
+    let (engine, doc, body, note) = body_and_note(
+        InlineObject::field("page-count"),
+        InlineObject::field("page-count"),
+    );
+    for i in 0..8 {
+        inline::paragraph(
+            &doc,
+            vec![Part::Text(&format!(
+                "Filler paragraph {i} runs on a while."
+            ))],
+        )
+        .unwrap();
+    }
+    doc.commit();
+    let snapshot = engine.layout(&doc);
+    assert!(snapshot.pages.len() >= 3, "{} pages", snapshot.pages.len());
+    assert!(codes(&snapshot).is_empty(), "{:?}", snapshot.diagnostics);
+    let pages = snapshot.pages.len().to_string();
+    assert_eq!(field_texts(&snapshot, body), [pages.clone()]);
+    assert_eq!(field_texts(&snapshot, note), [pages]);
+    // The same layout, incrementally.
+    let mut session = LayoutSession::new(&engine);
+    assert_eq!(session.layout(&doc).unwrap(), snapshot);
+    // And a page number in a note is the page the note is on.
+    let (engine, doc, body, note) = body_and_note(
+        InlineObject::field("page-number"),
+        InlineObject::field("page-number"),
+    );
+    let snapshot = engine.layout(&doc);
+    assert_eq!(field_texts(&snapshot, body), ["1"]);
+    assert_eq!(field_texts(&snapshot, note), ["1"]);
+}
+
+#[test]
+fn a_page_of_can_point_into_a_note_and_out_of_one() {
+    use reprise_doc::InlineObject;
+    let (engine, doc, body, note) = body_and_note(
+        InlineObject::field("text").with("text", "x"),
+        InlineObject::field("text").with("text", "y"),
+    );
+    // Filler pushes a last paragraph onto a later page.
+    for i in 0..8 {
+        inline::paragraph(
+            &doc,
+            vec![Part::Text(&format!(
+                "Filler paragraph {i} runs on a while."
+            ))],
+        )
+        .unwrap();
+    }
+    let last = inline::paragraph(&doc, vec![Part::Text("The last paragraph.")]).unwrap();
+    // The body points at the note's text; the note points at the last paragraph.
+    let to_note = doc.field_target(note, 0).unwrap();
+    let to_last = doc.field_target(last, 0).unwrap();
+    let end = doc.block(body).unwrap().text.len();
+    doc.insert_inline(
+        body,
+        end,
+        &InlineObject::field("page-of").with("target", to_note),
+    )
+    .unwrap();
+    let end = doc.block(note).unwrap().text.len();
+    doc.insert_inline(
+        note,
+        end,
+        &InlineObject::field("page-of").with("target", to_last),
+    )
+    .unwrap();
+    doc.commit();
+    let snapshot = engine.layout(&doc);
+    assert!(codes(&snapshot).is_empty(), "{:?}", snapshot.diagnostics);
+    let last_page = snapshot
+        .frame(snapshot.block(last).unwrap().lines[0].frame)
+        .unwrap()
+        .page
+        + 1;
+    assert!(last_page >= 3);
+    // The note sits on the page of its anchor, the first.
+    assert_eq!(field_texts(&snapshot, body), ["x", "1"]);
+    assert_eq!(field_texts(&snapshot, note), ["y", &last_page.to_string()]);
+    let mut session = LayoutSession::new(&engine);
+    assert_eq!(session.layout(&doc).unwrap(), snapshot);
+}
