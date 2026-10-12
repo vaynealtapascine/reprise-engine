@@ -362,6 +362,10 @@ fn default_text(n: u8, format: &NumberFormat) -> String {
     }
 }
 
+/// A definition resolved once for a numbering pass: its nine levels and what
+/// reading them reported, or why it can't be used.
+type ResolvedList = Result<(Vec<ResolvedLevel>, Vec<Note>), Note>;
+
 /// A paragraph's stored list membership.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Membership {
@@ -865,8 +869,7 @@ impl Document {
         if !self.may_have_items() {
             return out;
         }
-        let mut resolved: BTreeMap<ListId, Result<(Vec<ResolvedLevel>, Vec<Note>), Note>> =
-            BTreeMap::new();
+        let mut resolved: BTreeMap<ListId, ResolvedList> = BTreeMap::new();
         let mut counters: BTreeMap<ListId, [Option<i64>; LEVELS]> = BTreeMap::new();
         for node in self.document_order() {
             let Ok(meta) = self.meta_of(node) else {

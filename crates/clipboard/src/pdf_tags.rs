@@ -301,12 +301,12 @@ impl Builder<'_> {
                 node: block.node,
                 runs: rest,
             };
-            if let Some(Role::Title) = self.semantic_role(block.node) {
-                if let Some(b) = self.layout.block(block.node) {
-                    let s = snippet(&b.text);
-                    if !s.is_empty() {
-                        title_role.get_or_insert(s);
-                    }
+            if let Some(Role::Title) = self.semantic_role(block.node)
+                && let Some(b) = self.layout.block(block.node)
+            {
+                let s = snippet(&b.text);
+                if !s.is_empty() {
+                    title_role.get_or_insert(s);
                 }
             }
             let mut element = self.element(
