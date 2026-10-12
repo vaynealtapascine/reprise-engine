@@ -830,6 +830,19 @@ pub(crate) struct Sized {
     pub paint: AtomPaint,
 }
 
+impl Sized {
+    /// What the object asks of its line above and below the baseline. Text
+    /// that is drawn in the surrounding face (a field) asks for nothing: the
+    /// line already has the room that text needs, so a page number does not
+    /// make its line taller than the line's other words.
+    pub(crate) fn line_extent(&self) -> (Length, Length) {
+        match self.paint {
+            AtomPaint::Text { .. } => (Length::ZERO, Length::ZERO),
+            _ => (self.size.ascent, self.size.descent),
+        }
+    }
+}
+
 /// Measures every object from byte `start` on for one composition.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn size_atoms(

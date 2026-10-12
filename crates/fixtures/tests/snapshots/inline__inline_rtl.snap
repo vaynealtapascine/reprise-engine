@@ -1,0 +1,210 @@
+---
+source: crates/fixtures/tests/inline.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      47
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "inline",
+    "source": "document"
+  },
+  "pages": [
+    {
+      "width": 153600,
+      "height": 204800
+    }
+  ],
+  "frames": [
+    {
+      "name": "body",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 0,
+        "ty": 0
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 153600,
+        "height": 204800
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "5@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "style body",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 38
+          },
+          "preview": "שלום ￼ עולם abc ￼ שלום",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 153600,
+            "height": 12795
+          },
+          "baseline": 10240,
+          "width": 132295,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 30,
+                "end": 38
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 1,
+              "x": 0,
+              "width": 26216
+            },
+            {
+              "range": {
+                "start": 25,
+                "end": 30
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 1,
+              "x": 26216,
+              "width": 9892
+            },
+            {
+              "range": {
+                "start": 22,
+                "end": 25
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 2,
+              "x": 36108,
+              "width": 16117
+            },
+            {
+              "range": {
+                "start": 0,
+                "end": 22
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 1,
+              "x": 52225,
+              "width": 80070
+            }
+          ],
+          "atoms": [
+            {
+              "id": "5@1/35@1",
+              "at": 26,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 28602,
+                  "y": -369
+                },
+                "width": 5120,
+                "height": 14039
+              },
+              "baseline": 10240,
+              "paint": "text",
+              "text": "1",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0
+            },
+            {
+              "id": "5@1/14@1",
+              "at": 9,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 83213,
+                  "y": 0
+                },
+                "width": 20480,
+                "height": 10240
+              },
+              "baseline": 10240,
+              "paint": "image",
+              "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+              "alt": "inline picture",
+              "placeholder": false
+            }
+          ]
+        }
+      ],
+      "base_level": 1
+    }
+  ],
+  "relations": [],
+  "diagnostics": []
+}

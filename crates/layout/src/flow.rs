@@ -1138,7 +1138,10 @@ impl Prepared {
                 strut_bottom: bottom,
                 objects: sized
                     .iter()
-                    .map(|(&at, s)| (at, s.size.ascent, s.size.descent))
+                    .map(|(&at, s)| {
+                        let (ascent, descent) = s.line_extent();
+                        (at, ascent, descent)
+                    })
                     .collect(),
             }
         });
@@ -1261,7 +1264,7 @@ fn line_layout(
     // object rises above it; composition made the line tall enough.
     let atom_top = sized
         .range(fragment.text.clone())
-        .map(|(_, s)| s.size.ascent)
+        .map(|(_, s)| s.line_extent().0)
         .max();
     let half_leading = match atom_top {
         None => (fragment.height - ascent - descent).mul_ratio(1, 2),
