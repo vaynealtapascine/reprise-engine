@@ -972,3 +972,7 @@ pub(crate) fn field_notes(doc: &Document, snapshot: &mut LayoutSnapshot) {
             ))
     });
 }
+
+#[cfg(test)]
+#[path = "inline_tests.rs"]
+mod tests;

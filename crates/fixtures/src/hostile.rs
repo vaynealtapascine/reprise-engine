@@ -159,6 +159,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         inline_bidi()?,
         inline_storm()?,
         inline_storm_readable()?,
+        inline_fields_with_oscillating_regions()?,
     ])
 }
 
@@ -3379,4 +3380,45 @@ fn inline_storm_with(unreadable: bool, name: &'static str) -> Result<Fixture, Do
             ],
         )
     })
+}
+
+/// A float that keeps moving its own anchor (`float_moves_its_anchor`) in a
+/// paragraph that also holds page numbers and a page-of: region feedback
+/// oscillates while the field texts settle, so the loop is bounded, reports the
+/// region cycle and nothing about fields.
+pub fn inline_fields_with_oscillating_regions() -> Result<Fixture, DocError> {
+    use crate::inline::{Part, paragraph};
+    use reprise_doc::InlineObject;
+    let doc = region_document()?;
+    let body = paragraph(
+        &doc,
+        vec![
+            Part::Text("Anchor text. Page "),
+            Part::Object(InlineObject::field("page-number")),
+            Part::Text(" of "),
+            Part::Object(InlineObject::field("page-count")),
+        ],
+    )?;
+    let owner = doc.append_block(BlockKind::Annotation, "note", "float")?;
+    let range = doc.add_range(body, 1..2, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(reprise_doc::relation::builtin::FLOAT)
+            .owned_by(owner)
+            .target("anchor", Target::Range(range))
+            .param(
+                "width",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::from_pt(100))),
+            )
+            .param(
+                "margin",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::ZERO)),
+            ),
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "inline_fields_with_oscillating_regions",
+        doc,
+        &["layout.region-cycle"],
+    ))
 }
