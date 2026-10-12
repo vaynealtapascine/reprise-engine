@@ -23,7 +23,7 @@ styles: Array<NamedStyle>,
  * The distinct resolved paragraph styles that `blocks[].style.resolved`
  * indexes. Blocks sharing a style share an entry.
  */
-resolved: Array<ResolvedStyle>,
+resolved: Array<ResolvedStyle>, lists?: Array<NamedList>,
 /**
  * Links and comment anchors, compact: where each is and what it is for,
  * without a link's address (ask `annotation` for that). At most
@@ -42,7 +42,7 @@ formatting?: Array<TextRun>,
 /**
  * The block's paragraph style: the one additive per-block field.
  */
-style: BlockStyle, };
+style: BlockStyle, role?: BlockRole, list?: ListItem, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
 export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, indent_start?: string | null, indent_end?: string | null,
@@ -58,6 +58,25 @@ widows?: number | null,
  * 1..=32 lines.
  */
 orphans?: number | null, background?: [number, number, number, number] | null, };
+export type BlockRole = "body" | "heading-1" | "heading-2" | "heading-3" | "heading-4" | "heading-5" | "heading-6" | "title" | "subtitle" | "quote" | "code" | "verse";
+export type ListRef = { "kind": "existing", id: string, } | { "kind": "new", index: number, };
+export type ListDefinition = { base: string | null, levels: Array<ListLevel>, };
+export type ListLevel = { level: number,
+/**
+ * bullet, decimal, decimal-leading-zero, lower/upper-alpha, lower/upper-roman, none.
+ */
+format: string | null, text: string | null,
+/**
+ * Canonical signed i64 decimal string.
+ */
+start: string | null,
+/**
+ * Integer 1/1024 pt, logical inline start.
+ */
+indent: number | null, hanging: number | null, marker: TextStyle | null, };
+export type NamedList = { id: string, definition: ListDefinition | null, error: string | null, };
+export type ListItem = { id: string, level: number, value: string, restart: boolean, marker: string, };
+export type OutlineEntry = { node: string, level: number, text: string, page: number | null, };
 export type StyleProperty = "parent" | "families" | "size" | "line-height" | "alignment" | "tabs" | "weight" | "slant" | "underline" | "strike" | "color" | "indent-start" | "indent-end" | "indent-first" | "space-before" | "space-after" | "keep-with-next" | "keep-together" | "widows" | "orphans" | "background" | "language" | "features";
 export type NamedStyle = { name: string, parent: string | null,
 /**
@@ -104,10 +123,10 @@ export type BlockStyle = {
          */
         tag: string, value: number, };
         export type TextRun = { start: number, end: number, style: TextStyle, };
-        export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, };
+        export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "set-role", node: string, role: BlockRole, } | { "kind": "create-list", definition: ListDefinition, } | { "kind": "update-list", list: string, definition: ListDefinition, } | { "kind": "delete-list", list: ListRef, } | { "kind": "set-list-item", node: string, list: ListRef, level: number, } | { "kind": "remove-list-item", node: string, } | { "kind": "set-list-level", node: string, level: number, } | { "kind": "indent-list-item", node: string, by: number, } | { "kind": "restart-list", node: string, value: string | null, } | { "kind": "continue-list", node: string, } | { "kind": "enter", node: string, at: number, } | { "kind": "backspace-at-start", node: string, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, };
         export type Transaction = { commands: Array<Command>, };
         export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
-        export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>,
+        export type Applied = { blocks: Array<string>, relations: Array<string>, lists?: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>,
         /**
          * The annotations `add-annotation` created, in command order.
          */
@@ -139,7 +158,11 @@ export type BlockStyle = {
          * The line's UTF-8 byte range in its block's text (`State.blocks[].text`),
          * trailing whitespace included, so a reader can slice without `move`.
          */
-        start: number, end: number, };
+        start: number, end: number, role?: BlockRole,
+        /**
+         * A derived label on the first line; byte ranges still refer only to authored text.
+         */
+        marker?: string, };
         export type ExportFormat = "plain-text" | "html" | "native" | "pdf";
         export type Loss = { code: string, disposition: Disposition, detail: string, };
         export type Disposition = "preserved" | "approximated" | "dropped";
@@ -382,6 +405,7 @@ export type BlockStyle = {
                     local_selection(): Payload<Selection | null>;
                     marks(page: number): Payload<MarksPage>;
                     move_cursor(request: Payload<Move>): Payload<Cursor>;
+                    outline(): Payload<Array<OutlineEntry>>;
                     page_links(page: number): Payload<PageLinks>;
                     partial_page(job: number, page: number): Payload<DisplayPage>;
                     paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
@@ -492,6 +516,7 @@ export type BlockStyle = {
                     readonly documentsession_local_selection: (a: number) => [number, number, number];
                     readonly documentsession_marks: (a: number, b: number) => [number, number, number];
                     readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_outline: (a: number) => [number, number, number];
                     readonly documentsession_page_links: (a: number, b: number) => [number, number, number];
                     readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
                     readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];

@@ -223,8 +223,14 @@ it as `ListRef::New(i)`. `UpdateList` writes only the properties that changed, s
 concurrent edits to different levels both win.
 
 Pasting a native fragment keeps roles and lists: fragments carry each block's
-role and membership and the definitions they use; paste gives the definitions
-fresh IDs and remaps the items.
+role and membership and the definitions they use. **Into the document the
+fragment was copied from**, an item whose definition is still live stays in that
+definition, so pasting items into their own list continues its numbering (as
+Google Docs and Word do), and nothing new is staged. **Anywhere else** (another
+document, or a definition deleted since the copy) paste stages each definition
+with a fresh ID (`base` remapped) and remaps the items. The test is the
+paste's `same_namespace`, the same one that decides whether a pasted relation
+may keep its outside targets.
 
 ### Exports
 
