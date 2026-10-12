@@ -476,3 +476,52 @@ fn state_cuts_an_oversized_list_registry_and_items_still_number() {
     // a marker, and the registry is not a precondition of reading the state.
     assert_eq!(state.blocks[0].list.as_ref().unwrap().marker, "1.");
 }
+#[test]
+fn roles_without_a_built_in_style_need_it_defined_first() {
+    let mut s = session();
+    let ids = paragraphs(&mut s, &["quoted words"]);
+    let pair = |role, style: &str| Batch {
+        commands: vec![
+            Command::SetRole {
+                node: ids[0].clone(),
+                role,
+            },
+            Command::ApplyStyle {
+                node: ids[0].clone(),
+                style: Some(style.into()),
+            },
+        ],
+        expected_revision: None,
+        selection: None,
+    };
+    // `Quote` is an application style name, not a built-in: the pair is
+    // refused as a whole, and the role is not left half applied.
+    let before = s.state().unwrap().data;
+    assert!(
+        s.batch(&Payload::new(pair(BlockRole::Quote, "Quote")))
+            .is_err()
+    );
+    assert_eq!(s.state().unwrap().data, before);
+    // Defined first (the app's own definition), the same pair is one undo step.
+    apply(
+        &mut s,
+        vec![Command::DefineStyle {
+            name: "Quote".into(),
+            parent: Some("Normal".into()),
+            style: Style::default(),
+        }],
+    );
+    s.batch(&Payload::new(pair(BlockRole::Quote, "Quote")))
+        .unwrap();
+    let block = &s.state().unwrap().data.blocks[0];
+    assert_eq!(
+        (block.role, block.style.name.as_str()),
+        (BlockRole::Quote, "Quote")
+    );
+    s.undo().unwrap();
+    let block = &s.state().unwrap().data.blocks[0];
+    assert_eq!(
+        (block.role, block.style.name.as_str()),
+        (BlockRole::Body, "")
+    );
+}
