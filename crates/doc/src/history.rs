@@ -55,7 +55,23 @@ impl DocumentAt {
 
     /// The top-level blocks that existed then, in order.
     pub fn blocks(&self) -> Vec<NodeId> {
-        self.doc.blocks()
+        self.doc.top(crate::Domain::Body)
+    }
+
+    pub fn top(&self, domain: crate::Domain) -> Vec<NodeId> {
+        self.doc.top(domain)
+    }
+    pub fn order(&self, domain: crate::Domain) -> Vec<NodeId> {
+        self.doc.order(domain)
+    }
+    pub fn authored_order(&self) -> Vec<NodeId> {
+        self.doc.authored_order()
+    }
+    pub fn stories(&self) -> Vec<NodeId> {
+        self.doc.stories()
+    }
+    pub fn domain_of(&self, node: NodeId) -> Option<crate::Domain> {
+        self.doc.domain_of(node)
     }
 
     /// A block's text then; `None` if it didn't exist.

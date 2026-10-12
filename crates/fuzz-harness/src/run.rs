@@ -498,7 +498,7 @@ impl Cx<'_, '_> {
                 text,
             } => {
                 let parent = parent.and_then(|p| pick_block(doc, dead, p));
-                let siblings = doc.children(parent).len();
+                let siblings = doc.children_in(reprise_doc::Domain::Body, parent).len();
                 let kind = match kind % 10 {
                     0..=5 => BlockKind::Paragraph,
                     6..=8 => BlockKind::Annotation,
@@ -530,7 +530,7 @@ impl Cx<'_, '_> {
             } => {
                 let node = pick_block(doc, dead, *block)?;
                 let parent = parent.and_then(|p| pick_block(doc, dead, p));
-                let siblings = doc.children(parent).len();
+                let siblings = doc.children_in(reprise_doc::Domain::Body, parent).len();
                 (
                     Command::MoveBlock {
                         node,
@@ -1136,7 +1136,7 @@ impl Cx<'_, '_> {
                     .map(|b| b.text.as_str())
                     .collect::<String>()
             )),
-            Some((node, offset)) if doc.children(Some(node)).is_empty() => {
+            Some((node, offset)) if doc.children_of(node).is_empty() => {
                 let mut position = offset;
                 for live in live_blocks(doc) {
                     if live == node {

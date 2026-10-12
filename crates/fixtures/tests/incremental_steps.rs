@@ -204,7 +204,12 @@ fn step_work_is_bounded_for_a_long_paragraph() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(10_000);
     let doc = long_paragraph(words);
-    let bytes = doc.block(doc.blocks()[0]).unwrap().text.to_string().len();
+    let bytes = doc
+        .block(doc.top(reprise_doc::Domain::Body)[0])
+        .unwrap()
+        .text
+        .to_string()
+        .len();
     assert!(bytes > 3 * SHAPE_CHUNK_BYTES, "{bytes}");
     let mut session = LayoutSession::new(&engine);
     session.set_workers(Arc::new(Threads(4)));
@@ -322,7 +327,7 @@ fn edits_between_fragments_of_one_paragraph_are_stale_with_workers() {
         job.step(1).unwrap();
     }
     let view = job.partial().unwrap();
-    doc.block(doc.blocks()[0])
+    doc.block(doc.top(reprise_doc::Domain::Body)[0])
         .unwrap()
         .text
         .insert(0, "edited ")
@@ -354,7 +359,7 @@ fn remote_merges_reuse_memos_for_untouched_paragraphs() {
     .into_iter()
     .enumerate()
     {
-        let target = peer.blocks()[100 + round];
+        let target = peer.top(reprise_doc::Domain::Body)[100 + round];
         peer.block(target).unwrap().text.insert(0, "x").unwrap();
         peer.commit();
         doc.merge(&peer).unwrap();

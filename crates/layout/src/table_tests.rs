@@ -294,12 +294,12 @@ fn layout_is_deterministic_and_repeats_are_derived_only() {
     for i in 0..10 {
         row(&doc, t, false, &[&format!("{i}"), "z"]);
     }
-    let before = doc.blocks().len();
+    let before = doc.top(reprise_doc::Domain::Body).len();
     let one = engine.layout(&doc);
     let two = engine.layout(&doc);
     assert_eq!(one, two);
     assert_eq!(
-        doc.blocks().len(),
+        doc.top(reprise_doc::Domain::Body).len(),
         before,
         "layout writes nothing to the document"
     );

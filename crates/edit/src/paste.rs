@@ -66,7 +66,7 @@ pub(crate) fn prepare(
 ) -> Result<Prepared, EditError> {
     fragment.validate().map_err(invalid)?;
     if at.is_none()
-        && doc.blocks().is_empty()
+        && doc.top(reprise_doc::Domain::Body).is_empty()
         && let Some(raw) = &fragment.page_setup_patch
     {
         doc.validate_page_setup_import(raw).map_err(store)?;
@@ -80,7 +80,7 @@ pub(crate) fn prepare(
         fragment: fragment.clone(),
         at,
         parent: None,
-        index: doc.blocks().len(),
+        index: doc.top(reprise_doc::Domain::Body).len(),
         styles: BTreeMap::new(),
         names: BTreeMap::new(),
         prefix: String::new(),
@@ -102,7 +102,7 @@ pub(crate) fn prepare(
                 reason: Reason::BadOffset { node, offset },
             });
         }
-        if !doc.children(Some(node)).is_empty() || doc.table_role(node).map_err(store)?.is_some() {
+        if !doc.children_of(node).is_empty() || doc.table_role(node).map_err(store)?.is_some() {
             return Err(EditError {
                 command: None,
                 reason: Reason::HasChildren(node),
@@ -124,7 +124,7 @@ pub(crate) fn prepare(
             });
         }
         prepared.index = doc
-            .children(prepared.parent)
+            .children_in(reprise_doc::Domain::Body, prepared.parent)
             .iter()
             .position(|&n| n == node)
             .ok_or(EditError {
@@ -333,7 +333,7 @@ pub(crate) fn write(
         ..Pasted::default()
     };
     if fragment.blocks.is_empty() {
-        if at.is_none() && doc.blocks().is_empty() {
+        if at.is_none() && doc.top(reprise_doc::Domain::Body).is_empty() {
             for (name, raw) in &fragment.templates {
                 doc.store_raw_page_template(name, raw).map_err(store)?;
             }
@@ -491,7 +491,7 @@ pub(crate) fn write(
     for (name, style) in styles {
         doc.define_style(&name, &style).map_err(store)?;
     }
-    if at.is_none() && doc.blocks().is_empty() {
+    if at.is_none() && doc.top(reprise_doc::Domain::Body).is_empty() {
         for (name, raw) in &fragment.templates {
             doc.store_raw_page_template(name, raw).map_err(store)?;
         }
@@ -908,7 +908,7 @@ fn write_into_flow(
     // The staged roots go between the halves, in order.
     let mut root_index = match tail {
         Some(t) => doc
-            .children(parent)
+            .children_in(reprise_doc::Domain::Body, parent)
             .iter()
             .position(|&n| n == t)
             .ok_or_else(|| invalid(FragmentError::Invalid("split".into())))?,

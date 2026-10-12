@@ -42,14 +42,14 @@ impl LayoutSnapshot {
         let mut nodes: Vec<NodeId> = self.blocks.iter().map(|b| b.node).collect();
         if self.revision == doc.revision() {
             let mut ranks = BTreeMap::new();
-            let mut stack = doc.blocks();
+            let mut stack = doc.top(reprise_doc::Domain::Body);
             stack.reverse();
             while let Some(node) = stack.pop() {
                 if ranks.contains_key(&node) {
                     continue;
                 }
                 ranks.insert(node, ranks.len());
-                stack.extend(doc.children(Some(node)).into_iter().rev());
+                stack.extend(doc.children_of(node).into_iter().rev());
             }
             nodes.sort_by_key(|n| (ranks.get(n).copied().unwrap_or(usize::MAX), *n));
         } else {

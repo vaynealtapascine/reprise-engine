@@ -40,7 +40,7 @@ fn boundary(text: &str, rng: &mut Rng) -> usize {
 }
 
 fn random_command(doc: &Document, rng: &mut Rng) -> Option<Command> {
-    let blocks = doc.blocks();
+    let blocks = doc.top(reprise_doc::Domain::Body);
     let node = *blocks.get(rng.below(blocks.len()))?;
     let text = doc.block(node).ok()?.text.to_string();
     Some(match rng.below(7) {
@@ -87,7 +87,7 @@ fn random_command(doc: &Document, rng: &mut Rng) -> Option<Command> {
 }
 
 fn state(doc: &Document) -> Vec<(reprise_doc::NodeId, String)> {
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| (n, doc.block(n).unwrap().text.to_string()))
         .collect()

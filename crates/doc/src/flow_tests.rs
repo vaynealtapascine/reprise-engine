@@ -15,7 +15,7 @@ fn text(doc: &Document, id: NodeId) -> String {
 
 /// Every live block in document order, with its text.
 fn dump(doc: &Document) -> Vec<String> {
-    doc.document_order()
+    doc.order(crate::Domain::Body)
         .into_iter()
         .filter_map(|id| Some(doc.block(id).ok()?.text.to_string()))
         .collect()
@@ -54,7 +54,7 @@ fn a_split_is_a_break_and_moves_no_text() {
     assert_eq!(NodeId::parse(&q.to_string()), Some(q));
     assert_eq!(text(&doc, p), "hello");
     assert_eq!(text(&doc, q), " world");
-    assert_eq!(doc.blocks(), vec![p, q]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, q]);
     assert_eq!(doc.parent_of(q), Some(None));
     assert_eq!(doc.kind_of(q), Some(BlockKind::Paragraph));
     assert_eq!(doc.block(q).unwrap().style.as_deref(), Some("body"));
@@ -220,7 +220,7 @@ fn deleting_the_head_keeps_the_rest_of_the_flow() {
     doc.delete_block(p).unwrap();
     doc.commit_step();
     assert!(!doc.is_live(p));
-    assert_eq!(doc.blocks(), vec![q]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![q]);
     // Typing into the deleted head at the same time is kept, in the paragraph
     // that now comes first.
     other.block(p).unwrap().text.insert(0, "zero ").unwrap();
@@ -256,13 +256,13 @@ fn splitting_after_head_deletion_keeps_the_original_paragraph_first() {
             let mut undo = doc.undo_stack();
             let tail = doc.split_block(surviving, at).unwrap();
             doc.commit_step();
-            assert_eq!(doc.blocks(), [surviving, tail]);
+            assert_eq!(doc.top(crate::Domain::Body), [surviving, tail]);
             assert_eq!(dump(&doc), [&before[..at], &before[at..]]);
             assert!(undo.undo().unwrap());
-            assert_eq!(doc.blocks(), [surviving]);
+            assert_eq!(doc.top(crate::Domain::Body), [surviving]);
             assert_eq!(dump(&doc), std::slice::from_ref(&before));
             assert!(undo.redo().unwrap());
-            assert_eq!(doc.blocks(), [surviving, tail]);
+            assert_eq!(doc.top(crate::Domain::Body), [surviving, tail]);
             assert_eq!(dump(&doc), [&before[..at], &before[at..]]);
         }
     }
@@ -273,7 +273,7 @@ fn a_lone_head_is_deleted_as_a_block() {
     let (doc, p) = one("only");
     doc.delete_block(p).unwrap();
     assert!(doc.is_soft_deleted(p));
-    assert!(doc.blocks().is_empty());
+    assert!(doc.top(crate::Domain::Body).is_empty());
 }
 
 #[test]
@@ -326,21 +326,25 @@ fn inserting_a_block_between_paragraphs_embeds_it() {
         .insert_block_at(None, 1, &NewBlock::new(BlockKind::Image, "", "alt"))
         .unwrap();
     doc.commit_step();
-    assert_eq!(doc.blocks(), vec![p, img, q]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, img, q]);
     assert_eq!(doc.parent_of(img), Some(None));
     assert_eq!(undo.undo_count(), 1);
     undo.undo().unwrap();
-    assert_eq!(doc.blocks(), vec![p, q]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, q]);
     undo.redo().unwrap();
-    assert_eq!(doc.blocks(), vec![p, img, q], "same node, same place");
+    assert_eq!(
+        doc.top(crate::Domain::Body),
+        vec![p, img, q],
+        "same node, same place"
+    );
     // Moving it out of the flow, to the end.
     doc.move_block(img, None, 2).unwrap();
     doc.commit_step();
-    assert_eq!(doc.blocks(), vec![p, q, img]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, q, img]);
     // And back between them.
     doc.move_block(img, None, 1).unwrap();
     doc.commit_step();
-    assert_eq!(doc.blocks(), vec![p, img, q]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, img, q]);
 }
 
 #[test]
@@ -356,7 +360,7 @@ fn embedded_text_blocks_are_flows_of_their_own() {
         .unwrap();
     let f = doc.split_block(e, 7).unwrap();
     doc.commit();
-    assert_eq!(doc.blocks(), vec![p, e, f, q]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, e, f, q]);
     assert_eq!(dump(&doc), vec!["one ", "pasted ", "text", "two"]);
     assert_eq!(doc.parent_of(f), Some(None));
 }
@@ -424,7 +428,7 @@ fn hostile_break_characters_without_records_are_hidden() {
     raw_text(&doc, p).insert(1, "\u{FDD0}\u{FDD0}").unwrap();
     doc.commit();
     assert_eq!(dump(&doc), vec!["ab"]);
-    assert_eq!(doc.blocks(), vec![p]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p]);
     // Editing around them still works.
     let t = doc.block(p).unwrap().text;
     t.insert(1, "X").unwrap();
@@ -469,7 +473,7 @@ fn hostile_records_are_hidden_or_ignored() {
     forged.insert("active", true).unwrap();
     forged.insert("embed", other.to_string()).unwrap();
     doc.commit();
-    assert_eq!(doc.blocks(), vec![p, q, other]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![p, q, other]);
     assert_eq!(dump(&doc), vec!["a", "bc", "other"]);
 }
 
@@ -507,7 +511,7 @@ fn flows_survive_saving_and_reopening() {
     doc.commit();
     let bytes = doc.export(crate::PersistenceMode::default());
     let back = Document::import(&bytes, 3).unwrap();
-    assert_eq!(back.blocks(), vec![p, q]);
+    assert_eq!(back.top(crate::Domain::Body), vec![p, q]);
     assert_eq!(dump(&back), vec!["one ", "two"]);
 }
 
@@ -614,14 +618,18 @@ fn excessive_embed_depth_is_hidden_and_reported_without_repair() {
     let (doc, mut host) = one("ab");
     for _ in 0..=crate::MAX_FLOW_DEPTH {
         let tail = doc.split_block(host, 1).unwrap();
-        let index = doc.blocks().iter().position(|&n| n == tail).unwrap();
+        let index = doc
+            .top(crate::Domain::Body)
+            .iter()
+            .position(|&n| n == tail)
+            .unwrap();
         host = doc
             .insert_block_at(None, index, &NewBlock::new(BlockKind::Paragraph, "", "ab"))
             .unwrap();
     }
     doc.commit();
     let revision = doc.revision();
-    assert!(!doc.document_order().contains(&host));
+    assert!(!doc.order(crate::Domain::Body).contains(&host));
     assert!(
         doc.audit()
             .iter()

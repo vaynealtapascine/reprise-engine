@@ -11,7 +11,7 @@ use reprise_edit::Editor;
 use reprise_fixtures::{OTHER_PEER, engine, spike};
 
 fn state(doc: &Document) -> Vec<(NodeId, String)> {
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| (n, doc.block(n).unwrap().text.to_string()))
         .collect()
@@ -39,7 +39,7 @@ fn twenty_pastes_undo_and_redo_exactly() {
     for i in 0..20 {
         let doc = editor.document();
         let at = if i % 2 == 1 {
-            doc.blocks().first().map(|&n| {
+            doc.top(reprise_doc::Domain::Body).first().map(|&n| {
                 let text = doc.block(n).unwrap().text.to_string();
                 let mid = text
                     .char_indices()

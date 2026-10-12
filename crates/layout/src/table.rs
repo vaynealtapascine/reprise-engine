@@ -167,7 +167,7 @@ impl Flow<'_> {
                     continue;
                 };
                 let mut cell_blocks = Vec::new();
-                for block in doc.children(Some(cell.node)) {
+                for block in doc.children_of(cell.node) {
                     build.blocks = build.blocks.saturating_add(1);
                     if build.blocks > MAX_TABLE_BLOCKS {
                         break;

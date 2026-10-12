@@ -61,7 +61,7 @@ fn replicas_agree_and_the_two_bad_envelopes_are_reported_and_kept() {
             .any(|a| format!("{:?}", a.data).contains("javascript"))
     );
     // Queries are bounded however much overlaps.
-    let first = f.doc.blocks()[0];
+    let first = f.doc.top(reprise_doc::Domain::Body)[0];
     let all = f.doc.annotations_in(first, 0..usize::MAX);
     assert!(all.annotations.len() <= MAX_QUERY_RESULTS);
 }

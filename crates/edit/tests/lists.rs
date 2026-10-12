@@ -16,7 +16,7 @@ fn editor(texts: &[&str]) -> (Editor, Vec<NodeId>) {
 
 fn markers(ed: &Editor) -> Vec<String> {
     let doc = ed.document();
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| {
             let text = doc.block(n).unwrap().text.to_string();
@@ -79,7 +79,11 @@ fn enter_splits_items_and_leaves_or_outdents_empty_ones() {
     ed.apply_command(Command::Enter { node: new, at: 0 })
         .unwrap();
     assert_eq!(markers(&ed), ["1. first", ""]);
-    assert_eq!(ed.document().blocks().len(), 2, "no block was added");
+    assert_eq!(
+        ed.document().top(reprise_doc::Domain::Body).len(),
+        2,
+        "no block was added"
+    );
     // Undo walks back one key at a time.
     assert!(ed.undo().unwrap());
     assert_eq!(markers(&ed), ["1. first", "2. "]);

@@ -21,7 +21,7 @@ impl Package {
             ));
         }
         let used: BTreeSet<_> = doc
-            .document_order()
+            .authored_order()
             .into_iter()
             .filter(|&node| doc.kind_of(node) == Some(BlockKind::Image))
             .filter_map(|node| doc.image(node).ok().map(|i| i.asset))
@@ -162,6 +162,41 @@ mod tests {
     use crate::{ExternalLocation, Section};
     use reprise_doc::image::ImageData;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn an_unbound_story_image_is_packaged_as_authored_content() {
+        let bytes = b"story image bytes";
+        let mut store = AssetStore::default();
+        let hash = store.insert(bytes.as_slice()).unwrap();
+        let doc = Document::new(1).unwrap();
+        let story = doc
+            .create_story(&[reprise_doc::NewBlock::new(
+                BlockKind::Image,
+                "",
+                "header alt",
+            )])
+            .unwrap();
+        let node = doc.top(reprise_doc::Domain::Story(story))[0];
+        doc.set_image(node, &ImageData::new(&hash)).unwrap();
+        doc.commit();
+        assert!(doc.top(reprise_doc::Domain::Body).is_empty());
+        let mut package =
+            Package::new(&doc, DocumentId([1; 16]), PersistenceMode::History).unwrap();
+        assert!(
+            package
+                .embed_document_images(&doc, &store)
+                .unwrap()
+                .is_empty()
+        );
+        let assets = package.assets().unwrap();
+        assert!(assets.bundled.values().any(|b| b.as_slice() == bytes));
+        assert!(assets.missing.is_empty());
+        assert_eq!(
+            package.container.header.features.required & crate::features::REQUIRED_SECTIONS,
+            crate::features::REQUIRED_SECTIONS
+        );
+        assert!(!package.save().unwrap().is_empty());
+    }
 
     #[test]
     fn damaged_bundles_are_missing_and_repaired_without_losing_other_metadata() {

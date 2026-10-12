@@ -49,7 +49,10 @@ fn deletion_identity_does_not_collide_with_a_concurrent_real_peer() {
         "the collaborator's block must survive merge"
     );
     assert_eq!(a.block(other).unwrap().text.to_string(), "other");
-    assert_eq!(a.blocks(), b.blocks());
+    assert_eq!(
+        a.top(reprise_doc::Domain::Body),
+        b.top(reprise_doc::Domain::Body)
+    );
 }
 
 #[test]

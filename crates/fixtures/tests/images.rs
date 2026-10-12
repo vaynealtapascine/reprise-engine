@@ -193,7 +193,7 @@ fn tall_images_advance_then_overflow_and_page_limits_leave_following_content_dia
 fn unsupported_image_record_is_retained_and_a_later_block_still_flows() {
     let fixture = hostile::image_unreadable().unwrap();
     let doc = &fixture.doc;
-    let node = doc.blocks()[0];
+    let node = doc.top(reprise_doc::Domain::Body)[0];
     let raw = doc.image_record(node).unwrap();
     let other = doc
         .append_block(BlockKind::Paragraph, "body", "After")

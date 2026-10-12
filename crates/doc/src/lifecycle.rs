@@ -15,7 +15,9 @@
 //! Their activation is undoable, so undo/redo preserves inserted IDs too. All
 //! operations use the real peer; there are no reserved or synthetic identities.
 
-use loro::{LoroMap, LoroText, LoroTree, LoroValue, TreeID, TreeParentId, ValueOrContainer};
+use loro::{
+    ContainerTrait, LoroMap, LoroText, LoroTree, LoroValue, TreeID, TreeParentId, ValueOrContainer,
+};
 
 use crate::{DocError, Document, NewBlock, NodeId, RelationId};
 
@@ -31,14 +33,27 @@ fn flagged(tree: &LoroTree, id: TreeID) -> bool {
 
 impl Document {
     pub(crate) fn deleted_in_tree(&self, tree: &LoroTree, id: TreeID) -> bool {
+        let content = tree.id() == self.tree("content").id();
         let mut at = id;
-        // Loro guarantees an acyclic tree: every iteration ascends one parent,
-        // and the maximum number of iterations is the stored tree's height.
+        // Loro guarantees an acyclic tree: each iteration ascends one parent.
+        // Story metadata has meaning only in the content tree.
         loop {
-            if flagged(tree, at) {
+            let meta = tree.get_meta(at).ok();
+            if meta.as_ref().and_then(|m| crate::get_bool(m, DELETED)) == Some(true) {
                 return true;
             }
-            match tree.parent(at) {
+            let parent = tree.parent(at);
+            if content
+                && meta
+                    .as_ref()
+                    .and_then(|m| crate::get_str(m, "kind"))
+                    .as_deref()
+                    == Some("story")
+                && parent != Some(TreeParentId::Root)
+            {
+                return true;
+            }
+            match parent {
                 Some(TreeParentId::Node(parent)) => at = parent,
                 Some(TreeParentId::Root) => return false,
                 _ => return true,

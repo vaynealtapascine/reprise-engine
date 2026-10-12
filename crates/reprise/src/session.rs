@@ -458,7 +458,7 @@ impl DocumentSession {
     pub fn state(&self) -> Result<Payload<State>> {
         let mut todo: Vec<_> = self
             .doc()
-            .blocks()
+            .top(reprise_doc::Domain::Body)
             .into_iter()
             .rev()
             .map(|n| (n, 0u32))
@@ -490,7 +490,7 @@ impl DocumentSession {
             };
             todo.extend(
                 self.doc()
-                    .children(Some(node))
+                    .children_of(node)
                     .into_iter()
                     .rev()
                     .map(|n| (n, depth.saturating_add(1))),

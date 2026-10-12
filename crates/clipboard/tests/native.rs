@@ -19,7 +19,7 @@ fn copy(doc: &Document) -> NativeFragment {
 #[test]
 fn partial_unicode_ranges_and_deterministic_encoding() {
     let doc = doc(1, "office e\u{301} אבג end");
-    let node = doc.blocks()[0];
+    let node = doc.top(reprise_doc::Domain::Body)[0];
     let start = "off".len();
     let end = "office e\u{301} אב".len();
     let range = doc.add_range(node, 1..end, RangePolicy::EXPANDING).unwrap();
@@ -90,7 +90,7 @@ fn partial_unicode_ranges_and_deterministic_encoding() {
 #[test]
 fn selection_uses_kernel_reading_order_and_rejects_stale_layout() {
     let doc = doc(1, "office אבג e\u{301}");
-    let node = doc.blocks()[0];
+    let node = doc.top(reprise_doc::Domain::Body)[0];
     let engine = reprise_fixtures::engine();
     let snapshot = engine.layout(&doc);
     let selection = Selection {
@@ -108,7 +108,7 @@ fn selection_uses_kernel_reading_order_and_rejects_stale_layout() {
 #[test]
 fn paste_twice_has_new_ids_single_undo_and_stable_redo() {
     let source = doc(1, "one");
-    let first = source.blocks()[0];
+    let first = source.top(reprise_doc::Domain::Body)[0];
     let second = source
         .append_block(BlockKind::Paragraph, "", "two")
         .unwrap();
@@ -123,14 +123,14 @@ fn paste_twice_has_new_ids_single_undo_and_stable_redo() {
         .unwrap();
     let fragment = copy(&source);
     let target = doc(2, "ABCD");
-    let host = target.blocks()[0];
+    let host = target.top(reprise_doc::Domain::Body)[0];
     let mut editor = Editor::new(target, SchemaRegistry::builtin());
     let a = editor
         .paste(&fragment.fragment, Some((host, 2)), "target")
         .unwrap();
     let texts: Vec<_> = editor
         .document()
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| editor.document().block(n).unwrap().text.to_string())
         .collect();
@@ -141,14 +141,17 @@ fn paste_twice_has_new_ids_single_undo_and_stable_redo() {
         matches!(editor.document().resolve_range(range), reprise_doc::RangeState::Valid { bytes, .. } if bytes == (2..5))
     );
     assert!(editor.undo().unwrap());
-    assert_eq!(editor.document().blocks(), [host]);
+    assert_eq!(editor.document().top(reprise_doc::Domain::Body), [host]);
     assert!(matches!(
         editor.document().resolve_range(range),
         reprise_doc::RangeState::Missing { .. }
     ));
     assert!(editor.document().relations().is_empty());
     assert!(editor.redo().unwrap());
-    assert_eq!(editor.document().blocks(), [host, a.applied.blocks[0]]);
+    assert_eq!(
+        editor.document().top(reprise_doc::Domain::Body),
+        [host, a.applied.blocks[0]]
+    );
     assert_eq!(a.ids.nodes[&first], host);
     let b = editor.paste(&fragment.fragment, None, "target").unwrap();
     assert!(
@@ -174,7 +177,7 @@ fn paste_twice_has_new_ids_single_undo_and_stable_redo() {
 #[test]
 fn cross_document_same_peer_never_reuses_source_ids_or_external_targets() {
     let source = doc(1, "owner");
-    let node = source.blocks()[0];
+    let node = source.top(reprise_doc::Domain::Body)[0];
     let outside = source
         .append_block(BlockKind::Paragraph, "", "outside")
         .unwrap();
@@ -223,7 +226,7 @@ fn cross_document_same_peer_never_reuses_source_ids_or_external_targets() {
 #[test]
 fn copy_policies_inside_crossing_and_drop_are_rechecked_at_paste() {
     let source = doc(1, "owner");
-    let owner = source.blocks()[0];
+    let owner = source.top(reprise_doc::Domain::Body)[0];
     let other = source
         .append_block(BlockKind::Paragraph, "", "other")
         .unwrap();
@@ -356,7 +359,10 @@ fn concurrent_pastes_and_undo_merge_converge() {
     assert_ne!(a_ids.applied.blocks, b_ids.applied.blocks);
     a.merge(b.document()).unwrap();
     b.merge(a.document()).unwrap();
-    assert_eq!(a.document().blocks(), b.document().blocks());
+    assert_eq!(
+        a.document().top(reprise_doc::Domain::Body),
+        b.document().top(reprise_doc::Domain::Body)
+    );
     assert_eq!(a.document().revision(), b.document().revision());
     a.undo().unwrap();
     b.merge(a.document()).unwrap();
@@ -366,7 +372,10 @@ fn concurrent_pastes_and_undo_merge_converge() {
     a.redo().unwrap();
     b.merge(a.document()).unwrap();
     a.merge(b.document()).unwrap();
-    assert_eq!(a.document().blocks(), b.document().blocks());
+    assert_eq!(
+        a.document().top(reprise_doc::Domain::Body),
+        b.document().top(reprise_doc::Domain::Body)
+    );
 }
 
 #[test]
@@ -374,7 +383,7 @@ fn invalid_future_deep_deleted_and_mixed_paste_leave_revision_unchanged() {
     let source = doc(1, "x");
     let mut fragment = copy(&source).fragment;
     let target = doc(2, "y");
-    let node = target.blocks()[0];
+    let node = target.top(reprise_doc::Domain::Body)[0];
     target.delete_block(node).unwrap();
     target.commit();
     let mut editor = Editor::new(target, SchemaRegistry::builtin());
@@ -532,7 +541,7 @@ fn command_paste_tables_at_a_caret_and_position_effects_roundtrip() {
     let source = reprise_fixtures::hostile::table_row_taller_than_page().unwrap();
     let fragment = copy(&source.doc).fragment;
     let target = doc(2, "headtail");
-    let host = target.blocks()[0];
+    let host = target.top(reprise_doc::Domain::Body)[0];
     let mut editor = Editor::new(target, SchemaRegistry::builtin());
     let result = editor
         .apply_command(Command::Paste {
@@ -541,7 +550,7 @@ fn command_paste_tables_at_a_caret_and_position_effects_roundtrip() {
             target_namespace: "target".into(),
         })
         .unwrap();
-    let roots = editor.document().blocks();
+    let roots = editor.document().top(reprise_doc::Domain::Body);
     assert_eq!(
         editor.document().block(roots[0]).unwrap().text.to_string(),
         "head"
@@ -559,13 +568,13 @@ fn command_paste_tables_at_a_caret_and_position_effects_roundtrip() {
     assert!(!result.blocks.is_empty());
     assert_eq!(editor.undo_count(), 1);
     editor.undo().unwrap();
-    assert_eq!(editor.document().blocks(), [host]);
+    assert_eq!(editor.document().top(reprise_doc::Domain::Body), [host]);
     editor.redo().unwrap();
-    assert_eq!(editor.document().blocks(), roots);
+    assert_eq!(editor.document().top(reprise_doc::Domain::Body), roots);
 
     let plain = copy(&doc(5, "X")).fragment;
     let target = doc(6, "AB");
-    let host = target.blocks()[0];
+    let host = target.top(reprise_doc::Domain::Body)[0];
     let mut editor = Editor::new(target, SchemaRegistry::builtin());
     let pasted = editor.paste(&plain, Some((host, 1)), "target").unwrap();
     assert!(pasted.applied.blocks.is_empty());
@@ -593,7 +602,7 @@ fn command_paste_tables_at_a_caret_and_position_effects_roundtrip() {
 #[test]
 fn host_ranges_keep_their_ids_and_affinities_through_single_block_paste() {
     let target = doc(2, "ABCDEF");
-    let host = target.blocks()[0];
+    let host = target.top(reprise_doc::Domain::Body)[0];
     let cases = [
         (0..2, RangePolicy::FIXED, 0..2),
         (4..6, RangePolicy::FIXED, 5..7),
@@ -645,7 +654,7 @@ fn multi_block_paste_preserves_host_ranges_including_spanning_ranges() {
     source.append_block(BlockKind::Paragraph, "", "Y").unwrap();
     let fragment = copy(&source);
     let target = doc(2, "abcdef");
-    let host = target.blocks()[0];
+    let host = target.top(reprise_doc::Domain::Body)[0];
     let before = target.add_range(host, 1..2, RangePolicy::FIXED).unwrap();
     let after = target.add_range(host, 4..6, RangePolicy::FIXED).unwrap();
     let crossing = target.add_range(host, 2..5, RangePolicy::FIXED).unwrap();
@@ -684,7 +693,7 @@ fn concurrent_caret_pastes_with_host_ranges_converge() {
     let source = doc(10, "X");
     let fragment = copy(&source);
     let target = doc(1, "AB");
-    let host = target.blocks()[0];
+    let host = target.top(reprise_doc::Domain::Body)[0];
     let range = target
         .add_range(host, 0..2, RangePolicy::EXPANDING)
         .unwrap();
@@ -698,7 +707,10 @@ fn concurrent_caret_pastes_with_host_ranges_converge() {
         .unwrap();
     a.merge(b.document()).unwrap();
     b.merge(a.document()).unwrap();
-    assert_eq!(a.document().blocks(), b.document().blocks());
+    assert_eq!(
+        a.document().top(reprise_doc::Domain::Body),
+        b.document().top(reprise_doc::Domain::Body)
+    );
     assert_eq!(
         a.document().resolve_range(range),
         b.document().resolve_range(range)
@@ -718,7 +730,7 @@ fn authored_endpoint_policies_survive_native_paste_host_reanchor_and_undo() {
             for end in [Affinity::Before, Affinity::After] {
                 for empty in [Empty::Keep, Empty::Missing] {
                     let source = doc(1, text);
-                    let node = source.blocks()[0];
+                    let node = source.top(reprise_doc::Domain::Body)[0];
                     let policy = RangePolicy { start, end, empty };
                     let id = source.add_range(node, 0..text.len(), policy).unwrap();
                     let copied = copy(&source);
@@ -735,7 +747,7 @@ fn authored_endpoint_policies_survive_native_paste_host_reanchor_and_undo() {
                     assert_eq!(copied.fragment.ranges[0].policy, policy);
                     let decoded = NativeFragment::decode(&copied.encode().unwrap()).unwrap();
                     let target = doc(2, "host");
-                    let host = target.blocks()[0];
+                    let host = target.top(reprise_doc::Domain::Body)[0];
                     let host_range = target.add_range(host, 0..4, policy).unwrap();
                     let mut editor = Editor::new(target, SchemaRegistry::builtin());
                     let pasted = editor

@@ -387,7 +387,7 @@ pub fn copy_selection(
                 }
             }
             todo.extend(
-                doc.children(Some(node))
+                doc.children_of(node)
                     .into_iter()
                     .rev()
                     .map(|n| (n, depth + 1)),

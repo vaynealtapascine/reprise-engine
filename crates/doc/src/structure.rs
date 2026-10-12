@@ -41,6 +41,13 @@ pub enum Succession {
 }
 
 impl Document {
+    fn domain_children(&self, parent: Option<NodeId>) -> Vec<NodeId> {
+        match parent {
+            Some(node) => self.children_of(node),
+            None => self.top(crate::Domain::Body),
+        }
+    }
+
     /// Whether a block is alive. A paragraph of a flow is alive while its
     /// host is and its break is active (or, for the head, while the head is
     /// not deleted); see `docs/flow.md`.
@@ -54,24 +61,15 @@ impl Document {
         }
     }
 
-    /// The children of `of`, or of the document root for `None`, in order.
+    /// Children of `of`; for `None`, the body-domain alias of `top(Body)`.
     /// Each flow host contributes its live paragraphs, each followed by the
     /// nodes embedded after it. Empty when `of` isn't a live node; a break
     /// paragraph has no children.
     pub fn children(&self, of: Option<NodeId>) -> Vec<NodeId> {
-        let tree = self.tree("content");
-        let parent = match of {
-            None => TreeParentId::Root,
-            Some(n) if !n.is_break() && self.live(&tree, n.node) => TreeParentId::Node(n.node),
-            Some(_) => return Vec::new(),
-        };
-        let mut out = Vec::new();
-        for c in tree.children(parent).unwrap_or_default() {
-            if self.live(&tree, c) && !self.is_embedded(c) {
-                self.expand(c, 0, &mut out);
-            }
+        match of {
+            None => self.top(crate::Domain::Body),
+            Some(node) => self.children_of(node),
         }
-        out
     }
 
     /// The parent of a live node: `Some(None)` for a top-level block,
@@ -110,22 +108,10 @@ impl Document {
         get_str(&meta, "kind").and_then(|k| BlockKind::parse(&k))
     }
 
-    /// Every live node in document order: a node before its children, a
+    /// Body-domain alias of `order(Body)`: a node before its children, a
     /// node's children in order. A flow's paragraphs are in text order.
     pub fn document_order(&self) -> Vec<NodeId> {
-        let mut order = Vec::new();
-        let mut stack: Vec<NodeId> = self.children(None);
-        stack.reverse();
-        // Each node is pushed once, from its one parent, so this ends.
-        while let Some(id) = stack.pop() {
-            order.push(id);
-            if !id.is_break() {
-                let mut kids = self.children(Some(id));
-                kids.reverse();
-                stack.extend(kids);
-            }
-        }
-        order
+        self.order(crate::Domain::Body)
     }
 
     /// The blocks a structural query matches, in document order. The query's
@@ -143,7 +129,10 @@ impl Document {
                 let Some(parent) = self.parent_of(*from) else {
                     return Vec::new();
                 };
-                let siblings = self.children(parent);
+                let siblings = match parent {
+                    Some(node) => self.children_of(node),
+                    None => self.top(crate::Domain::Body),
+                };
                 let Some(at) = siblings.iter().position(|s| s == from) else {
                     return Vec::new();
                 };
@@ -163,7 +152,7 @@ impl Document {
             } => {
                 let matches = of_kind(kind);
                 let children: Vec<NodeId> = self
-                    .children(*of)
+                    .domain_children(*of)
                     .into_iter()
                     .filter(|&c| matches(self, c))
                     .collect();
@@ -180,7 +169,7 @@ impl Document {
             }
             StructuralQuery::FirstChild { of, kind } => {
                 let matches = of_kind(kind);
-                self.children(*of)
+                self.domain_children(*of)
                     .into_iter()
                     .find(|&c| matches(self, c))
                     .into_iter()
@@ -188,7 +177,7 @@ impl Document {
             }
             StructuralQuery::LastChild { of, kind } => {
                 let matches = of_kind(kind);
-                self.children(*of)
+                self.domain_children(*of)
                     .into_iter()
                     .rev()
                     .find(|&c| matches(self, c))
@@ -201,7 +190,7 @@ impl Document {
             },
             StructuralQuery::Children { of, kind } => {
                 let matches = of_kind(kind);
-                self.children(*of)
+                self.domain_children(*of)
                     .into_iter()
                     .filter(|&c| matches(self, c))
                     .collect()
@@ -309,7 +298,7 @@ impl Document {
             if !live.is_empty() {
                 // Document order, so that candidates read the way the
                 // document does. Only the order of a short list is at stake.
-                let order = self.document_order();
+                let order = self.authored_order();
                 let mut live: Vec<NodeId> = live.into_iter().collect();
                 live.sort_by_key(|n| order.iter().position(|o| o == n));
                 return Succession::Live(live);

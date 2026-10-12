@@ -76,7 +76,7 @@ impl Flow<'_> {
             .keeps
             .order
             .get_or_insert_with(|| {
-                let nodes = doc.blocks();
+                let nodes = doc.top(reprise_doc::Domain::Body);
                 let index = nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
                 Arc::new(BlockOrder { nodes, index })
             })

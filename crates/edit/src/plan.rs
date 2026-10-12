@@ -414,9 +414,12 @@ impl Model<'_> {
 
     fn kids(&mut self, parent: Option<NodeId>) -> &mut Vec<Slot> {
         let doc = self.doc;
-        self.kids
-            .entry(parent)
-            .or_insert_with(|| doc.children(parent).into_iter().map(Slot::Real).collect())
+        self.kids.entry(parent).or_insert_with(|| {
+            doc.children_in(reprise_doc::Domain::Body, parent)
+                .into_iter()
+                .map(Slot::Real)
+                .collect()
+        })
     }
 
     /// Where `node` sits among its parent's children.

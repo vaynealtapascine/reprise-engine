@@ -185,7 +185,7 @@ fn native_copy_carries_effective_formatting_across_paragraphs() {
         })
         .unwrap();
     let doc = editor.document();
-    let pasted = doc.blocks();
+    let pasted = doc.top(reprise_doc::Domain::Body);
     for (node, expected) in pasted.iter().zip([6..10, 0..6]) {
         let sized: Vec<_> = doc
             .text_formats(*node)
@@ -284,7 +284,7 @@ fn emphasis_html_and_native_roundtrip_independent_lines_and_alpha() {
             target_namespace: "target".into(),
         })
         .unwrap();
-    let pasted = editor.document().blocks()[0];
+    let pasted = editor.document().top(reprise_doc::Domain::Body)[0];
     let source = doc.text_formats(node).unwrap();
     let target = editor.document().text_formats(pasted).unwrap();
     assert_eq!(source.runs, target.runs);

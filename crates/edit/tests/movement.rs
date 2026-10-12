@@ -529,7 +529,7 @@ fn document_navigation_uses_authored_reading_order_overrides() {
     doc.commit();
     let snapshot = engine().layout(&doc);
     let nav = Navigator::semantic(&snapshot, &doc);
-    assert_eq!(doc.blocks(), ids);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), ids);
     assert_eq!(nav.reading_order(), &[ids[2], ids[0], ids[1]]);
     let start = nav
         .move_caret(Caret::new(ids[0], 0), Movement::DocumentStart)

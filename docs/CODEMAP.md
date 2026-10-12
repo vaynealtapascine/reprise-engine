@@ -332,3 +332,10 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `reprise-wasm` | `src/lib.rs`, `ts/worker.ts` | Annotation queries and worker kinds | 04 |
 | `fixtures`, `clipboard` | `src/hostile.rs` (`annotation_storm`), `clipboard/tests/annotation_storm.rs` | Hundreds of overlapping and nested annotations, a split, a deletion, concurrent edits and a hostile peer's envelopes | 37 |
 | docs | `docs/annotations.md` | Design note: building block, registry, behaviour, geometry, formats, suggestion mode, App seam | 10, 12, 13, 15, 29, 33, 35 |
+
+| `doc` | `src/domain.rs`, `src/sections.rs`, `src/sections/tests.rs` | Explicit body/story traversal, root story staging, retained starts with operation lifetimes, geometry-mode storage and read-only audits | 05–07, 29, 34, 37 |
+| workspace | `clippy.toml`; traversal callers in doc, edit, layout, format, clipboard, fixtures, fuzz-harness and their tests | Guard body aliases; explicit domains for traversal, authored image capture and historical views | 06, 27, 33–35 |
+| `format`, `doc` | `format/src/{features,container}.rs`, `doc/src/sync.rs` | Required sections bit 17 for packages and sync, including retained empty/malformed state and story tombstones; old-reader package refusal | 34 |
+
+| `fixtures`, `reprise` | `fixtures/tests/section_domains.rs`, `reprise/tests/section_domains.rs` | Every hostile fixture with an unbound story preserves body JSON; facade compatibility aliases stay body-only | 06, 33, 38 |
+| tools | `tools/check-sections.sh` | Full types/WASM/web/Node/TypeScript/worker/native gate scoped to sections2 and G: build caches | 38, 39 |

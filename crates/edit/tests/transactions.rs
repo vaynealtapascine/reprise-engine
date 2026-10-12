@@ -22,7 +22,7 @@ fn editor(doc: Document) -> Editor {
 
 /// Every live block in document order with its depth and text.
 fn dump(doc: &Document) -> Vec<(NodeId, usize, String)> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| {
             let mut depth = 0;
@@ -232,7 +232,7 @@ fn every_command_does_what_it_says() {
         })
         .unwrap();
     let tail = applied.blocks[0];
-    assert_eq!(e.document().blocks(), [a, tail, b]);
+    assert_eq!(e.document().top(reprise_doc::Domain::Body), [a, tail, b]);
     assert_eq!(texts(e.document()), ["héllo", " wörld", "second"]);
 
     e.apply_command(Command::JoinBlocks {
@@ -240,7 +240,7 @@ fn every_command_does_what_it_says() {
         second: tail,
     })
     .unwrap();
-    assert_eq!(e.document().blocks(), [a, b]);
+    assert_eq!(e.document().top(reprise_doc::Domain::Body), [a, b]);
     assert_eq!(texts(e.document()), ["héllo wörld", "second"]);
 
     let applied = e
@@ -251,7 +251,7 @@ fn every_command_does_what_it_says() {
         })
         .unwrap();
     let m = applied.blocks[0];
-    assert_eq!(e.document().blocks(), [a, m, b]);
+    assert_eq!(e.document().top(reprise_doc::Domain::Body), [a, m, b]);
 
     e.apply_command(Command::MoveBlock {
         node: b,
@@ -259,7 +259,7 @@ fn every_command_does_what_it_says() {
         index: 0,
     })
     .unwrap();
-    assert_eq!(e.document().blocks(), [b, a, m]);
+    assert_eq!(e.document().top(reprise_doc::Domain::Body), [b, a, m]);
 
     let style = Style {
         size: Some(LengthExpr::Pt(Length::from_pt(20))),
@@ -273,7 +273,7 @@ fn every_command_does_what_it_says() {
     assert_eq!(e.document().block(a).unwrap().overrides, style);
 
     e.apply_command(Command::DeleteBlock { node: m }).unwrap();
-    assert_eq!(e.document().blocks(), [b, a]);
+    assert_eq!(e.document().top(reprise_doc::Domain::Body), [b, a]);
 
     // Relations.
     let range = e.document().add_range(a, 0..5, RangePolicy::FIXED).unwrap();
@@ -325,7 +325,7 @@ fn a_transaction_is_one_undo_step() {
     assert!(e.redo().unwrap());
     assert_eq!(dump(e.document()), after);
     assert_eq!(
-        e.document().blocks(),
+        e.document().top(reprise_doc::Domain::Body),
         [a, new],
         "redo brings back the inserted block under the same ID"
     );
@@ -766,7 +766,11 @@ fn undoing_a_deleted_block_restores_the_same_node_with_everything_on_it() {
     );
     assert!(e.undo().unwrap());
     let doc = e.document();
-    assert_eq!(doc.blocks(), [a, target, note], "same ID, same place");
+    assert_eq!(
+        doc.top(reprise_doc::Domain::Body),
+        [a, target, note],
+        "same ID, same place"
+    );
     assert_eq!(
         doc.resolve_range(range),
         RangeState::Valid {
@@ -799,10 +803,14 @@ fn undo_after_a_concurrent_edit_inside_the_deleted_block() {
     })
     .unwrap();
     exchange(&mut one, &mut two);
-    assert_eq!(one.document().blocks(), [a], "no resurrection");
-    assert_eq!(two.document().blocks(), [a]);
+    assert_eq!(
+        one.document().top(reprise_doc::Domain::Body),
+        [a],
+        "no resurrection"
+    );
+    assert_eq!(two.document().top(reprise_doc::Domain::Body), [a]);
     assert!(one.undo().unwrap());
-    assert_eq!(one.document().blocks(), [a, b]);
+    assert_eq!(one.document().top(reprise_doc::Domain::Body), [a, b]);
     let block = one.document().block(b).unwrap();
     assert_eq!(block.text.to_string(), "hello, world");
     assert_eq!(block.overrides.family.as_deref(), Some("mono"));
@@ -834,11 +842,11 @@ fn undo_keeps_the_other_peers_blocks_and_moves() {
     exchange(&mut one, &mut two);
     assert!(one.undo().unwrap());
     exchange(&mut one, &mut two);
-    let order = one.document().blocks();
+    let order = one.document().top(reprise_doc::Domain::Body);
     assert!(order.contains(&b) && order.contains(&x));
     assert_eq!(order.len(), 4);
     assert_eq!(order[0], c, "their move stays");
-    assert_eq!(order, two.document().blocks());
+    assert_eq!(order, two.document().top(reprise_doc::Domain::Body));
     let _ = a;
 }
 
@@ -869,7 +877,7 @@ const SNIPPETS: [&str; 7] = ["a", "bc", "é", "e\u{301}", "שלום", "👩‍�
 
 /// A random command, valid or not, over the document's current state.
 fn random_command(rng: &mut Rng, doc: &Document) -> Command {
-    let order = doc.document_order();
+    let order = doc.order(reprise_doc::Domain::Body);
     let pick = |rng: &mut Rng| order.get(rng.below(order.len())).copied();
     let Some(node) = pick(rng) else {
         return Command::InsertBlock {
@@ -943,16 +951,22 @@ fn random_transaction(rng: &mut Rng, doc: &Document) -> Transaction {
 /// The structure is a forest: every live block is reached exactly once from
 /// the root, its parent agrees, and nothing refers to the dead.
 fn check_tree(doc: &Document) {
-    let order = doc.document_order();
+    let order = doc.order(reprise_doc::Domain::Body);
     let mut seen = std::collections::BTreeSet::new();
     for n in &order {
         assert!(seen.insert(*n), "{n} appears twice");
         assert!(doc.is_live(*n));
         let parent = doc.parent_of(*n).expect("live");
-        assert!(doc.children(parent).contains(n));
+        assert!(
+            doc.children_in(reprise_doc::Domain::Body, parent)
+                .contains(n)
+        );
         assert!(doc.block(*n).is_ok());
     }
-    assert_eq!(doc.blocks(), doc.children(None));
+    assert_eq!(
+        doc.top(reprise_doc::Domain::Body),
+        doc.top(reprise_doc::Domain::Body)
+    );
 }
 
 #[test]
@@ -1169,7 +1183,7 @@ fn every_command_round_trips_undo_redo_with_all_authored_fields() {
     // so deleted anchors retain the frozen Text/RangePolicy rebound semantics.
     let state = |doc: &Document| {
         (
-            doc.document_order()
+            doc.order(reprise_doc::Domain::Body)
                 .into_iter()
                 .map(|n| {
                     let block = doc.block(n).unwrap();
@@ -1259,7 +1273,7 @@ fn split_join_preserve_authored_range_policy_through_undo_redo() {
     assert!(editor.undo().unwrap());
     assert_eq!(editor.document().range_policy(range).unwrap(), Some(policy));
     assert!(editor.redo().unwrap());
-    let second = editor.document().blocks()[1];
+    let second = editor.document().top(reprise_doc::Domain::Body)[1];
     let tail_range = editor
         .document()
         .add_range(second, 0..4, RangePolicy::FIXED)

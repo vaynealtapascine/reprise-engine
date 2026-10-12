@@ -6,7 +6,7 @@ use crate::sync::*;
 use crate::{BlockKind, Document, NodeId, Style};
 
 fn dump(doc: &Document) -> Vec<(NodeId, String)> {
-    doc.document_order()
+    doc.order(crate::Domain::Body)
         .into_iter()
         .filter_map(|id| Some((id, doc.block(id).ok()?.text.to_string())))
         .collect()
@@ -448,7 +448,7 @@ fn unusual_but_valid_tree_positions_keep_local_insertion_working() {
             .unwrap();
             a.commit();
         }
-        assert_eq!(a.blocks().len(), 6, "position {position:?}");
+        assert_eq!(a.top(crate::Domain::Body).len(), 6, "position {position:?}");
     }
 }
 

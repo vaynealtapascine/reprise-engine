@@ -38,6 +38,8 @@ pub const REQUIRED_BLOCK_SEMANTICS: u64 = 1 << 14;
 /// would otherwise show as bare ranges and copy without their data. Bits 14
 /// and 15 belong to lists and inline objects (fixed at integration).
 pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
+/// Retained sections, independent stories and geometry mode.
+pub const REQUIRED_SECTIONS: u64 = 1 << 17;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
@@ -46,7 +48,8 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_PAGE_SETUP
     | REQUIRED_PARAGRAPH_STYLES
     | REQUIRED_BLOCK_SEMANTICS
-    | REQUIRED_ANNOTATIONS;
+    | REQUIRED_ANNOTATIONS
+    | REQUIRED_SECTIONS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -57,6 +60,9 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_sections() {
+        flags.required |= REQUIRED_SECTIONS;
+    }
     if document.has_annotations() {
         flags.required |= REQUIRED_ANNOTATIONS;
     }
@@ -78,7 +84,7 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     if document.has_text_emphasis() {
         flags.required |= REQUIRED_TEXT_EMPHASIS;
     }
-    let mut stack: Vec<NodeId> = document.blocks();
+    let mut stack: Vec<NodeId> = document.authored_order();
     let mut visited = 0usize;
     while let Some(node) = stack.pop() {
         visited += 1;
@@ -107,7 +113,6 @@ pub fn table_features(document: &Document) -> FeatureFlags {
         if flags.required & REQUIRED_TABLE_SPANS != 0 && flags.optional != 0 {
             break;
         }
-        stack.extend(document.children(Some(node)));
     }
     flags
 }

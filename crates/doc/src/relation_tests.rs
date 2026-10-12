@@ -334,12 +334,15 @@ fn queries_work_on_nested_blocks() {
         Found::Nodes(vec![l1, l2, l3])
     );
     // The top level doesn't see the lines.
-    assert_eq!(doc.children(None), vec![stanza, after]);
-    assert_eq!(doc.document_order(), vec![stanza, l1, l2, l3, after]);
+    assert_eq!(doc.top(crate::Domain::Body), vec![stanza, after]);
+    assert_eq!(
+        doc.order(crate::Domain::Body),
+        vec![stanza, l1, l2, l3, after]
+    );
     // Deleting the stanza takes its lines with it.
     doc.delete_block(stanza).unwrap();
     assert!(!doc.is_live(l2));
-    assert_eq!(doc.document_order(), vec![after]);
+    assert_eq!(doc.order(crate::Domain::Body), vec![after]);
 }
 
 #[test]
@@ -349,7 +352,7 @@ fn very_deep_nesting_does_not_overflow_the_stack() {
     for _ in 0..3000 {
         at = child(&doc, at, "x");
     }
-    assert_eq!(doc.document_order().len(), 3001);
+    assert_eq!(doc.order(crate::Domain::Body).len(), 3001);
     assert!(matches!(
         structural(&doc, StructuralQuery::Parent { of: at }).found,
         Found::Node(_)

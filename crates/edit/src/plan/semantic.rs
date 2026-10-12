@@ -206,7 +206,7 @@ impl Model<'_> {
         self.plan
             .steps
             .push(Step::SetListRestart { node, value: None });
-        let order = self.doc.document_order();
+        let order = self.doc.order(reprise_doc::Domain::Body);
         let Some(at) = order.iter().position(|&n| n == node) else {
             return Ok(());
         };

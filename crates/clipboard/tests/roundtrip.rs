@@ -128,10 +128,10 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
         if !fragment.fragment.blocks.is_empty() {
             assert_eq!(editor.undo_count(), 1, "{}: one undo", fixture.name);
             editor.undo().unwrap();
-            assert!(editor.document().blocks().is_empty());
+            assert!(editor.document().top(reprise_doc::Domain::Body).is_empty());
             editor.redo().unwrap();
             assert_eq!(
-                editor.document().blocks(),
+                editor.document().top(reprise_doc::Domain::Body),
                 fragment
                     .fragment
                     .blocks

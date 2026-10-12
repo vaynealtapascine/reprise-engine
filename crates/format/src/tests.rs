@@ -196,7 +196,10 @@ fn newer_files_are_read_only_and_never_downgraded() {
         .insert(99, Section::raw(b"future".to_vec()));
     let opened = open(&encoded(&container)).unwrap();
     assert!(opened.is_read_only());
-    assert_eq!(opened.view().unwrap().blocks().len(), 1);
+    assert_eq!(
+        opened.view().unwrap().top(reprise_doc::Domain::Body).len(),
+        1
+    );
     assert!(matches!(
         opened.editable_document(),
         Err(FormatError::ReadOnly)
@@ -443,9 +446,9 @@ fn table_features_are_declared_from_content_and_refused_by_old_readers() {
     let opened = open(&bytes).unwrap();
     let cell = {
         let d = opened.editable_document().unwrap();
-        let table = d.blocks()[0];
-        let row = d.children(Some(table))[0];
-        d.children(Some(row))[0]
+        let table = d.top(reprise_doc::Domain::Body)[0];
+        let row = d.children_of(table)[0];
+        d.children_of(row)[0]
     };
     opened
         .editable_document()

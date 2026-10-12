@@ -531,7 +531,7 @@ fn debug_explainability() {
 
 /// The `style.*` codes of every block, in document order, in a context.
 fn style_codes(doc: &Document, context: &ResolutionContext) -> Vec<Vec<String>> {
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|node| {
             doc.computed_style_in(node, context)
@@ -554,7 +554,7 @@ fn every_block_is_laid_out(fixture: &Fixture) {
     let snapshot = fixture.engine.layout(&fixture.doc);
     assert_eq!(
         snapshot.blocks.len(),
-        fixture.doc.blocks().len(),
+        fixture.doc.top(reprise_doc::Domain::Body).len(),
         "{}: every block is laid out",
         fixture.name
     );
@@ -584,7 +584,7 @@ fn style_expressions_report_and_fall_back() {
             &["style.unparsed"],
         ])
     );
-    for node in fixture.doc.blocks() {
+    for node in fixture.doc.top(reprise_doc::Domain::Body) {
         assert_eq!(
             size_of(&fixture.doc, node, &default),
             Length::from_pt(10),
@@ -643,7 +643,7 @@ fn style_bases_that_are_missing_or_indefinite_are_reported() {
             &[],
         ])
     );
-    let blocks = fixture.doc.blocks();
+    let blocks = fixture.doc.top(reprise_doc::Domain::Body);
     assert_eq!(
         size_of(&fixture.doc, blocks[1], &context),
         Length::from_pt(11)
@@ -1028,14 +1028,18 @@ fn incremental_page_seam() {
 #[test]
 fn editing_concurrent_delete_undo() {
     let fixture = hostile::editing_concurrent_delete_undo().unwrap();
-    let node = fixture.doc.blocks()[0];
+    let node = fixture.doc.top(reprise_doc::Domain::Body)[0];
     assert_eq!(
         fixture.doc.block(node).unwrap().text.to_string(),
         "anchor office e\u{301} \u{5D0}\u{5D1}"
     );
     assert_eq!(
-        fixture.doc.blocks(),
-        fixture.replica.as_ref().unwrap().blocks()
+        fixture.doc.top(reprise_doc::Domain::Body),
+        fixture
+            .replica
+            .as_ref()
+            .unwrap()
+            .top(reprise_doc::Domain::Body)
     );
     check(fixture);
 }
@@ -1044,8 +1048,8 @@ fn editing_concurrent_delete_undo() {
 fn editing_half_invalid() {
     use reprise_edit::{Command, Editor, Reason, Transaction};
     let fixture = hostile::editing_half_invalid().unwrap();
-    let node = fixture.doc.blocks()[0];
-    let keep = fixture.doc.blocks()[1];
+    let node = fixture.doc.top(reprise_doc::Domain::Body)[0];
+    let keep = fixture.doc.top(reprise_doc::Domain::Body)[1];
     let before = fixture.doc.revision();
     let mut editor = Editor::new(fixture.doc, reprise_doc::SchemaRegistry::builtin());
     let error = editor
@@ -1089,7 +1093,7 @@ fn editing_empty_block() {
     let fixture = hostile::editing_empty_block().unwrap();
     let snapshot = fixture.engine.layout(&fixture.doc);
     let nav = Navigator::semantic(&snapshot, &fixture.doc);
-    let caret = Caret::new(fixture.doc.blocks()[0], 0);
+    let caret = Caret::new(fixture.doc.top(reprise_doc::Domain::Body)[0], 0);
     for movement in [
         Movement::VisualLeft,
         Movement::VisualRight,

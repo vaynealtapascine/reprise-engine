@@ -56,7 +56,7 @@ pub(crate) fn run(
     plan: &Plan,
 ) -> Vec<Pending> {
     let mut cursor = Cursor::new(engine, doc, template, snapshot, plan);
-    for node in doc.blocks() {
+    for node in doc.top(reprise_doc::Domain::Body) {
         cursor = cursor.step(engine, doc, template, snapshot, plan, node, None);
     }
     cursor.finish(engine, template, snapshot, plan)

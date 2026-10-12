@@ -1186,7 +1186,7 @@ pub fn concurrent_templates() -> Result<Fixture, DocError> {
     taller.frames[0].height = Dim::pt(40);
     other.define_page_template(&taller)?;
     other.define_page_template(&PageTemplate::new("extra", Dim::pt(200), Dim::pt(200)))?;
-    let first = doc.blocks()[0];
+    let first = doc.top(reprise_doc::Domain::Body)[0];
     other.block(first)?.text.insert(0, "Edited. ")?;
 
     doc.merge(&other)?;
@@ -2154,7 +2154,7 @@ pub fn image_oversized() -> Result<Fixture, DocError> {
     )?;
     let node = fixture
         .doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .next()
         .ok_or_else(|| DocError::Store("missing fixture image".into()))?;
@@ -2260,7 +2260,7 @@ pub fn image_unreadable() -> Result<Fixture, DocError> {
     )?;
     let node = fixture
         .doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .next()
         .ok_or_else(|| DocError::Store("missing fixture image".into()))?;
@@ -2570,7 +2570,7 @@ pub fn collab_hostile_peer() -> Result<Fixture, DocError> {
     paragraph_with_note(&doc, "A noted paragraph whose note is torn out.", "noted")?;
     doc.commit();
     let note = doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .find(|&n| doc.kind_of(n) == Some(BlockKind::Annotation))
         .ok_or_else(|| DocError::Store("missing fixture note".into()))?;

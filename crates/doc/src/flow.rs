@@ -419,6 +419,9 @@ impl Document {
     /// parent's children: itself, or for a host its paragraphs with their
     /// embedded nodes.
     pub(crate) fn expand(&self, node: TreeID, depth: usize, out: &mut Vec<NodeId>) {
+        if !self.live(&self.tree("content"), node) || self.is_story_node(node) {
+            return;
+        }
         let Some(flow) = self.flow(node) else {
             out.push(NodeId::tree(node));
             return;
@@ -624,7 +627,7 @@ impl Document {
             }
         }
         let siblings: Vec<NodeId> = self
-            .children(parent)
+            .children_in(crate::Domain::Body, parent)
             .into_iter()
             .filter(|&s| Some(s) != moving)
             .collect();

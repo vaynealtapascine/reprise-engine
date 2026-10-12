@@ -399,7 +399,7 @@ fn indexed_resolution_matches_range_extent_under_flow_edits() {
         ((seed >> 33) as usize) % n.max(1)
     };
     for round in 0..60 {
-        let paras = doc.children(None);
+        let paras = doc.top(crate::Domain::Body);
         let p = paras[next(paras.len())];
         let len = doc.block(p).unwrap().text.len();
         match round % 5 {

@@ -146,7 +146,7 @@ fn validate_layout(doc: &Document, layout: Option<&LayoutSnapshot>) -> Result<()
 pub(crate) fn semantic(doc: &Document) -> Result<Vec<NodeId>, ClipboardError> {
     let mut out = Vec::new();
     let mut stack: Vec<_> = doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .rev()
         .map(|n| (n, 0usize))
@@ -159,7 +159,7 @@ pub(crate) fn semantic(doc: &Document) -> Result<Vec<NodeId>, ClipboardError> {
         }
         out.push(node);
         stack.extend(
-            doc.children(Some(node))
+            doc.children_of(node)
                 .into_iter()
                 .rev()
                 .map(|n| (n, depth + 1)),
@@ -644,7 +644,7 @@ fn html_node(
         paragraph(doc, node, layout, links, out)?;
     }
     let mut lists = crate::semantic_html::ListWriter::default();
-    for child in doc.children(Some(node)) {
+    for child in doc.children_of(node) {
         list_boundary(doc, child, &mut lists, out)?;
         html_node(doc, child, layout, links, out, depth + 1, grid)?;
     }
@@ -679,7 +679,7 @@ impl Exporter for Html {
                 }
             }
         }
-        for root in doc.blocks() {
+        for root in doc.top(reprise_doc::Domain::Body) {
             if seen.insert(root) {
                 roots.push(root);
             }

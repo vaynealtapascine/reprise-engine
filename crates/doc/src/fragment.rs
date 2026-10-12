@@ -407,7 +407,7 @@ impl Document {
             cuts.insert(node, bytes);
             if cut.is_none() {
                 todo.extend(
-                    self.children(Some(node))
+                    self.children_of(node)
                         .into_iter()
                         .rev()
                         .map(|n| (n, None, Some(node), depth + 1)),
@@ -588,7 +588,7 @@ impl Document {
         scope: CopyScope,
     ) -> Result<Fragment, FragmentError> {
         let selection: Vec<_> = self
-            .blocks()
+            .top(crate::Domain::Body)
             .into_iter()
             .map(|node| CopyBlock { node, bytes: None })
             .collect();

@@ -430,7 +430,7 @@ fn plain_export_retains_the_unplaced_tail_and_resource_dedup_keeps_font_pins() {
             .bytes,
     )
     .unwrap();
-    for node in fixture.doc.blocks() {
+    for node in fixture.doc.top(reprise_doc::Domain::Body) {
         let text = fixture.doc.block(node).unwrap().text.to_string();
         assert!(plain.contains(&text), "unplaced tail lost");
     }

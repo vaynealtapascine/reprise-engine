@@ -28,6 +28,8 @@ mod annotation_restore;
 #[cfg(test)]
 mod annotation_tests;
 mod changes;
+mod domain;
+pub use domain::Domain;
 pub mod codes;
 pub mod context;
 mod edit;
@@ -62,6 +64,7 @@ pub mod relation;
 mod relation_tests;
 mod resolve;
 pub mod roles;
+pub mod sections;
 mod structure;
 mod style;
 pub mod sync;
@@ -466,9 +469,9 @@ impl Document {
         Ok(NodeId::tree(id))
     }
 
-    /// Top-level blocks in document order.
+    /// Body-domain alias of [`Document::top`].
     pub fn blocks(&self) -> Vec<NodeId> {
-        self.children(None)
+        self.top(Domain::Body)
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
@@ -631,6 +634,9 @@ impl Document {
         else {
             return RangeState::Missing { node: Some(node) };
         };
+        if self.domain_of(node) != self.domain_of(end_node) {
+            return RangeState::Missing { node: Some(node) };
+        }
         let end = match self.flow_cmp(node, end_node) {
             std::cmp::Ordering::Equal => e.offset().max(s.offset()),
             // The end is in a later paragraph: this paragraph's part.

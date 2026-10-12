@@ -259,7 +259,7 @@ impl Document {
         }
         let mut issues = Vec::new();
         let mut inputs = Vec::new();
-        let children = self.children(Some(table));
+        let children = self.children_of(table);
         if children.len() > MAX_GRID_ROWS {
             issues.push(GridIssue {
                 node: table,
@@ -275,7 +275,7 @@ impl Document {
                 continue;
             };
             let mut cells = Vec::new();
-            let row_children = self.children(Some(row));
+            let row_children = self.children_of(row);
             if row_children.len() > columns {
                 issues.push(GridIssue {
                     node: row,

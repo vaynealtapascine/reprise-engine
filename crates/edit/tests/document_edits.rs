@@ -7,7 +7,7 @@ fn para(doc: &Document, text: &str) -> NodeId {
         .unwrap()
 }
 fn texts(doc: &Document) -> Vec<String> {
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| doc.block(n).unwrap().text.to_string())
         .collect()
@@ -24,13 +24,13 @@ fn moving_blocks_counts_live_siblings_and_refuses_cycles() {
     let gone = para(&doc, "gone");
     doc.delete_block(gone).unwrap();
     doc.move_block(a, None, 2).unwrap();
-    assert_eq!(doc.blocks(), [b, c, a]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [b, c, a]);
     doc.move_block(a, None, 0).unwrap();
-    assert_eq!(doc.blocks(), [a, b, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, b, c]);
     assert!(doc.move_block(a, None, 3).is_err(), "past the end");
     doc.move_block(c, Some(a), 0).unwrap();
-    assert_eq!(doc.blocks(), [a, b]);
-    assert_eq!(doc.children(Some(a)), [c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, b]);
+    assert_eq!(doc.children_of(a), [c]);
     assert!(doc.move_block(a, Some(a), 0).is_err());
     assert!(
         doc.move_block(a, Some(c), 0).is_err(),
@@ -41,7 +41,7 @@ fn moving_blocks_counts_live_siblings_and_refuses_cycles() {
         "under a deleted block"
     );
     assert!(doc.move_block(gone, None, 0).is_err(), "a deleted block");
-    assert_eq!(doc.blocks(), [a, b]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, b]);
 }
 
 #[test]
@@ -52,10 +52,10 @@ fn inserting_checks_its_parent_and_index() {
     assert!(doc.insert_block_at(None, 2, &new).is_err());
     let x = doc.insert_block_at(None, 0, &new).unwrap();
     let y = doc.insert_block_at(None, 2, &new).unwrap();
-    assert_eq!(doc.blocks(), [x, a, y]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [x, a, y]);
     doc.delete_block(a).unwrap();
     assert!(doc.insert_block_at(Some(a), 0, &new).is_err());
-    assert_eq!(doc.blocks(), [x, y]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [x, y]);
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn splitting_and_joining_keep_ids_text_and_succession() {
     let after = para(&doc, "after");
     assert!(doc.split_block(a, 2).is_err(), "inside the é");
     let b = doc.split_block(a, "héllo".len()).unwrap();
-    assert_eq!(doc.blocks(), [a, b, after]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, b, after]);
     assert_eq!(texts(&doc), ["héllo", " world", "after"]);
     let moved = doc.block(b).unwrap();
     assert_eq!(
@@ -86,7 +86,7 @@ fn splitting_and_joining_keep_ids_text_and_succession() {
 
     // Joining `b` back: relations that named it follow the text.
     doc.join_blocks(a, b).unwrap();
-    assert_eq!(doc.blocks(), [a, after]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, after]);
     assert_eq!(texts(&doc), ["héllo world", "after"]);
     assert_eq!(doc.successors(b), [a]);
     assert!(doc.join_blocks(a, a).is_err());
@@ -96,7 +96,11 @@ fn splitting_and_joining_keep_ids_text_and_succession() {
         .unwrap();
     assert!(doc.join_blocks(a, note).is_err(), "different kinds");
     assert!(doc.split_block(a, 999).is_err());
-    assert_eq!(doc.blocks(), [a, after, note], "refusals change nothing");
+    assert_eq!(
+        doc.top(reprise_doc::Domain::Body),
+        [a, after, note],
+        "refusals change nothing"
+    );
 }
 
 #[test]
@@ -162,7 +166,7 @@ fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
             .add_range(paragraphs[0], 0..4, RangePolicy::FIXED)
             .unwrap();
         let topology: Vec<_> = doc
-            .document_order()
+            .order(reprise_doc::Domain::Body)
             .into_iter()
             .map(|id| (id, doc.parent_of(id), doc.table_role(id).unwrap()))
             .collect();
@@ -170,7 +174,7 @@ fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
         let mut hidden = vec![target];
         let mut index = 0;
         while index < hidden.len() {
-            hidden.extend(doc.children(Some(hidden[index])));
+            hidden.extend(doc.children_of(hidden[index]));
             index += 1;
         }
         let layout = engine();
@@ -183,7 +187,7 @@ fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
         assert_eq!(editor.undo_count(), 1);
         let doc = editor.document();
         assert_eq!(
-            doc.blocks(),
+            doc.top(reprise_doc::Domain::Body),
             if level == 0 {
                 vec![before, after]
             } else {
@@ -195,7 +199,7 @@ fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
             assert!(doc.block(*id).is_err());
             assert!(doc.table_role(*id).is_err());
             assert_eq!(doc.parent_of(*id), None);
-            assert!(doc.children(Some(*id)).is_empty());
+            assert!(doc.children_of(*id).is_empty());
             assert!(
                 doc.evaluate(&StructuralQuery::Children {
                     of: Some(*id),
@@ -207,7 +211,7 @@ fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
                 doc.evaluate(&StructuralQuery::Parent { of: *id })
                     .is_empty()
             );
-            assert!(!doc.document_order().contains(id));
+            assert!(!doc.order(reprise_doc::Domain::Body).contains(id));
         }
         assert!(matches!(
             doc.resolve_range(range),
@@ -226,7 +230,7 @@ fn deleting_table_row_or_cell_hides_the_subtree_and_undo_restores_all_ids() {
         assert!(editor.undo().unwrap());
         let doc = editor.document();
         assert_eq!(
-            doc.document_order(),
+            doc.order(reprise_doc::Domain::Body),
             topology.iter().map(|(id, ..)| *id).collect::<Vec<_>>()
         );
         for (id, parent, role) in &topology {

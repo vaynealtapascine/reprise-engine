@@ -64,7 +64,7 @@ impl Features {
     pub const SNAPSHOT_JSON: Features = Features(1 << 2);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features = Features(1 | (1 << 2));
+    pub const SUPPORTED: Features = Features(1 | (1 << 2) | crate::sections::REQUIRED_SECTIONS);
 
     const NAMES: [(Features, &'static str); 3] = [
         (Features::DELTA_JSON, "delta-json"),
@@ -295,7 +295,7 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         PacketKind::Delta => Features::DELTA_JSON,
         PacketKind::Snapshot => Features::SNAPSHOT_JSON,
     };
-    if features != needed {
+    if features.0 & !crate::sections::REQUIRED_SECTIONS != needed.0 {
         return Err(invalid("packet features don't match its kind"));
     }
     let since = r.vector()?;
@@ -385,7 +385,14 @@ impl Document {
         let body = serde_json::to_vec(&json).map_err(|e| SyncError::Store(e.to_string()))?;
         let header = PacketHeader {
             format: SYNC_FORMAT,
-            features: Features::DELTA_JSON,
+            features: Features(
+                Features::DELTA_JSON.0
+                    | if self.has_sections() {
+                        crate::sections::REQUIRED_SECTIONS
+                    } else {
+                        0
+                    },
+            ),
             kind: PacketKind::Delta,
             since: clamped,
             until,
@@ -398,7 +405,9 @@ impl Document {
         let packet = self.export_delta(&[])?;
         let (mut header, body) = read_header(&packet)?;
         header.kind = PacketKind::Snapshot;
-        header.features = Features::SNAPSHOT_JSON;
+        header.features = Features(
+            Features::SNAPSHOT_JSON.0 | (header.features.0 & crate::sections::REQUIRED_SECTIONS),
+        );
         write_packet(&header, body)
     }
 

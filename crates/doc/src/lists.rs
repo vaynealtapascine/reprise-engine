@@ -871,7 +871,7 @@ impl Document {
         }
         let mut resolved: BTreeMap<ListId, ResolvedList> = BTreeMap::new();
         let mut counters: BTreeMap<ListId, [Option<i64>; LEVELS]> = BTreeMap::new();
-        for node in self.document_order() {
+        for node in self.order(crate::Domain::Body) {
             let Ok(meta) = self.meta_of(node) else {
                 continue;
             };

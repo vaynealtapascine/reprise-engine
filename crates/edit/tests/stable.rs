@@ -254,7 +254,7 @@ fn selections_resolve_identically_on_every_replica_after_concurrent_edits() {
             seed = seed
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(i as u64 + 1);
-            let live = e.document().blocks();
+            let live = e.document().top(reprise_doc::Domain::Body);
             let node = live[(seed >> 40) as usize % live.len()];
             let len = e.document().block(node).unwrap().text.len();
             let at = (seed >> 20) as usize % (len + 1);
