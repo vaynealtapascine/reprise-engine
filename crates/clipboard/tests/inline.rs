@@ -77,7 +77,10 @@ fn html_writes_images_and_resolved_fields_and_imports_them_again() {
     let html = String::from_utf8(export(Html, &s)).unwrap();
     assert!(html.contains("<img "), "{html}");
     assert!(html.contains(&format!("data-reprise-asset=\"{}\"", s.asset)));
-    assert!(html.contains("alt=\"a &quot;cat&quot; &amp; &lt;dog&gt;\""), "{html}");
+    assert!(
+        html.contains("alt=\"a &quot;cat&quot; &amp; &lt;dog&gt;\""),
+        "{html}"
+    );
     // The field is a span with its resolved text; the text field its text.
     assert!(html.contains("data-field=\"page-number\""));
     assert!(html.contains(">1</span>"), "{html}");
@@ -85,7 +88,10 @@ fn html_writes_images_and_resolved_fields_and_imports_them_again() {
 
     let imported = import_html(&html, ImportLimits::default()).unwrap();
     let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
-    let pasted = imported.fragment.paste(&mut editor, None, "target").unwrap();
+    let pasted = imported
+        .fragment
+        .paste(&mut editor, None, "target")
+        .unwrap();
     let node = pasted.ids.nodes.values().copied().next().unwrap();
     let before: Vec<_> = s
         .doc
@@ -173,7 +179,10 @@ fn html_from_other_tools_is_read_as_far_as_it_goes() {
     );
     let imported = import_html(&html, ImportLimits::default()).unwrap();
     let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
-    let pasted = imported.fragment.paste(&mut editor, None, "target").unwrap();
+    let pasted = imported
+        .fragment
+        .paste(&mut editor, None, "target")
+        .unwrap();
     let node = pasted.ids.nodes.values().copied().next().unwrap();
     let objects = editor.document().inline_objects(node).unwrap();
     assert_eq!(objects.len(), 2);
@@ -187,7 +196,10 @@ fn html_from_other_tools_is_read_as_far_as_it_goes() {
     // character is never an object.
     let text = editor.document().block(node).unwrap().text.to_string();
     assert_eq!(text.matches('\u{FFFC}').count(), 2, "{text:?}");
-    assert!(text.ends_with(", a b c") || text.ends_with(", abc"), "{text:?}");
+    assert!(
+        text.ends_with(", a b c") || text.ends_with(", abc"),
+        "{text:?}"
+    );
     assert!(
         imported
             .fragment
@@ -215,7 +227,10 @@ fn hostile_html_never_makes_an_object_it_cannot_validate() {
     ] {
         let imported = import_html(&html, ImportLimits::default()).unwrap();
         let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
-        let pasted = imported.fragment.paste(&mut editor, None, "target").unwrap();
+        let pasted = imported
+            .fragment
+            .paste(&mut editor, None, "target")
+            .unwrap();
         let node = pasted.ids.nodes.values().copied().next().unwrap();
         assert!(
             editor.document().inline_objects(node).unwrap().is_empty(),
