@@ -221,7 +221,7 @@ loop reuses the region feedback coordinator of decision 26 (`regions.rs`):
 
 Commands `InsertInline { node, at, object }` and `UpdateInline { node, at,
 params }`, the `inline` list per block in `State`, and native clipboard support.
-Package feature bit **13** (`REQUIRED_INLINE_OBJECTS`) is set by any `inline1`
+Package feature bit **15** (`REQUIRED_INLINE_OBJECTS`) is set by any `inline1`
 record, live or not, so older engines refuse such packages; documents without
 atoms are unchanged.
 

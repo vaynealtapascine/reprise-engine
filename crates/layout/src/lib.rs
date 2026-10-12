@@ -24,6 +24,7 @@ pub mod geometry;
 mod image;
 pub mod incremental;
 mod inline;
+mod inline_display;
 pub mod marks;
 mod notes;
 pub mod plugins;

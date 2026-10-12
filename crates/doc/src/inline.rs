@@ -408,10 +408,21 @@ impl Document {
         self.doc.get_map(INLINE)
     }
 
+    /// Root reads must not create a container: even try_get_map creates roots.
+    fn read_inline_map(&self) -> Option<LoroMap> {
+        let LoroValue::Map(roots) = self.doc.get_value() else {
+            return None;
+        };
+        if !roots.contains_key(INLINE) {
+            return None;
+        }
+        self.doc.try_get_map(INLINE)
+    }
+
     /// A readable record (version 1), active or not.
     fn inline_record(&self, host: TreeID, mark: ID) -> Option<LoroMap> {
         let key = NodeId::at_break(host, mark).to_string();
-        match self.inline_map().get(&key)? {
+        match self.read_inline_map()?.get(&key)? {
             ValueOrContainer::Container(Container::Map(m)) if get_i64(&m, VERSION) == Some(1) => {
                 Some(m)
             }
@@ -433,7 +444,7 @@ impl Document {
     /// Whether any inline object record exists, live or not. Packages that
     /// have one need an engine that understands them.
     pub fn has_inline_objects(&self) -> bool {
-        !self.inline_map().is_empty()
+        self.read_inline_map().is_some_and(|map| !map.is_empty())
     }
 
     /// The live objects of a paragraph, in text order.
@@ -778,11 +789,56 @@ impl Document {
         Some((at, resolved.offset()))
     }
 
+    /// Reanchor portable fragment page-of targets after destination text exists.
+    /// Each map entry supplies the destination node and copied text's byte shift.
+    /// Targets outside the copy keep their persistent identity.
+    pub fn remap_inline_targets(
+        &self,
+        nodes: &BTreeMap<NodeId, (NodeId, usize)>,
+    ) -> Result<(), DocError> {
+        let destinations: std::collections::BTreeSet<_> =
+            nodes.values().map(|&(node, _)| node).collect();
+        for node in destinations {
+            for entry in self.inline_objects(node)? {
+                if entry.object.kind != FIELD || entry.object.param("field") != Some("page-of") {
+                    continue;
+                }
+                let Some(raw) = entry
+                    .object
+                    .param("target")
+                    .and_then(|s| s.strip_prefix("copy:"))
+                else {
+                    continue;
+                };
+                let Some((source, at)) = raw.split_once(' ') else {
+                    continue;
+                };
+                let Some(source) = NodeId::parse(source) else {
+                    continue;
+                };
+                let Ok(at) = at.parse::<usize>() else {
+                    continue;
+                };
+                let Some(&(target, shift)) = nodes.get(&source) else {
+                    continue;
+                };
+                if let Ok(value) = self.field_target(target, at.saturating_add(shift)) {
+                    let patch = InlinePatch {
+                        align: None,
+                        params: BTreeMap::from([("target".into(), Some(value))]),
+                    };
+                    self.update_inline(entry.id, &patch)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Orphaned markers and records, for diagnostics. Read-only.
     pub fn inline_audit(&self) -> InlineAudit {
         let mut audit = InlineAudit::default();
-        let map = self.inline_map();
-        let mut hosts: BTreeMap<TreeID, Vec<ObjectMark>> = BTreeMap::new();
+        let map = self.read_inline_map();
+        let mut hosts: BTreeMap<TreeID, std::collections::BTreeSet<ID>> = BTreeMap::new();
         let tree = self.tree("content");
         for host in tree.nodes() {
             if let Some(flow) = self.flow(host)
@@ -800,16 +856,19 @@ impl Document {
                         .map_or(NodeId::tree(host), |p| p.id);
                     *audit.orphan_markers.entry(para).or_default() += 1;
                 }
-                hosts.insert(host, flow.objects.clone());
+                hosts.insert(host, flow.objects.iter().filter_map(|m| m.id).collect());
             }
         }
-        let mut keys: Vec<String> = map.keys().map(|k| k.to_string()).collect();
+        let mut keys: Vec<String> = map
+            .into_iter()
+            .flat_map(|map| map.keys().map(|k| k.to_string()).collect::<Vec<_>>())
+            .collect();
         keys.sort();
         for key in keys {
             let found = InlineId::parse(&key).is_some_and(|id| {
                 hosts
                     .get(&id.host)
-                    .is_some_and(|marks| marks.iter().any(|m| m.id == Some(id.mark)))
+                    .is_some_and(|marks| marks.contains(&id.mark))
             });
             if !found {
                 audit.orphan_records.push(key);

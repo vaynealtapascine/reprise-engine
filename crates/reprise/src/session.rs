@@ -545,6 +545,15 @@ impl DocumentSession {
                         resolved: index,
                     }
                 },
+                // Records that cannot be read are reported by layout diagnostics,
+                // so an unreadable object is left out here, not failed on.
+                inline: self
+                    .doc()
+                    .inline_objects(node)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(cv::inline_entry)
+                    .collect(),
             });
         }
         let page = self.engine.page_setup(self.doc());
@@ -663,9 +672,30 @@ impl DocumentSession {
         }
         let mut bytes = 0usize;
         for command in commands {
-            if let Command::InsertText { text, .. } | Command::InsertBlock { text, .. } = command {
-                bytes = bytes.saturating_add(text.len());
-            }
+            let added = match command {
+                Command::InsertText { text, .. } | Command::InsertBlock { text, .. } => text.len(),
+                // Inline parameters count too, each entry's name and value (and one
+                // byte, so empty names still cost something).
+                Command::InsertInline { object, .. } => {
+                    object
+                        .params
+                        .iter()
+                        .fold(object.kind.len(), |n, (name, value)| {
+                            n.saturating_add(name.len())
+                                .saturating_add(value.len())
+                                .saturating_add(1)
+                        })
+                }
+                Command::UpdateInline { patch, .. } => {
+                    patch.params.iter().fold(0usize, |n, (name, value)| {
+                        n.saturating_add(name.len())
+                            .saturating_add(value.as_ref().map_or(0, String::len))
+                            .saturating_add(1)
+                    })
+                }
+                _ => 0,
+            };
+            bytes = bytes.saturating_add(added);
         }
         if bytes > reprise_edit::MAX_TRANSACTION_BYTES {
             return Err(Error::Limit("transaction text".into()));
@@ -944,6 +974,19 @@ impl DocumentSession {
             anchor: self.checked_caret(&r.anchor)?,
             focus: self.checked_caret(&r.focus)?,
         })
+    }
+    /// Page geometry of the atom at a UTF-8 marker offset, from current layout.
+    pub fn atom_rect(&self, request: &Payload<FieldTarget>) -> Result<Payload<PageRect>> {
+        let r = validate(request)?;
+        let node = cv::id(&r.node)?;
+        let atom = self
+            .navigator()?
+            .atom_rect(node, r.at as usize)
+            .ok_or_else(|| Error::Invalid("no placed inline object at that offset".into()))?;
+        Ok(Payload::new(PageRect {
+            page: u32::try_from(atom.page).unwrap_or(u32::MAX),
+            rect: cv::rect(atom.rect),
+        }))
     }
     pub fn selection_rects(&self, request: &Payload<Selection>) -> Result<Payload<Vec<PageRect>>> {
         let selection = self.selection(validate(request)?)?;
@@ -1230,6 +1273,18 @@ impl DocumentSession {
             reprise_clipboard::import_plain(&r.text)?
         };
         self.paste_fragment(imported.fragment, r.at.as_ref())
+    }
+    /// The persistent `target` for a `page-of` field: the paragraph `node` at
+    /// byte `at`, which follows later splits, joins and edits. Store the
+    /// returned string as the `target` parameter of a field object, such as
+    /// `InlineObject { kind: "field", params: { field: "page-of", target } }`
+    /// in an `InsertInline` or `UpdateInline` command. Errors when `node` is
+    /// unknown or `at` is not a character boundary of its text.
+    pub fn field_target(&self, request: &Payload<FieldTarget>) -> Result<Payload<String>> {
+        let r = validate(request)?;
+        let node = cv::id(&r.node)?;
+        let target = self.doc().field_target(node, r.at as usize)?;
+        Ok(Payload::new(target))
     }
     pub fn save(&mut self) -> Result<Payload<Bytes>> {
         self.sync_fonts()?;

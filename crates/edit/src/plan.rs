@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use reprise_doc::relation::QueryAnchor;
+use reprise_doc::text::OBJECT;
 use reprise_doc::{
     DocError, Document, NewBlock, NodeId, RangeState, Relation, RelationId, SchemaRegistry, Style,
     Target,
@@ -145,6 +146,20 @@ pub(crate) enum Step {
         node: NodeId,
         at: usize,
     },
+    /// Stages the object and shows it. Staging commits what was pending in
+    /// the step first, so the object joins the step's undo history.
+    InsertInline {
+        node: NodeId,
+        at: usize,
+        object: reprise_doc::InlineObject,
+    },
+    /// Finds the object at `at` when the step runs, which is where the
+    /// earlier steps have left it.
+    UpdateInline {
+        node: NodeId,
+        at: usize,
+        patch: reprise_doc::InlinePatch,
+    },
 }
 
 /// A block the transaction creates.
@@ -223,6 +238,17 @@ struct Model<'a> {
     )>,
     /// Named styles the transaction made live (`true`) or not (`false`).
     styles: BTreeMap<String, bool>,
+    /// The inline objects of each paragraph whose text the transaction has
+    /// read, in text order, kept at their positions as the text changes.
+    inlines: BTreeMap<NodeId, Vec<ModelInline>>,
+}
+
+/// An inline object as the transaction sees it: where its U+FFFC is now, and
+/// its parameters as they will be.
+#[derive(Clone, Debug)]
+struct ModelInline {
+    at: usize,
+    object: reprise_doc::InlineObject,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -278,6 +304,7 @@ pub(crate) fn plan(
         payload: 0,
         page_setup: None,
         styles: BTreeMap::new(),
+        inlines: BTreeMap::new(),
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -359,8 +386,42 @@ impl Model<'_> {
                 .text
                 .to_string();
             self.texts.insert(node, text);
+            self.load_inlines(node)?;
         }
         self.texts.get_mut(&node).ok_or(Reason::NoSuchBlock(node))
+    }
+
+    /// Records the objects of `node` as the document holds them. Called when
+    /// the node's text is first read, so before the transaction changes it.
+    fn load_inlines(&mut self, node: NodeId) -> Result<(), Reason> {
+        if !self.doc.has_inline_objects() || !self.doc.in_flow(node) {
+            return Ok(());
+        }
+        let list = self
+            .doc
+            .inline_objects(node)
+            .map_err(Reason::from)?
+            .into_iter()
+            .map(|e| ModelInline {
+                at: e.at,
+                object: e.object,
+            })
+            .collect();
+        self.inlines.insert(node, list);
+        Ok(())
+    }
+
+    /// Moves the objects of `node` after its text changed: `removed` bytes at
+    /// `at` became `inserted` bytes. Objects inside the removed bytes are gone
+    /// (a deletion deactivates them); those after them move.
+    fn shift_inlines(&mut self, node: NodeId, at: usize, removed: usize, inserted: usize) {
+        let end = at.saturating_add(removed);
+        if let Some(list) = self.inlines.get_mut(&node) {
+            list.retain(|i| i.at < at || i.at >= end);
+            for i in list.iter_mut().filter(|i| i.at >= end) {
+                i.at = i.at.saturating_sub(removed).saturating_add(inserted);
+            }
+        }
     }
 
     fn kids(&mut self, parent: Option<NodeId>) -> &mut Vec<Slot> {
@@ -684,7 +745,90 @@ impl Model<'_> {
                 self.plan.steps.push(Step::RemoveRelation { id: *id });
                 Ok(())
             }
+            Command::InsertInline { node, at, object } => self.insert_inline(*node, *at, object),
+            Command::UpdateInline { node, at, patch } => self.update_inline(*node, *at, patch),
         }
+    }
+
+    fn insert_inline(
+        &mut self,
+        node: NodeId,
+        at: usize,
+        object: &reprise_doc::InlineObject,
+    ) -> Result<(), Reason> {
+        object.validate().map_err(Reason::Inline)?;
+        self.require(node)?;
+        if !self.doc.in_flow(node) {
+            return Err(Reason::Inline("inline objects need a flow paragraph".into()));
+        }
+        self.add_payload(inline_size(object))?;
+        let s = self.text(node)?;
+        if !s.is_char_boundary(at) {
+            return Err(Reason::BadOffset { node, offset: at });
+        }
+        s.insert(at, OBJECT);
+        let width = OBJECT.len_utf8();
+        self.shift_inlines(node, at, 0, width);
+        let list = self.inlines.entry(node).or_default();
+        let index = list.partition_point(|i| i.at < at);
+        list.insert(
+            index,
+            ModelInline {
+                at,
+                object: object.clone(),
+            },
+        );
+        self.plan.steps.push(Step::InsertInline {
+            node,
+            at,
+            object: object.clone(),
+        });
+        self.plan.effects.push(PlannedEffect::Text {
+            node,
+            at,
+            removed: 0,
+            inserted: width,
+        });
+        Ok(())
+    }
+
+    fn update_inline(
+        &mut self,
+        node: NodeId,
+        at: usize,
+        patch: &reprise_doc::InlinePatch,
+    ) -> Result<(), Reason> {
+        let is_object = self
+            .text(node)?
+            .get(at..)
+            .is_some_and(|s| s.starts_with(OBJECT));
+        let no_object = || Reason::BadOffset { node, offset: at };
+        if !is_object {
+            return Err(no_object());
+        }
+        let next = {
+            let entry = self
+                .inlines
+                .get(&node)
+                .and_then(|list| list.iter().find(|i| i.at == at))
+                .ok_or_else(no_object)?;
+            patch.apply(&entry.object)
+        };
+        next.validate().map_err(Reason::Inline)?;
+        self.add_payload(inline_size(&next))?;
+        if let Some(entry) = self
+            .inlines
+            .get_mut(&node)
+            .and_then(|list| list.iter_mut().find(|i| i.at == at))
+        {
+            entry.object = next;
+        }
+        self.plan.steps.push(Step::UpdateInline {
+            node,
+            at,
+            patch: patch.clone(),
+        });
+        Ok(())
     }
 
     /// Whether `name` is a live style at this point of the transaction.
@@ -774,6 +918,11 @@ impl Model<'_> {
         if text.contains(reprise_doc::text::BREAK) {
             return Err(Reason::Store("U+FDD0 is not text".into()));
         }
+        // Refused by the store too, but only after earlier steps wrote: check
+        // here, so that the whole transaction is refused.
+        if text.contains(OBJECT) {
+            return Err(Reason::Inline("U+FFFC is an inline object, not text".into()));
+        }
         self.add_payload(text.len())?;
         let s = self.text(node)?;
         if !s.is_char_boundary(at) {
@@ -784,6 +933,7 @@ impl Model<'_> {
             return Ok(());
         }
         s.insert_str(at, text);
+        self.shift_inlines(node, at, 0, text.len());
         self.plan.steps.push(Step::InsertText {
             node,
             at,
@@ -855,6 +1005,7 @@ impl Model<'_> {
             return Ok(());
         }
         s.replace_range(range.clone(), "");
+        self.shift_inlines(node, range.start, range.len(), 0);
         self.plan.steps.push(Step::DeleteText {
             node,
             range: range.clone(),
@@ -878,6 +1029,10 @@ impl Model<'_> {
             return Err(Reason::BadOffset { node, offset: at });
         }
         let tail = s.split_off(at);
+        if let Some(list) = self.inlines.get_mut(&node) {
+            // The tail's objects go with the tail.
+            list.retain(|i| i.at < at);
+        }
         if copy_may_be_needed {
             // Only a block outside a flow is split by copying its tail.
             self.add_payload(tail.len())?;
@@ -911,6 +1066,14 @@ impl Model<'_> {
         let head = self.text(first)?;
         let join_at = head.len();
         head.push_str(&tail);
+        if let Some(moved) = self.inlines.remove(&second) {
+            // The second paragraph's objects follow its text into the first.
+            let list = self.inlines.entry(first).or_default();
+            list.extend(moved.into_iter().map(|i| ModelInline {
+                at: i.at.saturating_add(join_at),
+                object: i.object,
+            }));
+        }
         self.kids(parent).remove(at);
         self.killed.insert(second);
         self.plan.steps.push(Step::Join { first, second });
@@ -1085,6 +1248,15 @@ fn style_size(style: &Style) -> usize {
         .filter_map(|k| style.stored(k))
         .map(|v| v.len().saturating_add(16))
         .sum()
+}
+
+/// Bytes an inline object adds to the transaction payload.
+fn inline_size(object: &reprise_doc::InlineObject) -> usize {
+    object.params.iter().fold(object.kind.len(), |n, (k, v)| {
+        n.saturating_add(k.len())
+            .saturating_add(v.len())
+            .saturating_add(16)
+    })
 }
 
 fn dead_block(reason: Reason, node: NodeId) -> Reason {

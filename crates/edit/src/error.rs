@@ -52,6 +52,8 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error("invalid inline object: {0}")]
+    Inline(String),
     #[error(transparent)]
     PageSetup(reprise_doc::page_setup::PageSetupError),
     #[error("alignment relation limit exceeded")]

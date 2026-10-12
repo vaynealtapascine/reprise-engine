@@ -649,6 +649,7 @@ impl Flow<'_> {
             }
             for line in &mut composed.lines {
                 line.rect.origin.x += x;
+                for atom in &mut line.atoms { atom.rect.origin.x += x; }
                 for run in &mut line.runs {
                     run.x += x;
                 }

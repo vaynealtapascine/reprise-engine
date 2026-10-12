@@ -104,9 +104,9 @@ pub(crate) fn run(
 pub(crate) fn active(engine: &Engine, doc: &Document) -> bool {
     doc.has_inline_objects()
         || doc.relations().iter().any(|(_, r)| {
-        r.as_ref()
-            .is_ok_and(|r| is_region(r) && engine.schemas.get(&r.schema).is_some())
-    })
+            r.as_ref()
+                .is_ok_and(|r| is_region(r) && engine.schemas.get(&r.schema).is_some())
+        })
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Feedback {

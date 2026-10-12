@@ -43,6 +43,7 @@ pub fn replace_text(&mut self, request: &Payload<ReplaceText>) -> Result<Payload
 pub fn batch(&mut self, request: &Payload<Batch>) -> Result<Payload<BatchReport>>
 pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>>
 pub fn import_text(&mut self, request: &Payload<TextImport>) -> Result<Payload<Applied>>
+pub fn field_target(&self, request: &Payload<FieldTarget>) -> Result<Payload<String>>
 pub fn save(&mut self) -> Result<Payload<Bytes>>
 pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>>
 pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>>

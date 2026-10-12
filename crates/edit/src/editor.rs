@@ -354,6 +354,14 @@ impl Editor {
             Step::ClearLineAlignment { node, at } => {
                 self.doc.clear_line_alignment(*node, *at)?;
             }
+            Step::InsertInline { node, at, object } => {
+                let id = self.doc.stage_inline(*node, *at, object)?;
+                self.doc.activate_inline(id)?;
+            }
+            Step::UpdateInline { node, at, patch } => {
+                let id = self.doc.inline_at(*node, *at).ok_or_else(missing)?;
+                self.doc.update_inline(id, patch)?;
+            }
         }
         Ok(())
     }

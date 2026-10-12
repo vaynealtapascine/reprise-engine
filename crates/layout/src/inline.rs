@@ -170,7 +170,10 @@ pub(crate) fn measure(object: &InlineObject, env: &MeasureEnv<'_>) -> Measured {
             notes: vec![(
                 Severity::Warning,
                 codes::INLINE_KIND,
-                format!("unknown inline object kind {:?} kept and not drawn", object.kind),
+                format!(
+                    "unknown inline object kind {:?} kept and not drawn",
+                    object.kind
+                ),
             )],
         },
     }
@@ -227,6 +230,11 @@ impl InlineKind for ImageKind {
                 None
             }
         };
+        if image.is_none() { return Measured { size: AtomBox::default(), paint: AtomPaint::None, notes }; }
+        if ["width", "height"].iter().filter_map(|name| object.param(name)).filter_map(reprise_doc::InlineSize::parse).any(|s| match s {
+            reprise_doc::InlineSize::Pt(l) => l < Length::ZERO,
+            reprise_doc::InlineSize::Em(n) | reprise_doc::InlineSize::Percent(n) => n < 0,
+        }) { notes.push((Severity::Warning, codes::IMAGE_SIZE, "negative inline image size clamped to zero".into())); }
         let intrinsic = image.as_ref().and_then(|image| {
             let Some(bytes) = env.engine.assets.get(&image.asset) else {
                 notes.push((
@@ -255,9 +263,8 @@ impl InlineKind for ImageKind {
         let em = env.em.mul_ratio(DEFAULT_EM, 1000);
         let (natural_w, natural_h) =
             intrinsic.map_or((em, em), |h| (h.physical_width, h.physical_height));
-        let resolve = |s: Option<reprise_doc::InlineSize>| {
-            s.map(|s| s.resolve(env.em, env.frame_inline))
-        };
+        let resolve =
+            |s: Option<reprise_doc::InlineSize>| s.map(|s| s.resolve(env.em, env.frame_inline));
         let authored_w = resolve(image.as_ref().and_then(|i| i.width));
         let authored_h = resolve(image.as_ref().and_then(|i| i.height));
         let (mut width, mut height) = match (authored_w, authored_h) {
@@ -524,12 +531,13 @@ pub(crate) fn resolve_fields(
         if objects.is_empty() {
             continue;
         }
+        let objects: BTreeMap<_, _> = objects.into_iter().map(|e| (e.id, e)).collect();
         for line in &block.lines {
             let Some(page) = snapshot.frame(line.frame).map(|f| f.page) else {
                 continue;
             };
             for atom in line.atoms.iter().filter(|a| a.kind == FIELD) {
-                let Some(entry) = objects.iter().find(|e| e.id == atom.id) else {
+                let Some(entry) = objects.get(&atom.id) else {
                     continue;
                 };
                 let Some(function) = field_function(&entry.object) else {
@@ -637,7 +645,9 @@ fn text_metrics(engine: &Engine, item: Option<&Item>, em: Length) -> (Length, Le
 }
 
 fn item_at(items: &[Item], at: usize) -> Option<&Item> {
-    items.iter().find(|i| i.range.contains(&at))
+    items
+        .get(items.partition_point(|i| i.range.end <= at))
+        .filter(|i| i.range.contains(&at))
 }
 
 /// The environment to measure an object at byte `at` in.
@@ -733,8 +743,8 @@ pub(crate) fn size_atoms(
     // Fields that resolve to the same text in the same face share one
     // shaping: 50,000 page numbers on a page are one request.
     type Key = (String, Option<FaceId>, Length);
-    let mut shaped: BTreeMap<Key, (AtomBox, AtomPaint, Vec<(Severity, Code, String)>)> =
-        BTreeMap::new();
+    type CachedMeasure = (AtomBox, AtomPaint, Vec<(Severity, Code, String)>);
+    let mut shaped: BTreeMap<Key, CachedMeasure> = BTreeMap::new();
     let mut sized = BTreeMap::new();
     for atom in atoms.iter().filter(|a| a.at >= start) {
         let (size, paint) = match &atom.fixed {

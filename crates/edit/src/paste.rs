@@ -577,6 +577,25 @@ pub(crate) fn write(
             b.text.len().saturating_add(shift),
         ))
     });
+    let target_nodes = result
+        .ids
+        .nodes
+        .iter()
+        .map(|(&old, &new)| {
+            (
+                old,
+                (
+                    new,
+                    if join_first && Some(old) == first {
+                        prefix.len()
+                    } else {
+                        0
+                    },
+                ),
+            )
+        })
+        .collect();
+    doc.remap_inline_targets(&target_nodes).map_err(store)?;
     Ok(result)
 }
 
@@ -840,6 +859,13 @@ fn write_into_flow(
                 b.text.len().saturating_add(shift),
             ))
         });
+    let target_nodes = result
+        .ids
+        .nodes
+        .iter()
+        .map(|(&old, &new)| (old, (new, joined.get(&old).copied().unwrap_or(0))))
+        .collect();
+    doc.remap_inline_targets(&target_nodes).map_err(store)?;
     Ok(result)
 }
 

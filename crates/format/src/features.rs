@@ -31,13 +31,17 @@ pub const REQUIRED_PAGE_SETUP: u64 = 1 << 12;
 /// Older readers must refuse paragraph properties, flat named-style records
 /// and clearing formatting actions (`docs/paragraph-styles.md`).
 pub const REQUIRED_PARAGRAPH_STYLES: u64 = 1 << 13;
+/// Older readers must refuse inline object records, live or retired, since
+/// they would drop the objects and their U+FFFC characters (`docs/inline.md`).
+pub const REQUIRED_INLINE_OBJECTS: u64 = 1 << 15;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
     | REQUIRED_TEXT_EMPHASIS
     | REQUIRED_MARKS
     | REQUIRED_PAGE_SETUP
-    | REQUIRED_PARAGRAPH_STYLES;
+    | REQUIRED_PARAGRAPH_STYLES
+    | REQUIRED_INLINE_OBJECTS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -53,6 +57,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     }
     if document.has_paragraph_styles() {
         flags.required |= REQUIRED_PARAGRAPH_STYLES;
+    }
+    if document.has_inline_objects() {
+        flags.required |= REQUIRED_INLINE_OBJECTS;
     }
     if document.has_marks() {
         flags.required |= REQUIRED_MARKS;

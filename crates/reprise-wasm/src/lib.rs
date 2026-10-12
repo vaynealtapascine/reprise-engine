@@ -11,6 +11,8 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<FieldTarget>")]
+    pub type FieldTargetPayload;
     #[wasm_bindgen(typescript_type = "Payload<ImportCopy>")]
     pub type ImportCopyPayload;
     #[wasm_bindgen(typescript_type = "Payload<Batch>")]
@@ -523,6 +525,12 @@ impl WasmDocument {
     }
     pub fn hit_test(&self, request: &HitTestPayload) -> Result<HitPayload, JsValue> {
         Ok(encode(self.inner.hit_test(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn atom_rect(&self, request: &FieldTargetPayload) -> Result<PageRectPayload, JsValue> {
+        Ok(encode(self.inner.atom_rect(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn field_target(&self, request: &FieldTargetPayload) -> Result<StringPayload, JsValue> {
+        Ok(encode(self.inner.field_target(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn selection_rects(
         &self,

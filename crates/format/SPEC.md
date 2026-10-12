@@ -271,3 +271,15 @@ when a `format1` envelope carries `clear`. An older reader would silently drop
 those properties, styles or masks, so it must refuse. Untouched documents,
 including those that only name built-in styles, keep their old mask. See
 `docs/paragraph-styles.md`; the bit number may be renumbered on integration.
+
+## Inline objects feature (required bit 15)
+
+`REQUIRED_INLINE_OBJECTS` is declared when any inline object record (`inline1`)
+is retained in the document, live or not: a staged object that was never
+activated, an object deactivated by deleting its U+FFFC, and anything still in
+history all count. An older reader would drop the object and its character, so
+it must refuse. Documents without inline records keep their old mask, so the
+bit is absent from every existing package and snapshot. Bit 13 is paragraph
+styles (`REQUIRED_PARAGRAPH_STYLES`), so inline objects take 15 because 14 is
+reserved for block semantics on the lists workstream; the integrator may
+renumber. See `docs/inline.md`.

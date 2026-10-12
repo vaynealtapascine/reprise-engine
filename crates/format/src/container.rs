@@ -492,3 +492,98 @@ mod paragraph_style_tests {
         assert!(refused(&save(&doc)));
     }
 }
+
+#[cfg(test)]
+mod inline_object_tests {
+    use super::*;
+    use reprise_doc::{BlockKind, Document, InlineObject, PersistenceMode};
+
+    const ASSET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn save(doc: &Document) -> Vec<u8> {
+        crate::Package::new(doc, DocumentId([9; 16]), PersistenceMode::History)
+            .unwrap()
+            .save()
+            .unwrap()
+    }
+
+    fn refused(bytes: &[u8]) -> bool {
+        let old = crate::features::KNOWN_REQUIRED & !crate::features::REQUIRED_INLINE_OBJECTS;
+        matches!(
+            Container::decode_known(bytes, Limits::default(), old),
+            Err(FormatError::RequiredFeatures(bits))
+                if bits == crate::features::REQUIRED_INLINE_OBJECTS
+        )
+    }
+
+    fn image() -> InlineObject {
+        InlineObject::image(ASSET, "a cat")
+    }
+
+    #[test]
+    fn old_reader_refuses_inline_objects_but_not_documents_without_them() {
+        let doc = Document::new(1).unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "body", "abcd")
+            .unwrap();
+        doc.commit();
+        assert!(!refused(&save(&doc)));
+        assert_eq!(
+            crate::features::table_features(&doc).required
+                & crate::features::REQUIRED_INLINE_OBJECTS,
+            0
+        );
+
+        let id = doc.insert_inline(node, 2, &image()).unwrap();
+        doc.commit_step();
+        assert!(refused(&save(&doc)));
+        Container::decode(&save(&doc), Limits::default()).unwrap();
+        let imported = crate::Package::open(
+            &save(&doc),
+            2,
+            Limits::default(),
+            &crate::MigrationRegistry::builtin(),
+        )
+        .unwrap()
+        .into_document()
+        .unwrap();
+        assert_eq!(imported.inline_object(id).unwrap(), image());
+    }
+
+    #[test]
+    fn retired_and_staged_records_keep_the_bit() {
+        // A staged object is an inactive record that was never activated.
+        let doc = Document::new(1).unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "body", "abcd")
+            .unwrap();
+        let id = doc.stage_inline(node, 2, &image()).unwrap();
+        doc.commit();
+        assert!(doc.inline_location(id).is_none());
+        assert!(refused(&save(&doc)), "a staged record is still retained");
+
+        // Deleting an object deactivates its record, which stays in the package.
+        let doc = Document::new(1).unwrap();
+        let node = doc
+            .append_block(BlockKind::Paragraph, "body", "abcd")
+            .unwrap();
+        let id = doc.insert_inline(node, 2, &image()).unwrap();
+        doc.commit_step();
+        let len = doc.block(node).unwrap().text.len();
+        doc.block(node).unwrap().text.delete(1..len - 1).unwrap();
+        doc.commit_step();
+        assert!(doc.inline_location(id).is_none());
+        assert!(refused(&save(&doc)), "a retired record is still retained");
+        let imported = crate::Package::open(
+            &save(&doc),
+            2,
+            Limits::default(),
+            &crate::MigrationRegistry::builtin(),
+        )
+        .unwrap()
+        .into_document()
+        .unwrap();
+        assert!(imported.has_inline_objects());
+        assert!(imported.inline_location(id).is_none());
+    }
+}

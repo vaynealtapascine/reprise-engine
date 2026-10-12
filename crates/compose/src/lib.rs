@@ -46,6 +46,8 @@ pub mod codes {
     pub const TAB_UNREACHABLE: Code = Code::new("compose.tab-unreachable");
     /// Tab candidate fitting exhausted its explicit work bound; a tail remains.
     pub const TAB_LIMIT: Code = Code::new("compose.tab-limit");
+    /// Height-dependent geometry exceeded its bounded remeasurement attempts.
+    pub const LINE_HEIGHT_LIMIT: Code = Code::new("compose.line-height-limit");
     /// An optimising composer set some or all lines first-fit instead: its
     /// search hit a limit, or geometry answered differently once earlier
     /// lines were known. Every composer guarantee still holds, and the lines

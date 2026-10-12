@@ -1638,6 +1638,7 @@ pub(crate) fn place(mut block: BlockLayout, frame: usize, by: Length) -> BlockLa
         line.frame = frame;
         line.rect.origin.y += by;
         line.baseline += by;
+                        for atom in &mut line.atoms { atom.rect.origin.y += by; atom.baseline += by; }
     }
     block.sync_image();
     block

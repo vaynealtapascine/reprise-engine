@@ -334,6 +334,27 @@ impl Document {
                 );
             }
         }
+        // Convert internal persistent targets to portable source labels/bytes.
+        // A paste remaps these after every destination paragraph is activated.
+        for block in &mut fragment.blocks {
+            for object in &mut block.inline {
+                if object.kind != crate::inline::FIELD || object.param("field") != Some("page-of") {
+                    continue;
+                }
+                if let Some((node, at)) = object
+                    .param("target")
+                    .and_then(|raw| self.resolve_field_target(raw))
+                    && let Some(cut) = cuts.get(&node)
+                    && cut.start <= at
+                    && at <= cut.end
+                {
+                    object.params.insert(
+                        "target".into(),
+                        format!("copy:{node} {}", at.saturating_sub(cut.start)),
+                    );
+                }
+            }
+        }
         let tree = self.tree("ranges");
         let mut ids = tree.nodes();
         ids.sort();
