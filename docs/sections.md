@@ -456,7 +456,7 @@ the first paragraph keeps its identity.
 Inherit resolves to the same variant of the nearest earlier section, in one
 forward scan, so 10,000 sections take linear time with no recursion **[Sol]**.
 `first` inheriting resolves to unset. A binding that names a node that isn't a
-live, root-level story renders empty, with Warning `layout.region-missing`. It
+live, root-level story renders empty, with Warning `layout.running-missing`. It
 never falls through to an earlier story.
 
 **Commands:**
@@ -842,16 +842,16 @@ end**, because the source is exhausted, never by making a page.
 -   **Empty story** (no blocks): extent 0, reserves nothing. A story with one
     empty paragraph has its strut height.
 -   **Clipping.** Content that doesn't fit after the cap is left out with
-    **Error** `layout.region-clipped`, since content was omitted. The footer
+    **Error** `layout.running-clipped`, since content was omitted. The footer
     keeps its fitting **source prefix** and bottom-aligns it, so a tall footer
     loses its tail, not its head **[Sol]**.
 -   **Oversized first unit.** A first line, image or table row taller than the
-    frame is painted clipped to the frame, with Error `layout.region-clipped`.
+    frame is painted clipped to the frame, with Error `layout.running-clipped`.
     The rest is omitted.
 -   **Bounded work** (R7: the cap bounds actual work, not just output):
     -   at most `MAX_STORY_BLOCKS` = 4,096 blocks and `MAX_STORY_TEXT` = 1 MiB
         of visible text are **read** per story per layout **[Sol]**; anything
-        beyond is omitted with Error `layout.region-clipped`;
+        beyond is omitted with Error `layout.running-clipped`;
     -   preparation (itemise, bidi, shape) of a story paragraph is memoised
         once per layout, keyed as in §11, so a 1 MiB paragraph is shaped once,
         not per page;
@@ -1117,7 +1117,7 @@ source document, and it means nothing in the destination.
     paste reports Info `clipboard.section-dropped`, with the count.
 -   A record whose **story references** name stories that aren't live, or
     aren't at the root, keeps the binding as missing: its raw value is written
-    unchanged, and still renders empty with `layout.region-missing`. It's
+    unchanged, and still renders empty with `layout.running-missing`. It's
     kept, not dropped.
 -   A record holding a container, or a future envelope version the reader
     can't remap, refuses the whole copy with a typed error before any
@@ -1331,8 +1331,8 @@ Error means left out)
 | `section.orphan-start` | Warning (audit) |
 | `story.orphan` | Info (audit) |
 | `story.nested` | Warning (audit) |
-| `layout.region-missing` | Warning |
-| `layout.region-clipped` | **Error** |
+| `layout.running-missing` | Warning |
+| `layout.running-clipped` | **Error** |
 | `layout.story-unsupported` | **Error** |
 | `clipboard.section-context` | Warning |
 | `clipboard.section-dropped` | Info (N7: inert records with no live block, not copied) |

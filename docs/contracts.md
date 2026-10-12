@@ -53,7 +53,7 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit` |
-| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.annotation-revision`, `layout.region-missing`, `layout.region-clipped`, `layout.story-unsupported` |
+| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.annotation-revision`, `layout.running-missing`, `layout.running-clipped`, `layout.story-unsupported` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit`, `style.deleted`, `style.rename-cycle` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
@@ -1121,13 +1121,20 @@ serialise byte-identically.
         blocks: Vec<BlockLayout>, clipped: bool }`. Running instances are
         never in `blocks`, the reading order, or the editing kernel's body
         queries, like `repeated_headers`.
+    -   `PageDescriptor.counter` is serialised as a canonical signed decimal
+        string, as every other 64-bit counter is (see "Decimal strings" above),
+        so JavaScript never loses precision. `RunningInstance.slot` is the slot
+        token; `frame` is a `usize` frame index, as in `LineLayout.frame`.
     -   `PageLayout`, `snapshot.template` and every existing query keep their
         signatures and meaning. Running frames are in `frames` with role
         `Flow("reprise.running.<slot>")`, never `main`.
 -   **Field instances** (`reprise-layout::inline`, with inline's sign-off).
     `FieldInstance` gains `Running { page: u32, slot: SlotId, repeat: u32 }`.
-    `SlotId` is a dense `u16` index into the running-slot registry.
-    `FieldInstance::{Single, Page}` are unchanged.
+    `SlotId` is a dense `u16` index into the running-slot registry. It is
+    in-process only and never serialised: every JSON form (snapshot, facade,
+    WASM, fragments) names a slot by its stable token (`header`, `footer`,
+    `background`, ...), so adding a slot never renumbers stored or exchanged
+    data. `FieldInstance::{Single, Page}` are unchanged.
 -   **Navigation** (`reprise-edit`).
     -   `Navigator::hit_placed(point) -> Option<PlacedHit>`, where `PlacedHit`
         is `Body(Hit)` or `Running { position, instance: RegionInstance }`;
@@ -1166,7 +1173,9 @@ serialise byte-identically.
 -   **Facade** (`reprise`, `reprise-wasm`).
     -   Commands: `insert_break`, `remove_break`, `set_section`,
         `create_story`, `set_region`, `create_region`, `link_region`,
-        `delete_story`.
+        `delete_story`. `link_region` is facade sugar for the kernel's
+        `SetRegion { binding: Inherit }` ("same as previous"); it has no
+        kernel command of its own.
     -   `State.sections`, `State.stories` and `BlockState.starts`. Each is left
         out of JSON when empty or absent.
     -   Queries: `page_sections`, `section_pages`, `page_label`,
