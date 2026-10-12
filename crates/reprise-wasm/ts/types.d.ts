@@ -40,7 +40,12 @@ formatting?: Array<TextRun>,
 /**
  * The block's paragraph style: the one additive per-block field.
  */
-style: BlockStyle, };
+style: BlockStyle, 
+/**
+ * The live inline objects of this paragraph in text order, present only
+ * when there are some (`docs/inline.md`).
+ */
+inline?: Array<InlineEntry>, };
 export type ImageInsert = { at: Caret | null, asset: string, alt: string, width: number | null, height: number | null, style: Style, };
 export type BlockKind = "paragraph" | "annotation" | "image";
 export type Style = { alignment?: Alignment | null, tabs?: TabStops | null, weight?: number | null, slant?: FontStyle | null, decoration?: Decoration, color?: [number, number, number, number] | null, families: Array<string> | null, size: string | null, line_height: string | null, indent_start?: string | null, indent_end?: string | null, 
@@ -102,7 +107,7 @@ export type TextFeature = {
  */
 tag: string, value: number, };
 export type TextRun = { start: number, end: number, style: TextStyle, };
-export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, };
+export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, } | { "kind": "insert-inline", node: string, at: number, object: InlineObject, } | { "kind": "update-inline", node: string, at: number, patch: InlinePatch, };
 export type Transaction = { commands: Array<Command>, };
 export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
 export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, 
@@ -341,4 +346,17 @@ export type BatchReport = { applied: Applied,
  * its block was deleted.
  */
 selection: Selection | null, };
+export type InlineAlign = "baseline" | "middle" | "text-top" | "text-bottom";
+export type InlineObject = { kind: string, align: InlineAlign, params: { [key in string]: string }, };
+export type InlinePatch = { align?: InlineAlign | null, params: { [key in string]: string | null }, };
+export type InlineEntry = { 
+/**
+ * `host/char`: stable through undo, redo and collaboration, new for a copy.
+ */
+id: string, 
+/**
+ * Byte offset of the object's U+FFFC in the paragraph's text.
+ */
+at: number, object: InlineObject, };
+export type FieldTarget = { node: string, at: number, };
 export type PacketBound = 33554432
