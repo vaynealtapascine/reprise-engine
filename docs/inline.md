@@ -136,7 +136,8 @@ Each atom resolves, per paragraph preparation, to an **atom box**:
 In vertical frames atoms are **upright**: the inline advance is the box's
 physical height and the box is centred on the vertical baseline, half its
 physical width either side. An image's display item is not turned with the
-column; a field is text and follows its surrounding text's orientation.
+column; a field is text and is drawn exactly as the text around it (sideways
+text takes the frame's turn or reflection with it).
 
 Sizes are clamped to `0..=frame extent`: an image is scaled, keeping its aspect
 ratio, to the frame's inline extent and then to the deepest frame of the thread
@@ -243,10 +244,11 @@ loop reuses the region feedback coordinator of decision 26 (`regions.rs`):
     complete flow pass and never stored in the document (05).
 -   While composing, a field takes its text from the plan; with no entry yet,
     `page-number` takes the page being composed, `page-count` the pages made so
-    far (at least the current page) and `page-of` the target's page if already
-    placed, else `?`. So page numbers settle in **one pass**: the page being
-    composed is the page the line is on. A `page-of` or `page-count` that was
-    guessed wrong needs a second pass.
+    far (at least the current page) and `page-of` a `?`: a guess cannot see the
+    pages a pass has not finished. So page numbers settle in **one pass**: the
+    page being composed is the page the line is on. A `page-of` (a backward
+    reference too) or a `page-count` that was guessed wrong needs a second pass,
+    which composes with what the first found.
 -   After the pass, every field is resolved from the snapshot. If any text
     differs from what was assumed, the pass repeats with the new plan, up to the
     shared limit of 16 passes, with the shared convergence rule: equal plans

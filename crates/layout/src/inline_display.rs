@@ -46,9 +46,17 @@ pub(crate) fn text_runs(line: &LineLayout) -> Cow<'_, [PositionedRun]> {
                 ..run.clone()
             });
         };
+        let mut atom_cluster = None;
         for glyph in &run.glyphs {
+            let leftover =
+                glyph.id == reprise_compose::INVISIBLE_GLYPH && atom_cluster == Some(glyph.cluster);
             if glyph.id == reprise_compose::ATOM_GLYPH {
                 flush(&mut part, start, pen, &mut out);
+                atom_cluster = Some(glyph.cluster);
+                pen += glyph.advance;
+                start = pen;
+            } else if leftover {
+                // Another glyph the font made for the object's character.
                 pen += glyph.advance;
                 start = pen;
             } else {
@@ -118,7 +126,7 @@ pub(crate) fn atom_item(atom: &AtomLayout, mode: WritingMode) -> Option<Item> {
                     glyph
                 })
                 .collect();
-            Some(Item::Glyphs(GlyphRun {
+            let mut run = GlyphRun {
                 synthetic_oblique: false,
                 face: face.clone(),
                 size: *size,
@@ -126,7 +134,28 @@ pub(crate) fn atom_item(atom: &AtomLayout, mode: WritingMode) -> Option<Item> {
                 text: text.clone(),
                 glyphs,
                 layer: Layer::Content,
-            }))
+            };
+            // Text is drawn as the surrounding text is: sideways text in a
+            // vertical frame takes the frame's turn (right to left) or its
+            // reflection (left to right) with it, and ordinary runs undo
+            // what their glyph positions already include.
+            match super::display::glyph_transform(mode, false)
+                .and_then(|m| m.inverse().map(|inverse| (m, inverse)))
+            {
+                Some((transform, inverse)) => {
+                    for glyph in &mut run.glyphs {
+                        let (x, y) = inverse.apply(glyph.x, glyph.y);
+                        glyph.x = x;
+                        glyph.y = y;
+                    }
+                    Some(Item::Group {
+                        transform,
+                        clip: None,
+                        items: vec![Item::Glyphs(run)],
+                    })
+                }
+                None => Some(Item::Glyphs(run)),
+            }
         }
     }
 }

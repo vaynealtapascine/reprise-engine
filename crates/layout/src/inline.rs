@@ -856,9 +856,12 @@ pub(crate) fn size_atoms(
     subject: &crate::Subject,
     out: &mut Vec<crate::Diagnostic>,
 ) -> BTreeMap<usize, Sized> {
-    // Fields that resolve to the same text in the same face share one
-    // shaping: 50,000 page numbers on a page are one request.
-    type Key = (String, Option<FaceId>, Length);
+    // Fields that resolve to the same text in the same style share one
+    // shaping: 50,000 page numbers on a page are one request. The style is the
+    // whole shaping item but its range (features, language and script change
+    // the glyphs), and the function is part of the key because what measuring
+    // reports (an unknown function) is cached with the box.
+    type Key = (String, Option<&'static str>, String, Length);
     type CachedMeasure = (AtomBox, AtomPaint, Vec<(Severity, Code, String)>);
     let mut shaped: BTreeMap<Key, CachedMeasure> = BTreeMap::new();
     let mut sized = BTreeMap::new();
@@ -868,7 +871,17 @@ pub(crate) fn size_atoms(
             None => {
                 let text = fields.text(atom.id, &atom.object);
                 let env = env(engine, items, atom.at, em, frame, Some(text.clone()));
-                let key = (text, env.item.map(|i| i.face.clone()), env.em);
+                let style = env.item.map_or_else(String::new, |item| {
+                    format!(
+                        "{:?}",
+                        Item {
+                            range: 0..0,
+                            ..item.clone()
+                        }
+                    )
+                });
+                let function = field_function(&atom.object).map(|f| f.name());
+                let key = (text, function, style, env.em);
                 let (size, paint, notes) = shaped
                     .entry(key)
                     .or_insert_with(|| {

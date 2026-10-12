@@ -488,3 +488,93 @@ fn incremental_layout_follows_fields_when_text_moves_them_between_pages() {
     assert_eq!(texts(&back), seen[0]);
     let _ = tail;
 }
+
+#[test]
+fn a_field_in_a_vertical_frame_is_drawn_like_the_text_around_it() {
+    // Sideways text in a vertical frame takes the frame's turn or reflection
+    // with it; a field is text, so it must be wrapped exactly as its neighbours.
+    fn runs(items: &[Item], wrapper: Option<String>, out: &mut Vec<(String, Option<String>)>) {
+        let direct = items.iter().all(|i| matches!(i, Item::Glyphs(_)));
+        for item in items {
+            match item {
+                Item::Glyphs(run) => out.push((run.text.clone(), wrapper.clone())),
+                Item::Group {
+                    transform, items, ..
+                } => runs(
+                    items,
+                    if direct {
+                        None
+                    } else {
+                        Some(format!("{transform:?}"))
+                    },
+                    out,
+                ),
+                _ => {}
+            }
+        }
+    }
+    for mode in [WritingMode::VerticalRl, WritingMode::VerticalLr] {
+        let (engine, doc, _) = inline::page(120, 200, mode).unwrap();
+        inline::paragraph(
+            &doc,
+            vec![
+                Part::Text("page "),
+                Part::Object(inline::page_number()),
+                Part::Text(" of the text"),
+            ],
+        )
+        .unwrap();
+        doc.commit();
+        let snapshot = engine.layout(&doc);
+        let list = snapshot.to_display_list(0, DisplayOptions::default());
+        let mut found = Vec::new();
+        runs(&list.items, None, &mut found);
+        let text = found.iter().find(|(t, _)| t.contains("page")).unwrap();
+        let field = found.iter().find(|(t, _)| t == "1").unwrap();
+        assert_eq!(field.1, text.1, "{mode:?}: {found:?}");
+    }
+}
+
+#[test]
+fn an_unknown_field_function_is_reported_once_and_not_for_its_neighbours() {
+    // Both fields compose to empty text in one face; what measuring reports
+    // about the first must not be shared with the second.
+    let (engine, doc, _) = inline::page(200, 100, WritingMode::default()).unwrap();
+    let p = inline::paragraph(
+        &doc,
+        vec![
+            Part::Text("a "),
+            Part::Object(reprise_doc::InlineObject::field("nope")),
+            Part::Text(" b "),
+            Part::Object(reprise_doc::InlineObject::field("text").with("text", "")),
+            Part::Text(" c"),
+        ],
+    )
+    .unwrap();
+    doc.commit();
+    let snapshot = engine.layout(&doc);
+    let warnings: Vec<_> = snapshot
+        .diagnostics_with("layout.inline-kind")
+        .map(|d| d.bytes.clone())
+        .collect();
+    assert_eq!(warnings, [Some(2..5)], "{:?}", snapshot.diagnostics);
+    // The other way round, the valid empty field comes first.
+    let q = inline::paragraph(
+        &doc,
+        vec![
+            Part::Object(reprise_doc::InlineObject::field("text").with("text", "")),
+            Part::Text(" "),
+            Part::Object(reprise_doc::InlineObject::field("nope")),
+        ],
+    )
+    .unwrap();
+    doc.commit();
+    let snapshot = engine.layout(&doc);
+    let on_q: Vec<_> = snapshot
+        .diagnostics_with("layout.inline-kind")
+        .filter(|d| d.subject == reprise_layout::Subject::Node(q))
+        .map(|d| d.bytes.clone())
+        .collect();
+    assert_eq!(on_q, [Some(4..7)]);
+    let _ = p;
+}

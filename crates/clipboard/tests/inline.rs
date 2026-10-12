@@ -305,3 +305,39 @@ fn a_link_around_an_object_exports_and_imports_with_the_object_inside() {
             .any(|e| e.at == start && e.object.kind == "image")
     );
 }
+
+#[test]
+fn objects_inside_table_cells_import_and_round_trip() {
+    let (engine, _, asset) = inline::page(200, 200, Default::default()).unwrap();
+    let _ = engine;
+    let html = format!(
+        "<table><tr><td>a <img data-reprise-asset=\"{asset}\" alt=\"icon\"></td>\
+         <td><span data-field=\"page-number\">1</span> b</td></tr></table>"
+    );
+    let imported = import_html(&html, ImportLimits::default()).unwrap();
+    let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
+    imported
+        .fragment
+        .paste(&mut editor, None, "target")
+        .unwrap();
+    let doc = editor.document();
+    let found: Vec<_> = doc
+        .document_order()
+        .into_iter()
+        .filter_map(|n| doc.inline_objects(n).ok())
+        .flatten()
+        .map(|e| e.object.kind)
+        .collect();
+    assert_eq!(found, ["image", "field"]);
+    // And a table with objects exports and imports again.
+    let schemas = SchemaRegistry::builtin();
+    let options = ExportOptions {
+        source_namespace: "source",
+        schemas: &schemas,
+        fonts: None,
+    };
+    let again = Html.export(doc, None, &options).unwrap();
+    let html = String::from_utf8(again.bytes).unwrap();
+    assert!(html.contains("<table>") && html.contains("<img "), "{html}");
+    assert!(import_html(&html, ImportLimits::default()).is_ok());
+}
