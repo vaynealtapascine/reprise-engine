@@ -52,7 +52,7 @@ pub(crate) fn text_runs(line: &LineLayout) -> Cow<'_, [PositionedRun]> {
                 pen += glyph.advance;
                 start = pen;
             } else {
-                part.push(glyph.clone());
+                part.push(*glyph);
                 pen += glyph.advance;
             }
         }

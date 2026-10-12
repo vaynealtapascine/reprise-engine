@@ -105,7 +105,10 @@ fn equal_field_plans_converge_and_a_seen_plan_is_an_oscillation() {
     let b = plan(&[(key(1, FieldInstance::Single), "2")]);
     assert_eq!(feedback(&a, &a, &[], 0), Feedback::Converged);
     assert_eq!(feedback(&a, &b, &[], 0), Feedback::Continue);
-    assert_eq!(feedback(&b, &a, &[a.clone()], 1), Feedback::Oscillated);
+    assert_eq!(
+        feedback(&b, &a, std::slice::from_ref(&a), 1),
+        Feedback::Oscillated
+    );
     // Two placements of one object are two entries: both must agree.
     let one = plan(&[
         (key(1, FieldInstance::Page(0)), "1"),

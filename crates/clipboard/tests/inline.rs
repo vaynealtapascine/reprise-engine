@@ -243,3 +243,65 @@ fn hostile_html_never_makes_an_object_it_cannot_validate() {
         );
     }
 }
+
+#[test]
+fn a_link_around_an_object_exports_and_imports_with_the_object_inside() {
+    use reprise_doc::annotation::{AnnotationData, AnnotationState, Kind, LinkTarget};
+    let s = setup();
+    // "Look " + object (3 bytes) + " on page ": link the picture and the words after it.
+    let start = "Look ".len();
+    let end = start + 3 + " on".len();
+    s.doc
+        .add_annotation(
+            s.node,
+            start..end,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://cats.example/a?b=1".into(),
+            }),
+        )
+        .unwrap();
+    s.doc.commit();
+    let layout = s.engine.layout(&s.doc);
+    let schemas = SchemaRegistry::builtin();
+    let out = Html
+        .export(
+            &s.doc,
+            Some(&layout),
+            &ExportOptions {
+                source_namespace: "source",
+                schemas: &schemas,
+                fonts: Some(&s.engine.fonts),
+            },
+        )
+        .unwrap();
+    let html = String::from_utf8(out.bytes).unwrap();
+    let anchor = html
+        .find("<a href=\"https://cats.example/a?b=1\">")
+        .unwrap();
+    let close = html[anchor..].find("</a>").unwrap() + anchor;
+    assert!(html[anchor..close].contains("<img "), "{html}");
+    assert!(html[anchor..close].ends_with(" on") || html[anchor..close].contains(" on"));
+    let imported = import_html(&html, ImportLimits::default()).unwrap();
+    let mut editor = Editor::new(Document::new(2).unwrap(), SchemaRegistry::builtin());
+    imported
+        .fragment
+        .paste(&mut editor, None, "target")
+        .unwrap();
+    let doc = editor.document();
+    let links = doc.annotations_of_kind(Kind::Link).annotations;
+    assert_eq!(links.len(), 1);
+    let AnnotationState::Active { pieces, .. } = &links[0].state else {
+        panic!("the link is active");
+    };
+    assert_eq!(pieces.len(), 1);
+    let node = pieces[0].node;
+    // The link covers the same bytes in the pasted paragraph, object included.
+    assert_eq!(pieces[0].bytes, start..end);
+    assert_eq!(doc.inline_objects(node).unwrap().len(), 4);
+    assert!(
+        doc.inline_objects(node)
+            .unwrap()
+            .iter()
+            .any(|e| e.at == start && e.object.kind == "image")
+    );
+}
