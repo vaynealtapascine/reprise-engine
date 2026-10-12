@@ -412,3 +412,64 @@ fn read_only_semantic_queries_do_not_enable_the_package_feature() {
         0
     );
 }
+#[test]
+fn outline_reports_each_headings_page_after_a_multi_page_layout() {
+    let mut s = session();
+    let mut texts = Vec::new();
+    for chapter in 0..3 {
+        texts.push(format!("Chapter {}", chapter + 1));
+        for line in 0..30 {
+            texts.push(format!("Body line {line} of chapter {}.", chapter + 1));
+        }
+    }
+    let ids = paragraphs(&mut s, &texts.iter().map(String::as_str).collect::<Vec<_>>());
+    let commands = (0..3)
+        .map(|chapter| Command::SetRole {
+            node: ids[chapter * 31].clone(),
+            role: if chapter == 1 {
+                BlockRole::Heading2
+            } else {
+                BlockRole::Heading1
+            },
+        })
+        .collect();
+    apply(&mut s, commands);
+    finish(&mut s);
+    let outline = s.outline().unwrap().data;
+    let steps = s.reading_order().unwrap().data;
+    for entry in &outline {
+        let first = steps.iter().find(|step| step.node == entry.node).unwrap();
+        assert_eq!(entry.page, Some(first.page), "{}", entry.text);
+    }
+    let pages: Vec<_> = outline.iter().map(|h| h.page.unwrap()).collect();
+    assert_eq!(pages[0], 0);
+    assert!(pages.windows(2).all(|w| w[0] < w[1]), "{pages:?}");
+    insta::assert_json_snapshot!("outline_after_layout", outline);
+}
+#[test]
+fn state_cuts_an_oversized_list_registry_and_items_still_number() {
+    let mut s = session();
+    let ids = paragraphs(&mut s, &["only item"]);
+    let mut commands: Vec<Command> = (0..1025)
+        .map(|_| Command::CreateList {
+            definition: definition("decimal", "1"),
+        })
+        .collect();
+    commands.push(Command::SetListItem {
+        node: ids[0].clone(),
+        list: ListRef::New { index: 1024 },
+        level: 0,
+    });
+    apply(&mut s, commands);
+    let state = s.state().unwrap().data;
+    assert_eq!(state.lists.len(), 1024);
+    assert!(
+        state
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "bindings.limit" && d.message.contains("list definitions"))
+    );
+    // The last definition is the one cut from the listing; its item still has
+    // a marker, and the registry is not a precondition of reading the state.
+    assert_eq!(state.blocks[0].list.as_ref().unwrap().marker, "1.");
+}

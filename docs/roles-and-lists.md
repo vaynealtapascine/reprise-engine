@@ -342,8 +342,12 @@ order. Tab is `indent-list-item.by: 1`, Shift+Tab is `-1`.
 `State.blocks[].role` is the semantic token (omitted means `body`);
 `.list` is `{id, level, value, restart, marker}` when a live definition resolves.
 `State.lists` carries `{id, definition, error}` entries in identity order; an
-empty registry is omitted. `Applied.lists` returns created identities. Both
-registry listing and full native fragments are bounded at 1,024 definitions.
+empty registry is omitted. `Applied.lists` returns created identities. The
+listing is bounded at 1,024 definitions: past that `State` lists the first
+1,024 and adds a `bindings.limit` warning, as it does for named styles and
+annotations, so a peer cannot make `state()` fail by creating definitions. The
+items of a cut definition still carry their markers. A native fragment (a
+copy) refuses more than 1,024 definitions, because a copy cannot be partial.
 A full-document `import_copy` preserves live unreferenced definitions as well
 as used definitions and bases, giving all definitions and nodes fresh IDs;
 tombstones/history stay with the source.

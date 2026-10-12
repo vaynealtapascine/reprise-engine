@@ -1,0 +1,24 @@
+---
+source: crates/reprise/tests/roles_lists.rs
+expression: outline
+---
+[
+  {
+    "node": "4@1",
+    "level": 1,
+    "text": "Chapter 1",
+    "page": 0
+  },
+  {
+    "node": "938@1",
+    "level": 2,
+    "text": "Chapter 2",
+    "page": 2
+  },
+  {
+    "node": "1872@1",
+    "level": 1,
+    "text": "Chapter 3",
+    "page": 5
+  }
+]
