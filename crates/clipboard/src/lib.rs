@@ -6,6 +6,7 @@ mod image_export;
 mod links;
 mod native;
 mod pdf_tags;
+mod semantic_html;
 mod text_css;
 pub use image_export::{NativeWithAssets, PdfWithAssets};
 pub use pdf_tags::{PdfMetadata, cell_role, heading_level};

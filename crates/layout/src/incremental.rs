@@ -188,6 +188,8 @@ struct Inputs {
     /// Every name the style chain visits, with its record: exactly what
     /// resolution reads, built-ins, deletions and renames included.
     styles: Vec<(String, Option<reprise_doc::StyleRecord>)>,
+    /// List geometry and role/list notes: a renumbered item re-lays out.
+    semantics: crate::list_marker::Semantics,
 }
 impl Inputs {
     fn read(doc: &Document, node: NodeId) -> Option<Self> {
@@ -213,6 +215,7 @@ impl Inputs {
             overrides: block.overrides,
             formatting: doc.text_formats(node).ok()?,
             styles,
+            semantics: crate::list_marker::semantics(doc, node),
         })
     }
     fn dependencies(&self, engine: &Engine, node: NodeId) -> BTreeSet<Dependency> {
@@ -251,6 +254,7 @@ impl Inputs {
             || self.overrides != old.overrides
             || self.image != old.image
             || self.formatting != old.formatting
+            || self.semantics != old.semantics
         {
             out.insert(Dependency::Node(node));
         }

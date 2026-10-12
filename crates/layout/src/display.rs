@@ -111,8 +111,11 @@ pub struct PdfReadingRun {
     pub run: reprise_display::pdf::ReadingRun,
     /// The line the run sits on.
     pub line: crate::LineRef,
-    /// The bytes of the block's text the run draws; None for an image.
+    /// The bytes of the block's text the run draws; None for an image or a
+    /// list marker.
     pub bytes: Option<std::ops::Range<usize>>,
+    /// The run draws a list item's marker (a PDF `Lbl`), not the block's text.
+    pub label: bool,
 }
 
 /// The runs of one block in reading order.
@@ -206,6 +209,24 @@ impl LayoutSnapshot {
                             },
                             line: at,
                             bytes: None,
+                            label: false,
+                        });
+                        child = child.saturating_add(1);
+                    }
+                    // The marker is drawn first; it reads before the text.
+                    for run in line.marker.iter().flat_map(|m| &m.runs) {
+                        let mut path = vec![*group, child];
+                        if glyph_transform(frame.writing_mode, run.upright).is_some() {
+                            path.push(0);
+                        }
+                        addresses.entry(at).or_default().push(PdfReadingRun {
+                            run: reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path,
+                            },
+                            line: at,
+                            bytes: None,
+                            label: true,
                         });
                         child = child.saturating_add(1);
                     }
@@ -221,6 +242,7 @@ impl LayoutSnapshot {
                             },
                             line: at,
                             bytes: Some(run.range.clone()),
+                            label: false,
                         });
                         child = child.saturating_add(
                             1 + decoration_paths(run, line, frame.writing_mode).len(),
@@ -241,6 +263,17 @@ impl LayoutSnapshot {
                         copies.push(reprise_display::pdf::ReadingRun {
                             page: frame.page,
                             path: vec![*group, child],
+                        });
+                        child = child.saturating_add(1);
+                    }
+                    for run in line.marker.iter().flat_map(|m| &m.runs) {
+                        let mut path = vec![*group, child];
+                        if glyph_transform(frame.writing_mode, run.upright).is_some() {
+                            path.push(0);
+                        }
+                        copies.push(reprise_display::pdf::ReadingRun {
+                            page: frame.page,
+                            path,
                         });
                         child = child.saturating_add(1);
                     }
@@ -335,8 +368,13 @@ impl LayoutSnapshot {
                             }
                         }
                     }
-                    for run in &line.runs {
-                        let mut glyphs = glyph_run(run, line, &block.text);
+                    let marker = line
+                        .marker
+                        .iter()
+                        .flat_map(|m| m.runs.iter().map(move |r| (r, m.text.as_str())));
+                    let text = line.runs.iter().map(|r| (r, block.text.as_str()));
+                    for (run, source) in marker.chain(text) {
+                        let mut glyphs = glyph_run(run, line, source);
                         if let Some(transform) = glyph_transform(frame.writing_mode, run.upright) {
                             if run.upright && frame.writing_mode == WritingMode::VerticalLr {
                                 for glyph in &mut glyphs.glyphs {

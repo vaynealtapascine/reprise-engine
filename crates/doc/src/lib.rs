@@ -46,6 +46,9 @@ mod hostile_tests;
 pub mod image;
 pub mod invariants;
 mod lifecycle;
+pub mod lists;
+#[cfg(test)]
+mod lists_tests;
 pub mod marks;
 mod page;
 pub mod page_setup;
@@ -58,6 +61,7 @@ pub mod relation;
 #[cfg(test)]
 mod relation_tests;
 mod resolve;
+pub mod roles;
 mod structure;
 mod style;
 pub mod sync;
@@ -97,6 +101,8 @@ pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
 pub mod emphasis;
 pub use emphasis::{Decoration, TextSlant};
 
+pub use lists::{LevelDef, ListDefinition, ListItem, ListNumbering, Membership, NumberFormat};
+pub use roles::{OutlineEntry, Role, StoredRole};
 pub use style::{
     Authored, BUILTIN_STYLES, Computed, ComputedStyle, LengthExpr, MAX_LINE_KEEP, MAX_STYLE_NAME,
     MAX_STYLES, PARAGRAPH_KEYS, Property, STORED_KEYS, Specified, StageExplanation, Style,
@@ -154,7 +160,9 @@ tree_ids!(
     /// A persistent range's identity.
     RangeId,
     /// A relation's identity.
-    RelationId
+    RelationId,
+    /// A list definition's identity (see `docs/roles-and-lists.md`).
+    ListId
 );
 
 /// A block's identity: a content-tree node, or a paragraph that starts at a
@@ -299,6 +307,8 @@ pub enum DocError {
     Store(String),
     #[error("index {index} is past the end of {len} children")]
     BadIndex { index: usize, len: usize },
+    #[error("invalid list: {0}")]
+    List(String),
 }
 
 impl From<loro::LoroError> for DocError {
@@ -329,6 +339,8 @@ pub struct Document {
     lineage: std::sync::Mutex<transfers::LineageCache>,
     /// Formatting records by flow host, per revision (see `formatting`).
     formats: std::sync::Mutex<formatting::FormatCache>,
+    /// List numbering, per revision (see `lists`).
+    list_cache: std::sync::Mutex<lists::ListCache>,
     /// Annotations, per revision (see `annotation`).
     annotations: std::sync::Mutex<annotation::AnnotationCache>,
     /// Which editing step this replica's next commits belong to (see
@@ -352,6 +364,7 @@ impl Document {
             flows,
             lineage: Default::default(),
             formats: Default::default(),
+            list_cache: Default::default(),
             annotations: Default::default(),
             steps: Default::default(),
         }

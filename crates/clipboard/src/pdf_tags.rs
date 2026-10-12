@@ -3,8 +3,12 @@
 //! Layout gives the blocks in reading order and the document gives their
 //! meaning. This module joins them into a `reprise_display::pdf::tags::Structure`:
 //!
-//! -   a block is a `P`, an `H1` to `H6` when its style is named like a heading
-//!     (see [`heading_level`]), or a `Figure` for an image;
+//! -   a block is what its role says (`H1`–`H6`, `Title`, `BlockQuote`,
+//!     `Code`; see [`pdf_role`]); a body block is a `P`, or an `H1` to `H6`
+//!     when its style is named like a heading (see [`heading_level`]); an
+//!     image is a `Figure`;
+//! -   consecutive list items are `L` > `LI` > (`Lbl`, `LBody`), a nested list
+//!     inside its parent item's `LBody`;
 //! -   a block placed by `reprise.note` is a `Note` with an ID, and the anchor
 //!     of that note becomes a `Reference` linked to it where the anchor's
 //!     glyphs can be cut out of their run;
@@ -22,7 +26,7 @@ use std::rc::Rc;
 
 use reprise_diag::Note;
 use reprise_display::pdf::tags::{
-    self, CellRole, Child, Content, DocLink, Link, LinkTo, Node, Role, Scope, Structure,
+    self, CellRole, Child, Content, DocLink, Link, LinkTo, Node, Numbering, Role, Scope, Structure,
 };
 use reprise_doc::annotation::{AnnotationData, AnnotationState, AnnotationView, Kind, LinkTarget};
 use reprise_doc::relation::builtin::{FLOAT, NOTE};
@@ -82,6 +86,53 @@ pub fn cell_role(cell: Option<&GridCell>) -> CellRole {
         col_span: span(cell.colspan),
     }
 }
+/// The structure role a block's semantic role asks for; `None` for body text,
+/// which falls back to [`heading_level`] on its style name.
+pub fn pdf_role(role: reprise_doc::Role, title: &str) -> Option<Role> {
+    use reprise_doc::Role as R;
+    match role {
+        R::Heading(level) => Some(Role::Heading {
+            level,
+            title: title.to_string(),
+        }),
+        R::Title => Some(Role::Title),
+        R::Quote => Some(Role::BlockQuote),
+        R::Code => Some(Role::Code),
+        // PDF 1.7 has no subtitle or verse element: they are paragraphs.
+        R::Subtitle | R::Verse => Some(Role::P),
+        R::Body => None,
+    }
+}
+
+/// A list's `/ListNumbering`, from its first item.
+pub fn numbering(item: &reprise_doc::ListItem) -> Numbering {
+    use reprise_doc::NumberFormat as F;
+    match &item.format {
+        F::Bullet => match item.marker.as_str() {
+            "◦" | "○" => Numbering::Circle,
+            "▪" | "■" => Numbering::Square,
+            _ => Numbering::Disc,
+        },
+        F::Decimal | F::DecimalLeadingZero | F::Unknown(_) => Numbering::Decimal,
+        F::LowerAlpha => Numbering::LowerAlpha,
+        F::UpperAlpha => Numbering::UpperAlpha,
+        F::LowerRoman => Numbering::LowerRoman,
+        F::UpperRoman => Numbering::UpperRoman,
+        F::None => Numbering::None,
+    }
+}
+
+/// One open list level while building the structure.
+struct OpenList {
+    level: u8,
+    list: reprise_doc::ListId,
+    /// The block that opened this `L`: its key.
+    key: NodeId,
+    numbering: Numbering,
+    /// The item whose `LI` is open at this level.
+    item: NodeId,
+}
+
 /// What a block placed by a relation is.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Placed {
@@ -222,11 +273,42 @@ impl Builder<'_> {
         let mut title = None;
         let mut first_text = None;
         let mut open = Open::default();
+        let mut title_role: Option<String> = None;
+        let mut lists: Vec<OpenList> = Vec::new();
+        let mut list_base: Option<Vec<(NodeId, Part)>> = None;
         for block in blocks {
             if block.runs.is_empty() {
                 continue;
             }
             let chain = self.table_chain(block.node);
+            // Lists nest only among blocks of one container (a cell, the root).
+            let keys: Vec<_> = chain.iter().map(|c| c.key).collect();
+            if list_base.as_ref() != Some(&keys) {
+                lists.clear();
+                list_base = Some(keys);
+            }
+            // A placed note or float interrupts a list; it is not an item of it.
+            let item = self
+                .doc
+                .list_item(block.node)
+                .filter(|_| !placed.contains_key(&block.node));
+            let (labels, rest): (Vec<_>, Vec<_>) = if item.is_some() {
+                block.runs.iter().cloned().partition(|r| r.label)
+            } else {
+                (Vec::new(), block.runs.clone())
+            };
+            let block = &PdfReadingBlock {
+                node: block.node,
+                runs: rest,
+            };
+            if let Some(Role::Title) = self.semantic_role(block.node)
+                && let Some(b) = self.layout.block(block.node)
+            {
+                let s = snippet(&b.text);
+                if !s.is_empty() {
+                    title_role.get_or_insert(s);
+                }
+            }
             let mut element = self.element(
                 block,
                 placed.get(&block.node).copied(),
@@ -254,11 +336,72 @@ impl Builder<'_> {
                     first_text = Some(s);
                 }
             }
-            if let Some(element) = element.take() {
+            let Some(element) = element.take() else {
+                continue;
+            };
+            let Some(item) = item else {
+                lists.clear();
                 open.place(chain, element);
+                continue;
+            };
+            if lists.first().is_some_and(|l| l.list != item.list) {
+                lists.clear();
             }
+            while lists.last().is_some_and(|l| l.level > item.level) {
+                lists.pop();
+            }
+            let (key, list_numbering) = match lists.last() {
+                Some(l) if l.level == item.level => {
+                    let reused = (l.key, l.numbering);
+                    lists.pop();
+                    reused
+                }
+                _ => (block.node, numbering(&item)),
+            };
+            let mut full = chain;
+            for l in &lists {
+                full.push(Container {
+                    key: (l.key, Part::List),
+                    role: Role::List(l.numbering),
+                });
+                full.push(Container {
+                    key: (l.item, Part::Item),
+                    role: Role::ListItem,
+                });
+                full.push(Container {
+                    key: (l.item, Part::ListBody),
+                    role: Role::ListBody,
+                });
+            }
+            full.push(Container {
+                key: (key, Part::List),
+                role: Role::List(list_numbering),
+            });
+            full.push(Container {
+                key: (block.node, Part::Item),
+                role: Role::ListItem,
+            });
+            lists.push(OpenList {
+                level: item.level,
+                list: item.list,
+                key,
+                numbering: list_numbering,
+                item: block.node,
+            });
+            if !labels.is_empty() {
+                let leaves = labels
+                    .into_iter()
+                    .map(|r| Child::Content(Content::whole(r.run)))
+                    .collect();
+                open.place(full.clone(), Node::new(Role::Label, leaves));
+            }
+            full.push(Container {
+                key: (block.node, Part::ListBody),
+                role: Role::ListBody,
+            });
+            open.place(full, element);
         }
-        (open.finish(), title.or(first_text))
+        (open.finish(), title_role.or(title).or(first_text))
     }
 
     /// The table containers above `node`, outermost first: `Table`, then for
@@ -373,15 +516,17 @@ impl Builder<'_> {
                 .ok()
                 .and_then(|b| b.style)
                 .and_then(|s| heading_level(&s));
-            match style {
-                Some(level) => Node::new(
+            let semantic = self.doc.role(block.node).unwrap_or_default();
+            match (pdf_role(semantic, &snippet(&layout_block.text)), style) {
+                (Some(role), _) => Node::new(role, children),
+                (None, Some(level)) => Node::new(
                     Role::Heading {
                         level,
                         title: snippet(&layout_block.text),
                     },
                     children,
                 ),
-                None => Node::new(Role::P, children),
+                (None, None) => Node::new(Role::P, children),
             }
         };
         node.at = at;
@@ -400,6 +545,11 @@ impl Builder<'_> {
             Some(Placed::Float) => Some(Node::new(Role::Div, vec![Child::Node(node)])),
             None => Some(node),
         }
+    }
+
+    /// The structure role a block's semantic role gives it, if any.
+    fn semantic_role(&self, node: NodeId) -> Option<Role> {
+        pdf_role(self.doc.role(node).ok()?, "")
     }
 
     /// The top left of a line, in page space.
@@ -709,8 +859,15 @@ enum Part {
     Node,
     Head,
     Body,
+    /// An `L`, named by the item that opened it.
+    List,
+    /// An item's `LI`.
+    Item,
+    /// An item's `LBody`.
+    ListBody,
 }
 
+#[derive(Clone)]
 struct Container {
     key: (NodeId, Part),
     role: Role,

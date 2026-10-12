@@ -36,7 +36,27 @@ pub struct FragmentBlock {
     /// Effective paragraph-local text overrides, flattened from anchored actions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub formatting: Vec<crate::formatting::FormatRun>,
+    /// The block's role, when it is not body (see `docs/roles-and-lists.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<crate::Role>,
+    /// Its list membership, naming a definition in [`Fragment::lists`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<FragmentItem>,
 }
+
+/// A copied block's list membership.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FragmentItem {
+    /// A source label: a key of [`Fragment::lists`].
+    pub list: crate::ListId,
+    pub level: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart: Option<i64>,
+}
+
+/// The most list definitions one fragment carries.
+pub const MAX_FRAGMENT_LISTS: usize = 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,6 +115,10 @@ pub struct Fragment {
     pub page_setup_patch: Option<String>,
     #[serde(default)]
     pub notes: Vec<reprise_diag::Note>,
+    /// The list definitions the copied items use, by source label. Paste
+    /// gives them fresh IDs. A `base` outside the fragment is dropped.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lists: BTreeMap<crate::ListId, crate::ListDefinition>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -119,6 +143,23 @@ impl Fragment {
         if let Some(raw) = &self.page_setup_patch {
             Document::validate_raw_page_setup(raw)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
+        }
+        if self.lists.len() > MAX_FRAGMENT_LISTS {
+            return Err(FragmentError::Limit("lists"));
+        }
+        for def in self.lists.values() {
+            def.validate()
+                .map_err(|e| FragmentError::Invalid(e.to_string()))?;
+        }
+        for block in &self.blocks {
+            if block.role.is_some_and(|r| !r.is_valid()) {
+                return Err(FragmentError::Invalid("heading levels are 1 to 6".into()));
+            }
+            if let Some(item) = &block.list
+                && (item.level > crate::lists::MAX_LEVEL || !self.lists.contains_key(&item.list))
+            {
+                return Err(FragmentError::Invalid("list item".into()));
+            }
         }
         if self.blocks.len() > MAX_FRAGMENT_BLOCKS
             || self.ranges.len() > 8192
@@ -279,6 +320,7 @@ impl Document {
             template_choice: None,
             page_setup_patch: None,
             notes: Vec::new(),
+            lists: BTreeMap::new(),
         };
         let mut cuts = BTreeMap::new();
         let mut todo: Vec<_> = selection
@@ -355,6 +397,12 @@ impl Document {
                 table: get_str(&meta, "table1"),
                 image: get_str(&meta, "image1"),
                 formatting,
+                role: self
+                    .stored_role(node)
+                    .ok()
+                    .map(|r| r.role)
+                    .filter(|r| *r != crate::Role::Body),
+                list: self.copy_list_item(node, &mut fragment.lists)?,
             });
             cuts.insert(node, bytes);
             if cut.is_none() {
@@ -545,6 +593,21 @@ impl Document {
             .map(|node| CopyBlock { node, bytes: None })
             .collect();
         let mut fragment = self.copy_fragment_scoped(source, &selection, schemas, scope)?;
+        // A full-document copy also carries unreferenced authored definitions.
+        // Tombstones belong to history and are intentionally not replayed.
+        for (id, read) in self.lists() {
+            let def = read.map_err(FragmentError::Invalid)?;
+            fragment.lists.insert(id, def);
+            if fragment.lists.len() > MAX_FRAGMENT_LISTS {
+                return Err(FragmentError::Limit("lists"));
+            }
+        }
+        let ids: BTreeSet<_> = fragment.lists.keys().copied().collect();
+        for def in fragment.lists.values_mut() {
+            if def.base.is_some_and(|base| !ids.contains(&base)) {
+                def.base = None;
+            }
+        }
         let map = self.doc.get_map("page_templates");
         for key in map.keys() {
             if let Some(ValueOrContainer::Value(LoroValue::String(raw))) = map.get(&key) {
@@ -647,5 +710,52 @@ impl Document {
         meta.insert("end", crate::ranges::anchor_value(&end))?;
         crate::ranges::write_policy(&meta, policy)?;
         Ok(())
+    }
+}
+
+impl Document {
+    /// A copied block's membership, adding its definition (and the bases it
+    /// inherits from, while they are live) to `lists`. Only items of live
+    /// definitions are copied.
+    fn copy_list_item(
+        &self,
+        node: NodeId,
+        lists: &mut BTreeMap<crate::ListId, crate::ListDefinition>,
+    ) -> Result<Option<FragmentItem>, FragmentError> {
+        let Some(item) = self.list_item(node) else {
+            return Ok(None);
+        };
+        let restart = self
+            .list_membership(node)
+            .ok()
+            .flatten()
+            .and_then(|m| m.restart);
+        let mut next = Some(item.list);
+        for _ in 0..crate::lists::MAX_BASE_DEPTH {
+            let Some(id) = next.take() else { break };
+            if lists.contains_key(&id) {
+                break;
+            }
+            let Ok(def) = self.list_definition(id) else {
+                break;
+            };
+            next = def.base;
+            lists.insert(id, def);
+            if lists.len() > MAX_FRAGMENT_LISTS {
+                return Err(FragmentError::Limit("lists"));
+            }
+        }
+        // A base that was not copied (missing or past the depth) is dropped.
+        let copied: Vec<crate::ListId> = lists.keys().copied().collect();
+        for def in lists.values_mut() {
+            if def.base.is_some_and(|b| !copied.contains(&b)) {
+                def.base = None;
+            }
+        }
+        Ok(Some(FragmentItem {
+            list: item.list,
+            level: item.level,
+            restart,
+        }))
     }
 }

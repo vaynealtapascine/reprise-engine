@@ -58,6 +58,7 @@ pub fn glyph_outlines( &self, request: &Payload<GlyphRequest>, ) -> Result<Paylo
 pub fn glyph_outlines_styled( &self, request: &Payload<StyledGlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
 pub fn svg(&self, page: u32) -> Result<Payload<String>>
 pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>>
+pub fn outline(&self) -> Result<Payload<Vec<OutlineEntry>>>
 pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>>
 pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>>
 pub fn diagnostics_for( &self, request: &Payload<DiagnosticFilter>, ) -> Result<Payload<DiagnosticList>>

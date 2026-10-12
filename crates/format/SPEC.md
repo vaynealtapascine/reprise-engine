@@ -272,6 +272,16 @@ those properties, styles or masks, so it must refuse. Untouched documents,
 including those that only name built-in styles, keep their old mask. See
 `docs/paragraph-styles.md`; the bit number may be renumbered on integration.
 
+## Block semantics feature (required bit 14)
+
+`REQUIRED_BLOCK_SEMANTICS` is declared whenever any paragraph metadata or break
+record holds a role (`role1`) or list membership (`list1`, `level1`,
+`restart1`), or the `lists` tree of list definitions exists, including deleted
+definitions and values reset to body whose history is retained. A reader whose
+known required mask predates bit 14 refuses before decoding the document
+section. Documents that never used roles or lists retain their old required
+mask. Numbering is derived and never persisted. See `docs/roles-and-lists.md`.
+
 ## Annotations feature (required bit 16)
 
 `REQUIRED_ANNOTATIONS` is declared whenever any persistent range carries an

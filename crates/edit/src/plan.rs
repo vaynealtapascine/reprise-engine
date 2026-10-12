@@ -23,6 +23,8 @@ use reprise_doc::{
 use crate::command::Command;
 use crate::error::{EditError, Reason};
 
+mod semantic;
+
 /// The most commands one transaction may hold.
 pub const MAX_COMMANDS: usize = 10_000;
 /// The most text one `InsertText` or `InsertBlock` may carry, in bytes.
@@ -115,6 +117,33 @@ pub(crate) enum Step {
     RemoveRelation {
         id: RelationId,
     },
+    SetRole {
+        node: NodeId,
+        role: reprise_doc::Role,
+    },
+    /// `new` indexes [`Plan::lists`].
+    ActivateList {
+        new: usize,
+    },
+    UpdateList {
+        list: reprise_doc::ListId,
+        definition: reprise_doc::ListDefinition,
+    },
+    DeleteList {
+        list: crate::ListRef,
+    },
+    SetListItem {
+        node: NodeId,
+        list: crate::ListRef,
+        level: u8,
+    },
+    RemoveListItem {
+        node: NodeId,
+    },
+    SetListRestart {
+        node: NodeId,
+        value: Option<i64>,
+    },
     DefineStyle {
         name: String,
         style: Style,
@@ -175,6 +204,8 @@ pub(crate) struct Plan {
     /// staged first; steps name them by index.
     pub created: Vec<Created>,
     pub relations: Vec<Relation>,
+    /// List definitions to stage; [`Step::ActivateList`] names them by index.
+    pub lists: Vec<reprise_doc::ListDefinition>,
     pub steps: Vec<Step>,
     /// The commands' effects, with staged blocks as indices; the editor
     /// resolves them once those have IDs.
@@ -235,6 +266,10 @@ struct Model<'a> {
     )>,
     /// Named styles the transaction made live (`true`) or not (`false`).
     styles: BTreeMap<String, bool>,
+    /// List membership this transaction has changed: `None` for not an item.
+    members: BTreeMap<NodeId, Option<(crate::ListRef, u8)>>,
+    /// Lists this transaction has deleted.
+    dead_lists: BTreeSet<crate::ListRef>,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -290,6 +325,8 @@ pub(crate) fn plan(
         payload: 0,
         page_setup: None,
         styles: BTreeMap::new(),
+        members: BTreeMap::new(),
+        dead_lists: BTreeSet::new(),
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -718,6 +755,7 @@ impl Model<'_> {
                 self.plan.steps.push(Step::RemoveAnnotation { id: *id });
                 Ok(())
             }
+            other => self.semantic(other),
         }
     }
 
