@@ -1,834 +1,1331 @@
 # Sections, columns, manual breaks and running regions
 
-Decisions 01, 05, 06, 07, 11, 20, 24, 26, 27, 28, 33, 35, 37 and 38 apply.
-This note is the design for the sections workstream. It is written before
-the code, against `flow.md`, `paragraph-styles.md`, `incremental.md` and
-`annotations.md` on engine `main` (f13a4ee). It also relies on two wave-1
-designs that haven't merged yet: lists (`NumberFormat`) and inline (fields).
-What this work needs from each of them is listed under *What this needs from
-wave 1*.
+Decisions 01, 05, 06, 07, 11, 20, 24, 25, 26, 27, 28, 33, 34, 35, 37 and 38
+apply. This is the design for the sections workstream, revision A.2. It answers
+the advisor's review (`reviews/sections-design-review.md`, R1–R11) and the
+orchestrator's decisions on it. The first draft is `fdfe2b4`. Ideas adopted from
+the cancelled GPT-6.1-Sol design (`eng-sections` `5b70673`) are marked
+**[Sol]**.
 
-A document divides into **sections**. Each section can have its own page
-geometry, columns, page numbering and running regions (headers, footers and a
-background). **Manual page and column breaks** use the same boundary
-mechanism. Running regions are **stories**: authored content stored outside the
-body and composed again for each page.
+The work is in four layers:
 
-## Building blocks
+1.  **Stories and placements.** A story is authored content. A placement says
+    where that content's frames come from. The body is one distinguished
+    story, with the default paged placement. Headers, footers and a
+    background are running placements: one copy per page.
+2.  **Section boundaries.** Start records in a root map, keyed by the block the
+    boundary sits before. Manual page and column breaks use the same records.
+3.  **Pages.** One page factory and stable logical frame addresses, shared by
+    every layout subsystem.
+4.  **The seams later work plugs into.** Pageless mode, linked text boxes and
+    the canvas.
 
-| Thing | Authored (stored) | Derived (layout) |
+Nothing derived from layout is written to Loro (05).
+
+## 1. Stories and placements
+
+| Concept | What it is | Stored? |
 | --- | --- | --- |
-| Section boundary, page break, column break | a **start record** in root map `starts1`, keyed by the block the boundary sits before | the section table, and the pages and bands |
-| First section's properties | `starts1` under the reserved ID `first` | |
-| Document default page setup | `page-setup1`, unchanged | |
-| Header, footer and background content | a **story**: a top-level content-tree node of kind `story` whose children are ordinary blocks | one **running instance** per page and slot |
-| Which story a section shows | `starts1` keys `region.<slot>.<variant>` | the resolved slot table, with "same as previous" applied |
-| Page numbers | `numbering.*` keys | a label per page, and field values per placement |
+| **Story** | An ordered run of blocks, edited with the ordinary text machinery. It has an identity of its own and doesn't know where it is shown. | Yes. |
+| **Body story** | The distinguished logical story: the root's children that aren't story nodes. It has no node of its own, and existing documents are not migrated. | Yes, implicitly, as today. |
+| **Placement** | Where a story's frames come from. | Yes, in the kind's own records. |
+| **Instance** | One placement's realisation in a layout: a page's header, a page's band of body columns. | No, derived. |
 
-Nothing derived is stored (05). Running instances, blank filler pages, column
-frames, balanced heights, page labels and field texts are all thrown away and
-recomputed.
+A story has no slot, no section and no page. One story can be bound to several
+placements: the same story as the header of three sections, or as both header
+and footer. A story bound to no placement is still live, editable and
+recoverable (§6).
 
-## Why boundaries are records keyed by block identity
+There are four placement kinds. This workstream builds the first two:
 
-The brief offers three representations: a break kind in the flow host text
-(candidate A), section container nodes in the tree (B), and boundary records on
-leading blocks (C). This design chooses **C, keyed by the block's `NodeId`**. For
-a break paragraph, that identity *is* the U+FDD0 marker of candidate A, so for
-most paragraphs C and A are the same boundary. Keying by `NodeId` also covers
-the three block kinds that have no marker:
+-   **Body (default).** The body story flows through the sections' pages (§7).
+    In pageless or canvas documents later, this placement may be **absent**:
+    the body story then exists but isn't laid out. An empty body never stops
+    other stories being placed.
+-   **Running.** A section binds a story to a `(slot, variant)`. The binding is
+    stored in the section's start record (§3). Each page the section owns gets
+    one instance per bound slot.
+-   **Chain (future: frames and canvas).** An authored, ordered list of
+    frames, possibly shaped, rotated or vertical, that one story threads
+    through, InDesign-style. One story flows through the whole chain. There is
+    not a story per box.
+-   **Canvas (future: frames and canvas).** Placements on an unbounded 2D
+    plane, with an authored reading order across them.
 
--   **break paragraph:** `NodeId` is `host/mark`, so the boundary is the marker
-    itself (candidate A);
--   **head paragraph of a host:** `NodeId` is the host's tree ID; there is no
-    marker before it;
--   **embedded table or image:** the embedded node's tree ID. An embed's marker
-    could carry the boundary, but a non-embedded top-level table (older
-    documents) has no marker.
+What a later placement kind must supply:
 
-So a boundary is "a section (or page, or column) **starts at this block**".
-That's the same whatever kind of block it starts at.
+1.  its own authored record root;
+2.  a **frame source** for layout (§7.1);
+3.  a variant of `FieldInstance` (§10);
+4.  a hit-test and caret instance (§12);
+5.  a reading-order policy: whether it's an artifact or semantic (§13);
+6.  copy and remap rules (§14).
 
-Why not put the fields on the `breaks1` record itself:
+The seams in this design take a new kind without changing the stored form of
+stories or sections.
 
--   **Split.** Split copies a record's kind, style and overrides into the new
-    paragraph (`flow.md`). A boundary must not be copied, or pressing Enter at
-    the end of a paragraph after a page break would add a second page break.
-    The same applies to making page-break-before a paragraph style property:
-    `overrides` are copied on split, and a style is inherited by every paragraph
-    that uses it. A boundary is structure at one place, not style.
--   **Head paragraphs.** These have no record. Adding one means inserting a
-    marker before the head, which retires the head's identity (`head = false`).
--   **Old readers.** Records stay exactly as old engines know them. The package
-    bit is what refuses (*Package*), but a document opened by a buggy reader
-    still has well-formed paragraph records.
+## 2. Traversal domains (R1)
 
-Candidate B (container nodes) is rejected. A flow host can't cross a tree
-parent, so moving the boundary would copy text and lose character identity,
-which is what `flow.md` exists to prevent. It would also change every
-`children(None)` walk in the engine.
+There is one `content` tree, which avoids splitting `NodeId` lookup across
+trees. It has three **typed traversal domains**, so the compiler can see which
+one each caller uses. The first draft's "filter `children(None)` and
+everything works" was wrong, and the review showed why: `document_order()` is
+used by image packaging and list numbering, and selection replacement starts
+from `blocks()`.
 
-### The start record
+```rust
+pub enum Domain { Body, Story(NodeId) }
 
-`starts1` is a root map. Root, as with `breaks1` and `inline1`, so that
-concurrent first writes don't overwrite each other's container. It uses the
-flat-key pattern of `para1` and `styles1`: one map entry per property, key
-`"<id>/<prop>"`, split at the **last** `/`. Property names never contain `/`;
-they use `.`, and `NodeId`s may contain `/`. Concurrent edits to different
-properties therefore both survive.
+impl Document {
+    pub fn order(&self, domain: Domain) -> Vec<NodeId>;     // that domain, document order
+    pub fn top(&self, domain: Domain) -> Vec<NodeId>;       // its top-level blocks
+    pub fn authored_order(&self) -> Vec<NodeId>;            // body, then each live story, in tree order
+    pub fn stories(&self) -> Vec<NodeId>;                   // live top-level story nodes
+    pub fn domain_of(&self, node: NodeId) -> Option<Domain>;
+}
+```
 
-`<id>` is a block's `NodeId` in its `Display` form, or `first`.
+-   `blocks()`, `children(None)` and `document_order()` keep their signatures,
+    and are defined as the **body** domain. They're documented as aliases of
+    `top(Domain::Body)` and `order(Domain::Body)`. For documents without
+    stories they return exactly what they return today. Their wording in
+    `contracts.md` changes in the contract commit (§16).
+-   Every caller is switched to an explicit domain function. Stage B removes
+    every internal call of the aliases outside the facade. A clippy
+    `disallowed_methods` entry for `reprise-doc`'s own crates keeps it that
+    way, so a new caller has to choose a domain.
 
-| Key | Value | Meaning |
+How each consumer is routed:
+
+| Consumer | Domain |
+| --- | --- |
+| `structure.rs` children and `blocks` | Body |
+| `position.rs:84`, locating a cursor | **Authored**, so carets work in stories |
+| `invariants.rs:41`, including tombstones | Authored and tombstones |
+| `persist.rs`, `hostile.rs` | Authored |
+| Image resources, `image_assets.rs:24` | Authored: a header image is packaged |
+| List numbering, which today walks `document_order()` | **Per domain**: the body numbers the body, and each story numbers itself (§20) |
+| Selection replacement, `replace.rs:69` | The selection's domain |
+| Ranges and annotations | The domain of the range's start. A range whose ends are in different domains is refused at creation, and resolves as unresolved if it arrives from a hostile peer. |
+| Body reading order, outline, select-all, plain text | Body |
+| Copy-all, `import_copy` | Authored, through the fragment envelope (§14) |
+| History views (`history.rs:57`) | Per domain, with the same functions at a past version |
+
+**Story nodes.** A story is a `content` node with meta `kind = "story"` and
+`v = 1`, whose **parent is the root**.
+
+-   Its children are ordinary blocks: flow hosts with breaks, embedded tables
+    and images, and inline atoms. Stories are created by staging (07).
+-   A `story` node anywhere other than directly under the root is
+    **outside every domain**, and so is its subtree. `is_live`, `block`,
+    `locate`, `domain_of` and every enumeration agree on this. `audit` reports
+    it as Warning `story.nested`.
+-   A story inside a story is the same case.
+-   Start records inside a story are orphans (§3).
+
+## 3. Section boundaries: start records (R3)
+
+A boundary is "a section, page or column **starts at this block**". It is
+keyed by the block's `NodeId`.
+
+-   For a break paragraph, that `NodeId` is `host/mark`, so the boundary *is*
+    the paragraph's U+FDD0 marker.
+-   It also covers the cases with no marker: a host's head paragraph,
+    embedded tables and images, and old top-level tables.
+-   It is never copied by split. A split copies a break record's kind, style
+    and overrides, so a field on the `breaks1` record would duplicate a page
+    break on Enter. The same objection applies to `overrides`.
+
+Section containers (candidate B) are rejected, because a flow host can't cross
+a tree parent without copying text.
+
+Sol's alternative, an attribute on the `breaks1` record, covers break
+paragraphs but not head paragraphs or embeds. That leads it to restrict
+boundaries to break markers. Keying by block covers every block kind with one
+rule, so I keep it.
+
+### Keys
+
+The root map is `starts1`. It's a root, like `breaks1` and `inline1`, so
+concurrent first writes don't overwrite each other's container. Keys are flat.
+
+-   An **address** is a block `NodeId` in `Display` form, or `first`.
+-   Address-level keys: `<addr>/active` (bool) and `<addr>/gen` (i64 ≥ 1).
+-   Generation-level keys: `<addr>/<gen>/<prop>`.
+
+Parsing works from the right:
+
+-   The last `/`-segment is the property. `active` and `gen` are reserved
+    address-level names.
+-   For any other property, the segment before it must be a decimal `gen`.
+    A `NodeId`'s mark segment always contains `@`, so a gen segment can't be
+    mistaken for one.
+-   The rest is the address.
+-   Keys that don't parse are retained and never rewritten. They are reported
+    once per address, aggregated.
+
+**Generations** answer the review's address-reuse and atomic-reset point. A
+boundary's **address** is stable: its block. Its **lifetime** is `(address,
+gen)`.
+
+-   Inserting a break where the record is inactive or absent writes
+    `gen = old + 1`, the new properties under the new gen, and `active = true`.
+-   The old generation's keys stay, unread. That includes unknown keys, so
+    reset needs no deletion and can't race.
+-   A concurrent edit to an old generation lands there and stays inert.
+-   Two peers resetting from the same generation both write `gen = n + 1`.
+    Their properties merge key by key.
+
+`first` is the document's leading section.
+
+-   It has no `active` and no `gen`. Its keys are `first/0/<prop>`.
+-   It can't be removed and has no block, so liveness never applies to it.
+-   Its `break` and `start` keys are ignored.
+
+### Properties (per generation)
+
+| Key | Value | Notes |
 | --- | --- | --- |
-| `active` | bool | The boundary is in effect. Removal writes `false` and keeps the other keys (see *Operations*). |
-| `break` | `section` \| `page` \| `column` | What starts here. |
+| `break` | `section` \| `page` \| `column` | Required on a block address. Unknown values are retained, and the boundary is ignored with Warning `section.property`. |
 | `start` | `new-page` \| `odd-page` \| `even-page` \| `continuous` | Section only. Default `new-page`. |
-| `width`, `height`, `top`, `right`, `bottom`, `left` | i64 layout units | A `PageSetupPatch` over the document default. Same bounds and checks as `page_setup.rs`. |
-| `orientation` | `portrait` \| `landscape` | Swaps the resolved width and height when they disagree with it. So "landscape" works without restating the size, and it reflows if the default size changes. Margins aren't rotated. |
-| `header.distance`, `footer.distance` | i64 | From the page edge to the region. Default 36 pt. Clamped to `0..=height/2`. |
-| `columns.count` | i64 | 1 to 64 (*Limits*). Absent: the template's own main frames, exactly as today. |
-| `columns.gap` | i64 | Default 18 pt. |
-| `columns.widths` | comma-separated i64 | Optional weights, one per column. When present they set the count (see *Columns*). |
-| `columns.rule` | i64 | Width of a rule between columns. 0 or absent means no rule. |
-| `direction` | `ltr` \| `rtl` | Column order. Default `ltr`. |
-| `writing-mode` | `horizontal-tb` \| `vertical-rl` \| `vertical-lr` | For the section's frames. Default: the template's. |
-| `numbering.restart` | i64 decimal string | Restart at this value. Absent means continue. A string, so JavaScript loses no bits (as lists does). |
-| `numbering.format` | a lists `NumberFormat` token | Absent means the previous section's format; the first section defaults to `decimal`. |
-| `region.first`, `region.even` | bool | Use the `first` / `even` variants (Word's "different first page" and "different odd and even"). Default false. |
-| `region.<slot>.<variant>` | a story's `NodeId`, or `""` | `""` means explicitly none. **Absent means same as previous**, the default. |
+| `template` | the name of a stored page template | Section's base template. Absent means the document's. The seam for spatial (*House of Leaves*) sections (§19). |
+| `mode` | `paged` \| `pageless` | The geometry-mode override (§18). Absent means the document's mode. |
+| `width`, `height`, `top`, `right`, `bottom`, `left` | i64 units | A `PageSetupPatch` over the document default (§4). |
+| `orientation` | `portrait` \| `landscape` | Swaps the merged width and height when they disagree. A square page never swaps. Margins stay physical. |
+| `header.distance`, `footer.distance` | i64 | From the page edge. Default 36 pt. |
+| `columns.count`, `columns.gap`, `columns.widths`, `columns.rule` | see §4 | |
+| `direction` | `ltr` \| `rtl` | Column order only. Unicode bidi inside paragraphs is unchanged **[Sol]**. |
+| `writing-mode` | `horizontal-tb` \| `vertical-rl` \| `vertical-lr` | |
+| `numbering.restart` | i64 decimal string | Absent means continue. |
+| `numbering.format` | lists `NumberFormat` token | Absent means the previous section's; the first section defaults to `decimal`. `bullet` and `none` are refused, with Warning **[Sol]**. |
+| `region.first`, `region.even` | bool | Variant switches (§9). |
+| `region.<slot>.<variant>` | story `NodeId` \| `""` | `""` means explicitly none. **Absent means same as previous.** |
+| `region.<slot>.writing-mode` | as above | Optional. v1 renders only `horizontal-tb` (§9). |
+| `filler.regions` | `blank` \| `running` | Policy for the parity filler that **this** section's start creates (§7.4). Default `blank`. |
 
-Only `active`, `break` and `start` mean anything on a page or column break.
-Every other key is ignored there.
+Only `break` and `start` mean anything on page and column breaks. Their other
+keys are retained and ignored. So are unknown properties and unknown slots.
+State reports raw keys it doesn't understand, so nothing is silently dropped.
 
-**Inheritance.**
+**Inheritance (Q1, decided).**
 
--   Geometry, columns, direction and writing mode: built-in template, then the
-    document default (`page-setup1`, unchanged), then the section's own keys.
-    They are **not** taken from the previous section, as the brief asks.
--   The insert command copies the containing section's own geometry, columns,
-    direction and writing-mode keys into the new record. That gives Word's
-    "the new section looks like this one" behaviour without layout-time
-    cascading. See *Open questions*.
--   Numbering format and region links come from the **previous section in body
-    order**. Restart never inherits.
+-   Geometry, template, mode, columns, direction and writing mode come from
+    the built-in template, then the document default, then the section's own
+    keys. They are never taken from the previous section.
+-   `InsertBreak` copies the containing section's own keys for this **exact
+    set**:
+    -   `template`, `mode`;
+    -   `width`, `height`, `top`, `right`, `bottom`, `left`, `orientation`;
+    -   `header.distance`, `footer.distance`;
+    -   `columns.*`, `direction`, `writing-mode`.
+-   It never copies `start`, `numbering.*`, `region.*`, `filler.*` or unknown
+    keys.
+-   Numbering format and region bindings are intentional cascades from the
+    previous section in body order. `numbering.restart` never cascades.
 
-**When a start is in effect.** All of these must hold:
+### When a boundary is in effect
+
+A block address is **effective** when all of these hold:
 
 -   `active` is true;
+-   `gen` is readable;
 -   `break` is readable;
 -   the block is live;
--   the block is in **body order**: `Document::blocks()`, top level, after host
-    expansion. Starts on blocks inside table cells, inside stories, or on
-    relation-placed blocks are ignored;
--   the block isn't the first block of the body. A start there would make the
-    `first` section empty. It still counts as a section with that block's
-    properties, but its `start` kind is ignored, because there's no earlier
-    page to break from.
+-   the block is in the body domain's top-level order (`top(Domain::Body)`).
 
-Anything else is an **orphan start**: ignored, and listed by `audit` with Info
-`section.orphan-start`. Unreadable values are ignored property by property. That
-property falls back to its inherited value, and layout reports Warning
-`section.property`.
+Otherwise it's an orphan. `audit` reports inactive records as Info
+`section.inactive`, which is expected history. It reports everything else
+(dead block, wrong domain, unreadable) as Warning `section.orphan-start`,
+aggregated with a bounded, numerically ordered sample.
 
-**Section identity** is the start block's `NodeId`, or `first`. `NodeId`s are
-never reused (07), so neither are section IDs. The facade calls this
-`SectionId` and writes it as a string.
+**First section and body index 0.** The section sequence is `first`, then
+every effective section boundary in body order.
 
-### Stories
+-   If an effective section boundary is on the **first** body block, `first`
+    is an empty section. That boundary's section holds the body, and its
+    `start` kind is ignored, because there's nothing to break from. No filler
+    is added.
+-   An empty `first` makes no pages, but **does take part in inheritance**.
+    A later section that inherited `first`'s header still does after the body
+    prefix is deleted.
+-   A page or column break on the first body block has no effect.
+-   **Empty body.** One page, owned by `first`, with its running regions. A
+    story-only document behaves the same way.
 
-A **story** is a content-tree node whose parent is the root and whose `kind` is
-`story`. Its meta also holds `slot`, which the app uses as a hint (`header`,
-`footer`, `background`) but which doesn't affect layout. Its tree children are
-ordinary blocks: flow hosts with breaks, embedded tables and images, and, once
-inline lands, inline atoms. So everything that works on paragraphs works in a
-story unchanged: views, split and join, formatting, `para1`, ranges,
-annotations, undo, and anchors that follow characters.
+## 4. Interpreting geometry (R4)
 
--   `Document::children(None)`, and therefore `blocks()` and every body
-    traversal, **skips** story nodes. They're outside the body and its reading
-    order, as the brief requires.
--   `Document::stories() -> Vec<NodeId>` lists the live stories in tree order.
-    `children(Some(story))` gives a story's blocks, and `story_of(block)` gives
-    the story a block is in, if any.
--   A story node anywhere other than directly under the root is ignored; its
-    subtree isn't shown. So is a story inside a story. Stories have no sections:
-    starts inside them are orphans.
+**Parsing.** Every value is read with explicit bounds, before any arithmetic.
+Values are i64 in Loro, converted with a checked `Length::try_from_units`.
 
-Story nodes are created by staging (07). Undo and redo flip the deletion flag,
-so a story keeps its ID.
-
-This choice is safe only if code that walks the content tree's root directly,
-instead of going through `children(None)`, is updated. Stage B decides each of
-these explicitly and tests the decision:
-
-| Place | What stories need there |
+| Property | Accepted |
 | --- | --- |
-| `position.rs:84` | Include stories, so a caret can be placed in a story. |
-| `invariants.rs:41` | Include stories in the checks. |
-| `hostile.rs` | Include stories when generating hostile documents. |
-| `persist.rs:58` | Include stories when saving and loading. |
-| `lifecycle.rs:43` | Decide liveness the same way as for any other node. |
-| clipboard | Leave stories out of copied body fragments. |
-| exports | Leave stories out of the body; emit them as artifacts (*Exports*). |
+| `width`, `height` | `1..=MAX_PAGE_LENGTH` (14,745,600 units) |
+| margins, distances, `columns.gap`, `columns.rule` | `0..=MAX_PAGE_LENGTH` |
+| `columns.count` | `1..=64`. Above 64 it's clamped to 64, with Warning `section.columns-limit`. |
+| `columns.widths` | A CSV string of at most 1 KiB and at most 64 entries, each `0..=MAX_PAGE_LENGTH`. Its size is checked before it's split. |
+| `numbering.restart` | Any i64 |
 
-### Slots and variants: the extension point
+A value outside its range is ignored. That property inherits instead, with
+Warning `section.property`.
 
-A **slot** is a running region kind. The registry is a table in
-`reprise-layout` (`running.rs`), and each entry supplies:
+**Merge, then validate.**
 
-1.  `name`: the stored key segment (`header`, `footer`, `background`);
-2.  `variants`: which of `default`, `first` and `even` it uses;
-3.  `place(page geometry, section) -> RegionBox`: its rectangle, and whether
-    its extent grows from an edge;
-4.  `reserve`: how its composed extent changes the body area: push from the
-    top, push from the bottom, or none;
-5.  `paint_order`: below the body or above it;
-6.  `artifact`: its tagged-PDF artifact type and subtype.
+1.  Overlay the section's geometry keys on the document default, property by
+    property.
+2.  Apply orientation.
+3.  Validate the merged `PageDimensions` with `page_setup.rs`'s existing check:
+    positive width and height, and a positive text area. So opposing margins
+    are judged only after the merge.
+4.  If the merge is invalid, the section uses the **whole** document default
+    geometry, with Warning `section.geometry` **[Sol]**.
 
-The three slots:
+The document default has its existing template fallback.
 
-| Slot | Box | Reserve | Painted | PDF artifact |
-| --- | --- | --- | --- | --- |
-| `header` | Starts `header.distance` from the top edge, across the body's left and right margins, and grows down. | Pushes the body down. | Above the body. | `/Pagination /Header` |
-| `footer` | Ends `footer.distance` from the bottom edge, across the same width, and grows up. | Pushes the body up. | Above the body. | `/Pagination /Footer` |
-| `background` | The whole page. | None. | Below the body. | `/Pagination /Watermark` |
+**Logical axes.** Margins are physical.
 
-`background` proves the extension. It has different placement, reservation and
-paint order from the other two, and it's what the *House of Leaves* north star
-uses for text set behind a page: a watermark, a ghost passage, a mirrored layer.
-A side-margin running head would be a fourth slot with `place` in the outer
-margin and no reservation.
+-   The **inline extent** *A*:
+    -   horizontal-tb: `width − left − right`;
+    -   vertical-rl and vertical-lr: `height − top − bottom`.
+-   Columns partition the inline axis. Bands advance along the block axis:
+    down in horizontal-tb, leftward in vertical-rl, rightward in vertical-lr
+    **[Sol]**.
+-   Column widths are logical inline measures: physical heights in vertical
+    sections.
 
-**Variant selection** on a page owned by section *s*:
+**Columns.** Let *n* be the column count and *g* the gap.
 
-1.  If this is *s*'s first owned page and `region.first` is set, use `first`.
-2.  Otherwise, if `region.even` is set and the page's **physical** index
-    (1-based) is even, use `even`. See *Open questions*.
-3.  Otherwise use `default`.
+-   All arithmetic is i64. *n* ≤ 64 and every term ≤ 2²⁴, so no product
+    exceeds 2³¹; checked operations are used anyway.
+-   `W = A − (n−1)·g`. If `W < n·MIN_COLUMN`, the section falls back to **one**
+    column, with Warning `section.columns-fit`. `MIN_COLUMN` is 1 pt.
+-   **Equal columns:** `q = W / n`, `r = W mod n`. The first *r* columns in
+    thread order get `q + 1`.
+-   **Weighted columns:** `w_i` from `columns.widths`.
+    -   Base width: `floor(W·w_i / Σw)`.
+    -   The remainder, `W − Σ base`, which is less than *n*, goes 1 unit at a
+        time to the columns in thread order.
+    -   `Σw = 0` falls back to equal widths, with Warning `section.property`.
+    -   When `columns.widths` is valid it sets *n*. A disagreeing
+        `columns.count` is ignored with Warning `section.property`.
+-   **Rounding.** This is **integer apportionment of an exact total**, not
+    `Length` division. Every quantity is non-negative and the remainder is
+    distributed explicitly, so no rounding takes place and the frozen
+    half-away-from-zero rule has nothing to apply to. Widths always sum to *W*
+    exactly.
+-   **Narrow columns.** A column under `MIN_COLUMN`, from a zero weight, is
+    skipped by the thread, with Warning `section.column-narrow`. If all are
+    skipped, the section falls back to one column.
+-   **Rules.** `columns.rule` is clamped to *g*, with Warning when clamped.
+    Its offset in the gap is `(g − rule) / 2`, integer floor. That's a
+    placement of non-negative integers, again not `Length` division. Rules
+    are derived display paths: never frames and never in reading order.
+-   **Order.** Columns are ordered from inline-start: right to left for
+    `rtl`, top to bottom in vertical modes.
 
-The chosen variant resolves through "same as previous": the nearest section at
-or before *s* that has the key. A variant that's enabled but resolves to
-nothing gives an empty region.
+**Templates.** These rules settle the first draft's contradiction between
+keeping template frames "exactly" and applying section geometry.
 
-**Same as previous can't form a cycle.** Inheritance is positional: always
-from the section before in body order. No key can name a section, so there is
-nothing to cycle through.
+1.  **No section geometry or column keys.** The template's frames are used
+    exactly as today: `page_setup.rs:324` projects the document default onto
+    the **first** main frame only.
+2.  **Geometry keys, no column keys.** The same first-main-frame projection,
+    with the merged dimensions. Other main frames, non-main frames, transforms
+    and paths are untouched. `writing-mode`, if set, is applied to every main
+    frame.
+3.  **Any column key.** Generated rectangular main frames replace **all** main
+    frames, inside the body rectangle the merged margins give.
+    -   If a replaced frame had a path, a non-identity transform or a mirror,
+        the section reports Warning `section.template` **[Sol]**.
+    -   Non-main frames (notes, margin, other named flows) are kept as
+        authored.
+    -   `clear` of the last column key returns to rule 2.
 
-The hostile cases are all treated as `""` (none), with Warning
-`layout.region-missing`. A key that is:
+## 5. Operations (R3)
 
--   unparsable;
--   names a node that isn't a live story;
--   names a story nested somewhere other than the root.
+These are edit-kernel commands. They work inside `batch`, respect
+`expected_revision`, and validate the whole sequence before any staging. A
+failed command writes no root and adds no undo step **[Sol]**.
 
-## Operations
+-   **`InsertBreak { at, kind, patch }`.** `at` is a position or `Before(block)`.
+    -   At offset 0 of a paragraph, or `Before(block)`: write the boundary on
+        that block.
+    -   Elsewhere: split, and write it on the paragraph the split returns.
+        That includes `split_block`'s copy-and-lineage path for a split inside
+        an inherited prefix after head deletion (`flow.rs:522–548`). Whichever
+        `NodeId` the split returns is the address.
+    -   On an **effective** boundary: refused with `EditError::BreakExists`.
+        To change a page break into a section break, use `RemoveBreak` then
+        `InsertBreak` in one batch.
+    -   Refused in a story or a table cell.
+    -   All three break kinds end the paragraph **[Sol]**: a page break inside
+        `abcd` at byte 2 gives two paragraphs.
+-   **`RemoveBreak { block }`** writes `active = false`. The paragraphs stay,
+    and the content joins the previous section.
+-   **`SetSection { section, patch, clear }`** writes keys in the current
+    generation. `clear` writes nothing new; it removes that generation's key.
+    Concurrent edits of other keys survive.
+-   **Undo.** An insert reverts its map writes and, through the flow, the
+    marker's activation. The marker was staged, so redo gives back the same
+    address and generation.
 
-All of these are edit-kernel commands (see *Facade*). They work inside `batch`
-and respect `expected_revision`.
+**Deleting a boundary (Q4, decided).** A boundary lives and dies with its
+block. A deletion removes every boundary strictly inside the range and keeps
+the one at its start. That follows from `flow.md`'s join semantics, in which
+the first paragraph keeps its identity.
 
-**Insert a break** at a position or before a block. If the position is a
-paragraph's offset 0, or names a block, the start is written on that block.
-Otherwise the paragraph is split there (staged marker, `flow.md`) and the start
-is written on the new paragraph. Writing a start means writing `active = true`,
-`break`, and, for a section, `start` and the copied keys. All of these go in
-the undoable commit.
-
-If an inactive record already exists for that block, the command first
-deletes its keys, so the new section doesn't bring back old properties.
-
-**Undo** of an insertion reverts the map writes and, through the flow, the
-marker's activation. The paragraph's `NodeId`, and so the section ID, comes
-back on redo, because the marker was staged.
-
-**Remove a break** writes `active = false`. The paragraphs stay; the section's
-content joins the previous section.
-
-**Deleting a break: which properties win.** One rule covers both cases:
-
-> A boundary lives and dies with its block. A deletion removes every boundary
-> strictly inside the deleted range, and keeps the boundary at its start.
-
-That follows from `flow.md`'s join semantics, in which the first paragraph
-keeps its identity:
-
--   Deleting from section 1 into section 2 deactivates section 2's first
-    paragraph. Section 2's start goes with it, and its remaining content takes
-    **section 1's properties**. The inactive record keeps section 2's
-    properties, so undo brings them back.
--   Deleting exactly the text of section 2's first paragraph and its end, from
-    `P.0` to `Q.0`, joins `Q` into `P`. `P` keeps its identity, so section 2
-    survives.
--   Deleting a whole one-paragraph section 2 together with section 3's
-    boundary, from `P.0` to `R.0`, keeps **section 2's** properties and drops
-    section 3's. Word keeps section 3's here, because it stores a section's
-    properties at its end. Documented and tested.
--   `DeleteBlock` on a start's block removes the start (*Open questions*).
-
-**Join across a section break** (Backspace at section 2's first paragraph) is
-the same: the join deactivates `P`, and section 1's properties win. The facade
-offers both "remove break" and "join". The app decides what Backspace does
-(*App seam*).
-
-**Split inside a section's first paragraph** keeps the boundary on the first
-part. Enter at its offset 0 leaves an empty paragraph at the section's top,
-which is what word processors do.
-
-**Copy and paste.** A fragment carries the boundaries **strictly inside** it,
-the same rule as deletion. Each one is written on the pasted copy of its block
-(new `NodeId`, so a new section ID) with the source record's own keys.
-
--   Region links are kept when pasting within the same document. Across
-    documents they're dropped (the section shows "same as previous") and the
-    paste reports what it lost, as decision 35 requires.
--   The `first` record is never carried.
--   Pasting into a story drops every boundary.
-
-`import_copy` copies `starts1` and every story. Start keys and story references
-are remapped through the node-ID map, so the copy has new identities and the
-same structure.
+-   Joining or range-deleting across a boundary: the earlier section's
+    properties win.
+-   Deleting exactly the first paragraph's text and end (`P.0..Q.0`) keeps the
+    boundary on `P`.
+-   Deleting a one-paragraph section together with the next boundary
+    (`P.0..R.0`) keeps **`P`'s** section and drops `R`'s. Word keeps `R`'s.
+-   `DeleteBlock` of a start block drops the boundary. There is no re-keying.
+-   Undo of any of these restores the block, and with it the record, which was
+    never touched. A section whose content is deleted down to its first,
+    now-empty paragraph is still a section, and still makes its pages.
 
 ### Concurrency
 
-| Concurrent edits | Result |
+| Concurrent edits | Merged result |
 | --- | --- |
-| Two peers insert a section break at the same mid-paragraph offset | Two markers next to each other, so an empty paragraph between them. The first new section holds only that empty paragraph and makes one page. This is the honest CRDT outcome, the same as two concurrent Enters. It converges, and the app shows both breaks so one can be removed. |
-| Two peers make the same existing paragraph start a section | Both write the same keys. One section results, and each property is last-writer-wins. |
-| A page break and a section break at the same block | `break` is last-writer-wins. If page wins, the section keys are kept but inert. |
-| One peer removes a section break while another edits its properties | Inactive, with the edits kept. Undoing the removal brings the section back with them. |
-| Concurrent edits to a header story | Ordinary text merging in one story. |
-| Both peers unlink the same header | Each creates a story; the reference key is last-writer-wins. The losing story is an orphan: kept, listed by `audit` and `State.stories`, never shown. Its text isn't lost, but nothing displays it (*Risks*). |
-| One peer links a region back to the previous section while another types in it | Linking soft-deletes the story when nothing else references it. The typing lands in a deleted story; undoing the link brings it back. |
+| Insert + insert at the same mid-paragraph offset | Two markers, with an empty paragraph between them, so an extra section and page. This is the same as two concurrent Enters. No coalescing. Both orders give the same result. |
+| Insert + insert making the same block a boundary | Both write `gen = n+1`. One section; each property is last-writer-wins. |
+| Page break + section break at one block | `break` is last-writer-wins within the generation. If page wins, the section keys are inert. |
+| Remove + property edit | Inactive, with the edit kept. Undoing the remove shows it. |
+| Remove + insert (reset) at one inactive address | Not possible from one state: insert requires the address to be inactive, and remove requires it to be active. Across a remove and an undo, the last writer on `active` wins. |
+| Reset + property edit to the old generation | The edit lands in the old generation and is inert. |
+| Concurrent edits to one story | Ordinary text merging. |
+| Link-away + typing or binding | See §6. Nothing is deleted. |
 
-## Layout
+## 6. Stories: bindings, orphans and recovery (R2)
 
-### The section table
+**Bindings** are the `region.<slot>.<variant>` keys. A key has three states:
 
-The section table is computed once per document revision from `blocks()` and
-`starts1`. Each section has an ID, the index of its first body block, its kind,
-its resolved properties, and its slot table. Page and column breaks are a
-`BTreeMap<NodeId, BreakKind>` beside it. Sections with no blocks (an empty
-`first`) produce no pages.
+-   absent: Inherit, "same as previous";
+-   `""`: None;
+-   a story `NodeId`: that story.
 
-The resolved template for a section is the page template patched by
-`PageDimensions` and columns. `patch_page_template` today patches only the
-first main frame. It generalises to: replace every main-flow frame with the
-section's columns, cut from the text area the margins leave. Notes and margin
-frames are kept. With `columns.count` absent, the template's own main frames
-are kept exactly as they are, so documents without sections lay out
-byte-identically.
+Inherit resolves to the same variant of the nearest earlier section, in one
+forward scan, so 10,000 sections take linear time with no recursion **[Sol]**.
+`first` inheriting resolves to unset. A binding that names a node that isn't a
+live, root-level story renders empty, with Warning `layout.region-missing`. It
+never falls through to an earlier story.
 
-### Pages, bands and ownership
+**Commands:**
 
--   A **band** is a run of columns across one stretch of a page's block axis.
-    A page has one band, or several when continuous sections start on it.
--   **The page owner** is the section in effect at the page's top. It owns:
-    -   the page size;
-    -   the top and bottom margins;
-    -   the running regions;
-    -   the page number, and therefore numbering restart and format;
-    -   the page's writing mode.
-    That's Word's rule, and it answers "whose geometry, header and page number
-    on a shared page".
+-   `CreateStory { blocks? }` creates a staged story with no binding.
+-   `SetRegion { section, slot, variant, binding: Inherit | None | Story(id) }`
+    binds a new story, an existing one, or an orphan.
+-   `CreateRegion { section, slot, variant, from: Empty | CopyOf(story) }` is
+    `CreateStory` then `SetRegion` in one step. **Unlink** is `CreateRegion`
+    with `CopyOf` the effective story, with fresh IDs and formatting kept
+    **[Sol]**.
+-   `LinkRegion` is `SetRegion { binding: Inherit }`.
+-   `DeleteStory { story }` is an explicit, ordinary soft delete: tombstone
+    semantics, and undo restores it. Bindings to it then read as missing.
 
-**A continuous section** starting on page *P*:
+**What never deletes a story.** `SetRegion`, link, unlink, removing a section
+and `RemoveBreak` only ever write binding keys. No command deletes a story
+because it looks unreferenced. Reference counts are only locally true: one
+peer links away while another binds the same story elsewhere, and a deletion
+would leave the second peer pointing at a tombstone.
 
-1.  It first **balances** the previous section's last band (*Balancing*).
-2.  It opens a new band on *P* directly below that one, at the band's used
-    block extent.
-3.  The new band uses the continuous section's own left and right margins,
-    columns, gap, rule and direction. The page's block-axis limits and its
-    running regions stay the owner's.
+**Orphans.** A live story that no effective binding names is an orphan. It is
+kept, never laid out, and still editable.
+
+-   `State.stories` lists every live story with `bound_by: Vec<{section, slot,
+    variant}>`; an orphan's list is empty.
+-   `audit` reports orphans as Info `story.orphan`, aggregated with a bounded
+    sample.
+-   **Recovery doesn't depend on undo.** The app lists orphans, with their
+    text, from `State.stories`, and rebinds one with `SetRegion` or deletes it
+    with `DeleteStory`.
+-   Concurrent "unlink" by two peers leaves one orphan. Its text is preserved
+    and can be found from `State`.
+
+## 7. Layout: pages, frames and bands (R6)
+
+### 7.1 Page factory, frame addresses and frame sources
+
+Every subsystem that makes pages or frames today does its own arithmetic from
+one template's frame count. That's `flow::new_page` and `advance`,
+`floats.rs:40–74`, `notes.rs:96–98` and `225–275`, `table_flow.rs:374`, and
+`regions::ensure_page`. One new module, `pages.rs`, replaces all of them.
+
+-   **`PageFactory`** is the only code that pushes to `snapshot.pages` and
+    `snapshot.frames`. It creates a page of a given **kind**:
+    -   `Content { section }`;
+    -   `Filler { owner, requested_by }`;
+    -   `NoteContinuation { anchor_section }`.
+
+    It enforces the page limit once for all three. It records a
+    `PageDescriptor` for each page:
+    -   physical index;
+    -   owner;
+    -   counter and label;
+    -   kind;
+    -   bands;
+    -   body area after running reservations.
+-   **`FrameAddr`** is a stable logical address:
+    -   `Main { page, band, column }`;
+    -   `Other { page, role, ordinal }`;
+    -   `Running { page, slot }`.
+
+    The factory maps it to the snapshot frame index for that pass.
+-   **Plan entries are keyed by `FrameAddr`, not by snapshot index.** That
+    covers `Plan.reservations`, exclusions, note carries and placements.
+    Balancing or a continuous start can change frame counts between passes, so
+    each entry is checked against the current pass: an address the pass
+    doesn't produce is ignored, and the feedback loop re-derives it. A stale
+    index can never land on the wrong frame **[Sol]**.
+-   **The layout loop consumes a `FrameSource`**: a resumable iterator of frames
+    with the factory behind it. The body's source asks the factory for bands
+    and pages section by section. A running instance's source is the
+    **one-frame adapter**: one frame, after which it's exhausted. It never
+    creates a page, so a story runner ends at its frame. A future chain source
+    yields the chain's frames in authored order. Flow takes a block sequence
+    from a `Domain` plus a `FrameSource` (§20).
+-   **Note-continuation pages** that notes create after body flow ends are
+    owned by the section owning the note's anchor **[Sol]**. They continue its
+    counter and labels, and count against the same limit.
+-   **When the page limit is reached** while a parity filler is pending, the
+    filler isn't made; the existing Error `layout.page-limit` covers it.
+
+For documents without sections, the factory produces exactly today's pages,
+frames and order. That is the S3 gate in §21: every existing snapshot is
+byte-identical.
+
+### 7.2 Ownership of a shared page
+
+**The page owner is the section in effect at the page's top.** It owns:
+
+-   the page size, the margins on the block axis, and the template's non-main
+    frames;
+-   the running regions;
+-   the counter and label;
+-   first and even variant selection;
+-   the filler policy.
+
+A continuous section starting on the page:
+
+1.  closes and balances the previous band (§8);
+2.  opens a band below it, with its own inline margins, columns, gap, rule
+    and direction.
 
 Exceptions:
 
--   If the continuous section's resolved width, height or writing mode differs
-    from the page owner's, a band can't honour it. The start acts as
-    `new-page`, with Warning `section.continuous-new-page`, because the output
-    differs from what was asked. Word does the same, silently.
--   Its `numbering.restart` takes effect on the first page it owns. If it never
-    owns a page, the restart has no effect; that's documented, with no
-    diagnostic, the same as Word.
+-   If the continuous section's merged size, writing mode or `template` differs
+    from the owner's, it acts as `new-page`, with Warning
+    `section.continuous-new-page`. The authored start is kept.
+-   If no band with positive depth is left on the page, it continues on a new
+    page with no warning. That's ordinary overflow.
+-   Its restart and first-page variant are **pending** until it owns a page
+    **[Sol]**.
 
-**`odd-page` and `even-page`** test the next page's **physical** parity, its
-1-based index. When the parity is wrong, layout inserts one **blank filler
-page**. It is derived: it has no authored content and is never stored.
+**Section and page queries (recommended).** A section that never owns a page
+consumes neither a restart nor a first variant.
 
--   It is **owned by the preceding section**: that section's geometry and
-    running regions, and its numbering continues on it. That's what Word shows.
--   It's marked `blank` in the per-page record, so the app and exports can tell
-    it apart.
+-   `section_pages(s)` returns `{ owned, occupied }`. Both are ranges and can
+    be empty. `occupied` includes pages where *s* has only a band.
+-   `page_sections(p)` returns the owner plus every section with a band on *p*,
+    in band order.
 
-**A page break** starts a new page in the same section: same geometry, next
-number. On a page shared through a continuous section, the new page is owned
-by whichever section is current.
+### 7.3 Breaks
 
-**A column break** moves to the next column of the band's thread. In the last
-column it moves to a new page.
+-   **Page break:** a new page, owned by the current section.
+-   **Column break:** the next column of the band. In the last column, or with
+    one column, it's a page break.
+-   **Forced transitions.** Manual breaks override keep-with-next across the
+    break; the existing unsatisfied-keep warning applies **[Sol]**. Balancing
+    trials keep them as forced transitions (§8).
+-   **No loops.** A band with zero room can't loop: every step advances a
+    frame, consumes a unit, or reaches the page limit.
 
-Two breaks are redundant and do nothing:
+### 7.4 Parity starts and filler pages (Q2, Q3, decided)
 
--   a page break on the first block of a `new-page` section;
--   any break on the first body block.
+`odd-page` and `even-page` test the **physical**, 1-based parity of the next
+content page. Restarts change only labels: an odd physical page can show the
+label "2". The same rule holds for both start kinds and for the `even`
+variant. Exports that can't keep both, such as DOCX, which uses the number's
+parity, report the approximation (§15).
 
-### Columns
+**A filler page** is derived:
 
-The band's inline extent *W* is the page width minus that band's left and
-right margins (the physical height in vertical modes).
+-   `PageKind::Filler`;
+-   owned by the outgoing section: its geometry, and a **counted** label;
+-   no body, no notes.
 
--   **Equal columns:** `(W − gap·(n−1)) / n`, in integers. The remainder goes
-    1 unit at a time to the first columns, so the widths always sum to *W*
-    exactly.
--   **Explicit widths are weights.** `column_i = (W − gaps) · w_i / Σw`, with
-    the same remainder rule. They always fit and they reflow with page size.
-    That is the *relative* in "easy to reflow, and relative". A weight sum of 0
-    falls back to equal columns, with Warning `section.property`.
--   Columns are ordered from the band's **inline-start**: left to right for
-    `ltr`, right to left for `rtl`. In vertical sections columns divide the
-    physical vertical axis and progress downward in both `vertical-rl` and
-    `vertical-lr` (decision 20, `vertical.md`). Bands then advance along the
-    horizontal block axis.
--   Each column is a `Flow("main")` frame, so the existing threading carries
-    text from column to column, then to the next page.
--   A rule is a display item centred in each gap, as long as the band's used
-    extent. It is derived and never a frame.
+By default it is **visually blank, including the background**. If the section
+that requested the parity break (the incoming one) sets
+`filler.regions = running`, the filler shows the **owner's** running slots,
+background included, and composes them as on any page the owner owns, never as
+a `first` variant. The policy belongs to the requesting section because that's
+where the author chooses the break.
 
-### Balancing
+### 7.5 Numbering
 
-When a continuous section follows section *S* on the same page, *S*'s last band
-is balanced: its columns get the smallest common depth *h* into which the
-band's content still fits. The search:
+The counter starts at `first`'s restart, or 1.
 
--   It's a bisection over integer `Length` *h* in `[lo, H]`:
-    -   *H* is the band's full available depth. *H* always fits, because it is
-        where the content already landed.
-    -   *lo* is `ceil(content depth / n)`.
--   Each trial re-flows the band's content into *n* frames of depth *h*, with
-    the ordinary rules (keeps, widows, orphans, table rows).
--   It keeps the best fitting *h* found so far and narrows toward it.
--   **Bound: at most 24 trials** (`MAX_BALANCE_TRIALS`). *H* can be at most
-    `MAX_PAGE_LENGTH` = 14,400 pt = 14,745,600 units < 2²⁴, so 24 halvings
-    reach a single unit.
--   The predicate needn't be monotone (keeps can make it non-monotone). The
-    bisection still ends, and it returns a depth that is known to fit.
--   All the arithmetic is integer, so it's deterministic (38).
+-   A content page whose owner has a pending restart takes that value.
+-   Every other page takes the previous page's counter + 1, saturating at
+    `i64::MAX` with Warning `section.page-counter`.
+-   Filler pages and note-continuation pages count.
 
-A section's last band is balanced only before a continuous start. The end of
-the document isn't balanced, as in Word.
+The **label** is `NumberFormat::parse(fmt).render(counter)`. When that returns
+`None`, the label is decimal, with Warning `section.page-number-range`.
 
-### Running regions on a page
+## 8. Balancing (R5)
 
-Composition order for page *n* owned by section *s*:
+When a section *S* is followed by an effective continuous start on the same
+page, *S*'s last band is balanced. The document's end and `new-page` endings
+stay ragged.
 
-1.  For each slot, pick the variant and story. Compose the story into a
-    one-frame flow of the slot's width, at depth up to its cap. The field
-    environment is this page instance (*Fields*).
-2.  The extents give the body's area:
-    -   body top = `max(top margin, header bottom)`;
-    -   body bottom = `min(height − bottom margin, footer top)`.
+**Inputs, all frozen for this pass:**
 
-**A header taller than the top margin pushes the body down,** as in Word. CSS
-page-margin boxes clip instead, but clipping silently hides authored text,
-which is the output most at odds with what the author asked for. To stop a
-region eating the page, each of header and footer is capped: it may take the
-body down to **half its margin-defined depth** at most. The other half stays
-body. Content past the cap is clipped, with Warning `layout.region-clipped`.
+-   checkpoint *C*: the cursor at the band start, with fills, keeps state and
+    pending notes;
+-   the band's *n* columns and their fixed widths;
+-   the field environment;
+-   the band's exclusions and reservations, by `FrameAddr`;
+-   endpoint *E*, the continuous boundary block.
 
-The cap also bounds the work. A 100,000-paragraph header composes only up to
-the cap: preparation is lazy, and composition stops at the frame end.
+**`fit(h)`** flows from *C* into *n* frames of depth *h* with the ordinary
+rules (keeps, widows and orphans, table rows, column breaks as forced
+transitions). It is **true only if all of these hold**:
 
-**Derived instances.** Each composed region is a `RunningInstance { page,
-slot, variant, story, frame, blocks }`, in `LayoutSnapshot.running`. It is the
-same pattern as `repeated_headers`:
+-   the flow reaches *E*;
+-   it never advances past column *n* or to a new page;
+-   it omits nothing;
+-   it uses no overflow fallback (a forced oversized line or row placement);
+-   it reports no unsatisfied keep that the reference didn't also report.
 
--   its frame is in `snapshot.frames` with role
-    `FrameRole::Flow("reprise.running.<slot>")` (a named flow, never `main`);
--   its `BlockLayout`s carry the story's `NodeId`s and byte ranges.
+**Reference.** The band as first flowed with full depth *H* is complete and
+kept. It is the **verified fallback**: if *S*'s content doesn't fit there, it
+went to the next page, and this band is simply *S*'s last.
 
-It's never in `blocks`, never in reading order, never stored, and tagged as an
-artifact.
+**Search.** Bisection over integers in `[1, H]`:
 
-v1 composes running regions horizontal-tb even in vertical sections. Vertical
-running heads are a follow-up.
+-   `hi = H` with result *R*; `lo = 1`.
+-   While `lo < hi` and fewer than 24 trials have run:
+    -   `mid = lo + (hi − lo) / 2`;
+    -   if `fit(mid)`, then `hi = mid` and keep that trial's complete output;
+    -   otherwise `lo = mid + 1`.
+-   The committed result is the kept output for the final `hi`.
 
-What stories hold: floats, footnotes and relation-placed blocks inside a story
-aren't laid out in v1, with Info `layout.story-unsupported`. Tables, images and
-paragraphs are.
+No `ceil(content / n)` lower bound is assumed; it's wrong for unequal widths
+and spacing that depends on the frame.
 
-### Page numbers and labels
+**What is claimed.**
 
-Each page *n* has a counter:
+-   The result is always a **verified fit no deeper than *H***. It's the
+    shallowest depth *tested*.
+-   It is the **minimum** fitting depth only when `fit` is monotone. That holds
+    for the documented subset:
+    -   one-column-width-class greedy text;
+    -   fixed line metrics;
+    -   no keeps;
+    -   no floats or notes in the band;
+    -   no atoms whose metrics depend on the frame.
 
--   *s*'s restart value, if it has one, on *s*'s first owned page;
--   otherwise the previous page's counter + 1 (saturating i64). The first page
-    starts at 1.
+    There it's the standard bisection result.
+-   Outside that subset no minimum is claimed. The output is deterministic and
+    feasible, which is what the snapshot promises.
+-   There is no diagnostic for a non-monotone predicate. Bisection never tests
+    below a failing point after finding a fit above it, so a violation can't be
+    detected without extra trials, and the output is still what was asked: a
+    balanced band.
 
-Blank filler pages count.
+**Bounds.**
 
-The page's **label** is `NumberFormat::parse(format).render(counter)`, from the
-lists API. When `render` returns `None` (roman outside 1–3,999, alpha below 1),
-the label is decimal, with Warning `section.page-number-range`. That is the same
-fallback as lists' `list.counter-range`, under a code of its own.
+-   At most 24 trials per band per pass.
+-   *H* ≤ `MAX_PAGE_LENGTH` < 2²⁴ for validated section geometry, so 24
+    trials reach one unit.
+-   `template::resolve_template` doesn't enforce that bound, so a hostile
+    template can give a larger *H*. The search then still stops at 24 trials
+    with the shallowest fit found. That's deterministic, with Info
+    `section.balance-approx`, since the output is still a balanced, valid band.
+-   The total is the reference plus 24 trials per band, at most 32 bands per
+    page, inside the shared 16-pass loop.
 
-Labels are known when a page is made, so a `page-number` field still settles in
-one pass.
+**Isolation.** Each trial runs on a scratch cursor and a scratch snapshot
+segment cloned from *C*. Its diagnostics and placements are discarded unless
+it's the kept trial. The committed band is exactly the kept output; no
+replay is needed.
 
-### Fields
+**Later passes.** Balancing is recomputed from scratch in every feedback pass
+from that pass's inputs. Each pass recomputes its own reference, so there's
+never a retained depth that a later pass has made infeasible.
 
-Inline's model keys resolved field values by atom: `Plan.fields:
-BTreeMap<InlineId, String>`, read through `FieldEnv { page, pages, values }`.
-A story's atom is shown on every page that shows the story, so **values must be
-keyed per placement**, as GPT-6.1-Sol pointed out:
+**Scheduling.** The search is resumable. See §11.
 
-```rust
-pub enum Placement { Body, Running { page: usize, slot: SlotId } }
-pub struct FieldKey { pub atom: InlineId, pub at: Placement }
-// Plan.fields: BTreeMap<FieldKey, String>
+## 9. Running regions (R7)
+
+### Slots: the extension point
+
+`RunningSlots` is an ordered registry in `reprise-layout/src/running.rs`. A
+slot supplies:
+
+-   its name;
+-   which variants it supports;
+-   its box from the page geometry;
+-   its reservation side (top, bottom or none);
+-   its paint order;
+-   its hit priority (§12);
+-   its artifact type (§13);
+-   its export form.
+
+| Slot | Box | Reserves | Painted | Artifact |
+| --- | --- | --- | --- | --- |
+| `header` | The page's inline margins, from `header.distance` at the top edge, growing toward the body. | Top | Above the body | `/Pagination /Header` |
+| `footer` | The same width, ending `footer.distance` from the bottom edge. | Bottom | Above the body | `/Pagination /Footer` |
+| `background` | The whole page. | None | Below the body | `/Pagination /Watermark` |
+
+`background` proves the extension: it has a different box, no reservation and
+a different paint order. It is tested with a decorative watermark. Meaningful
+one-off text set behind a page belongs to the future chain or canvas
+placement, which may be semantic (§13).
+
+Unknown slot keys are retained and ignored, with Warning `section.region-slot`.
+
+### Variant selection
+
+On a page the section owns:
+
+1.  **first:** the section's first owned content page, `region.first` is set,
+    and the first binding resolves to something other than unset;
+2.  **even:** otherwise, `region.even` is set, the physical index is even, and
+    the even binding isn't unset;
+3.  **default:** otherwise.
+
+An explicit None selects an empty region and stops any fallback. So a defined
+`first` wins over `even`, and an unset `first` doesn't hide `even` **[Sol]**.
+
+### Reservation budget (R7)
+
+Take a horizontal-tb page with merged geometry *H*, *T* and *B*. Merge
+validation guarantees `T + B < H`.
+
+-   `D = H − T − B` is the authored body depth, at least 1.
+-   `keep = max(1, D / 4)`, in integers. The body always keeps at least this
+    much.
+-   *h* is the header's need: `header.distance + composed depth`. *f* is the
+    footer's.
+
+The **priority is the header first, then the footer**. The order is
+deterministic and uses no proportions **[Sol]**:
+
+```text
+top    = min(max(T, h), H − B − keep)
+bottom = min(max(B, f), H − top − keep)
 ```
 
--   Body atoms use `Placement::Body`, so nothing changes for them.
--   Each running instance composes with `at = Running { page, slot }`. A page
-    shows each slot at most once, so `(page, slot)` is unique.
--   After a pass, inline's resolver produces one entry per placement.
--   Convergence still compares whole plans, with the shared limit of 16 passes
-    and `layout.field-unsettled`.
--   Repeated table header rows have the same latent problem in inline today: a
-    `page-number` in a repeated header row shows one value on every page.
-    `Placement::Repeat { frame }` would fix it. That's flagged to inline, not
-    owned here.
+**Invariant:** `H − top − bottom ≥ keep ≥ 1`. Each term is ≥ its authored margin
+unless it's capped, and caps only take from running reservations, never from
+the authored margins.
 
-Field meanings with sections:
+When a cap takes effect, the region's frame depth becomes
+`top − header.distance` (for the footer, `bottom − footer.distance`). That is
+clamped at 0. If the distance itself exceeds the capped extent, the region gets
+a zero-depth frame and shows nothing.
 
-| Field | Value |
-| --- | --- |
-| `page-number` | The **label** of its page (`FieldEnv::label(page)`), not the physical index. |
-| `page-of` | The label of the target's page. |
-| `page-count` | The number of physical pages, in decimal, filler pages included. Word's `NUMPAGES`. |
+-   **Footnotes** allocate inside the body area that remains, with the existing
+    note limits. A running reservation is applied first, as page geometry.
+-   **Vertical pages.** Header and footer are still physical top and bottom
+    bands. In vertical-rl and vertical-lr, those physical edges are the ends of
+    the body's **inline** axis, so a reservation shortens the column length.
+    The formula is the same physical one. Clipping is done in physical page
+    space.
+-   **Running text in vertical sections** is `horizontal-tb`. An authored
+    `region.<slot>.writing-mode` other than `horizontal-tb` is rendered
+    horizontal, with Warning `section.region-writing-mode`, because that
+    changes requested output. A vertical section with no such key reports
+    nothing, because nothing different was asked.
 
-A per-section page count is a later field function.
+### Composition and clipping
 
-In the first pass, `page-count` in a header assumes the pages made so far; the
-second pass corrects it. A header whose height depends on the count can
-oscillate. That's bounded by the 16-pass limit and reported, not hung (26, 37).
+A region is composed by the ordinary flow over `Domain::Story(id)` with the
+one-frame source, whose depth is the capped frame. It **stops at the frame
+end**, because the source is exhausted, never by making a page.
 
-### Incremental layout
+-   **Empty story** (no blocks): extent 0, reserves nothing. A story with one
+    empty paragraph has its strut height.
+-   **Clipping.** Content that doesn't fit after the cap is left out with
+    **Error** `layout.region-clipped`, since content was omitted. The footer
+    keeps its fitting **source prefix** and bottom-aligns it, so a tall footer
+    loses its tail, not its head **[Sol]**.
+-   **Oversized first unit.** A first line, image or table row taller than the
+    frame is painted clipped to the frame, with Error `layout.region-clipped`.
+    The rest is omitted.
+-   **Bounded work** (R7: the cap bounds actual work, not just output):
+    -   at most `MAX_STORY_BLOCKS` = 4,096 blocks and `MAX_STORY_TEXT` = 1 MiB
+        of visible text are **read** per story per layout **[Sol]**; anything
+        beyond is omitted with Error `layout.region-clipped`;
+    -   preparation (itemise, bidi, shape) of a story paragraph is memoised
+        once per layout, keyed as in §11, so a 1 MiB paragraph is shaped once,
+        not per page;
+    -   line composition per instance stops at the frame depth;
+    -   a 100,000-paragraph story reads 4,096 and composes until full.
+-   **Unsupported content.** Floats, footnotes and relation-placed blocks
+    inside a story are not laid out in v1: **Error**
+    `layout.story-unsupported`, because content is left out. Paragraphs, lists,
+    tables (one frame, so headers never repeat), images and inline atoms are
+    laid out.
 
-Today a paragraph transition's key is its template, incoming cursor, fills and
-plan (`incremental.md`). With sections:
+### Instances
 
--   **The cursor** gains the section index, the band, and the page's **body
-    geometry**: the frame rectangles after running-region reservation.
--   **Running instances** are their own memo unit. Key: the story's content
-    revision, the slot's box, and the instance's field inputs (label, page
-    count, `page-of` targets). They're composed in a per-page stage that body
-    transitions don't replay.
+`RunningInstance { page, slot, variant, story, frame: FrameAddr, blocks,
+clipped }` lives in `SectionsLayout` (§16). It is never in
+`LayoutSnapshot.blocks`. Its `BlockLayout`s carry the story's `NodeId`s and
+byte ranges, like `repeated_headers`. Its frame role is
+`Flow("reprise.running.<slot>")`, never `main`.
 
-That gives the behaviour the brief asks for:
+## 10. Fields (R9)
 
--   **Edit inside section *k*.** Every transition before section *k* hits its
-    memo, so earlier sections are reused. The test asserts the session's hit
-    counters, not just equal output.
--   **Header edit.** The instances miss. If every extent is unchanged, the body
-    geometry is unchanged, so every body transition hits. If an extent changes,
-    body transitions miss from that section's first affected page.
--   **Section property edit.** That section's resolved template changes, so
-    transitions miss from its first block on. A numbering change alters later
-    labels: running instances recompose, and body transitions downstream miss
-    only through field-plan changes.
--   **Balancing** is memoized per band, keyed by the band's content transitions
-    and its geometry.
+This extends inline's existing seam, in `eng-inline2/crates/layout/src/inline.rs`.
+It doesn't add one beside it. Inline already has `FieldKey { id, instance }`,
+`FieldInstance::{Single, Page(u32)}` and a resolver that visits repeated table
+headers.
 
-Viewport-first `partial()` cuts `running` and the per-page records with the
-pages, as it cuts `repeated_headers`. A band waiting to be balanced is never
-published unbalanced; the cut happens before that page.
+```rust
+pub enum FieldInstance {
+    Single,
+    Page(u32),                                    // existing: repeated body content on a page
+    Running { page: u32, slot: SlotId, repeat: u32 },
+    // reserved for frames-and-canvas: Chain { chain: ChainId, frame: u32, repeat: u32 }
+}
+```
 
-Incremental output equals full output. That's the existing equality test,
-extended to these fixtures.
+-   **`slot`** is part of the key because one story can be bound to two slots
+    on one page. *(page, slot)* determines the variant, so the variant isn't
+    in the key. `SlotId` is the registry's dense index, a `u16`.
+-   **`repeat` is the recursive qualifier.** Content repeated *inside* an
+    instance keeps its parent instance and adds an ordinal. In v1 a running
+    instance has one frame, so table headers never repeat inside it and
+    `repeat` is always 0. Chains will use it for headers repeated across
+    frames.
+-   **Enumeration.** The resolver enumerates running instance blocks for
+    **assumed** values (while composing) and for **resolved** values (after
+    the pass), as it does today for repeated headers.
 
-### Snapshot additions
+Asks of `FieldEnv`:
 
-`LayoutSnapshot` gains two fields. Both are left out of JSON when empty, the
-way `repeated_headers` is, so every existing snapshot is byte-identical:
+-   **Labels.** `labels: &PageLabels`.
+    -   `page-number` always renders `labels.label(env.page)` directly. It never
+        reads a plan value, so a stale value from the page an atom moved off
+        can't win **[Sol]**. This is exact in one pass, because labels are
+        fixed when a page is made.
+    -   `page-of` renders the target page's label.
+-   **One page-count rule everywhere.** This replaces the first draft's two
+    rules. `page-count` reads the plan's value for its own key. With no value
+    yet, it uses the pages made so far (at least 1), as inline already does.
+    It is the physical page total, in decimal, fillers included.
+-   **`page-of` targets:**
+    -   a target in the body, placed once: the label of its page;
+    -   a target in a repeated table-header row: the authored row's page;
+    -   a target in a story, which has many placements or none: `?`, with
+        inline's existing unresolved warning **[Sol]**;
+    -   a target in an orphan or deleted story: `?`.
+-   **Convergence.** All of these values are in the plan that the shared
+    16-pass coordinator compares and freezes: running reservations, labels,
+    field values (body and running) and note carries. A freeze never combines
+    new field text with old metrics.
+-   **Pageless.** Page fields render `?` in pageless sections (§18).
 
--   `running: Vec<RunningInstance>`;
--   `sections: Vec<PageSection>`, one per page: `{ section, label, blank,
-    bands: Vec<Band { frames, rules }> }`. It's empty when the document has no
-    sections, breaks or stories.
+## 11. Incremental layout and scheduling (R8)
 
-`PageLayout` is unchanged: it already carries a size per page.
-`snapshot.template` still names the base template. Adding fields to the frozen
-`LayoutSnapshot` is a **contract proposal** (*Open questions*).
+**Dependencies, not whole-plan keys.** Today `FlowKey` clones the **whole**
+`Plan` (`incremental.rs:328–363`). So a reservation or field change on page 40
+invalidates page 1. That changes as follows:
 
-## Facade
+-   A transition records the plan entries it **read**, as
+    `Vec<(PlanAddr, Option<PlanValue>)>`. That covers reservations and
+    exclusions by `FrameAddr`, and field values by `FieldKey`.
+-   A memo hit requires every recorded read to equal the current plan's value.
+    This is decision 27's dependency-driven evaluation. It's exact, because a
+    transition can only be affected by what it read.
+-   The cursor key gains the section context: section ID and generation, its
+    resolved properties, the page owner's counter, pending restart, the band's
+    `FrameAddr`, and the band's geometry after reservation.
+-   It never includes the whole section vector or the document revision.
 
-**Commands.** These are new `Command` variants, appended:
+**Running instance cache.** This is a separate memo. Its key:
 
--   `InsertBreak { at: BreakAt, kind: BreakKind, patch: Option<SectionPatch> }`.
-    `BreakAt` is `Position(Position)` or `Before(NodeId)`. `BreakKind` is
-    `Page`, `Column`, or `Section(StartKind)`. Body only: it's refused in a
-    story.
--   `RemoveBreak { block }`.
--   `SetSection { section: SectionId, patch: SectionPatch, clear: Vec<SectionProp> }`.
-    The patch works like `PageSetupPatch`; `clear` removes own keys so the
-    property inherits again.
--   `CreateRegion { section, slot, variant, from: Empty | Copy(story) }`.
-    Creates a story, staged, and sets the reference. "Unlink from previous" is
-    `CreateRegion` with `Copy` of the inherited story.
--   `LinkRegion { section, slot, variant }`. Deletes the key, so the region is
-    "same as previous" again. It soft-deletes the story when nothing else
-    references it.
--   `SetRegionNone { section, slot, variant }`. Writes `""`.
+-   the story's blocks' `Inputs`: text, resolved style chain, formatting runs,
+    list markers from the story's own numbering, inline objects and their
+    asset hashes;
+-   the slot's box and frame context (writing mode, resolution context);
+-   the `FieldKey` values it read, and the labels it read.
 
-Text, formatting, split, join, inline and annotation commands take story
-`NodeId`s unchanged. A command whose range crosses between the body and a
-story, or between two stories, is refused with `EditError::CrossStory`.
+Fonts and the composer are fixed for the session's lifetime.
 
-`set_page_setup` keeps its meaning: it sets the document default every section
-inherits from. `State.page_setup` is still that default.
+**What is reused.** Reuse is conditional on unchanged inputs. It is not
+promised unconditionally.
 
-**State.** Two new fields:
+-   **Body edit in section *k*.** Transitions before *k* hit their memos when
+    their reads are unchanged. Tests assert hit counts for an unaffected prefix.
+-   **Story edit.** Every instance of that story misses, across every section
+    that binds or inherits it. If every reservation is unchanged, body
+    transitions hit. Otherwise body re-flows from the first page whose
+    reservation changed.
+-   **Legitimate backward invalidation.** All of these are expected and tested:
+    -   a later edit changes the page total, so an earlier header showing
+        `page-count` recomposes, and if its extent changes, so does that
+        page's body;
+    -   shared and inherited stories span sections;
+    -   balancing re-places *S*'s last band when *S* changes, which moves the
+        continuous section after it on that page.
+-   **Section property edit.** Misses from that section's first block. A
+    numbering change reaches later labels, so later instances that read them
+    miss.
 
--   `sections: Vec<SectionState>`. Each entry has:
-    -   `id`;
-    -   `first_block`, and `end`, the next section's first block or none;
-    -   `break_kind`;
-    -   `own`, the section's own patch;
-    -   `resolved` (geometry, orientation, columns, numbering, direction,
-        writing mode);
-    -   `regions`: a list of `{ slot, variant, story, inherited_from }`.
--   `stories: Vec<StoryState { id, slot, blocks, referenced_by }>`. Orphans have
-    an empty `referenced_by`.
+**Scheduling.** These operations are resumable units charged to
+`step(budget)`:
 
-Each `BlockState` also gains `starts: Option<"section" | "page" | "column">`.
+-   a section or band transition;
+-   one balance trial: its start, then ordinary flow units, then its end;
+-   committing a band;
+-   one running instance: per block, then commit.
 
-**Queries:**
+No unit contains a whole story or a whole search. A budget of 1 still makes
+progress. Cancellation and staleness gates are unchanged.
 
--   `page_section(page) -> SectionId`;
--   `section_pages(section) -> Range<usize>`;
--   `page_label(page) -> String`;
--   `page_regions(page) -> Vec<RegionInstance { slot, variant, story, rect }>`,
-    which also answers "the header and footer rectangles on a page";
--   `region_instances(story) -> Vec<(page, slot)>`;
--   `page_fields(page) -> Vec<{ atom, at, text }>`: resolved field text per
-    page instance.
+**Partial publication.** A page is **publishable** only when all its bands are
+committed and its running instances composed. `partial()` cuts before the
+first page that isn't. It drops every frame, rule, band, running instance,
+`PageDescriptor` and field result for cut pages, as it already drops
+`repeated_headers`. The partial view stays provisional until the job
+converges, as today.
 
-**The caret in a story.** Hit-testing a running region returns the story
-paragraph's `Position` plus `instance: Option<RegionInstance { page, slot }>`.
-Caret and selection-rectangle queries take that instance as an optional hint.
+## 12. Editing and navigation in stories
 
-The instance is **view state, held by the app**, never document state. A story
-appears on many pages, and only the app knows which one the user clicked.
+-   Text, split, join, formatting, inline and annotation commands take story
+    `NodeId`s unchanged.
+-   A command whose range spans domains (body and story, or two stories) is
+    refused with `EditError::CrossDomain`.
+-   Select-all inside a story selects that story.
+-   Section and break commands are refused in stories.
+-   **Hit test.** `Navigator::hit_placed(point) -> Option<PlacedHit>`, which is
+    additive. It returns `Body(hit)` or `Running { position, instance:
+    RegionInstance { page, slot } }`.
+    -   Header and footer win over the body in their rectangles.
+    -   `background` is hit only when the app passes `HitMode::Background`.
+    -   `Navigator::hit` is unchanged and body-only.
+-   **Caret and selection.** `caret_in(instance, position)` and
+    `selection_rects_in(instance, range)` are additive.
+-   **The instance is view state held by the app**, never document state.
+    After a relayout, if that page no longer shows the story in that slot:
+    1.  use the nearest page that does, by physical distance, lower on ties;
+    2.  if none does, return no geometry. The selection stays valid and is
+        visible through `State.stories`.
 
-After a relayout, if that page no longer shows the story in that slot, the
-query falls back to the nearest page that does, then to the first. The app's
-caret therefore never points at a page that doesn't exist.
+## 13. Reading order and artifacts
 
-## Exports
+Artifact policy belongs to the **placement kind and slot**, not to the story.
+
+-   Running placements repeat on every page, so they are always artifacts:
+    their text would otherwise be read once per page.
+-   The same story bound later to a chain or canvas placement can be semantic.
+    That placement declares its reading order.
+-   Body reading order and tagging are unchanged.
+-   Column rules and filler pages carry no tags.
+
+## 14. Clipboard and import_copy (R11)
+
+**Fragment envelope.** `Fragment.sections: Option<String>` is a versioned JSON
+envelope (`v: 1`), omitted when absent **[Sol]**. Older strict readers refuse
+it, as with annotations' optional field. It holds:
+
+-   `boundaries`: `[{ block, break, start?, props }]`. `block` is the
+    fragment-local block ID. `props` are the raw current-generation keys,
+    including unknown ones.
+-   `context`: `first`'s raw keys. Copy-all only.
+-   `stories`: `[{ source, blocks: [FragmentBlock], ranges }]`. Each source
+    story is copied once.
+-   `bindings`: per boundary, `region.*` with story references as
+    fragment-local story labels.
+
+**Bounds** are counted against the fragment's existing aggregate size and
+resource limits, not a second budget:
+
+-   at most 16,384 boundaries;
+-   at most 64 property keys per boundary, each value at most 2 KiB;
+-   at most 256 stories.
+
+A malformed envelope is refused **before any mutation**.
+
+**Which boundaries are copied.** Those **strictly inside** the selection: the
+block is in the fragment and is **not** its first block. A boundary at the
+selection's start isn't copied, which matches deletion, so cut followed by
+paste leaves the source's leading boundary in place. Select-all of the body
+carries `context`.
+
+**Paste.**
+
+-   Each boundary is written on the pasted copy of its block: a new
+    `NodeId`, `gen = 1`, `active = true`. The text before the first copied
+    boundary joins the destination's section.
+-   **Inherited bindings.** At the **first** copied boundary, every Inherit
+    whose predecessor isn't in the fragment is **materialised** as its
+    effective value at copy time: a copied story, or None. So a paste never
+    picks up unrelated destination headers **[Sol]**. Later boundaries keep
+    Inherit.
+-   **Within one document**, story references stay as references to the same
+    stories; there's no copy.
+-   **Across documents**, stories are copied with fresh IDs, and sharing is
+    kept, so one source story becomes one new story.
+-   `context` is written to `first` only when the destination body is empty.
+    Otherwise it's dropped, with Warning `clipboard.section-context`.
+-   **Pasting into a story** drops every boundary and binding, with the same
+    warning.
+-   **Remapping.** One transfer map covers:
+    -   host and marker IDs, through the new split markers;
+    -   boundary addresses;
+    -   story IDs;
+    -   ranges and annotations in stories;
+    -   relations;
+    -   inline `page-of` targets inside the fragment.
+
+    Targets outside the fragment keep the existing cross-document rules.
+
+**`import_copy`** goes through `copy_document_fragment` (`session.rs:178`), so
+the envelope carries what a copy of the whole document needs. In its
+`complete` mode it carries:
+
+-   **every** live story, orphans included, which stay orphans;
+-   inactive boundaries, as inactive;
+-   raw unknown keys.
+
+Copying an orphan never makes it bound. A record that can't be remapped safely
+(a future container) refuses the copy with a typed error rather than losing
+it.
+
+## 15. Exports
 
 **PDF**
 
--   Per-page `MediaBox` from `pages[i]`.
--   Running instances are marked content `/Artifact` with the slot's type and
-    subtype. Body tagging is unchanged.
--   Labels become the document's `/PageLabels` number tree when every format
-    maps to `/D`, `/r`, `/R`, `/a` or `/A`.
--   The PDF/UA checks are extended: no story text in the structure tree, and
-    every artifact has a type.
+-   Each page uses its own `MediaBox`.
+-   Running instances are `/Artifact` marked content with the slot's type and
+    subtype. The renderer's artifact metadata gains an optional run-to-subtype
+    map (§16).
+-   `/PageLabels` is written when every format maps to `/D`, `/r`, `/R`, `/a`
+    or `/A`. Otherwise it's left out, with an export note.
+-   The PDF/UA checks inspect the actual marked-content artifacts and confirm
+    body tagging is unchanged.
 
 **HTML**
 
--   Each section becomes a `<section>` with `data-reprise-section` holding its
-    own keys as JSON, plus CSS `columns` and `column-gap` for viewers.
--   Each section's **default** header and footer stories are emitted once, as
-    `<header>` and `<footer>` inside it. HTML has no per-page running regions,
-    so `first` and `even` variants are emitted as `<header
-    data-reprise-variant="first" hidden>`, and the export reports this as a
-    loss.
--   Page and column breaks are `break-before: page | column` on the block.
--   Import reads all of this back.
+-   Each section becomes `<section data-reprise-section="{v:1, props,
+    bindings}">`, with CSS `columns` and `column-gap` for viewers.
+-   Each story is emitted **once per document**, with a document-local label:
+    -   as visible `<header>` or `<footer>` content in the first section that
+        binds it as a default variant;
+    -   otherwise as `<template data-reprise-story=label>`.
+-   Bindings use the labels and keep the three states: absent (Inherit),
+    `""` (None), and the label.
+-   Background, first and even variants are bindings like any other, so
+    they round-trip.
+-   Page and column breaks become `break-before: page | column`.
+-   **Fields.** If the export has a paginated layout, page fields carry the
+    first owned page's text plus their semantic attribute. Without one, they
+    carry `?`.
+-   Losses (pagination, filler pages, per-page values) are reported.
 
-**Plain text:** body only.
+**Plain text:** body only. Stories and pagination are reported as losses.
 
-## Package
+**DOCX** is design-level only; this workstream doesn't build it.
 
-Bit **17**, `REQUIRED_SECTIONS`. It's set when `starts1` has any key, live or
-not, or any `story` node exists. Older engines refuse such packages. Documents
-without them write nothing new, so they stay readable by older engines and
-their snapshots don't change. The test is: an old engine refuses a document with
-one section break, and a document with none is byte-identical.
+-   Each section's properties move to DOCX's trailing `sectPr`: on the
+    paragraph before its start, and the final section's on the body.
+-   `region.first` maps to `titlePg`. `region.even` maps to
+    `evenAndOddHeaders`, which is a **document** setting, so mixed values are
+    approximated and reported.
+-   Inherit maps to an omitted `headerReference`, which DOCX also inherits.
+-   None maps to an empty header part.
+-   Physical parity versus Word's number parity is reported where they
+    disagree.
 
-## Limits and diagnostics
+## 16. Contract and compatibility changes (R10)
 
-| Limit | Value | Effect past it |
+These all go in the orchestrator's single contract commit, **before Stage B
+slice S4** (§21). They are additive; existing signatures and omitted-empty
+serialisation are kept.
+
+1.  `LayoutSnapshot.sections: Option<SectionsLayout>`, with
+    `#[serde(default, skip_serializing_if = "Option::is_none")]`. It's one
+    field rather than the first draft's two **[Sol]**, and is `None` for
+    documents with no sections, breaks or stories. It holds
+    `pages: Vec<PageDescriptor>`, `running: Vec<RunningInstance>`, and the
+    rules. `PageLayout`, `snapshot.template` and existing query signatures are
+    unchanged.
+2.  `FieldInstance::Running { page, slot, repeat }`, and `SlotId`. These are
+    in inline's type and need its sign-off.
+3.  `Navigator::{hit_placed, caret_in, selection_rects_in}`, plus
+    `PlacedHit`, `RegionInstance` and `HitMode`. `Navigator::hit`, `Caret` and
+    `Selection` are unchanged and body-only.
+4.  `Fragment.sections: Option<String>`, as in §14.
+5.  Display artifact metadata: an optional `artifact_kinds` run-to-subtype
+    map beside the unchanged artifact run list.
+6.  `Document` domain functions (§2), plus the contract wording that
+    `blocks()`, `children(None)` and `document_order()` enumerate the **body**
+    domain.
+7.  Facade:
+    -   the commands in §5 and §6;
+    -   `State.sections`, `State.stories`, and `BlockState.starts`;
+    -   the queries in §17.
+8.  `EditError::{BreakExists, CrossDomain}`.
+9.  The diagnostic codes in §17.
+10. **Package bit 17, `REQUIRED_SECTIONS`.** It is set when the retained
+    authored state contains any of these:
+    -   a `starts1` root, **even if emptied**;
+    -   any key in it, active, inactive or unreadable;
+    -   any `story` node, **live or tombstoned**.
+
+    It is detected without creating roots. Reads, empty patches and refused
+    commands never create it. Sync feature negotiation refuses too, not just
+    package save. An old reader's refusal is tested with a real package, not
+    by checking a mask **[Sol]**.
+
+Regression evidence for the contract commit: every existing layout snapshot,
+package and fragment is byte-identical, including frame order and diagnostic
+order.
+
+## 17. Facade summary, limits and diagnostics
+
+**State**
+
+-   `sections`: each entry has:
+    -   `id`, which is the address string or `first`, and `gen`;
+    -   `first_block` and `end`;
+    -   `break`;
+    -   `own` (raw and parsed);
+    -   `resolved` geometry with provenance, plus columns, direction, writing
+        mode, numbering, filler policy and mode;
+    -   `bindings`, each as `{ slot, variant, authored: Inherit | None |
+        Story, resolved: Option<story>, from_section }`;
+    -   `unknown_keys`.
+
+    Page indices come only from queries.
+-   `stories`: `{ id, bound_by, blocks }`.
+-   `BlockState.starts`.
+
+**Queries**
+
+-   `page_sections(p)`;
+-   `section_pages(s) -> { owned, occupied }`;
+-   `page_label(p)`;
+-   `page_regions(p) -> [{ slot, variant, story, rect, clipped }]`;
+-   `region_instances(story) -> [(page, slot)]`;
+-   `page_fields(p) -> [{ atom, instance, text }]`.
+
+| Limit | Value | Past it |
 | --- | --- | --- |
-| Columns per section | 64 (`MAX_COLUMNS`) | Extra columns dropped, with Warning `section.columns-limit`. A 1,000-column section lays out 64. |
-| Narrowest column | 1 pt | Narrower columns, including zero-width ones, are skipped by the thread, with Warning `section.column-narrow`. If all are narrow: one column. |
-| Bands per page | 32 (`MAX_BANDS_PER_PAGE`) | A further continuous start acts as `new-page`, with Warning `section.band-limit`. This bounds balancing work per page to 32 × 24 trials. |
-| Balance trials | 24 | Always enough to reach one unit (*Balancing*). |
-| Sections | Not capped | Each `new-page` section makes a page, so the existing page limit (`layout.page-limit`, Error) bounds 10,000 sections. Resolving the table is linear in starts. |
-| Story size | Not capped | Composition stops at the region cap (*Running regions*). |
-| Field passes | 16 (shared) | `layout.field-unsettled` (inline's code). |
+| Columns | 64 | Clamped, Warning |
+| Narrowest column | 1 pt | Skipped, Warning |
+| Bands per page | 32 | The 33rd continuous start acts as `new-page`, Warning `section.band-limit` |
+| Balance trials | 24 per band per pass | Shallowest fit found, Info `section.balance-approx` past 2²⁴ |
+| Story read | 4,096 blocks, 1 MiB | Rest omitted, Error |
+| Sections | Not capped | `new-page` sections are bounded by the page limit, and continuous ones by the band limit. Resolution is one linear scan. |
+| Envelope | §14 | Refused before mutation |
+| Field passes | 16, shared | `layout.field-unsettled` |
 
-New codes, for the `contracts.md` codes table:
+**New codes** (severity per 37: Info means as asked, Warning means differs,
+Error means left out)
 
-| Code | Severity | When |
+| Code | Severity |
+| --- | --- |
+| `section.property` | Warning |
+| `section.geometry` | Warning |
+| `section.template` | Warning |
+| `section.columns-limit` | Warning |
+| `section.columns-fit` | Warning |
+| `section.column-narrow` | Warning |
+| `section.continuous-new-page` | Warning |
+| `section.band-limit` | Warning |
+| `section.balance-approx` | Info |
+| `section.page-counter` | Warning |
+| `section.page-number-range` | Warning |
+| `section.region-slot` | Warning |
+| `section.region-writing-mode` | Warning |
+| `section.inactive` | Info (audit) |
+| `section.orphan-start` | Warning (audit) |
+| `story.orphan` | Info (audit) |
+| `story.nested` | Warning (audit) |
+| `layout.region-missing` | Warning |
+| `layout.region-clipped` | **Error** |
+| `layout.story-unsupported` | **Error** |
+| `clipboard.section-context` | Warning |
+
+Every `section.*` diagnostic is sorted by section order, then key.
+
+## 18. Pageless: the seam only
+
+**Stored form.** A versioned **geometry-mode record**: root map `geometry1`,
+with `v = 1` and `mode = paged | pageless`. It isn't a seventh `page-setup1`
+key: that reader refuses unknown keys, and its contract fixes six. A section
+overrides it with its `mode` key. It's absent by default, which means
+`paged`, so nothing changes for existing documents.
+
+**Viewport.** The engine's existing `Medium { width, height }` input
+(`page.rs:44`) supplies the viewport's inline extent. It is an engine input
+and part of the session identity, and is **never stored**.
+
+**What Stage B settles** (in S1 and S4):
+
+-   the record and the section key;
+-   reading them;
+-   resolving each section's mode;
+-   reporting the mode in `State`.
+
+A pageless section, in this seam-only state, lays out **paged** with Warning
+`section.mode-unsupported`. The output differs from what was asked, but no
+content is lost.
+
+**What the full slice (S12) adds,** only if the frame-source work lands
+cleanly:
+
+-   **Frames.** A pageless section's body source yields frames of the inline
+    extent `Medium.width − inline margins`, each `PAGELESS_CHUNK` deep
+    (fixed, such as 2,048 pt). They are joined without breaks, so the depth is
+    unbounded in principle but always produced in bounded, checked chunks, and
+    `Length::MAX` never stands in for infinity.
+-   **Mixed modes.** A pageless section starts a new sheet; the next paged
+    section starts a new page.
+-   **Inactive features.** Manual page and column breaks and running bindings
+    are kept but inactive in pageless sections, with Info. Page fields
+    render `?`.
+-   **Export.** PDF and print require an explicit paginated configuration,
+    which lays pageless sections out paged with their merged geometry.
+
+## 19. Generalisation to text boxes, canvas and the canvas map
+
+These belong to a later **frames and canvas** workstream. This design reserves
+the seams it plugs into. It does not design them in detail.
+
+| Requirement | Fit | Seam reserved here |
 | --- | --- | --- |
-| `section.property` | Warning | A start-record value is unreadable or out of range; the inherited value is used. |
-| `section.orphan-start` | Info | `audit` only: a start record that isn't in effect. |
-| `section.columns-limit` | Warning | More than 64 columns. |
-| `section.column-narrow` | Warning | A column under 1 pt was skipped. |
-| `section.continuous-new-page` | Warning | A continuous start was made a new page (size or writing mode differs). |
-| `section.band-limit` | Warning | Too many continuous sections on one page. |
-| `section.page-number-range` | Warning | The format can't show the counter; decimal was used. |
-| `layout.region-clipped` | Warning | A running region was cut at its cap. |
-| `layout.region-missing` | Warning | A region reference doesn't name a live top-level story. |
-| `layout.story-unsupported` | Info | A float, note or relation inside a story was not laid out. |
+| Linked text boxes | **Needs its own primitive** (a chain placement) | Story identity independent of placement (§1). A `FrameSource` that yields a chain's frames, shaped and transformed, with the existing geometry providers (§7.1). `FieldInstance::Chain` (§10). The placement-owned artifact policy (§13). Chain topology is owned there: merge-safe order, cycles, multiple successors, wrap and exclusions, copy and remap. |
+| Infinite canvas | **Needs its own primitive** (canvas placement and document composition) | The body is a logical story whose default placement may be absent (§1). Empty-body rules (§3). `authored_order` (§2). Canvas owns unbounded coordinates with checked limits, cross-placement reading order, bounded spatial queries and print tiling. |
+| Canvas map | **Fits with this split now** | Placement **bounds** (authored, or resolved without shaping) are kept separate from story **extents** (from layout). `SectionsLayout` already separates frame rectangles from composed extents. Canvas adds a frame index and `bounds(placement)` and `extent(story) -> Known \| Estimated \| Pending`, tied to revision and layout inputs. The minimap UI is separate. |
+| Spatial sections | Fits | A section's `template` key (§3) selects an authored spatial template. Its frames and reading-order relations are kept when no column key is set (§4, rule 1 or 2). |
 
-## What this needs from wave 1
+## 20. What this needs from wave 1
 
-**Inline (`docs/inline.md`)**
+**Inline** (`eng-inline2`)
 
--   **`FieldKey { atom, at: Placement }`** as the `Plan.fields` key, with
-    `Placement::{Body, Running { page, slot }}`, plus `Repeat { frame }` if
-    inline takes the table fix. The resolver yields one entry per placement.
--   **`FieldEnv`** gains:
-    -   `at: Placement`;
-    -   `labels: Option<&PageLabels>`, so that `page-number` and `page-of`
-        render `labels.label(page)`, and decimal `page + 1` when it's `None`;
-    -   `pages` taken from the plan's page count for running instances. The
-        page count isn't known while the flow is still making pages.
--   The flow in `flow.rs` must be callable on **a block list and a one-frame
-    template** (`run_story`), not only on `doc.blocks()` with the document
-    template. That's a refactor shared with the cursor changes below; whichever
-    lands second rebases.
+-   the `FieldInstance::Running` variant and its enumeration (§10);
+-   `FieldEnv.labels`, with `page-number` always computed directly from it;
+-   flow callable on `(Domain, FrameSource)`, which is the refactor in S3.
 
-**Lists (`docs/roles-and-lists.md`)**
+**Lists**
 
--   `reprise_doc::lists::NumberFormat::{parse, token, render}`, used as
-    documented.
--   List counters run over a block **sequence**. Body counters must not count
-    story paragraphs, and a story numbers its own lists. Because stories aren't
-    in `blocks()` this comes free, if lists computes counters over a caller's
-    sequence rather than walking the tree root itself.
+-   `NumberFormat::{parse, token, render}`.
+-   List counters computed per domain. Today they walk `document_order()`, so
+    this is **not** free. It's a change to lists' counter pass: take the
+    domain's order, so a story numbers its own lists and the body's lists never
+    count story paragraphs.
 
-Until both merge, Stage B builds everything else first:
+Both changes are additive. If either workstream merges first without them, I
+make the change in their file and call it out.
 
-1.  start records and stories;
-2.  the section table;
-3.  geometry and columns;
-4.  page and column breaks;
-5.  bands and balancing;
-6.  running-region layout with `text` content;
-7.  the commands, `State` and queries;
-8.  HTML, PDF sizes and artifacts;
-9.  the package bit.
+## 21. Build order: Stage B slices
 
-Then numbering labels and fields go on top.
+Each slice is one reviewable PR-sized unit with its own tests, and ends green
+on the full check.
 
-## How later features plug in
+| Slice | Builds | Tests (from the review's list) |
+| --- | --- | --- |
+| **S1 Storage** | Domains (§2) and the clippy guard; `starts1` with generations; stories; `geometry1`; bit 17; `audit`. | Traversal by domain; nested and deleted stories; boundary on the first block; deleted body prefix; empty body; bit 17 for inactive, unreadable, emptied and tombstoned state; reads create no roots; old reader refuses. |
+| **S2 Commands** | Breaks, `SetSection`, stories and bindings, `CrossDomain`; `State` (sections, stories). | Offset 0, end, and inherited-head copied splits; joins across hosts; embedded tables; multibyte and emoji offsets. Two-peer matrix: insert+insert, insert/remove, remove+edit, reset+edit, page vs section, all merge orders, save and reopen, undo and redo, stable IDs. Link-away vs typing and binding; simultaneous unlink; orphan recovery. Story lists, body/story cross-range refusal. |
+| *Contract commit (orchestrator)* | §16 | Regression evidence. |
+| **S3 Page factory** | `PageFactory`, `FrameAddr`, `FrameSource`; plan entries by address; floats, notes, tables and `ensure_page` moved onto them. **No output change.** | Every existing snapshot byte-identical; native and WASM equal. |
+| **S4 Geometry** | Section table, merge and validation, columns, templates, page and column breaks, parity fillers and filler policy, ownership, decimal counters, mode resolution. | Portrait→landscape→portrait; three unequal columns with a rule; odd-page filler; RTL; vertical with asymmetric margins; negative, extreme and CSV-huge properties; combined invalid margins; 1,000 columns; all-narrow columns; custom transformed templates; filler at the page limit; sorted diagnostics. |
+| **S5 Bands and balancing** | Continuous bands and resumable balancing. | 1→2→1 columns on one page; unequal widths with keeps, widows, tables, oversized rows, floats and notes; non-monotone trials; infeasible later pass; *H* > 2²⁴; 33 bands; budgets 0 and 1, so there's no unbalanced partial page. |
+| **S6 Running regions** | Slots, variants, reservation, the story runner, instances, navigation and hit-testing. | First and even headers; three-section inheritance and explicit None; tall header; header and footer both tall, plus notes across bands; note continuation across geometry changes; 100,000-paragraph and 1 MiB single-paragraph stories; one story in several slots and pages; repeated table headers inside stories; caret fallback. |
+| **S7 Incremental** | Read-set keys, the running cache, scheduling units. | Full equals incremental after body, header, style, image, numbering and geometry edits; reuse of an unaffected prefix is asserted; backward `page-count` invalidation is asserted; varied chunking, cancellation and staleness. |
+| *Wave 1 merges* | | |
+| **S8 Fields and numbering** | The `FieldInstance` extension, labels, `NumberFormat`, story lists. | Roman then decimal restart; `page-number`, `page-count` and `page-of` with missing and multiply-placed targets; digit-boundary oscillation and the 16-pass freeze. |
+| **S9 Clipboard** | Envelope, paste and `import_copy`. | Internal and endpoint boundaries; whole-document `first`; same- and cross-document paste; paste into a story; remapped field targets; malformed envelope refused before mutation; story images kept in packages and `import_copy`. |
+| **S10 Exports** | PDF, HTML, plain text. | MediaBox per page, labels, artifact subtypes, PDF/UA with body tags unchanged; HTML round-trip of sections, links, None and variants, with honest losses; plain text is body only. |
+| **S11 Facade and WASM** | Bindings, types, worker. | Native and WASM equality; full check. |
+| **S12 Pageless (gated)** | §18's full slice, only if S3 and S5 landed cleanly. | Viewport resize with no authored writes; explicit paginated export. |
 
--   **Header and footer editing in the app.** Hit-test, then `instance` and a
-    story `Position`; edit with the ordinary text commands. A section and
-    page-setup dialog reads `SectionState.own` and `resolved`, and writes
-    `SetSection` and `clear`. Linking a region is `LinkRegion`; unlinking is
-    `CreateRegion` with `Copy`.
--   **A table of contents with page numbers.** Each entry is a `page-of` field
-    targeting its heading, and renders the target page's **label**, so roman
-    front matter and a decimal body are right without extra work.
-    `section_pages` lets a TOC restrict itself to sections.
--   **Footnotes per section.** Note numbering restarts at section starts: a
-    `notes.restart` key in the start record, read by the notes allocator from
-    the section table. **Endnotes at a section's end** are a slot-like
-    derived band placed before the next section's first band. The band
-    mechanism already models "content at a section's end".
--   **Print and PDF with mixed page sizes.** This already works through
-    per-page `MediaBox` and `/PageLabels`. Print imposition reads
-    `PageSection.blank` to skip or keep filler pages.
--   **Spreads and facing pages.** The `even` variant and physical parity are
-    the start. Facing pages add mirrored margins: an `inside` and `outside`
-    pair resolved by parity, in the same record. A spread view pairs pages by
-    physical index.
--   ***House of Leaves*-style spatial pages.** A section whose `template` key
-    names a spatial page template (decision 01, explicit composition). Its
-    pages come from that template's frames and their explicit reading order,
-    not from columns, inside an otherwise flowing document. The section table
-    is already where a page's template is chosen. The `background` slot carries
-    text set behind those pages.
+## 22. How later features plug in
 
-## App seam
+-   **Header and footer editing; a section and page-setup dialog.** The app
+    uses `hit_placed` and `caret_in` for the instance, and the ordinary text
+    commands for editing. `State.sections` gives `own`, `resolved` and
+    bindings. `SetSection` and `clear` change properties, and `SetRegion` and
+    `CreateRegion` change bindings.
+-   **A table of contents with page numbers.** Entries are `page-of` fields
+    that render the target's label, so roman front matter and a decimal body
+    are right. `section_pages` scopes a TOC to sections.
+-   **Footnotes per section.** A `notes.restart` start key, read by the notes
+    allocator from the section table.
+-   **Endnotes at a section's end.** A derived band placed before the next
+    section's first band.
+-   **Mixed page sizes in print and PDF.** Per-page `MediaBox`, `PageDescriptor`
+    and `PageLabels`. Imposition reads the filler kind.
+-   **Spreads and facing pages.** Physical parity, filler descriptors and the
+    `even` variant are the start. Mirrored `inside` and `outside` margins
+    become new geometry keys resolved by parity.
+-   ***House of Leaves* spatial pages.** A section's `template` names a spatial
+    template. Chain and canvas placements (§19) hold text set across or behind
+    pages, which may be semantic.
 
--   **Commands:** `insert_break`, `remove_break`, `set_section`,
-    `create_region`, `link_region` and `set_region_none`, plus the existing
-    text commands with story positions. All work inside `batch` with
-    `expected_revision`.
--   **State:** `sections`, `stories`, and `BlockState.starts`.
--   **Queries:** `page_section`, `section_pages`, `page_label`,
-    `page_regions`, `region_instances` and `page_fields`, plus hit-test and
-    caret queries carrying `instance`.
+## 23. App seam
+
+-   **Commands:**
+    -   `insert_break`, `remove_break`, `set_section`;
+    -   `create_story`, `set_region`, `create_region`, `link_region`,
+        `delete_story`;
+    -   text commands on story positions.
+
+    All are inside `batch` with `expected_revision`.
+-   **State:** `sections`, `stories`, `BlockState.starts`.
+-   **Queries:** as in §17, plus `hit_placed`, `caret_in` and
+    `selection_rects_in`.
 -   **App policy, not engine policy:**
-    -   Backspace at a section's first paragraph calls `remove_break` first, and
-        `join` on a second Backspace, as Google Docs does.
-    -   Double-clicking a header area enters story editing on that instance.
+    -   Backspace at a section start calls `remove_break` first, then joins.
+    -   Double-clicking a header edits that instance.
+    -   Typing into an inherited header edits the shared story. The app offers
+        unlink first; the engine never copies on typing **[Sol]**.
 
-## Open questions for review
+## 24. Decisions and remaining questions
 
-1.  **Copy on insert versus cascade.** Properties inherit from the document
-    default, not the previous section, as the brief says. The insert command
-    copies the containing section's own geometry and column keys so a new
-    section looks like the current one. The alternative is to cascade
-    geometry from the previous section at layout time. That's simpler for
-    users, but then changing one section silently changes all later ones.
-2.  **Physical parity.** Odd and even starts, and the `even` variant, use
-    physical parity. Word uses the page *number*'s parity. Physical parity is
-    right for spreads and recto starts, but differs from Word after a restart
-    at an even number.
-3.  **Running regions on blank filler pages.** Following Word, filler pages
-    show the preceding section's regions. Publishers often want them blank. A
-    later `blank-pages: plain` key could switch that.
-4.  **`DeleteBlock` on a start block** drops the boundary. Alternatively the
-    kernel could re-key the start onto the next block of the section in the
-    same step. That's friendlier, but a concurrent property edit to the old
-    key would be lost.
-5.  **Contract addition.** Two `skip_serializing_if` fields on the frozen
-    `LayoutSnapshot`, `running` and `sections`. The precedent is
-    `repeated_headers`. The other option is a parallel `SectionsLayout`
-    returned beside the snapshot, which would double every query path. This
-    needs the orchestrator's decision before Stage B reaches layout.
-6.  **Where stories are stored.** Stories are in the `content` tree, skipped
-    by `children(None)`, so every text facility works on them. A separate Loro
-    tree would isolate them better, but then every `NodeId` lookup would need
-    to know which tree it's in.
-7.  **Inline's API.** `FieldKey`, `Placement` and the `FieldEnv` labels are
-    asks of an in-progress workstream. If inline merges first without them,
-    this work makes the change additively in `inline.rs` and calls it out in
-    the report.
+**Decided.**
 
-## Risks
+-   **Q1:** copy on insert, with the exact property set in §3.
+-   **Q2:** physical parity everywhere.
+-   **Q3:** fillers are blank, with a policy owned by the requesting section.
+-   **Q4:** a boundary dies with its block.
+-   **Q5:** the contract commit (§16).
+-   **Q6:** one tree with typed domains.
+-   **Q7:** extend `FieldInstance`, and flow over a `FrameSource`.
 
--   **The flow cursor refactor.** Bands put frames for a page at
-    non-template indices. The cursor's `thread` has to become absolute frame
-    indices, and `page_base + thread[pos]` goes. This touches the hottest code
-    in layout and the transition key. The guard is that documents without
-    sections must take the old path byte for byte; every existing snapshot is
-    the test.
--   **Running geometry feeding back into body geometry.** Header height
-    depends on fields, fields depend on page count, and page count depends on
-    body geometry. That's a real cycle. It's bounded by decision 26's
-    coordinator, but a header showing `page-count` that wraps at a digit
-    boundary can oscillate and freeze with a Warning.
--   **Balancing inside incremental and viewport-first jobs.** A band is
-    re-flowed up to 24 times, and partial publication must stop before an
-    unbalanced band. Memoizing per band keeps edits elsewhere cheap; a
-    pathological page with 32 bands costs 768 trial flows.
--   **Notes and floats with bands.** `Plan.reservations` is keyed by frame.
-    Footnotes on a page with two bands reserve from the owner's last band
-    only. Tested, but the interaction with continuous sections is the least
-    explored part.
--   **Direct root walks.** Any one missed (the *Stories* table) leaks stories
-    into the body. The invariants and hostile suites get a story in every
-    generated document to catch this.
--   **Concurrent unlink.** This can orphan a peer's freshly typed header text.
-    Nothing is destroyed, but nothing shows it until someone recovers it.
--   **Wave-1 timing.** Fields and numbering arrive late. Building order 1–9
-    above avoids blocking on them, but the field keying change in inline is
-    still required to finish.
+**Still open:**
+
+1.  **Body page-number with a stale plan value.** Making `page-number` always
+    direct (§10) changes inline's current "plan value first" order for body
+    atoms. That's inline's call; the alternative is keying body page-number
+    by page.
+2.  **Band-level note areas.** A page with bands has one page-level note area
+    in v1. Per-band areas belong to the section-endnotes follow-up.
+
+## 25. Risks
+
+-   **S3's refactor** moves every subsystem's frame arithmetic onto one
+    factory and switches plan keys to addresses. Byte-identical snapshots are
+    the gate. If it slips, every later slice slips.
+-   **Read-set memo keys** are a new invalidation mechanism. A missed read is
+    a stale-output bug. The full-versus-incremental equality tests are the
+    guard, run on every fixture.
+-   **Header, field and page-count feedback** is a real cycle. It's bounded by
+    the 16-pass freeze, but a header with `page-count` at a digit boundary can
+    freeze with a Warning.
+-   **Balancing cost:** up to 25 band flows × 32 bands × 16 passes on one
+    pathological page. It's resumable and bounded, but slow in that case.
+-   **Domain routing:** any consumer left on a body alias leaks or drops
+    stories. The clippy guard, plus a story in every hostile and invariants
+    document, catches this.
+-   **Wave-1 asks** (inline's `FieldInstance` and `page-number` order, lists'
+    per-domain counters) land in other workstreams' files.
