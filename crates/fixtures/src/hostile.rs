@@ -3134,6 +3134,8 @@ pub fn list_semantics_storm() -> Result<Fixture, DocError> {
             "list.definition-cycle",
             "list.definition-missing",
             "layout.list-indent",
+            // The absurd indent is cut to leave one em, so words overflow it.
+            "compose.overflow",
         ],
     );
     fixture.replica = Some(peer);
