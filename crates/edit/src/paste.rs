@@ -613,6 +613,7 @@ pub(crate) fn write(
         &fragment,
         &mut result,
         join_first.then_some(first).flatten(),
+        same_namespace,
     )?;
     // The first pasted paragraph joined the caret's paragraph, which it
     // replaces here: it keeps that paragraph's role and membership.
@@ -633,27 +634,39 @@ pub(crate) fn write(
     Ok(result)
 }
 
-/// Pasted roles and lists: each definition the fragment carries is staged
-/// with a fresh ID and activated, and every pasted block takes its role and
-/// membership. A first block joined into the paragraph at the caret leaves
-/// that paragraph's own role and membership alone.
+/// Pasted roles and lists. Into the document the fragment was copied from, an
+/// item whose definition is still live stays in that list, so pasting items
+/// into their own list continues its numbering, as in Google Docs and Word.
+/// Anywhere else (another document, or a definition since deleted) each
+/// definition the fragment carries is staged with a fresh ID and activated,
+/// with its `base` remapped. Every pasted block takes its role and membership.
+/// A first block joined into the paragraph at the caret leaves that
+/// paragraph's own role and membership alone.
 fn write_semantics(
     doc: &Document,
     fragment: &Fragment,
     result: &mut Pasted,
     kept: Option<NodeId>,
+    same_namespace: bool,
 ) -> Result<(), EditError> {
     let mut lists = BTreeMap::new();
+    let mut fresh = BTreeSet::new();
     for (old, def) in &fragment.lists {
+        if same_namespace && doc.is_list_live(*old) {
+            lists.insert(*old, *old);
+            continue;
+        }
         let mut own = def.clone();
         own.base = None;
         let new = doc.stage_list(&own).map_err(store)?;
         doc.activate_list(new).map_err(store)?;
         lists.insert(*old, new);
+        fresh.insert(*old);
         result.applied.lists.push(new);
     }
     for (old, def) in &fragment.lists {
-        if let (Some(base), Some(&new)) = (def.base, lists.get(old))
+        if fresh.contains(old)
+            && let (Some(base), Some(&new)) = (def.base, lists.get(old))
             && let Some(&base) = lists.get(&base)
         {
             let mut own = def.clone();
@@ -936,7 +949,7 @@ fn write_into_flow(
         doc.restore_relation(*new).map_err(store)?;
     }
     let kept = if join_first { first } else { None };
-    write_semantics(doc, &fragment, &mut result, kept)?;
+    write_semantics(doc, &fragment, &mut result, kept, same_namespace)?;
     write_formats(doc, &fragment, &result.ids, &joined)?;
     result.end = fragment
         .blocks

@@ -422,7 +422,10 @@ fn outline_reports_each_headings_page_after_a_multi_page_layout() {
             texts.push(format!("Body line {line} of chapter {}.", chapter + 1));
         }
     }
-    let ids = paragraphs(&mut s, &texts.iter().map(String::as_str).collect::<Vec<_>>());
+    let ids = paragraphs(
+        &mut s,
+        &texts.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
     let commands = (0..3)
         .map(|chapter| Command::SetRole {
             node: ids[chapter * 31].clone(),

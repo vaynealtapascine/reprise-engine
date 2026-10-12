@@ -9,8 +9,10 @@ mod checker;
 use checker::check;
 use lopdf::{Document as PdfDocument, Object};
 use reprise_clipboard::{
-    ExportOptions, Exporter, Html, ImportLimits, NativeFragment, PlainText, copy_all, import_html,
+    ExportOptions, Exporter, Html, ImportLimits, NativeFragment, PlainText, copy_all, copy_blocks,
+    import_html,
 };
+use reprise_doc::fragment::CopyBlock;
 use reprise_doc::{
     BlockKind, Document, LevelDef, ListDefinition, ListId, NodeId, NumberFormat, Role,
     SchemaRegistry,
@@ -425,6 +427,101 @@ fn a_native_copy_keeps_roles_and_lists_and_pastes_fresh_definitions() {
         pasted.list, original_list,
         "pasted items use a fresh definition"
     );
+}
+
+/// Marker and list of every item of `editor`'s document, in order.
+fn listed(editor: &Editor) -> Vec<(String, ListId)> {
+    let doc = editor.document();
+    doc.document_order()
+        .into_iter()
+        .filter_map(|n| doc.list_item(n).map(|i| (i.marker, i.list)))
+        .collect()
+}
+
+#[test]
+fn pasting_items_into_their_own_document_continues_the_list() {
+    let doc = blank();
+    let list = doc.create_list(&list_of(&[NumberFormat::Decimal])).unwrap();
+    let ids: Vec<NodeId> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|t| item(&doc, t, list, 0))
+        .collect();
+    doc.commit();
+    let schemas = SchemaRegistry::builtin();
+    let selection = |nodes: &[NodeId]| -> Vec<CopyBlock> {
+        nodes
+            .iter()
+            .map(|&node| CopyBlock { node, bytes: None })
+            .collect()
+    };
+    let fragment = copy_blocks(&doc, "doc", &selection(&ids[1..3]), &schemas, None, None).unwrap();
+    let mut editor = Editor::new(doc, SchemaRegistry::builtin());
+    let before = editor.document().revision();
+    let pasted = fragment.paste(&mut editor, None, "doc").unwrap();
+    // The pasted b and c join the list after d: no new definition.
+    assert!(pasted.applied.lists.is_empty(), "no fresh definition");
+    let items = listed(&editor);
+    assert_eq!(
+        items.iter().map(|i| i.0.as_str()).collect::<Vec<_>>(),
+        ["1.", "2.", "3.", "4.", "5.", "6."]
+    );
+    assert!(items.iter().all(|i| i.1 == list), "one list throughout");
+    assert!(editor.undo().unwrap());
+    assert_eq!(listed(&editor).len(), 4);
+    assert_ne!(
+        before,
+        editor.document().revision(),
+        "undo is a new revision"
+    );
+
+    // Another document gets its own definition.
+    let mut other = Editor::new(blank(), SchemaRegistry::builtin());
+    let foreign = fragment.paste(&mut other, None, "elsewhere").unwrap();
+    assert_eq!(foreign.applied.lists.len(), 1);
+    assert_eq!(
+        listed(&other)
+            .iter()
+            .map(|i| i.0.as_str())
+            .collect::<Vec<_>>(),
+        ["1.", "2."]
+    );
+    assert_ne!(listed(&other)[0].1, list);
+}
+
+#[test]
+fn pasting_after_the_list_was_deleted_brings_a_fresh_definition_back() {
+    let doc = blank();
+    let list = doc
+        .create_list(&list_of(&[NumberFormat::UpperAlpha]))
+        .unwrap();
+    let a = item(&doc, "a", list, 0);
+    doc.commit();
+    let schemas = SchemaRegistry::builtin();
+    let fragment = copy_blocks(
+        &doc,
+        "doc",
+        &[CopyBlock {
+            node: a,
+            bytes: None,
+        }],
+        &schemas,
+        None,
+        None,
+    )
+    .unwrap();
+    doc.delete_list(list).unwrap();
+    doc.commit();
+    let mut editor = Editor::new(doc, SchemaRegistry::builtin());
+    let pasted = fragment.paste(&mut editor, None, "doc").unwrap();
+    assert_eq!(pasted.applied.lists.len(), 1, "the definition is recreated");
+    let items = listed(&editor);
+    assert_eq!(
+        items.len(),
+        1,
+        "the deleted list's own item is a plain paragraph"
+    );
+    assert_eq!(items[0].0, "A.");
+    assert_ne!(items[0].1, list);
 }
 
 #[test]
