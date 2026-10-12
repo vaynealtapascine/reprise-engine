@@ -158,6 +158,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         annotation_storm()?,
         inline_bidi()?,
         inline_storm()?,
+        inline_storm_readable()?,
     ])
 }
 
@@ -3249,6 +3250,17 @@ pub fn inline_bidi() -> Result<Fixture, DocError> {
 /// resizes an image while another deletes it. Everything is reported and
 /// nothing is lost or looped.
 pub fn inline_storm() -> Result<Fixture, DocError> {
+    inline_storm_with(true, "inline_storm")
+}
+
+/// [`inline_storm`] without the record whose asset is not a hash. A copy of
+/// text with an unreadable object is refused whole (like an unreadable block),
+/// so this one is what the clipboard and paste tests copy and paste.
+pub fn inline_storm_readable() -> Result<Fixture, DocError> {
+    inline_storm_with(false, "inline_storm_readable")
+}
+
+fn inline_storm_with(unreadable: bool, name: &'static str) -> Result<Fixture, DocError> {
     use crate::inline::{Part, RED, image, paragraph};
     use reprise_doc::hostile::{corrupt_inline_record, insert_object_marker, write_inline_record};
     use reprise_doc::{InlineObject, InlinePatch};
@@ -3318,9 +3330,11 @@ pub fn inline_storm() -> Result<Fixture, DocError> {
             })
             .map_err(|e| DocError::Store(e.to_string()))
     };
-    let notahash = by_alt("notahash")?.ok_or(DocError::Store("no notahash".into()))?;
-    corrupt_inline_record(&doc, notahash.id, "p:asset", "not-a-hash")
-        .map_err(|e| DocError::Store(e.to_string()))?;
+    if unreadable {
+        let notahash = by_alt("notahash")?.ok_or(DocError::Store("no notahash".into()))?;
+        corrupt_inline_record(&doc, notahash.id, "p:asset", "not-a-hash")
+            .map_err(|e| DocError::Store(e.to_string()))?;
+    }
     let future = by_alt("future")?.ok_or(DocError::Store("no future".into()))?;
     corrupt_inline_record(&doc, future.id, "v", "2").map_err(|e| DocError::Store(e.to_string()))?;
     insert_object_marker(&doc, p, 0)?;
@@ -3354,7 +3368,7 @@ pub fn inline_storm() -> Result<Fixture, DocError> {
         engine,
         replica: Some(replica),
         ..Fixture::new(
-            "inline_storm",
+            name,
             doc,
             &[
                 "layout.inline-kind",
