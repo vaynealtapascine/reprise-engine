@@ -27,7 +27,7 @@ pub struct Pasted {
     pub end: Option<(NodeId, usize)>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Prepared {
     fragment: Fragment,
     at: Option<(NodeId, usize)>,
@@ -53,7 +53,7 @@ fn invalid(error: FragmentError) -> EditError {
 fn store(error: DocError) -> EditError {
     EditError {
         command: None,
-        reason: Reason::Store(error.to_string()),
+        reason: Reason::from(error),
     }
 }
 
@@ -896,7 +896,10 @@ impl Editor {
         at: Option<(NodeId, usize)>,
         target_namespace: &str,
     ) -> Result<Pasted, EditError> {
+        self.doc.check_edit_preflight().map_err(store)?;
         let prepared = prepare(&self.doc, &self.schemas, fragment, at, target_namespace)?;
+        let trial = self.doc.fork_for_edit().map_err(store)?;
+        write(&trial, &self.schemas, prepared.clone())?;
         let result = write(&self.doc, &self.schemas, prepared);
         self.doc.commit_step();
         result

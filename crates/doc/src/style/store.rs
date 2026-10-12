@@ -135,7 +135,7 @@ fn nested_map(map: &LoroMap, key: &str) -> Option<LoroMap> {
 impl Document {
     /// Whether a root exists, without creating it. Presence includes an
     /// emptied root, whose operations stay in history.
-    fn has_root(&self, name: &str) -> bool {
+    pub(crate) fn has_root(&self, name: &str) -> bool {
         self.doc.get_by_str_path(name).is_some()
     }
 
@@ -144,6 +144,9 @@ impl Document {
     }
 
     fn nested_style(&self, name: &str) -> Option<LoroMap> {
+        if !self.has_root("styles") {
+            return None;
+        }
         nested_map(&self.doc.get_map("styles"), name)
     }
 
@@ -250,13 +253,15 @@ impl Document {
             .collect();
         let mut scanned = 0usize;
         let mut cut = false;
-        for name in self.doc.get_map("styles").keys() {
-            scanned += 1;
-            if scanned > MAX_SCANNED_KEYS {
-                cut = true;
-                break;
+        if self.has_root("styles") {
+            for name in self.doc.get_map("styles").keys() {
+                scanned += 1;
+                if scanned > MAX_SCANNED_KEYS {
+                    cut = true;
+                    break;
+                }
+                names.insert(name.to_string());
             }
-            names.insert(name.to_string());
         }
         if let Some(flat) = self.flat_styles() {
             for k in flat.keys() {

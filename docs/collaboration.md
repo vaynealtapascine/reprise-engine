@@ -1,5 +1,27 @@
 # Real-time collaboration
 
+## Durable document binding and the total packet bound
+
+Fresh facade documents store `document1.id` in their authored CRDT. Copies bind a
+fresh history to a fresh package ID, and reopen checks that the package's ID
+agrees with its stored lineage. Legacy documents without this root keep their
+current appearance and stored bytes on read.
+
+Sync feature bit 3 (`document-lineage1`) adds a fixed 32-byte lowercase hex ID
+prefix inside the frame's body, before its JSON schema. The existing length
+field includes the prefix. Packet metadata mirrors the feature; the frame's ID
+is compared with durable receiver state before merge. Legacy snapshot imports
+compare the stored IDs before merging. Marker absence must also agree. Rewriting
+only an outer host `document_id` therefore cannot cross-sync a copy, including
+after reopen or copying it again. Authentication remains the host's responsibility.
+
+The unchanged 32 MiB `MAX_PACKET_BYTES` bounds the complete wire buffer, including
+vectors and any lineage prefix, for framed and legacy imports and exports.
+An unbound frame costs `23 + 12 * (since.len + until.len)` bytes; a bound frame
+costs 32 more. Both vectors still allow up to 4096 entries. Oversized buffers are
+refused before parsing, and packet construction reserves the exact overhead
+before allocation. Persistence packages have their own larger, unchanged bounds.
+
 This document describes how reprise-engine supports a multiplayer editor (decisions 05, 07,
 09, 10, 12, 29, 30, 34, 37 and 38). The engine provides sync *primitives* only. Transport,
 authentication and servers belong to the host (see the implementation choices under 41).

@@ -89,7 +89,7 @@ missingDoc.free(); imageOpen.free(); imageTarget.free(); imageDoc.free(); defaul
 // Multiplayer methods use the same typed boundary and byte representation.
 const remote = ws.create(p({ document_id: "00112233445566778899aabbccddeeff", peer_id: "31" }));
 const full = doc.sync_export(p({ since: null }));
-assert.deepEqual(full.data.features, ["snapshot-json"]);
+assert.deepEqual(full.data.features, ["snapshot-json", "document-lineage1"]);
 remote.sync_import(full);
 const multiplayerSelection = { anchor: { node, offset: 2, affinity: "downstream" }, focus: { node, offset: 4, affinity: "upstream" } };
 const stable = remote.set_selection(p(multiplayerSelection));
@@ -99,6 +99,10 @@ doc.apply(p({ commands: [{ kind: "insert-text", node, at: 0, text: "remote " }] 
 const packet = doc.sync_export(p({ since: vv }));
 assert.ok(packet.data.content.bytes instanceof Uint8Array);
 const report = remote.sync_import(packet).data;
+// Every byte import checks the complete wire cap before copying or parsing.
+const overLimit = new Uint8Array(wasm.maxPacketBytes() + 1);
+assert.throws(() => remote.sync_import(p({ ...packet.data, content: { bytes: overLimit } })), e => e.data.code === "bindings.limit");
+assert.throws(() => remote.import_updates(p({ ...doc.export_updates().data, content: { bytes: overLimit } })), e => e.data.code === "bindings.limit");
 assert.ok(report.changed && report.changes.blocks.includes(node));
 assert.equal(report.selection.focus.offset, 11);
 assert.equal(remote.sync_import(packet).data.changed, false);
@@ -119,7 +123,7 @@ const parity = ws.create(p({ document_id: "00112233445566778899aabbccddeeff", pe
 const parityNode = parity.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "parity", style: { families: null, size: null, line_height: null } }] })).data.blocks[0];
 parity.apply(p({ commands: [{ kind: "insert-text", node: parityNode, at: 6, text: " אב" }] }));
 const parityPacket = parity.sync_export(p({ since: [] }));
-assert.equal(Buffer.from(parityPacket.data.content.bytes).toString("hex"), fs.readFileSync(path.join(__dirname, "../../reprise/tests/sync_delta.hex"), "utf8").trim());
+assert.equal(Buffer.from(parityPacket.data.content.bytes).toString("hex"), fs.readFileSync(path.join(__dirname, "../../reprise/tests/sync_lineage_delta.hex"), "utf8").trim());
 // Character formatting crosses the boundary as runs; glyph outlines draw what layout placed.
 parity.apply(p({ commands: [{ kind: "format-text", node: parityNode, start: 0, end: 3, style: { families: null, size: 20 * 1024, language: null, features: null, reset: false, weight: 700, slant: "italic", decoration: { underline: true, strike: true }, color: [1, 2, 3, 0] } }] }));
 const runs = parity.state().data.blocks.find(b => b.id === parityNode).formatting;
@@ -176,12 +180,24 @@ for (const run of styledRuns) {
 }
 assert.throws(() => parity.set_font_settings(p({ generics: {}, fallbacks: Array(65).fill("bad"), synthetic_oblique: true })), e => e.data.code === "font.config");
 assert.throws(() => parity.set_font_settings(p({ generics: { unknown: "bad" }, fallbacks: [], synthetic_oblique: false })));
+// Unknown settings fields are refused before any mutation, at workspace and document level.
+assert.throws(() => ws.set_font_settings(p({ generics: {}, fallbacks: [], synthetic_oblique: true, unexpected_option: true })), e => e.data.code === "bindings.invalid");
 // Authored paper edits retain host font settings; resetting fonts retains paper.
 parity.set_page_setup(p({ width: 240 * 1024, height: 320 * 1024, right: 36 * 1024 }));
 finish(parity);
 assert.equal(parity.display_page(0).data.display.width, 240 * 1024);
 assert.ok(parity.display_json(0).data.includes('"synthetic_oblique":true'));
 assert.ok(parity.display_json(0).data.includes('"family":"Universal"'));
+// A refused unknown field leaves the settings, the revision and an active layout job untouched.
+const refusedRevision = parity.state().data.revision;
+const refusedJob = parity.start_layout(options).data;
+assert.throws(() => parity.set_font_settings(p({ generics: {}, fallbacks: [], synthetic_oblique: false, unexpected_option: true })), e => e.data.code === "bindings.invalid");
+assert.deepEqual(parity.state().data.revision, refusedRevision);
+let refusedProgress;
+for (let i = 0; i < 10_000 && !(refusedProgress = parity.step(refusedJob, 1).data).complete; i++);
+assert.ok(refusedProgress.complete, "job survives a refused settings call");
+parity.release_job(refusedJob);
+assert.ok(parity.display_json(0).data.includes('"synthetic_oblique":true'));
 parity.set_font_settings(p({ generics: {}, fallbacks: [], synthetic_oblique: false }));
 finish(parity); assert.ok(!parity.display_json(0).data.includes('"synthetic_oblique"'));
 assert.equal(parity.state().data.page_setup.width, 240 * 1024);

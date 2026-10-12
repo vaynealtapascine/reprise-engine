@@ -4,7 +4,7 @@ use crate::*;
 use reprise_doc::{Document, PersistenceMode};
 use reprise_layout::incremental::{LayoutCache, LayoutContinuation, LayoutSession};
 use reprise_layout::{Engine, LayoutSnapshot};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -74,7 +74,12 @@ impl Workspace {
             hash: face.id().hash.clone(),
         };
         let mut shared = lock(&self.fonts);
-        if !shared.faces.iter().any(|f| f.id() == face.id()) {
+        if let Some(index) = shared.faces.iter().position(|f| f.id() == face.id()) {
+            if shared.faces[index].declaration() != face.declaration() {
+                shared.faces[index] = Arc::new(face);
+                shared.generation = shared.generation.saturating_add(1);
+            }
+        } else {
             if shared.faces.len() >= MAX_WORKSPACE_FACES {
                 return Err(Error::Limit("workspace faces".into()));
             }
@@ -113,6 +118,7 @@ impl Workspace {
         let id = cv::document_id(&r.document_id)?;
         let peer = cv::peer(&r.peer_id)?;
         let doc = Document::new(peer)?;
+        doc.bind_document_lineage(&r.document_id)?;
         ensure_base_style(&doc)?;
         let package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
         self.adopt(DocumentSession::new(
@@ -181,6 +187,7 @@ impl Workspace {
         // folded together); an untouched built-in is left to the engine so
         // the copy needs no more format features than its source.
         let fresh = Document::new(peer)?;
+        fresh.bind_document_lineage(&r.document_id)?;
         let (names, cut) = old.style_names();
         if cut {
             return Err(Error::Limit("named styles".into()));
@@ -294,7 +301,7 @@ impl Workspace {
             .notes
             .extend(opened.assets.restore_images(&mut engine.assets));
         let package = opened.package().clone();
-        let id = package
+        let id: String = package
             .document_id()
             .0
             .iter()
@@ -302,6 +309,11 @@ impl Workspace {
             .collect();
         let notes = opened.notes.clone();
         let doc = opened.into_document()?;
+        if doc.document_lineage()?.is_some_and(|lineage| lineage != id) {
+            return Err(Error::Invalid(
+                "package identity does not match document lineage".into(),
+            ));
+        }
         ensure_base_style(&doc)?;
         self.adopt(DocumentSession::new(
             doc,
@@ -336,6 +348,8 @@ pub struct DocumentSession {
     shared: Option<Fonts>,
     shared_seen: u64,
     settings_local: bool,
+    /// Explicit session declarations and package pins override workspace faces.
+    local_faces: BTreeSet<reprise_font::FaceId>,
     /// The document this one was copied from (`import_copy`), if any.
     copied_from: Option<String>,
     /// Resolved paragraph styles for `state`, per (style, overrides), valid
@@ -385,6 +399,7 @@ impl DocumentSession {
         engine: Engine,
         notes: Vec<reprise_diag::Note>,
     ) -> Self {
+        let local_faces = engine.fonts.registered_ids().cloned().collect();
         Self {
             editor: Box::new(reprise_edit::Editor::new(doc, engine.schemas.clone())),
             engine,
@@ -403,6 +418,7 @@ impl DocumentSession {
             shared: None,
             shared_seen: 0,
             settings_local: false,
+            local_faces,
             copied_from: None,
             style_cache: Default::default(),
         }
@@ -418,6 +434,9 @@ impl DocumentSession {
             return Ok(());
         }
         for face in &shared.faces {
+            if self.local_faces.contains(face.id()) {
+                continue;
+            }
             let held = self
                 .engine
                 .fonts
@@ -762,6 +781,7 @@ impl DocumentSession {
             .fonts
             .register(bytes.to_vec(), declaration)
             .map_err(|e| Error::note(e.note()))?;
+        self.local_faces.insert(id.clone());
         self.reconfigure()?;
         Ok(Payload::new(Face {
             family: id.family,
@@ -1125,6 +1145,7 @@ impl DocumentSession {
         assets: reprise_display::AssetStore,
     ) -> Result<()> {
         for face in fonts {
+            self.local_faces.insert(face.id().clone());
             self.engine.fonts.add(face);
         }
         self.engine.assets = assets;
@@ -1668,13 +1689,15 @@ impl DocumentSession {
     /// A version vector is still exchanged; transport can suppress equal vectors.
     pub fn export_updates(&self) -> Result<Payload<SyncUpdate>> {
         let info = self.sync_info().data;
+        let bytes = self.doc().try_export(PersistenceMode::History)?;
+        if bytes.len() > crate::MAX_PACKET_BYTES {
+            return Err(Error::Limit("sync bytes".into()));
+        }
         Ok(Payload::new(SyncUpdate {
             document_id: info.document_id,
             from_peer: info.peer_id,
             vector: info.vector,
-            content: Bytes {
-                bytes: self.doc().try_export(PersistenceMode::History)?,
-            },
+            content: Bytes { bytes },
         }))
     }
     pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>> {
@@ -1689,7 +1712,7 @@ impl DocumentSession {
             ));
         }
         cv::peer(&r.from_peer)?;
-        if r.content.bytes.len() > 64 * 1024 * 1024 || r.vector.len() > 4096 {
+        if r.content.bytes.len() > crate::MAX_PACKET_BYTES || r.vector.len() > 4096 {
             return Err(Error::Limit("sync bytes/vector".into()));
         }
         for clock in &r.vector {
@@ -1699,6 +1722,9 @@ impl DocumentSession {
             }
         }
         let doc = Document::import(&r.content.bytes, cv::peer(&self.peer_id)?)?;
+        if doc.document_lineage()? != self.doc().document_lineage()? {
+            return Err(self.lineage_refusal());
+        }
         let actual: Vec<_> = doc
             .version_vector()
             .into_iter()

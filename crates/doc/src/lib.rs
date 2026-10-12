@@ -43,6 +43,7 @@ mod history;
 pub mod hostile;
 #[cfg(test)]
 mod hostile_tests;
+mod identity;
 pub mod image;
 pub mod invariants;
 mod lifecycle;
@@ -285,6 +286,10 @@ pub struct Block {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DocError {
+    #[error("commit direct document edits before isolated edit preflight")]
+    UncommittedEdit,
+    #[error("edit preflight tree depth exceeds {0}")]
+    EditPreflightDepth(usize),
     #[error("no live node {0}")]
     NoNode(NodeId),
     #[error("node {0} is malformed: {1}")]
@@ -373,8 +378,63 @@ impl Document {
         Ok(Document::wrap(doc))
     }
 
+    /// An isolated, same-peer replica for exhaustive edit preflight. Never
+    /// publish its history: the editor replays the checked writes locally so
+    /// they retain the ordinary per-peer undo origin and identity allocation.
+    pub fn fork_for_edit(&self) -> Result<Document, DocError> {
+        // Loro's fork has an implicit commit barrier. Never let a refused
+        // command publish an external caller's still-pending raw writes.
+        self.check_edit_preflight()?;
+        let doc = self.doc.fork();
+        doc.set_peer_id(self.doc.peer_id())?;
+        Ok(Document::wrap(doc))
+    }
+
+    /// Staging uses Loro's recursive snapshot codec. Bound physical tree
+    /// ancestry (tombstones included) before entering it, on native and WASM.
+    pub fn check_edit_preflight(&self) -> Result<(), DocError> {
+        const MAX_DEPTH: usize = 64;
+        if self.doc.get_pending_txn_len() != 0
+            || !self
+                .lineage_pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        {
+            return Err(DocError::UncommittedEdit);
+        }
+        for root in ["content", "ranges", "relations"] {
+            if !self.has_root(root) {
+                continue;
+            }
+            let nodes = self.tree(root).get_nodes(true);
+            let parents: std::collections::BTreeMap<_, _> =
+                nodes.iter().map(|n| (n.id, n.parent)).collect();
+            for node in &nodes {
+                let mut parent = node.parent;
+                let mut depth = 0usize;
+                while let loro::TreeParentId::Node(id) = parent {
+                    if depth >= MAX_DEPTH {
+                        return Err(DocError::EditPreflightDepth(MAX_DEPTH));
+                    }
+                    parent = parents
+                        .get(&id)
+                        .copied()
+                        .unwrap_or(loro::TreeParentId::Root);
+                    depth += 1;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Merges another replica's edits into this one (29).
     pub fn merge(&self, other: &Document) -> Result<(), DocError> {
+        if self.document_lineage()? != other.document_lineage()? {
+            return Err(DocError::Store(
+                "documents have different durable lineages".into(),
+            ));
+        }
         self.commit();
         other.commit();
         // Only what this replica lacks: both documents are this process's own,
@@ -594,6 +654,9 @@ impl Document {
     /// Where a range is now. A range whose ends have crossed (possible after
     /// concurrent edits) is treated as empty at its start.
     pub fn resolve_range(&self, id: RangeId) -> RangeState {
+        if !self.has_ranges_root() {
+            return RangeState::Missing { node: None };
+        }
         let tree = self.tree("ranges");
         if !self.live(&tree, id.0) {
             return RangeState::Missing { node: None };
@@ -684,6 +747,9 @@ impl Document {
     /// can't be read, for example because a newer engine wrote it; it is kept
     /// in the document either way (34).
     pub fn relations(&self) -> Vec<(RelationId, Result<Relation, String>)> {
+        if !self.has_root("relations") {
+            return Vec::new();
+        }
         let tree = self.tree("relations");
         let mut ids: Vec<TreeID> = tree
             .nodes()

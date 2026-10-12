@@ -31,6 +31,7 @@ impl EditError {
             | Reason::TextTooLong { .. }
             | Reason::TransactionTooLarge { .. }
             | Reason::TreeDepthLimit { .. }
+            | Reason::PreflightDepth { .. }
             | Reason::MarksLimit
             | Reason::StyleLimit { .. } => crate::codes::LIMIT,
             Reason::PageSetup(_) => crate::codes::PAGE_SETUP_INVALID,
@@ -53,6 +54,10 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error("commit direct document edits before this composite edit")]
+    UncommittedEdit,
+    #[error("isolated edit preflight supports physical tree depth up to {max}")]
+    PreflightDepth { max: usize },
     #[error(transparent)]
     PageSetup(reprise_doc::page_setup::PageSetupError),
     #[error("alignment relation limit exceeded")]

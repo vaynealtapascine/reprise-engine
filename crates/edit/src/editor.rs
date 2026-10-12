@@ -180,9 +180,21 @@ impl Editor {
     /// document exactly as it was. `Store` indicates an unexpected failure
     /// while applying a prevalidated plan.
     pub fn apply(&mut self, transaction: &Transaction) -> Result<Applied, EditError> {
+        // Basic input and ancestry refusals must precede Loro's commit barrier.
         let plan = plan::plan(&self.doc, &self.schemas, transaction.commands())?;
         if plan.steps.is_empty() && plan.paste.is_none() {
             return Ok(Applied::default());
+        }
+        // Exercise every real capacity check against the resulting state,
+        // including implicit formatting transfers. No publication or undo
+        // origin is changed on refusal. The same peer allocates the same IDs
+        // on deterministic replay, with no intervening remote operation.
+        if plan.needs_trial(&self.doc).map_err(store)? {
+            let trial = Editor::new(
+                self.doc.fork_for_edit().map_err(store)?,
+                self.schemas.clone(),
+            );
+            trial.write(plan.clone())?;
         }
         let applied = self.write(plan);
         // Whatever happened, what was written is one step.
@@ -216,41 +228,47 @@ impl Editor {
             .map_err(store)?;
         let mut made_relations = Vec::new();
         let mut made_annotations = Vec::new();
-        for step in &plan.steps {
-            match step {
-                Step::AlignLine {
-                    node,
-                    at,
-                    alignment,
-                } => {
-                    made_relations.push(self.doc.align_line(*node, *at, *alignment).map_err(store)?)
+        for (index, step) in plan.steps.iter().enumerate() {
+            (|| -> Result<(), EditError> {
+                match step {
+                    Step::AlignLine {
+                        node,
+                        at,
+                        alignment,
+                    } => made_relations
+                        .push(self.doc.align_line(*node, *at, *alignment).map_err(store)?),
+                    Step::PinLine {
+                        node,
+                        at,
+                        edge,
+                        target,
+                        target_at,
+                        target_edge,
+                    } => made_relations.push(
+                        self.doc
+                            .pin_line(*node, *at, *edge, *target, *target_at, *target_edge)
+                            .map_err(store)?,
+                    ),
+                    Step::AddAnnotation { node, range, data } => made_annotations.push(
+                        self.doc
+                            .add_annotation_prechecked(*node, range.clone(), data)
+                            .map_err(|e| EditError {
+                                command: None,
+                                reason: Reason::from(e),
+                            })?,
+                    ),
+                    Step::AddRelation { new } => {
+                        self.step(step, &mut blocks, &relations).map_err(store)?;
+                        made_relations.extend(relations.get(*new).copied());
+                    }
+                    _ => self.step(step, &mut blocks, &relations).map_err(store)?,
                 }
-                Step::PinLine {
-                    node,
-                    at,
-                    edge,
-                    target,
-                    target_at,
-                    target_edge,
-                } => made_relations.push(
-                    self.doc
-                        .pin_line(*node, *at, *edge, *target, *target_at, *target_edge)
-                        .map_err(store)?,
-                ),
-                Step::AddAnnotation { node, range, data } => made_annotations.push(
-                    self.doc
-                        .add_annotation_prechecked(*node, range.clone(), data)
-                        .map_err(|e| EditError {
-                            command: None,
-                            reason: Reason::from(e),
-                        })?,
-                ),
-                Step::AddRelation { new } => {
-                    self.step(step, &mut blocks, &relations).map_err(store)?;
-                    made_relations.extend(relations.get(*new).copied());
-                }
-                _ => self.step(step, &mut blocks, &relations).map_err(store)?,
-            }
+                Ok(())
+            })()
+            .map_err(|mut error| {
+                error.command = plan.step_commands.get(index).copied();
+                error
+            })?;
         }
         let blocks = blocks
             .into_iter()
@@ -434,6 +452,10 @@ impl Editor {
 fn store(e: reprise_doc::DocError) -> EditError {
     EditError {
         command: None,
-        reason: Reason::Store(e.to_string()),
+        reason: match e {
+            reprise_doc::DocError::UncommittedEdit => Reason::UncommittedEdit,
+            reprise_doc::DocError::EditPreflightDepth(max) => Reason::PreflightDepth { max },
+            e => Reason::Store(e.to_string()),
+        },
     }
 }

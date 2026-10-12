@@ -4,6 +4,80 @@ use reprise::*;
 const SOURCE: &str = "00112233445566778899aabbccddeeff";
 const COPY: &str = "ffeeddccbbaa99887766554433221100";
 
+#[test]
+fn rewritten_source_envelope_cannot_contaminate_reopened_or_transitive_copy() {
+    let (bytes, mut original) = source();
+    let mut copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let saved = copy.save().unwrap().data.bytes;
+    let reopened = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "3".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    let transitive = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: "00000000000000000000000000000009".into(),
+                peer_id: "4".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    let since = original.sync_info().data.vector;
+    let n = original.state().unwrap().data.blocks[0].id.clone();
+    tx(
+        &mut original,
+        vec![Command::InsertText {
+            node: n,
+            at: 0,
+            text: "foreign ".into(),
+        }],
+    );
+    let packet = original
+        .sync_export(&Payload::new(SyncRequest { since: None }))
+        .unwrap();
+    let delta = original
+        .sync_export(&Payload::new(SyncRequest { since: Some(since) }))
+        .unwrap();
+    let legacy = original.export_updates().unwrap();
+    for mut receiver in [copy, reopened, transitive] {
+        let before = (
+            receiver.save().unwrap().data.bytes,
+            receiver.state().unwrap().data,
+            receiver.sync_info().data,
+        );
+        for mut forged in [packet.clone(), delta.clone()] {
+            forged.data.document_id = receiver.state().unwrap().data.document_id;
+            assert!(
+                receiver.sync_import(&forged).is_err(),
+                "rewritten envelope merged source history"
+            );
+        }
+        let mut forged = legacy.clone();
+        forged.data.document_id = receiver.state().unwrap().data.document_id;
+        assert!(receiver.import_updates(&forged).is_err());
+        assert_eq!(
+            (
+                receiver.save().unwrap().data.bytes,
+                receiver.state().unwrap().data,
+                receiver.sync_info().data
+            ),
+            before
+        );
+    }
+}
+
 fn workspace() -> Workspace {
     Workspace::new()
 }

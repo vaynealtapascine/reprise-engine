@@ -197,3 +197,37 @@ fn workspace_font_input_is_bounded_and_atomic() {
     let face = w.declare_font(&declaration(), ATKINSON).unwrap().data;
     assert_eq!(w.font_handles(&face), Some(1));
 }
+
+#[test]
+fn workspace_refresh_preserves_session_font_descriptors() {
+    let w = Workspace::new();
+    w.declare_font(&declaration(), ATKINSON).unwrap();
+    let mut s = create(&w, "00000000000000000000000000000001", "1");
+    let mut local = declaration();
+    local.data.weight = 700;
+    s.declare_font(&local, ATKINSON).unwrap();
+    text(&mut s, Some(vec!["Universal".into()]));
+    let n = s.state().unwrap().data.blocks[0].id.clone();
+    s.apply(&Payload::new(Transaction {
+        commands: vec![Command::FormatText {
+            node: n,
+            start: 0,
+            end: 6,
+            style: TextStyle {
+                weight: Some(700),
+                ..Default::default()
+            },
+        }],
+    }))
+    .unwrap();
+    lay_out(&mut s);
+    assert!(!codes(&s).contains(&"font.nearest".to_string()));
+    w.set_font_settings(&Payload::new(FontSettings::default()))
+        .unwrap();
+    lay_out(&mut s);
+    assert!(
+        !codes(&s).contains(&"font.nearest".to_string()),
+        "workspace replaced local descriptors: {:?}",
+        codes(&s)
+    );
+}

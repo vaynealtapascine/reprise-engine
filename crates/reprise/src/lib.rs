@@ -30,8 +30,8 @@ pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 pub const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_AWARENESS_BYTES: usize = 64 * 1024;
-/// The one bound on a sync packet's body, in bytes: 32 MiB (the frame header
-/// adds under a KiB). The app, the relay and
+/// The one bound on complete sync wire bytes, including the frame and both
+/// vectors: 32 MiB. The app, the relay and
 /// browser persistence should all import this number instead of carrying
 /// their own.
 ///

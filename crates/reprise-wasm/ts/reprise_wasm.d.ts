@@ -440,7 +440,7 @@ export type BlockStyle = {
                 }
 
                 /**
-                 * The one bound on a sync packet body, in bytes (32 MiB). The TypeScript
+                 * The one bound on complete sync wire bytes, in bytes (32 MiB). The TypeScript
                  * type `PacketBound` is this number as a literal. See the native constant
                  * `reprise::MAX_PACKET_BYTES` for the rationale.
                  */

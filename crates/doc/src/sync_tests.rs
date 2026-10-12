@@ -31,6 +31,57 @@ fn repack(header: &PacketHeader, body: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn maximum_vectors_use_the_total_wire_bound_at_exact_boundary() {
+    let vector: Vector = (1..=MAX_VECTOR_ENTRIES as u64).map(|p| (p, 1)).collect();
+    let header = PacketHeader {
+        format: SYNC_FORMAT,
+        features: Features::DELTA_JSON,
+        kind: PacketKind::Delta,
+        since: vector.clone(),
+        until: vector,
+    };
+    let overhead = 23 + 12 * (header.since.len() + header.until.len());
+    let mut body = vec![b' '; MAX_PACKET_BYTES - overhead];
+    let packet = super::sync::tests_support::try_write(&header, &body).unwrap();
+    assert_eq!(packet.len(), MAX_PACKET_BYTES);
+    assert_eq!(read_header(&packet).unwrap().0, header);
+    body.push(b' ');
+    assert!(matches!(
+        super::sync::tests_support::try_write(&header, &body),
+        Err(SyncError::Limit("packet bytes"))
+    ));
+    let mut oversized = packet;
+    oversized.push(0);
+    assert!(matches!(
+        read_header(&oversized),
+        Err(SyncError::Limit("packet bytes"))
+    ));
+}
+
+#[test]
+fn valid_bound_join_at_exact_wire_limit_imports() {
+    let source = Document::new(1).unwrap();
+    let id = "00112233445566778899aabbccddeeff";
+    source.bind_document_lineage(id).unwrap();
+    let node = source
+        .append_block(BlockKind::Paragraph, "", "boundary")
+        .unwrap();
+    source.commit();
+    let small = source.export_snapshot_packet().unwrap();
+    let (header, body) = read_header(&small).unwrap();
+    let overhead = small.len() - body.len();
+    let mut padded = body.to_vec();
+    padded.resize(MAX_PACKET_BYTES - overhead, b' ');
+    let packet = super::sync::tests_support::try_write(&header, &padded).unwrap();
+    assert_eq!(packet.len(), MAX_PACKET_BYTES);
+    let receiver = Document::new(2).unwrap();
+    receiver.bind_document_lineage(id).unwrap();
+    receiver.commit();
+    receiver.import_packet(&packet).unwrap();
+    assert_eq!(receiver.block(node).unwrap().text.to_string(), "boundary");
+}
+
+#[test]
 fn delta_converges_and_is_idempotent() {
     let (a, b, p) = pair();
     type_at(&b, p, 5, " world");

@@ -26,7 +26,7 @@ use crate::persist::MAX_PERSIST_OPS;
 /// The packet format this engine writes and reads. Format 1 is the facade's
 /// self-contained `SyncUpdate` snapshot, which stays readable there.
 pub const SYNC_FORMAT: u16 = 2;
-/// Largest packet body.
+/// Largest complete wire packet, including the frame and both vectors.
 pub const MAX_PACKET_BYTES: usize = 32 * 1024 * 1024;
 /// Most changes in one delta.
 pub const MAX_PACKET_CHANGES: usize = 1_000_000;
@@ -62,14 +62,17 @@ impl Features {
     pub const SNAPSHOT_LORO_1_16: Features = Features(1 << 1);
     /// A complete history in the same bounded JSON vocabulary as deltas.
     pub const SNAPSHOT_JSON: Features = Features(1 << 2);
+    /// A 32-byte durable document ID prefixes the JSON body.
+    pub const DOCUMENT_LINEAGE: Features = Features(1 << 3);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features = Features(1 | (1 << 2));
+    pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3));
 
-    const NAMES: [(Features, &'static str); 3] = [
+    const NAMES: [(Features, &'static str); 4] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),
+        (Features::DOCUMENT_LINEAGE, "document-lineage1"),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -272,6 +275,9 @@ fn write_vector(out: &mut Vec<u8>, vector: &[(u64, i32)]) -> Result<(), SyncErro
 /// features are checked before anything else, so a newer packet is refused
 /// with [`SyncError::Format`] or [`SyncError::Feature`], never misread.
 pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
+    if bytes.len() > MAX_PACKET_BYTES {
+        return Err(SyncError::Limit("packet bytes"));
+    }
     let mut r = Reader(bytes);
     if r.take(4)? != MAGIC {
         return Err(invalid("not a sync packet"));
@@ -295,7 +301,7 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         PacketKind::Delta => Features::DELTA_JSON,
         PacketKind::Snapshot => Features::SNAPSHOT_JSON,
     };
-    if features != needed {
+    if features.0 & !Features::DOCUMENT_LINEAGE.0 != needed.0 {
         return Err(invalid("packet features don't match its kind"));
     }
     let since = r.vector()?;
@@ -306,6 +312,7 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         return Err(SyncError::Limit("packet bytes"));
     }
     let body = r.take(len)?;
+    lineage_body(features, body)?;
     if !r.0.is_empty() {
         return Err(invalid("trailing bytes after the packet body"));
     }
@@ -327,11 +334,34 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
     Ok((header, body))
 }
 
+fn lineage_body(features: Features, body: &[u8]) -> Result<(Option<&str>, &[u8]), SyncError> {
+    if features.0 & Features::DOCUMENT_LINEAGE.0 == 0 {
+        return Ok((None, body));
+    }
+    let id = body
+        .get(..32)
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .filter(|id| crate::identity::valid(id))
+        .ok_or_else(|| invalid("invalid packet lineage"))?;
+    Ok((Some(id), body.get(32..).unwrap_or_default()))
+}
+
+/// Durable lineage carried inside the frame, independent of host DTO metadata.
+pub fn packet_lineage(bytes: &[u8]) -> Result<Option<&str>, SyncError> {
+    let (header, body) = read_header(bytes)?;
+    lineage_body(header.features, body).map(|(id, _)| id)
+}
+
 fn write_packet(header: &PacketHeader, body: &[u8]) -> Result<Vec<u8>, SyncError> {
-    if body.len() > MAX_PACKET_BYTES {
+    let size = 23usize
+        .saturating_add(
+            12usize.saturating_mul(header.since.len().saturating_add(header.until.len())),
+        )
+        .saturating_add(body.len());
+    if size > MAX_PACKET_BYTES {
         return Err(SyncError::Limit("packet bytes"));
     }
-    let mut out = Vec::with_capacity(body.len().saturating_add(64));
+    let mut out = Vec::with_capacity(size);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&header.format.to_le_bytes());
     out.extend_from_slice(&header.features.0.to_le_bytes());
@@ -382,10 +412,26 @@ impl Document {
         let json = self
             .doc
             .export_json_updates(&to_vv(&clamped), &to_vv(&until));
-        let body = serde_json::to_vec(&json).map_err(|e| SyncError::Store(e.to_string()))?;
+        let mut body = serde_json::to_vec(&json).map_err(|e| SyncError::Store(e.to_string()))?;
+        let lineage = self
+            .document_lineage()
+            .map_err(|e| SyncError::Store(e.to_string()))?;
+        if let Some(id) = &lineage {
+            let mut bound = Vec::with_capacity(body.len().saturating_add(32));
+            bound.extend_from_slice(id.as_bytes());
+            bound.append(&mut body);
+            body = bound;
+        }
         let header = PacketHeader {
             format: SYNC_FORMAT,
-            features: Features::DELTA_JSON,
+            features: Features(
+                Features::DELTA_JSON.0
+                    | if lineage.is_some() {
+                        Features::DOCUMENT_LINEAGE.0
+                    } else {
+                        0
+                    },
+            ),
             kind: PacketKind::Delta,
             since: clamped,
             until,
@@ -398,7 +444,9 @@ impl Document {
         let packet = self.export_delta(&[])?;
         let (mut header, body) = read_header(&packet)?;
         header.kind = PacketKind::Snapshot;
-        header.features = Features::SNAPSHOT_JSON;
+        header.features = Features(
+            Features::SNAPSHOT_JSON.0 | (header.features.0 & Features::DOCUMENT_LINEAGE.0),
+        );
         write_packet(&header, body)
     }
 
@@ -407,6 +455,13 @@ impl Document {
     /// nothing and reports nothing.
     pub fn import_packet(&self, bytes: &[u8]) -> Result<ChangeReport, SyncError> {
         let (header, body) = read_header(bytes)?;
+        let (lineage, body) = lineage_body(header.features, body)?;
+        let mine = self
+            .document_lineage()
+            .map_err(|e| SyncError::Store(e.to_string()))?;
+        if lineage != mine.as_deref() {
+            return Err(invalid("packet belongs to a different document lineage"));
+        }
         self.commit();
         self.import_delta(&header, body)
     }
@@ -762,6 +817,12 @@ fn op_len(content: &JsonOpContent) -> u64 {
 
 #[cfg(test)]
 pub(crate) mod tests_support {
+    pub(crate) fn try_write(
+        header: &super::PacketHeader,
+        body: &[u8],
+    ) -> Result<Vec<u8>, super::SyncError> {
+        super::write_packet(header, body)
+    }
     pub(crate) fn write(header: &super::PacketHeader, body: &[u8]) -> Vec<u8> {
         super::write_packet(header, body).unwrap()
     }

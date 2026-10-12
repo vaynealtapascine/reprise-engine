@@ -156,6 +156,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         paragraph_style_storm()?,
         plumbing_mark_facts()?,
         annotation_storm()?,
+        foreign_copy_snapshot()?,
     ])
 }
 
@@ -3181,4 +3182,30 @@ pub fn annotation_storm() -> Result<Fixture, DocError> {
         replica: Some(replica),
         ..Fixture::new("annotation_storm", doc, &[])
     })
+}
+
+/// Source history cannot enter an independent copy when the host rewrites
+/// its outer routing ID: the frame carries the durable source identity.
+pub fn foreign_copy_snapshot() -> Result<Fixture, DocError> {
+    let source = Document::new(OTHER_PEER)?;
+    define_styles(&source)?;
+    source.bind_document_lineage("00000000000000000000000000000001")?;
+    source.append_block(BlockKind::Paragraph, "body", "foreign SOURCE")?;
+    source.commit();
+    let doc = document()?;
+    doc.bind_document_lineage("00000000000000000000000000000002")?;
+    doc.append_block(BlockKind::Paragraph, "body", "COPY")?;
+    doc.commit();
+    let before = doc.try_export(reprise_doc::PersistenceMode::History)?;
+    let packet = source
+        .export_snapshot_packet()
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    if doc.import_packet(&packet).is_ok()
+        || doc.try_export(reprise_doc::PersistenceMode::History)? != before
+    {
+        return Err(DocError::Store(
+            "foreign copy snapshot was published".into(),
+        ));
+    }
+    Ok(Fixture::new("foreign_copy_snapshot", doc, &[]))
 }

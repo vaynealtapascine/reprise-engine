@@ -164,6 +164,14 @@ beside it. The relay and the browser store should both import the constant
 rather than carry their own number: the relay's 32 MiB already matches;
 browser persistence should raise from 16 MiB to the constant.
 
+Review correction: this is the complete wire-byte cap, not a body-only cap.
+Every framed and legacy import/export enforces it. The exact base frame cost
+is `23 + 12 * (since.len + until.len)`; durable document binding adds a
+32-byte prefix under sync bit 3 (`document-lineage1`). Fresh facade documents
+and copies persist `document1.id`; framed bytes and legacy snapshot state
+must agree with the receiver's durable ID before merge. Reopening and copying
+a copy retain this isolation. Old unmarked documents remain unmarked on read.
+
 ## 7. Facade review
 
 `docs/facade-review.md`, prose only.

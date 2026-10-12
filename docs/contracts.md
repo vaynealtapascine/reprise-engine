@@ -1,5 +1,56 @@
 # Frozen contracts
 
+## Review fixes: edit publication, lineage and transport bounds
+
+- Refused editor transactions, paste and selection replacement preserve authored
+  bytes, retained CRDT history, revision and undo/redo. The planner's structural
+  model for composite plans is followed by exhaustive same-peer execution on an isolated document,
+  including implicit formatting copies and the post-deletion paste checks.
+  Only a successful preflight is replayed through the live editor's undo origin.
+  A standalone plain text splice has no staging or implicit transfers; its
+  complete effect is checked by the paragraph model, retaining the typing path.
+  The model also accounts for explicit multi-command format actions. Composite
+  formatting transfers and paste/replacement require a committed store for
+  isolated preflight: direct core writes made after `Editor::new` must be
+  committed first. A refusal uses `edit.invalid-command` (Error) and publishes
+  none of those pending writes. Facade sessions maintain this boundary already.
+  Isolated preflight bounds physical content/range/relation tree depth, including
+  tombstones, at 64, before entering Loro's recursive snapshot codec; excess is
+  `edit.limit` (Error), with no mutation. The general editing ancestry bound and
+  the paragraph model's direct text path retain their existing limits.
+- `reprise::MAX_PACKET_BYTES` and the TypeScript `PacketBound` remain **33554432**.
+  This caps the complete `content.bytes` wire buffer on framed and legacy sync
+  imports and exports. Format-2 framing is exactly
+  `23 + 12 * (since.len + until.len)` bytes, plus a 32-byte lineage prefix when
+  `document-lineage1` is required. The body allowance is that constant minus
+  the actual overhead; there is no additional frame allowance. WASM checks
+  typed byte-buffer lengths before copying. Package, asset, font and awareness
+  bounds are separate, unchanged limits.
+- Fresh facade documents and copies store their lowercase 32-hex package ID in
+  `document1.id`. Reopening checks package identity against this durable ID.
+  Copies have a new ID and history. Legacy unmarked documents stay unmarked on
+  read; marker presence and value must match before legacy or framed sync merges.
+  Format-2 packets with a marker require sync feature bit 3,
+  `document-lineage1`, and prefix their JSON body with that ID. Older sync readers
+  refuse this feature. The metadata does not affect rendering and is retained
+  by old package readers as opaque Loro state; it needs no package rendering bit.
+  Hosts must still authenticate room routing: lineage is an isolation check,
+  not a signature against an attacker who forges the whole body.
+- Explicit session font declarations, imported font resources and restored
+  package pins take precedence over workspace faces with the same `FaceId`.
+  A redeclaration at one scope replaces descriptors at that scope; identical
+  workspace declarations remain deduplicated. Workspace refreshes update only
+  workspace-owned entries. Invalid WASM font setting keys are refused on the
+  copied object before mutation, preserving settings and active layout jobs.
+- Missing anchor targets expose `relation.missing-target` consistently in mark
+  facts and the relation-filtered diagnostics query.
+- Body, cell, note and float text share logical paragraph indent geometry,
+  including RTL mirroring, first-line continuation and bounded clamping.
+  Cell paragraph spacing collapses between paragraphs and is truncated at
+  fragment starts. Auxiliary contexts report `layout.paragraph-context`
+  (**Warning**) when authored keeps/widows/orphans cannot apply; notes and floats
+  also report it for outer paragraph spacing controlled by their region policy.
+
 These are the interfaces that parallel workstreams build against (decision 40, step 2),
 frozen on 2026-10-03. Each section says where the contract lives, what it guarantees, and
 which parts are deliberately left open for a workstream to fill in.
@@ -51,7 +102,7 @@ Codes in use:
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit` |
-| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.annotation-revision` |
+| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.paragraph-context`, `layout.annotation-revision` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit`, `style.deleted`, `style.rename-cycle` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |

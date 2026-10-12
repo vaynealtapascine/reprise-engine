@@ -433,6 +433,12 @@ fn refresh_guides(doc: &Document, snapshot: &mut LayoutSnapshot) {
         codes::ALIGNMENT_OUTSIDE,
         codes::ALIGNMENT_CONFLICT,
         codes::ALIGNMENT_INVALID,
+        codes::RELATION_MISSING_TARGET,
+        codes::RELATION_TARGET_DELETED,
+        codes::RELATION_NO_MATCH,
+        codes::RELATION_BAD_TARGET,
+        codes::RELATION_NO_FRAME,
+        codes::RELATION_SNAPSHOT_UNAVAILABLE,
     ];
     for (id, mut guide) in guides {
         // The first diagnostic of the pin, in report order, explains it.

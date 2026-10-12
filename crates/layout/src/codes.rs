@@ -3,6 +3,9 @@
 
 use reprise_diag::Code;
 
+/// Paragraph properties that an auxiliary composition context cannot honour.
+pub const PARAGRAPH_CONTEXT: Code = Code::new("layout.paragraph-context");
+
 /// Merged or unreadable page properties could not be applied.
 pub const PAGE_SETUP_INVALID: Code = Code::new("layout.page-setup-invalid");
 

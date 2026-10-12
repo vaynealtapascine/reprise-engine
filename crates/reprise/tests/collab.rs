@@ -323,7 +323,10 @@ fn deltas_converge_and_report_changes() {
     let packet = delta(&b, &a);
     assert_eq!(packet.data.kind, SyncKind::Delta);
     assert_eq!(packet.data.format, 2);
-    assert_eq!(packet.data.features, vec!["delta-json".to_owned()]);
+    assert_eq!(
+        packet.data.features,
+        vec!["delta-json".to_owned(), "document-lineage1".to_owned()]
+    );
     assert!(packet.data.content.bytes.len() < 1024);
     let report = a.sync_import(&packet).unwrap().data;
     assert!(report.changed);
@@ -726,7 +729,28 @@ fn three_peer_partition_rejoin_soak() {
 /// the packet bytes with this golden. Re-record with REPRISE_RECORD_SYNC=1.
 #[test]
 fn delta_packet_bytes_are_pinned() {
-    let mut s = create("1");
+    // Retain the exact unbound legacy wire golden. New documents explicitly
+    // use the versioned lineage feature and have their own pin below.
+    let legacy = reprise_doc::Document::new(1).unwrap();
+    let bytes = reprise_format::Package::new(
+        &legacy,
+        reprise_format::DocumentId([
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ]),
+        reprise_doc::PersistenceMode::History,
+    )
+    .unwrap()
+    .save()
+    .unwrap();
+    let mut s = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "1".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
     let p = paragraph(&mut s, "parity");
     type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
     let packet = s
@@ -747,6 +771,36 @@ fn delta_packet_bytes_are_pinned() {
     }
     assert_eq!(hex, include_str!("sync_delta.hex").trim());
     // The same packet joins a fresh replica.
+    let mut fresh = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "2".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    fresh.sync_import(&Payload::new(packet)).unwrap();
+    assert_eq!(blocks(&fresh), blocks(&s));
+}
+
+#[test]
+fn lineage_delta_packet_bytes_are_pinned() {
+    let mut s = create("1");
+    let p = paragraph(&mut s, "parity");
+    type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
+    let packet = s
+        .sync_export(&Payload::new(SyncRequest {
+            since: Some(Vec::new()),
+        }))
+        .unwrap()
+        .data;
+    let hex: String = packet
+        .content
+        .bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(hex, include_str!("sync_lineage_delta.hex").trim());
     let mut fresh = create("2");
     fresh.sync_import(&Payload::new(packet)).unwrap();
     assert_eq!(blocks(&fresh), blocks(&s));

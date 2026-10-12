@@ -34,7 +34,7 @@ pub const MAX_TRANSACTION_BYTES: usize = 16 << 20;
 /// `TreeDepthLimit` error (and `edit.limit` diagnostic), never silent truncation.
 pub const MAX_ANCESTORS: usize = 1024;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Step {
     SetPageSetup(reprise_doc::page_setup::PageSetupPatch),
     SetAlignment {
@@ -160,7 +160,7 @@ pub(crate) enum Step {
 }
 
 /// A block the transaction creates.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Created {
     /// Staged before the steps run, then placed.
     Staged(Box<NewBlock>),
@@ -168,7 +168,7 @@ pub(crate) enum Created {
     Split,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Plan {
     pub paste: Option<crate::paste::Prepared>,
     /// The blocks the transaction creates, in command order. Staged ones are
@@ -176,12 +176,47 @@ pub(crate) struct Plan {
     pub created: Vec<Created>,
     pub relations: Vec<Relation>,
     pub steps: Vec<Step>,
+    /// Command owning each write, including implicit structural effects.
+    pub step_commands: Vec<usize>,
     /// The commands' effects, with staged blocks as indices; the editor
     /// resolves them once those have IDs.
     pub effects: Vec<PlannedEffect>,
 }
 
-#[derive(Debug)]
+impl Plan {
+    /// Explicit formatting counts are fully modelled. Structural copies can
+    /// also write reset/copy actions; exercise those on the resulting state.
+    pub(crate) fn needs_trial(&self, doc: &Document) -> Result<bool, DocError> {
+        if self.paste.is_some() {
+            return Ok(true);
+        }
+        let explicit = self
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::FormatText { .. }));
+        for step in &self.steps {
+            let node = match step {
+                Step::Split { node, .. } | Step::MoveCopy { node, .. } => node,
+                Step::Join { first, second } => {
+                    if explicit
+                        || doc.text_format_capacity(*first)?.0 != 0
+                        || doc.text_format_capacity(*second)?.0 != 0
+                    {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+                _ => continue,
+            };
+            if explicit || doc.text_format_capacity(*node)?.0 != 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum PlannedEffect {
     Text {
         node: NodeId,
@@ -293,6 +328,7 @@ pub(crate) fn plan(
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
+        model.plan.step_commands.resize(model.plan.steps.len(), i);
     }
     Ok(model.plan)
 }
@@ -1154,7 +1190,11 @@ impl Model<'_> {
 
 impl From<DocError> for Reason {
     fn from(e: DocError) -> Reason {
-        Reason::Store(e.to_string())
+        match e {
+            DocError::UncommittedEdit => Reason::UncommittedEdit,
+            DocError::EditPreflightDepth(max) => Reason::PreflightDepth { max },
+            e => Reason::Store(e.to_string()),
+        }
     }
 }
 

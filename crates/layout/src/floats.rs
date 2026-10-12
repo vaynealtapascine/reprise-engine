@@ -2,7 +2,6 @@
 use crate::regions::{Plan, ensure_page, prepare};
 use crate::template::ResolvedTemplate;
 use crate::{Diagnostic, Engine, LayoutSnapshot, LineRef, Subject, codes};
-use reprise_compose::Measure;
 use reprise_diag::Severity;
 use reprise_doc::{Document, FloatSide, Param, Relation, RelationId};
 use reprise_geom::{Length, Point, Rect};
@@ -109,9 +108,13 @@ impl Floats {
                     out.diagnostics.extend(candidate_diagnostics);
                     return;
                 };
+                prepared.diagnose_context(true, &mut candidate_diagnostics);
+                if prepared.indents(width).1 {
+                    candidate_diagnostics.push(crate::flow::indent_clamped(&Subject::Node(owner)));
+                }
                 let composed = prepared.compose(
                     engine,
-                    &Measure(width),
+                    &prepared.paragraph_measure(width, 0),
                     index,
                     0,
                     Length::ZERO,
