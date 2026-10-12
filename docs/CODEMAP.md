@@ -4,12 +4,17 @@
 
 | Crate | Files | Responsibility |
 | --- | --- | --- |
-| doc | `src/identity.rs`, `src/lib.rs`, `src/sync.rs`, `src/sync_tests.rs` | Durable document binding, same-peer edit trial replicas, versioned lineage prefix and total wire limits |
-| edit | `src/{editor,plan,paste,replace}.rs`, `tests/refusal_atomicity.rs` | Exhaustive isolated execution preflight and command-indexed refusal; retained history/undo regression matrix |
+| doc | `src/identity.rs`, `src/lib.rs`, `src/style/store.rs`, `src/sync.rs`, `src/sync_tests.rs` | Durable document binding, read-pure lookup guards, committed/bounded same-peer edit trials, versioned lineage prefix and total wire limits |
+| edit | `src/{editor,error,plan,paste,replace}.rs`, `tests/refusal_atomicity.rs` | Isolated execution for implicit capacity effects, typed staging preconditions and command-indexed refusal; retained history/undo matrix |
 | font / reprise | `font/src/lib.rs`, `reprise/src/session.rs`, `session/collab.rs`, `reprise/tests/{import_copy,packet_bound,plumbing_edit,plumbing_marks,workspace_fonts}.rs` | Face provenance and scope precedence; durable copy isolation; transport, refusal and mark regressions |
 | layout | `src/flow.rs`, `src/flow/keeps.rs`, `src/{table_flow,notes,floats,codes}.rs`, `src/relations/alignment.rs` | Shared logical indent measure, cell spacing, unsupported auxiliary property diagnostics, missing-target explanations |
 | reprise-wasm | `src/lib.rs`, `ts/smoke.cjs` | Strict snapshotted font field validation and pre-copy sync byte bound |
 | fixtures | `src/hostile.rs`, `tests/{hostile,paragraph_styles,regions_geometry}.rs`, `tests/snapshots/hostile__{content_,}foreign_copy_snapshot.snap` | Independent copy history attack, cell/note/float geometry and two new goldens |
+
+New multi-write commands must model every fallible capacity effect or join
+`Plan::needs_trial` for isolated execution. The copy/transfer cases include reset
+format actions as well as explicit formatting. Lists, inline and section commands
+should use that same publication boundary when integrated.
 
 Each crate lives in `crates/<name>` and is published to the workspace as `reprise-<name>`.
 The table is in crate dependency order. File paths are relative to that crate unless they

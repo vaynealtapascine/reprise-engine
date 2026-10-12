@@ -407,11 +407,16 @@ impl Document {
             if !self.has_root(root) {
                 continue;
             }
-            let nodes = self.tree(root).get_nodes(true);
-            let parents: std::collections::BTreeMap<_, _> =
-                nodes.iter().map(|n| (n.id, n.parent)).collect();
-            for node in &nodes {
-                let mut parent = node.parent;
+            let tree = self.tree(root);
+            // Node listings also compute sibling indices, which is quadratic
+            // in a wide range tree. Only physical IDs and parents are needed.
+            let parents: std::collections::BTreeMap<_, _> = tree
+                .nodes()
+                .into_iter()
+                .map(|id| (id, tree.parent(id).unwrap_or(loro::TreeParentId::Root)))
+                .collect();
+            for &first in parents.values() {
+                let mut parent = first;
                 let mut depth = 0usize;
                 while let loro::TreeParentId::Node(id) = parent {
                     if depth >= MAX_DEPTH {

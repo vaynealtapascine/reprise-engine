@@ -1,0 +1,191 @@
+# Review fixes 1 handoff
+
+Worktree: `F:/reprise-wt/eng-fixes1`; branch: `ws/review-fixes-1`; base: `f13a4ee`.
+Part A is implemented. Part B stops at its committed design addendum under the
+brief's explicit redesign clause; findings 8–10 are not claimed fixed.
+
+## 1. Summary by decision
+
+- Decisions 29/37: refused composite edits and selection replacement execute
+  implicit capacity effects on an isolated same-peer replica before publication.
+  Basic malformed input and ancestry checks run first. Refusals preserve bytes,
+  retained history, revision and undo/redo; late errors retain their command index.
+- Decisions 07/29: fresh documents and independent copies carry durable document
+  identity. Source snapshots, deltas and legacy updates cannot merge into a copy
+  by rewriting only the outer packet ID, including after reopen/transitive copy.
+- Decisions 37/38: the existing 33554432-byte cap covers total sync wire bytes;
+  WASM checks typed-buffer size before copying. Invalid font-setting keys cannot
+  mutate settings or stale an existing job. Explicit session font declarations
+  survive workspace refresh.
+- Decisions 19/37: missing anchor diagnostics reach mark explanations and filtered
+  queries. Shared integer paragraph measures honor logical indents in table cells,
+  notes and floats. Unsupported context properties produce a warning.
+- Decisions 05/07: the Part B addendum specifies durable style identity, whole
+  authored graph duplication and required compatibility signaling. It records
+  the unresolved legacy built-in ambiguity and concurrent migration problem.
+
+## 2. Commits
+
+- `bda0d74 fix(engine): preflight refused edits and bind independent copies`
+- `dc307c8 docs(styles): specify durable identity migration and unresolved compatibility`
+- A final checkpoint contains the linear parent scan, documentation corrections
+  and this report; obtain its hash with `git log --oneline f13a4ee..HEAD`.
+
+Every commit has the requested GPT-6.1-Sol coauthor trailer. Nothing was pushed.
+
+## 3. Files touched
+
+Paths below are relative to the worktree. No app files or `PROGRESS.md` changed.
+The brief identifies affected subsystems rather than a closed file allowlist.
+Supporting edits beyond its explicitly named files are listed in full here.
+
+- `crates/doc/src/{identity.rs,lib.rs,style/store.rs,sync.rs,sync_tests.rs}`:
+  durable binding, pure lookup guards, edit staging and packet boundaries.
+- `crates/edit/src/{editor.rs,error.rs,paste.rs,plan.rs,replace.rs}` and
+  `crates/edit/tests/refusal_atomicity.rs`: publication and refusal coverage.
+- `crates/font/src/lib.rs`: additive registered-face iterator for provenance.
+- `crates/layout/src/{codes.rs,flow.rs,flow/keeps.rs,table_flow.rs,notes.rs,floats.rs,relations/alignment.rs}`:
+  shared geometry and context/anchor diagnostics.
+- `crates/fixtures/src/hostile.rs`, `crates/fixtures/tests/{hostile.rs,paragraph_styles.rs,regions_geometry.rs}`,
+  and the two new foreign-copy snapshots listed below.
+- `crates/reprise/src/{lib.rs,session.rs,session/collab.rs}`;
+  `crates/reprise/tests/{collab.rs,hostile_peer.rs,import_copy.rs,packet_bound.rs,plumbing_edit.rs,plumbing_marks.rs,workspace_fonts.rs,sync_lineage_delta.hex}`.
+- `crates/reprise-wasm/src/lib.rs`, `crates/reprise-wasm/ts/{smoke.cjs,reprise_wasm.d.ts}`.
+- `docs/{CODEMAP.md,contracts.md,collaboration.md,plumbing.md,paragraph-styles.md,review-fixes-1-report.md}`.
+
+No dependencies, DTO shapes, API version, package feature mask or PacketBound
+literal changed. Generated WASM declarations change only the cap documentation.
+
+## 4. Design choices and narrowed behavior
+
+The small planner still handles completely modeled effects without copying the
+document, including ordinary typing. Paste, replacement and structural formatting
+transfers additionally execute the actual writes in isolation and replay successful
+plans locally, preserving undo origin and deterministic ID allocation. Trial
+history is never merged into the live editor.
+
+Loro's fork implicitly commits pending raw writes. Composite staging therefore
+refuses an uncommitted native store rather than publishing those writes during a
+failed edit. Native callers mutating `Editor::document()` directly must commit
+first; facade sessions already maintain that boundary. Staging checks physical
+content/range/relation tree ancestry, including tombstones, at depth 64 before
+Loro's recursive codec; deeper trees produce `edit.limit`. Ordinary model-only
+editing retains its previous ancestry bound. The final parent scan avoids sibling
+index computation, which was quadratic for a wide formatting tree.
+
+Copy isolation compares durable identity before merging either content or history.
+It does not require an ancestor list: any foreign lineage is refused. Old unmarked
+documents remain unmarked when read. Host-authenticated room routing is still
+needed against an attacker rewriting the entire payload; lineage is not a signature.
+
+Session faces have explicit local provenance, including restored pins/imported
+resources. Workspace refresh only replaces workspace-owned faces. A same-scope
+redeclaration replaces descriptors; an identical workspace face is deduplicated.
+
+Cells support spacing collapse and shared indents. Notes/floats honor indents but
+warn about unsupported spacing/keeps. Auxiliary properties are bounded and
+diagnosed instead of silently borrowing body pagination policy.
+
+Part B needs a coordinated migration: legacy undefined built-in names and intended
+built-ins have the same stored representation, and eager materialization changes
+pinned CRDT IDs/revisions. The addendum names the migration policy and concurrency
+decisions still required. Bit 18 remains reserved and unused.
+
+## 5. Public API and diagnostics
+
+Additive native APIs: `Document::{document_lineage,bind_document_lineage,
+fork_for_edit,check_edit_preflight}`, `sync::packet_lineage`,
+`Features::DOCUMENT_LINEAGE`, and `FontStore::registered_ids`.
+New typed refusals are `DocError::{UncommittedEdit,EditPreflightDepth}` and
+`Reason::{UncommittedEdit,PreflightDepth}`. They use existing `edit.invalid-command`
+and `edit.limit` Error codes: a refused edit is omitted entirely.
+
+New `layout.paragraph-context` is Warning because requested spacing/keep policy
+does not apply in that composition context. Existing `relation.missing-target`
+and `layout.indent-clamped` codes are reused, not renamed.
+
+## 6. Snapshots
+
+All existing layout/content snapshots and `sync_delta.hex` remain unchanged.
+Two new fixture goldens were recorded and read:
+
+- `hostile__foreign_copy_snapshot.snap`: complete geometry/report for a receiver
+  that refuses another durable document's snapshot; original receiver text remains.
+- `hostile__content_foreign_copy_snapshot.snap`: content-only display for the same
+  refused merge. Fixture count increases from 102 to 103.
+
+`sync_lineage_delta.hex` is a separate new wire golden for the scoped feature;
+native and WASM tests pin it without rewriting the unmarked legacy golden.
+
+## 7. Dependencies
+
+None added; no license changes.
+
+## 8. Contract and stored-form changes, separately
+
+1. Durable metadata: fresh facade documents/copies author lowercase 32-hex
+   `document1.id`. Package ID agreement is checked on reopen. Reads do not add it.
+   The root is opaque preserved Loro metadata, with no rendering semantics, so no
+   package rendering bit was allocated.
+2. Sync format-2 extension: required sync bit 3, `document-lineage1`, prefixes the
+   JSON body with 32 ASCII hex bytes. Existing fixed framing stays unchanged;
+   unaware sync readers refuse the required bit. Legacy binary imports compare
+   stored lineage before merge too.
+3. Total transport ceiling: `MAX_PACKET_BYTES`/`PacketBound` stay 33554432; the
+   ceiling includes vectors, fixed frame and optional prefix on all facade sync
+   imports/exports. No extra 1 MiB frame allowance or 64 MiB legacy allowance.
+4. Edit staging preconditions: committed native state and physical tree depth 64
+   for isolated preflight, with typed refusal and no publication, as detailed above.
+5. Font precedence: explicit session declarations/imported/restored faces take
+   precedence over the workspace refresh at the same FaceId.
+6. Proposed only: stable style IDs, graph remapping and required package bit 18.
+   No Part B stored migration or feature activation was implemented.
+
+The first five are documented in `contracts.md`; the sixth is the dedicated
+`paragraph-styles.md` addendum. Integrators should review the staging restriction
+and metadata compatibility choice explicitly.
+
+## 9. Known gaps and later consumers
+
+Handoff for PROGRESS: Part A findings 1–7 are implemented and regression-covered.
+Part B findings 8–10 remain open. Resolve legacy built-in adoption semantics,
+concurrent first-patch identity and queued old-writer updates before implementing
+the addendum. A naive name-key rename or clipboard flattening fix is insufficient.
+
+Lists, inline objects and sections should model all fallible writes or join
+`Plan::needs_trial` before publication. The CODEMAP documents this extension point.
+Lists can later reference durable style IDs for levels; headings need an authored
+semantic role; table cells/headers/footers share the same inherited style graph.
+Partial clipboard/HTML remain explicit appearance projections, while whole-document
+copy must export/import the complete authored graph.
+
+App seam: existing batch/paste/replace methods and `expected_revision` stay in use.
+Existing State revision/undo fields expose atomic outcomes. Existing mark-facts
+and `diagnostics_for` queries now include missing-target explanations. Existing
+`set_font_settings`, `declare_font` and layout-job calls preserve their DTOs.
+There is no new app command required by Part A. The app findings remain out of scope.
+
+## 10. Verification
+
+Before-fix failures were observed in the original task activity, before the
+corresponding production changes:
+
+| Finding | Regression and observed failure |
+| --- | --- |
+| 1 | `refusal_atomicity`: late join and replacement changed frozen history/undo state |
+| 2 | `rewritten_source_envelope_cannot_contaminate_reopened_or_transitive_copy`: rewritten envelope merged source history |
+| 3 | `legacy_and_framed_import_refuse_wire_limit_before_parsing`: got `bindings.store`, expected `bindings.limit` |
+| 4 | WASM smoke extra font-setting key: missing expected exception; prebuilt-package probe also showed the active job became stale |
+| 5 | `workspace_refresh_preserves_session_font_descriptors`: unexpected `font.nearest` after workspace refresh |
+| 6 | `deleted_anchor_target_explains_missing_mark_and_query`: explanation was None instead of `relation.missing-target` |
+| 7 | `table_cell_uses_resolved_paragraph_indents`: first-line indent was 0pt instead of 15pt |
+
+The later refusal matrix exercises malformed/stale batches across insertion,
+deletion, split, join, move and style definition, plus malformed paste/replacement
+and text/HTML replacement. Native tests cover late capacity, pending raw writes,
+read-root purity and bounded deep staging. Packet tests cover exact total cap,
+cap+1 and both maximum-length version vectors. Part B's acceptance cases remain
+specified in the addendum rather than implemented tests.
+
+Final gate results and verbatim tails will be appended after all running checks
+finish. Logs are under `G:/reprise-target/eng-fixes1/`.
