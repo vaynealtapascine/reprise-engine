@@ -429,3 +429,62 @@ fn fifty_thousand_objects_in_one_paragraph_lay_out_in_one_pass() {
         }
     }
 }
+
+#[test]
+fn incremental_layout_follows_fields_when_text_moves_them_between_pages() {
+    // Typing above a page number moves it to another page; the cached
+    // composition of its paragraph must not keep the old page's text.
+    let (engine, doc, _) = inline::page(100, 36, WritingMode::default()).unwrap();
+    let head = inline::paragraph(&doc, vec![Part::Text("A short heading.")]).unwrap();
+    let numbered = inline::paragraph(
+        &doc,
+        vec![
+            Part::Text("Page "),
+            Part::Object(inline::page_number()),
+            Part::Text(" of "),
+            Part::Object(reprise_doc::InlineObject::field("page-count")),
+            Part::Text(". Then a good deal of text so that the paragraph runs on."),
+        ],
+    )
+    .unwrap();
+    let tail = inline::paragraph(&doc, vec![Part::Text("The very last paragraph.")]).unwrap();
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let texts = |s: &LayoutSnapshot| -> Vec<String> {
+        s.block(numbered)
+            .unwrap()
+            .lines
+            .iter()
+            .flat_map(|l| l.atoms.iter().map(|a| a.text()))
+            .collect()
+    };
+    let mut seen = Vec::new();
+    for step in 0..6 {
+        if step > 0 {
+            // Each edit adds a line above the numbered paragraph.
+            let at = doc.block(head).unwrap().text.len();
+            doc.block(head)
+                .unwrap()
+                .text
+                .insert(at, " More heading words to wrap.")
+                .unwrap();
+        }
+        doc.commit();
+        let incremental = session.layout(&doc).unwrap();
+        let full = engine.layout(&doc);
+        assert_eq!(incremental, full, "step {step}");
+        seen.push(texts(&full));
+    }
+    assert!(
+        seen.windows(2).any(|w| w[0] != w[1]),
+        "the fields moved: {seen:?}"
+    );
+    // And removing the text brings the fields back.
+    let len = doc.block(head).unwrap().text.len();
+    doc.block(head).unwrap().text.delete(16..len).unwrap();
+    doc.commit();
+    let back = session.layout(&doc).unwrap();
+    assert_eq!(back, engine.layout(&doc));
+    assert_eq!(texts(&back), seen[0]);
+    let _ = tail;
+}
