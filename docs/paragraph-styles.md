@@ -306,3 +306,112 @@ heading role). Each step names the enum or table the property joins.
 A note on clearing: clearing a property of a style whose base is a built-in
 reveals the built-in's value (that is what "inherit" means for that layer);
 set the property explicitly to turn a built-in's keep off.
+
+## Review addendum: durable identity and compatibility (proposed, 2026-10-12)
+
+This is a design addendum, not an implemented stored form. Review-fixes Part A
+is independent of it. Part B needs a wider migration design than a local rename
+patch, so implementation stops at this addendum as the fix brief permits.
+Required package bit **18** remains reserved for this work; bits 14–17 belong
+to lists, inline, annotations and sections. No read may allocate identity,
+materialise a built-in definition, or set a package feature bit.
+
+### The compatibility ambiguity that must be resolved
+
+Two documents can have the same authored form: a paragraph names `Heading 1`,
+there is no definition of that name, and the required paragraph-style bit is
+absent. One was authored before built-ins existed and rendered with the base
+style; the other was authored by the current paragraph-style writer and was
+intended to render as a built-in heading. Package format version 1 has no
+mandatory writer-version or built-in-semantics marker that distinguishes them.
+The test `format::container::paragraph_style_tests::
+old_reader_refuses_paragraph_styles_even_after_undo_but_not_untouched_documents`
+explicitly demonstrates that the latter still has no required style signal.
+
+Consequently, neither always enabling nor always disabling built-ins on an
+unmarked read can preserve both histories' intended appearance. Materialising
+definitions on open violates read purity. Materialising them on every current
+authoring path adds CRDT operations and changes revision/node identities in
+`paragraph_styles__heading_kept_with_next.snap` and
+`hostile__paragraph_style_storm.snap`, even if the geometry is the same. Those
+existing goldens may not be changed under this brief. No such snapshot change
+has been made here.
+
+The integrator must select an explicit migration policy for ambiguous v1 files:
+use legacy name resolution, use an externally established writer version, or
+require a user/host-authored adoption operation that preserves current built-in
+appearance. An unresolved name alone is insufficient evidence of an opt-in.
+New authored references must carry a durable, versioned opt-in and require bit
+18 (and a corresponding sync feature), so an older reader refuses them.
+
+### Identity owns properties; names select and describe it
+
+Introduce an opaque `StyleId`, scoped to the document, separate from its display
+name. A live record's properties, parent reference, base kind and deletion flag
+belong to that ID. Renaming changes a label/alias entry, never copies properties.
+Deletion retains the record and parent edge; later property edits cannot revive
+it implicitly. Reusing a name for a different style must not reuse its ID.
+
+Use flat per-property storage (for example a version-2 style root with
+`<property>/<id>` keys), retaining the existing independent-property CRDT merge
+rule. Keep **base kind** (`defined`, legacy definition, or a pinned built-in
+version) separate from **lifecycle** (live/deleted). Current `state/<name>`
+overloads these facts, so copying an effective `StyleRecord` cannot recover the
+full authored distinction reliably. Parent edges and block references bind to
+IDs; aliases are retained selectors pointing to IDs, not new property owners.
+
+Legacy records need a deterministic compatibility identity view that two peers
+opening the same file compute identically without writing. The first authored
+adoption must preserve concurrent first-property patches, which current tests
+require to merge even when the style did not previously have a definition.
+Simply allocating an independent ID on each peer's first touch loses one patch.
+Likewise, moving legacy properties into a new record by copying them can race
+with an already-open legacy peer's update. Specify adoption and queued-v1-sync
+handling before replacing the existing keys.
+
+Concurrent label changes use the CRDT's deterministic conflict rule. A label
+collision must preserve both identities and their data, with an unambiguous
+selector/query result or a deterministic disambiguated display name. The current
+name-only commands cannot silently select a different identity after a collision
+or name reuse. Add an optional identity selector to the facade commands and an
+identity field to style query results if needed; append fields and regenerate
+both declaration files. Legacy name selectors remain supported through aliases.
+
+### Copy the authored graph, not clipboard appearance
+
+Add a bounded authored-graph export/import boundary in `reprise-doc`. It carries
+all records, parent edges, aliases, tombstones, base kinds and unreadable retained
+values, including unused records. A duplicate allocates fresh identities and
+remaps every internal edge/reference consistently. It retains the source's
+built-in semantic version and authored patches rather than treating every
+non-live built-in as a deletion.
+
+`Workspace::import_copy` must install that graph independently of the clipboard
+projection. Fragment style materialisation remains appropriate for partial
+clipboard appearance, but must not overwrite the duplicate's remapped graph or
+detach a renamed parent. This requires coordinating block/override/parent
+references in `doc::{lib,style,fragment}`, editor paste/style commands, copy
+plumbing, package detection, sync negotiation and the facade query cache. A
+patch only to `rename_named_style` or `style_names` does not cover those seams.
+
+### Acceptance tests for the dedicated migration work
+
+- Rename versus a different-property patch, rename versus deletion, and competing
+  renames converge in both delivery orders while retaining each authored effect.
+- Two peers' first patches to the same legacy/undefined style both survive
+  adoption; queued v1 updates have a documented, tested compatibility outcome.
+- Empty and populated duplicates retain unused aliases and tombstones; changing
+  a renamed parent afterwards changes the same inheriting styles in both copies.
+- Applying an untouched built-in declares bit 18 and an old-known-mask reader
+  refuses it; legacy undefined names follow the selected migration policy.
+- Reads preserve stored bytes/revision and never set bit 18. Explicit definitions
+  and all existing geometry/content goldens remain unchanged.
+- Undo/redo retains identity through rename, deletion, name reuse and copy. Cyclic,
+  malformed and over-limit graphs remain bounded and diagnosed deterministically.
+
+Lists can reference style IDs for their levels while keeping labels editable.
+Headings should eventually derive their semantic role from an authored role or
+pinned built-in identity rather than a mutable display name. Headers/footers and
+table cells share the same parent graph and context resolution. The style menu
+uses stable identity for selection and display names for presentation; partial
+clipboard and HTML remain explicit appearance projections.
