@@ -992,9 +992,17 @@ impl Prepared {
     /// says they had to be reduced (`layout.indent-clamped`).
     pub(crate) fn indents(&self, width: Length) -> (Indents, bool) {
         Indents::bounded(
-            self.style.indent_start,
+            if self.marker.is_some() {
+                Length::ZERO
+            } else {
+                self.style.indent_start
+            },
             self.style.indent_end,
-            self.style.indent_first,
+            if self.marker.is_some() {
+                Length::ZERO
+            } else {
+                self.style.indent_first
+            },
             width,
         )
     }
@@ -1164,7 +1172,7 @@ impl Prepared {
                         }
                     }
                 });
-                first.marker = crate::list_marker::place(marker, first, edges);
+                first.marker = crate::list_marker::place(engine, marker, first, edges);
             }
         }
         Composed {

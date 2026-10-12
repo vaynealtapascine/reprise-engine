@@ -655,6 +655,9 @@ fn marker_for(
             style: styles.get(first),
             descriptors: descriptors.get(first).copied(),
             color: paint.get(first).map_or([0, 0, 0, 255], |p| p.color),
+            decoration: paint
+                .get(first)
+                .map_or(reprise_doc::Decoration::default(), |p| p.decoration),
             family_chains,
         },
         &mut shaping_notes,

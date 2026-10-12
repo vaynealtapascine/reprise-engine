@@ -11,6 +11,8 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<Array<OutlineEntry>>")]
+    pub type OutlinePayload;
     #[wasm_bindgen(typescript_type = "Payload<ImportCopy>")]
     pub type ImportCopyPayload;
     #[wasm_bindgen(typescript_type = "Payload<Batch>")]
@@ -541,6 +543,9 @@ impl WasmDocument {
     }
     pub fn export(&self, request: &ExportFormatPayload) -> Result<ExportedPayload, JsValue> {
         Ok(encode(self.inner.export(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn outline(&self) -> Result<OutlinePayload, JsValue> {
+        Ok(encode(self.inner.outline())?.unchecked_into())
     }
     pub fn reading_order(&self) -> Result<ListReadingStepPayload, JsValue> {
         Ok(encode(self.inner.reading_order())?.unchecked_into())

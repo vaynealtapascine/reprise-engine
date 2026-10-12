@@ -155,6 +155,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         font_host_oblique()?,
         paragraph_style_storm()?,
         plumbing_mark_facts()?,
+        list_semantics_storm()?,
     ])
 }
 
@@ -3064,4 +3065,77 @@ pub fn plumbing_mark_facts() -> Result<Fixture, DocError> {
             "relation.missing-target",
         ],
     ))
+}
+
+/// Numbering under hostile authored state: enormous counters and indents,
+/// inherited cycles, dangling definitions, and concurrent item levels.
+pub fn list_semantics_storm() -> Result<Fixture, DocError> {
+    use reprise_doc::{LevelDef, ListDefinition, NumberFormat, Role};
+    let doc = document()?;
+    let first = doc.append_block(BlockKind::Paragraph, "body", "Numbered heading")?;
+    doc.set_role(first, Role::Heading(2))?;
+    let def = ListDefinition {
+        base: None,
+        levels: [(
+            0,
+            LevelDef {
+                format: Some(NumberFormat::UpperRoman),
+                start: Some(i64::MAX),
+                indent: Some(Length::MAX),
+                hanging: Some(Length::MAX),
+                ..Default::default()
+            },
+        )]
+        .into(),
+    };
+    let list = doc.create_list(&def)?;
+    doc.set_list_item(first, list, 0)?;
+    let next = doc.append_block(BlockKind::Paragraph, "body", "Deep item still reads")?;
+    doc.set_list_item(next, list, 8)?;
+    let body = doc.append_block(BlockKind::Paragraph, "body", "Intervening body")?;
+    let last = doc.append_block(BlockKind::Paragraph, "body", "Saturated counter")?;
+    doc.set_list_item(last, list, 0)?;
+    let base = doc.create_list(&ListDefinition::default())?;
+    let child = doc.create_list(&ListDefinition {
+        base: Some(base),
+        ..Default::default()
+    })?;
+    doc.update_list(
+        base,
+        &ListDefinition {
+            base: Some(child),
+            ..Default::default()
+        },
+    )?;
+    let cycle = doc.append_block(BlockKind::Paragraph, "body", "A cycle cuts inheritance")?;
+    doc.set_list_item(cycle, child, 0)?;
+    let gone = doc.create_list(&ListDefinition::bulleted())?;
+    let plain = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "A missing definition reads as body",
+    )?;
+    doc.set_list_item(plain, gone, 0)?;
+    doc.delete_list(gone)?;
+    doc.commit();
+    let peer = doc.fork(OTHER_PEER)?;
+    doc.set_list_level(next, 7)?;
+    peer.set_role(body, Role::Verse)?;
+    peer.set_list_level(last, 1)?;
+    doc.commit();
+    peer.commit();
+    doc.merge(&peer)?;
+    peer.merge(&doc)?;
+    let mut fixture = Fixture::new(
+        "list_semantics_storm",
+        doc,
+        &[
+            "list.counter-range",
+            "list.definition-cycle",
+            "list.definition-missing",
+            "layout.list-indent",
+        ],
+    );
+    fixture.replica = Some(peer);
+    Ok(fixture)
 }

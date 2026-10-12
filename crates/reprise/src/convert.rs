@@ -1,5 +1,7 @@
 use crate::*;
+mod semantics;
 use reprise_geom::Length;
+pub(crate) use semantics::{list_definition_out, list_item_out, role_out};
 pub(crate) fn peer(s: &str) -> Result<u64> {
     if s.len() > 20 {
         return Err(Error::InvalidId(s.into()));
@@ -448,6 +450,7 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             range: *start as usize..*end as usize,
             style: text_style(style)?,
         },
+        other => return semantics::command(other),
     })
 }
 fn text_style(s: &TextStyle) -> Result<reprise_doc::formatting::TextStyle> {
@@ -525,6 +528,7 @@ pub(crate) fn applied(a: reprise_edit::Applied, notes: Vec<reprise_diag::Note>) 
     Applied {
         blocks: a.blocks.iter().map(ToString::to_string).collect(),
         relations: a.relations.iter().map(ToString::to_string).collect(),
+        lists: a.lists.iter().map(ToString::to_string).collect(),
         effects: a
             .effects
             .into_iter()

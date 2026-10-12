@@ -110,6 +110,19 @@ function send(data) {
   const copied = await send({ kind: "import-copy", request: p({ document_id: "30112233445566778899aabbccddeeff", peer_id: "54" }), bytes: saved.content.data.bytes });
   assert.equal(copied.kind, "state"); assert.equal(copied.state.data.document_id, "30112233445566778899aabbccddeeff");
   assert.equal(copied.state.data.blocks[0].text, ">> hello there");
+  const copiedNode = copied.state.data.blocks[0].id;
+  const semantic = await send({ kind: "batch", request: p({ commands: [
+    { kind: "set-role", node: copiedNode, role: "heading-3" },
+    { kind: "create-list", definition: { levels: [{ level: 0, format: "decimal", start: "4" }] } },
+    { kind: "set-list-item", node: copiedNode, list: { kind: "new", index: 0 }, level: 0 }
+  ], expected_revision: copied.state.data.revision, selection: null }) });
+  assert.equal(semantic.kind, "batched");
+  assert.equal(semantic.state.data.blocks[0].list.marker, "4.");
+  assert.equal(semantic.state.data.blocks[0].role, "heading-3");
+  const outline = await send({ kind: "outline" });
+  assert.equal(outline.kind, "outline"); assert.equal(outline.headings.data[0].level, 3);
+  assert.equal(outline.headings.data[0].page, null);
+  console.log("roles/lists worker smoke passed");
   assert.equal((await send({ kind: "close" })).kind, "ack");
   console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

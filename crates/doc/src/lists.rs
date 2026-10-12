@@ -934,7 +934,7 @@ fn render_marker(
     levels: &[ResolvedLevel],
     notes: &mut Vec<Note>,
 ) -> String {
-    let mut chars: Vec<char> = template.chars().collect();
+    let mut chars: Vec<char> = template.chars().take(MAX_TEMPLATE + 1).collect();
     if chars.len() > MAX_TEMPLATE {
         chars.truncate(MAX_TEMPLATE);
         notes.push(Note::warning(

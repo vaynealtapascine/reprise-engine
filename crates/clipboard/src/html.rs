@@ -400,6 +400,7 @@ struct Reader {
 
 /// One open `ol`/`ul`.
 struct HtmlList {
+    level: u8,
     start: Option<i64>,
     /// No `li` has been read in it yet.
     fresh: bool,
@@ -477,7 +478,11 @@ impl Reader {
             .get("start")
             .and_then(|v| v.trim().parse::<i64>().ok())
             .filter(|_| ordered);
-        let level = self.lists.len().min(LIST_LEVELS - 1) as u8;
+        let level = attrs
+            .get("data-reprise-level")
+            .and_then(|v| v.parse::<u8>().ok())
+            .filter(|&v| v < LIST_LEVELS as u8)
+            .unwrap_or(self.lists.len().min(LIST_LEVELS - 1) as u8);
         if self.lists.len() >= LIST_LEVELS {
             once(
                 &mut self.notes,
@@ -486,7 +491,11 @@ impl Reader {
                 false,
             );
         }
-        self.lists.push(HtmlList { start, fresh: true });
+        self.lists.push(HtmlList {
+            level,
+            start,
+            fresh: true,
+        });
         let level_def = reprise_doc::LevelDef {
             format: Some(format),
             start,
@@ -676,6 +685,7 @@ impl Reader {
                 || (name == "span" && k == "lang")
                 || (cell && (k == "colspan" || k == "rowspan"))
                 || (name == "ol" && (k == "start" || k == "type"))
+                || ((name == "ol" || name == "ul") && k == "data-reprise-level")
                 || (name == "li" && k == "value")
                 || (k == "class"
                     && crate::semantic_html::role_of(name, attrs.get("class").map(String::as_str))
@@ -714,7 +724,7 @@ impl Reader {
             ) => {
                 self.flush(false)?;
                 if name == "li" {
-                    let level = self.lists.len().clamp(1, LIST_LEVELS) - 1;
+                    let level = self.lists.last().map_or(0, |l| usize::from(l.level));
                     // An explicit value, or the list's start on its first item.
                     let start = self.lists.last_mut().and_then(|l| {
                         let first = std::mem::replace(&mut l.fresh, false);
@@ -732,13 +742,15 @@ impl Reader {
                     self.role = role;
                 }
                 self.style = css(attrs, &mut self.notes)?;
-                self.preserve_space = attrs.get("style").is_some_and(|s| {
-                    s.split(';').any(|d| {
-                        d.split_once(':').is_some_and(|(k, v)| {
-                            k.trim().eq_ignore_ascii_case("white-space") && v.trim() == "pre-wrap"
+                self.preserve_space = name == "pre"
+                    || attrs.get("style").is_some_and(|s| {
+                        s.split(';').any(|d| {
+                            d.split_once(':').is_some_and(|(k, v)| {
+                                k.trim().eq_ignore_ascii_case("white-space")
+                                    && v.trim() == "pre-wrap"
+                            })
                         })
-                    })
-                });
+                    });
                 self.direction = match attrs.get("dir").map(String::as_str) {
                     Some("rtl") => Some(1),
                     Some("ltr") => Some(0),
@@ -758,7 +770,7 @@ impl Reader {
             ) => {
                 // An emptied item keeps its marker, as in a browser.
                 let item = name == "li" && self.item.is_some();
-                self.flush(item)?;
+                self.flush(item || self.role != reprise_doc::Role::Body)?;
                 self.style = Style::default();
                 self.preserve_space = false;
                 self.direction = None;

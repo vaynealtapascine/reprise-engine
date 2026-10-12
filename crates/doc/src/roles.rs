@@ -241,7 +241,9 @@ impl Document {
         let LoroValue::Map(roots) = self.doc.get_value() else {
             return true;
         };
-        if roots.contains_key(crate::lists::LISTS) {
+        if roots.contains_key(crate::lists::LISTS)
+            && !self.tree(crate::lists::LISTS).nodes().is_empty()
+        {
             return true;
         }
         let keys = [

@@ -486,6 +486,21 @@ impl Document {
             .map(|node| CopyBlock { node, bytes: None })
             .collect();
         let mut fragment = self.copy_fragment(source, &selection, schemas)?;
+        // A full-document copy also carries unreferenced authored definitions.
+        // Tombstones belong to history and are intentionally not replayed.
+        for (id, read) in self.lists() {
+            let def = read.map_err(FragmentError::Invalid)?;
+            fragment.lists.insert(id, def);
+            if fragment.lists.len() > MAX_FRAGMENT_LISTS {
+                return Err(FragmentError::Limit("lists"));
+            }
+        }
+        let ids: BTreeSet<_> = fragment.lists.keys().copied().collect();
+        for def in fragment.lists.values_mut() {
+            if def.base.is_some_and(|base| !ids.contains(&base)) {
+                def.base = None;
+            }
+        }
         let map = self.doc.get_map("page_templates");
         for key in map.keys() {
             if let Some(ValueOrContainer::Value(LoroValue::String(raw))) = map.get(&key) {

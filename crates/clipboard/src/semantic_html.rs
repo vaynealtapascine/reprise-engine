@@ -195,6 +195,10 @@ impl ListWriter {
                 attrs.push_str(&format!(" start=\"{}\"", item.value));
             }
         }
+        // Keep authored levels even when a sequence starts deep or skips ancestors.
+        if usize::from(item.level) != self.open.len() {
+            attrs.push_str(&format!(" data-reprise-level=\"{}\"", item.level));
+        }
         let tag = if ordered { "ol" } else { "ul" };
         crate::export::append(out, &format!("<{tag}{attrs}><li>"))?;
         self.open.push(Open {

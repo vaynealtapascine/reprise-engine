@@ -140,10 +140,6 @@ pub(crate) enum Step {
     RemoveListItem {
         node: NodeId,
     },
-    SetListLevel {
-        node: NodeId,
-        level: u8,
-    },
     SetListRestart {
         node: NodeId,
         value: Option<i64>,

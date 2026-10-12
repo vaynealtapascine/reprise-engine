@@ -61,6 +61,7 @@ pub(crate) struct FirstRun<'a> {
     pub style: Option<&'a StyleRun>,
     pub descriptors: Option<reprise_font::Descriptors>,
     pub color: [u8; 4],
+    pub decoration: reprise_doc::Decoration,
     pub family_chains: bool,
 }
 
@@ -72,6 +73,7 @@ pub(crate) struct PreparedMarker {
     pub runs: Vec<ShapedRun>,
     pub width: Length,
     pub color: [u8; 4],
+    pub decoration: reprise_doc::Decoration,
     pub rtl: bool,
     /// The marker's start, from the room's inline-start edge.
     pub start: Length,
@@ -119,8 +121,22 @@ pub(crate) fn prepare(
         range: 0..text.len(),
         families,
         size,
-        language: base.and_then(|s| s.language.clone()),
-        features: Vec::new(),
+        language: patch
+            .language
+            .clone()
+            .or_else(|| base.and_then(|s| s.language.clone())),
+        features: patch
+            .features
+            .clone()
+            .map(|fs| {
+                fs.into_iter()
+                    .map(|f| reprise_shape::Feature {
+                        tag: f.tag,
+                        value: f.value,
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| base.map(|s| s.features.clone()).unwrap_or_default()),
     }];
     let input = ParagraphInput {
         text: &text,
@@ -170,6 +186,10 @@ pub(crate) fn prepare(
         runs,
         width,
         color: patch.color.unwrap_or(first.color),
+        decoration: reprise_doc::Decoration {
+            underline: patch.decoration.underline.or(first.decoration.underline),
+            strike: patch.decoration.strike.or(first.decoration.strike),
+        },
         rtl,
         start,
         first_inset,
@@ -268,6 +288,7 @@ impl GeometryProvider for Inset<'_> {
 
 /// Places a marker on the first line of its item, on that line's baseline.
 pub(crate) fn place(
+    engine: &Engine,
     marker: &PreparedMarker,
     line: &LineLayout,
     edges: Edges,
@@ -290,11 +311,28 @@ pub(crate) fn place(
         .iter()
         .map(|run| {
             let width = run.width();
+            let decoration = engine.fonts.get(&run.face).ok().map(|face| {
+                face.decoration_metrics().map(|(position, thickness)| {
+                    crate::snapshot::DecorationLine {
+                        offset: -run
+                            .size
+                            .mul_ratio(position, i32::from(face.metrics().units_per_em)),
+                        thickness: run
+                            .size
+                            .mul_ratio(thickness, i32::from(face.metrics().units_per_em))
+                            .max(Length(1)),
+                    }
+                })
+            });
             let placed = PositionedRun {
                 synthetic_oblique: run.synthetic_oblique,
                 color: marker.color,
-                underline: None,
-                strike: None,
+                underline: (marker.decoration.underline == Some(true))
+                    .then(|| decoration.map(|d| d[0]))
+                    .flatten(),
+                strike: (marker.decoration.strike == Some(true))
+                    .then(|| decoration.map(|d| d[1]))
+                    .flatten(),
                 upright: run.upright,
                 combined: run.combined,
                 horizontal_scale: run.horizontal_scale,
@@ -335,6 +373,7 @@ mod tests {
             runs: Vec::new(),
             width: Length::from_pt(width),
             color: [0, 0, 0, 255],
+            decoration: reprise_doc::Decoration::default(),
             rtl,
             start: Length::from_pt(18),
             first_inset: Length::from_pt(36),

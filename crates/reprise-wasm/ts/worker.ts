@@ -4,7 +4,7 @@ import init, { Workspace, DocumentSession, setPanicHandler } from "./reprise_was
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
   DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, FontSettings, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied,
-  ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face } from "./types.js";
+  OutlineEntry, ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
@@ -24,6 +24,7 @@ type Request = Payload<{ id: string } & (
   | { kind: "start"; request: Payload<LayoutOptions> }
   | { kind: "step"; job: number; budget: number }
   | { kind: "cancel"; job: number }
+  | { kind: "outline" }
   | { kind: "marks"; page: number }
   | { kind: "save" }
   | { kind: "sync-export"; request?: Payload<SyncRequest> }
@@ -47,6 +48,7 @@ export type Response = Payload<{ id: string } & (
   | { kind: "face"; face: Payload<Face> }
   | { kind: "started"; job: number }
   | { kind: "layout"; job: number; progress: Payload<LayoutProgress>; pages: Payload<DisplayPage>[] }
+  | { kind: "outline"; headings: Payload<OutlineEntry[]> }
   | { kind: "marks"; page: Payload<MarksPage> }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
@@ -135,6 +137,7 @@ scope.onmessage = (event: MessageEvent<Request>) => {
           break;
         }
         case "cancel": current().cancel(data.job); if (data.job === active) release(); post({ id, kind: "ack" }); break;
+        case "outline": post({ id, kind: "outline", headings: current().outline() }); break;
         case "marks": post({ id, kind: "marks", page: current().marks(data.page) }); break;
         case "save": { release(); const content = current().save(); post({ id, kind: "saved", content }, [content.data.bytes.buffer]); break; }
         case "sync-export": {

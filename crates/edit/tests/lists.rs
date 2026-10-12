@@ -303,3 +303,41 @@ fn two_peers_indent_different_items() {
     assert!(a.undo().unwrap());
     assert_eq!(markers(&a), ["1. x", "2. y", "  a. z"]);
 }
+
+#[test]
+fn continue_observes_lists_and_restart_created_earlier_in_the_transaction() {
+    let (mut ed, ids) = editor(&["one", "two", "three"]);
+    ed.apply(
+        &Transaction::new()
+            .with(Command::CreateList {
+                definition: ListDefinition::numbered(),
+            })
+            .with(Command::CreateList {
+                definition: ListDefinition::bulleted(),
+            })
+            .with(Command::SetListItem {
+                node: ids[0],
+                list: ListRef::New(0),
+                level: 0,
+            })
+            .with(Command::SetListItem {
+                node: ids[1],
+                list: ListRef::New(1),
+                level: 0,
+            })
+            .with(Command::SetListItem {
+                node: ids[2],
+                list: ListRef::New(1),
+                level: 0,
+            })
+            .with(Command::RestartList {
+                node: ids[1],
+                value: Some(99),
+            })
+            .with(Command::ContinueList { node: ids[1] }),
+    )
+    .unwrap();
+    assert_eq!(markers(&ed), ["1. one", "2. two", "3. three"]);
+    assert!(ed.undo().unwrap());
+    assert_eq!(markers(&ed), ["one", "two", "three"]);
+}

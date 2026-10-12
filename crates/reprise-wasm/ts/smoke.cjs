@@ -341,3 +341,35 @@ console.log("paragraph style WASM smoke passed");
 }
 paperTarget.free(); paperOpen.free(); paperPeer.free(); paper.free(); ws.free();
 console.log("page setup WASM smoke passed");
+
+{
+  const w = new wasm.Workspace();
+  const s = w.create(p({ document_id: "40112233445566778899aabbccddeeff", peer_id: "71" }));
+  const ids = s.apply(p({ commands: [
+    { kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "List heading", style: {} },
+    { kind: "insert-block", parent: null, index: 1, block_kind: "paragraph", text: "second", style: {} }
+  ] })).data.blocks;
+  const revision = s.state().data.revision;
+  const commands = [
+    { kind: "set-role", node: ids[0], role: "heading-2" },
+    { kind: "apply-style", node: ids[0], style: "Heading 2" },
+    { kind: "create-list", definition: { base: null, levels: [{ level: 0, format: "decimal-leading-zero", start: "7" }] } },
+    ...ids.map(node => ({ kind: "set-list-item", node, list: { kind: "new", index: 0 }, level: 0 }))
+  ];
+  const result = s.batch(p({ commands, expected_revision: revision, selection: null }));
+  assert.equal(result.data.applied.lists.length, 1);
+  assert.deepEqual(s.state().data.blocks.map(b => b.list.marker), ["07.", "08."]);
+  assert.equal(s.outline().data[0].page, null);
+  assert.equal(s.outline().data[0].level, 2);
+  assert.throws(() => s.batch(p({ commands, expected_revision: revision, selection: null })), e => e.data.code === "bindings.stale");
+  s.undo(); assert.equal(s.outline().data.length, 0); s.redo();
+  finish(s);
+  assert.equal(s.outline().data[0].page, 0);
+  assert.equal(s.reading_order().data[0].marker, "07.");
+  assert.equal(s.reading_order().data[0].start, 0);
+  const copy = w.import_copy(p({ document_id: "50112233445566778899aabbccddeeff", peer_id: "72" }), s.save().data.bytes);
+  assert.equal(copy.state().data.blocks[1].list.marker, "08.");
+  assert.notEqual(copy.state().data.lists[0].id, s.state().data.lists[0].id);
+  copy.free(); s.free(); w.free();
+  console.log("roles/lists WASM smoke passed");
+}

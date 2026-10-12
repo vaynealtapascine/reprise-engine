@@ -9,7 +9,7 @@ This note is the design for `ws/lists` (decisions 05, 06, 07, 08, 13, 14, 16, 29
     derived at query time, marker layout, editing semantics and exports.
 
 A role says what a paragraph *is*. It never fixes how it looks (06): appearance
-stays with named styles (08), which `ws/style` extends in parallel.
+stays with named styles (08), which engine main now supplies.
 
 ## 1. Roles
 
@@ -65,9 +65,11 @@ with a `NodeId`; the role marks that node as a heading.
 | verse | `P` | `p class="reprise-verse"` | no | `Verse` |
 
 The **default style** column is the agreed mapping with `ws/style`, which ships
-`Normal`, `Title`, `Subtitle` and `Heading 1`–`6` as built-in names. The engine
+`Normal`, `Title`, `Subtitle` and `Heading 1`–`6` as built-in names.
+`Quote`, `Code` and `Verse` are reserved application style names; main does not
+ship defaults for those three. Define them first if their appearance is wanted. The engine
 only exposes it (`Role::default_style`); it never applies a style when a role
-changes. The app sends `SetRole` and the style change in one transaction, so
+changes. The app sends `SetRole` and `ApplyStyle` in one revision-checked `batch`, so
 undo treats them as one step. Nothing here depends on `ws/style`'s code.
 
 **Reading order** (33) is unchanged in *order*: a role never moves a block. What
@@ -147,7 +149,7 @@ like flows) and keeps one counter vector per list:
 -   Items of other lists and non-list paragraphs in between change nothing, so a
     list **continues across intervening paragraphs** until told to restart.
 -   "Restart numbering here" sets `restart1`. "Continue the previous list"
-    clears `restart1` and, when the nearest earlier item belongs to another
+    clears `restart1` (including one set earlier in the transaction) and, when the nearest earlier item belongs to another
     list, moves this item and every later item of its list into that list.
 
 The result per item: list, level, ordinal and the **rendered marker text**. It is
@@ -192,7 +194,9 @@ correctly in right-to-left text. It sits on the first line's baseline, starting
 
 **A marker wider than the hanging indent pushes the first line's text**, as
 Word does: the first line starts at `max(indent, marker start + marker width +
-¼ em)`. Later lines start at `indent`. A tab-based rule was rejected because
+¼ em)`. Later lines start at `indent`. The list definition **replaces** paragraph `indent-start` and `indent-first`;
+these do not add. Paragraph `indent-end`, spacing and keeps remain in force.
+The same rule applies in main flow, cells and notes. A tab-based rule was rejected because
 tab stops belong to `marks1` and the marker is not authored text.
 
 The marker is derived geometry on the first line: `LineLayout.marker:
@@ -226,7 +230,10 @@ fresh IDs and remaps the items.
 
 -   **HTML:** headings `h1`–`h6`, `blockquote`, `pre`; consecutive items become
     nested `ol`/`ul` with `li`, `start` when the first item's value is not 1 (or
-    restarts), and `list-style-type` for the format. Import reads the same, plus
+    restarts), and `list-style-type` for the format.
+    `data-reprise-level` preserves a starting deep level or a gap between levels;
+    standard HTML still sees a valid list. Import also preserves literal `pre`
+    whitespace and empty semantic paragraphs. Import reads the same, plus
     `ol type`, `ol start`, `li value`, and nests levels by `ol`/`ul` depth.
 -   **PDF:** `L` (with its `ListNumbering`) > `LI` > (`Lbl`, `LBody`); nested lists
     go inside the parent item's `LBody`. Headings, `Title`, `BlockQuote` and
@@ -246,6 +253,8 @@ never used roles or lists keep their exact bytes and masks.
 | --- | --- | --- |
 | `role.unknown` | Warning | A stored role this engine cannot read; treated as body. |
 | `list.definition-missing` | Warning | An item names a missing, deleted or unreadable definition, or a base is missing; the item is a plain paragraph. |
+| `list.definition-unreadable` | Warning | A stored definition property cannot be read; inherits or defaults. |
+| `layout.list-indent` | Warning | A list inset would leave less than one em of room; reduced. |
 | `list.definition-cycle` | Warning | A `base` chain loops or exceeds 16 links; inheritance stops there. |
 | `list.level-clamped` | Warning | A stored level outside 0–8; clamped. |
 | `list.format-unknown` | Warning | A stored format this engine cannot read; rendered as decimal. |
@@ -261,7 +270,7 @@ never used roles or lists keep their exact bytes and masks.
     each consumer that must decide:
 2.  `Role::default_style` (the style the app pairs with it);
 3.  `pdf_role` in `clipboard/src/pdf_tags.rs` (its PDF tag);
-4.  `html_open`/`html_close` in `clipboard/src/semantic_html.rs` and the import
+4.  `element`/`role_of` in `clipboard/src/semantic_html.rs` and the import
     table (its HTML element or class);
 5.  `Role::outline_level` (whether it is in the outline).
 
@@ -301,3 +310,59 @@ treat it as body (`role.unknown`); the package bit already refuses them.
     when choosing the glyph; PDF tags the marker as a form-free `Lbl` with
     alternate text "checked"/"not checked"; HTML exports `<input type=checkbox
     checked disabled>`.
+
+## App seam after main integration
+
+The facade has `set-role`, `create-list`, `update-list`, `delete-list`,
+`set-list-item`, `remove-list-item`, `set-list-level`, `indent-list-item`,
+`restart-list`, `continue-list`, `enter`, and `backspace-at-start` commands.
+They work through `apply` or `batch`; `batch.expected_revision` rejects stale
+state before any authored change, and role/style pairing shares one undo step:
+
+```json
+{"version":1,"data":{"commands":[
+  {"kind":"set-role","node":"4@1","role":"heading-2"},
+  {"kind":"apply-style","node":"4@1","style":"Heading 2"}
+],"expected_revision":null,"selection":null}}
+```
+
+For list creation, send `create-list` with `definition: {base: null, levels:
+[{level: 0, format: "decimal", start: "1", indent: 36864, hanging: 18432}]}`,
+then `set-list-item` with `list: {kind: "new", index: 0}` and `level: 0`.
+Existing identities use `{kind: "existing", id: "..."}`. Starts, ordinals and
+restarts are canonical signed i64 decimal strings, so JavaScript loses no bits.
+Definitions have nine optional authored levels, inherit from `base`, and an
+update replaces the authored definition while writing only changed properties.
+Duplicate levels, unknown formats, negative indents and invalid marker patches
+are refused atomically. `restart-list.value: null` clears a restart;
+`continue-list` also adopts the nearest preceding list and remaps later items
+of the original list, using current transaction membership in original document
+order. Tab is `indent-list-item.by: 1`, Shift+Tab is `-1`.
+
+`State.blocks[].role` is the semantic token (omitted means `body`);
+`.list` is `{id, level, value, restart, marker}` when a live definition resolves.
+`State.lists` carries `{id, definition, error}` entries in identity order; an
+empty registry is omitted. `Applied.lists` returns created identities. Both
+registry listing and full native fragments are bounded at 1,024 definitions.
+A full-document `import_copy` preserves live unreferenced definitions as well
+as used definitions and bases, giving all definitions and nodes fresh IDs;
+tombstones/history stay with the source.
+
+`outline()` returns `{node, level, text, page}` in document order. `page` is
+zero-based and null before/currently without layout. Reading steps carry the
+role and the derived marker on the first line, while `start`/`end` continue to
+slice only authored UTF-8 bytes. List diagnostics are node-scoped layout
+warnings and appear through `diagnostics_for` after layout. The WASM session
+exposes the same query, and the worker accepts `{kind: "outline"}` and returns
+`{kind: "outline", headings: Payload<OutlineEntry[]>}`.
+
+### Takeover decisions
+
+The document storage, numbering and marker abstraction are retained. The draft
+editing/export implementation was checkpointed, then main 383cfca was union
+merged; package semantics moved from draft bit 13 to fixed bit 14. Enter now
+validates the offset even on an empty item, and Continue observes earlier batch
+commands. Marker shaping honors first-run language, features, color, size and
+decorations with the definition patch on top. Marker run ranges refer to marker
+bytes; consumers of `LineLayout.marker` can share the item's baseline and frame
+transform without modifying authored text or caret byte offsets.

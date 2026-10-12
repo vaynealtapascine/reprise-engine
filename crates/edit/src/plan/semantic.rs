@@ -17,6 +17,12 @@ impl Model<'_> {
         match command {
             Command::SetRole { node, role } => {
                 self.require(*node)?;
+                if !matches!(
+                    self.doc.kind_of(*node),
+                    Some(BlockKind::Paragraph | BlockKind::Annotation)
+                ) {
+                    return Err(Reason::NotText(*node));
+                }
                 if !role.is_valid() {
                     return Err(Reason::BadRole);
                 }
@@ -47,6 +53,11 @@ impl Model<'_> {
                     .validate()
                     .map_err(|e| Reason::InvalidList(e.to_string()))?;
                 self.check_base(definition)?;
+                self.add_payload(
+                    serde_json::to_vec(definition)
+                        .map_err(|e| Reason::Store(e.to_string()))?
+                        .len(),
+                )?;
                 self.plan.steps.push(Step::UpdateList {
                     list: *list,
                     definition: definition.clone(),
@@ -88,17 +99,25 @@ impl Model<'_> {
                 Ok(())
             }
             Command::ContinueList { node } => self.continue_list(*node),
-            Command::Enter { node, at } => match self.item(*node)? {
-                Some((list, level)) if self.text(*node)?.is_empty() => {
-                    if level > 0 {
-                        self.set_item(*node, list, level - 1)
-                    } else {
-                        self.remove_item(*node);
-                        Ok(())
-                    }
+            Command::Enter { node, at } => {
+                if !self.text(*node)?.is_char_boundary(*at) {
+                    return Err(Reason::BadOffset {
+                        node: *node,
+                        offset: *at,
+                    });
                 }
-                _ => self.split(*node, *at),
-            },
+                match self.item(*node)? {
+                    Some((list, level)) if self.text(*node)?.is_empty() => {
+                        if level > 0 {
+                            self.set_item(*node, list, level - 1)
+                        } else {
+                            self.remove_item(*node);
+                            Ok(())
+                        }
+                    }
+                    _ => self.split(*node, *at),
+                }
+            }
             Command::BackspaceAtStart { node } => {
                 if self.item(*node)?.is_some() {
                     self.remove_item(*node);
@@ -182,37 +201,33 @@ impl Model<'_> {
     }
 
     fn continue_list(&mut self, node: NodeId) -> Result<(), Reason> {
-        let (list, _) = self.item(node)?.ok_or(Reason::NotAListItem(node))?;
-        let numbering = self.doc.list_numbering();
-        if numbering.items.get(&node).is_some_and(|i| i.restart) {
-            self.plan
-                .steps
-                .push(Step::SetListRestart { node, value: None });
+        let (own, _) = self.item(node)?.ok_or(Reason::NotAListItem(node))?;
+        // An earlier command in this transaction may have set a restart.
+        self.plan
+            .steps
+            .push(Step::SetListRestart { node, value: None });
+        let order = self.doc.document_order();
+        let Some(at) = order.iter().position(|&n| n == node) else {
+            return Ok(());
+        };
+        let mut previous = None;
+        for &n in order.iter().take(at).rev() {
+            if self.live(n)?
+                && let Some((list, _)) = self.item(n)?
+            {
+                previous = Some(list);
+                break;
+            }
         }
-        let ListRef::Existing(own) = list else {
+        let Some(target) = previous.filter(|&l| l != own) else {
             return Ok(());
         };
-        let Some(at) = numbering.sequence.iter().position(|&n| n == node) else {
-            return Ok(());
-        };
-        let previous = numbering.sequence[..at]
-            .iter()
-            .rev()
-            .find_map(|n| numbering.items.get(n))
-            .map(|i| i.list);
-        let Some(previous) = previous.filter(|&l| l != own) else {
-            return Ok(());
-        };
-        let target = ListRef::Existing(previous);
         self.list_live(target)?;
-        let later: Vec<(NodeId, u8)> = numbering.sequence[at..]
-            .iter()
-            .filter_map(|n| numbering.items.get(n).map(|i| (*n, i)))
-            .filter(|(_, i)| i.list == own)
-            .map(|(n, i)| (n, i.level))
-            .collect();
-        for (n, level) in later {
-            if self.live(n)? {
+        for &n in order.iter().skip(at) {
+            if self.live(n)?
+                && let Some((list, level)) = self.item(n)?
+                && list == own
+            {
                 self.set_item(n, target, level)?;
             }
         }

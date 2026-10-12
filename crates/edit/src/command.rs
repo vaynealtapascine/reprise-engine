@@ -200,8 +200,8 @@ pub enum Command {
     },
     /// Continues the previous list: clears the item's restart and, when the
     /// nearest earlier item belongs to another list, moves this item and every
-    /// later item of its list into that list. Reads numbering as it was when
-    /// the transaction started.
+    /// later item of its list into that list. Reads document order as it was when
+    /// the transaction started; membership reflects earlier commands.
     ContinueList {
         node: NodeId,
     },

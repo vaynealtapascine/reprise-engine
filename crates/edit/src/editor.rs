@@ -388,7 +388,6 @@ impl Editor {
                 self.doc.set_list_item(*node, id, *level)?;
             }
             Step::RemoveListItem { node } => self.doc.remove_list_item(*node)?,
-            Step::SetListLevel { node, level } => self.doc.set_list_level(*node, *level)?,
             Step::SetListRestart { node, value } => self.doc.set_list_restart(*node, *value)?,
         }
         Ok(())
