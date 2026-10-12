@@ -221,6 +221,7 @@ impl Flow<'_> {
                 frame.rect.width,
                 top,
                 depth,
+                crate::FieldInstance::Single,
             );
             if copy.is_some() && !fragment.placed && !fragment.done {
                 // The copy would leave the body no room: the body wins.
@@ -236,6 +237,7 @@ impl Flow<'_> {
                     frame.rect.width,
                     top,
                     depth,
+                    crate::FieldInstance::Single,
                 );
             }
             if !fragment.done
@@ -258,6 +260,7 @@ impl Flow<'_> {
                     frame.rect.width,
                     head,
                     self.fresh_depth(),
+                    crate::FieldInstance::Single,
                 );
                 if fresh.done {
                     // Keep the group together: start it on a fresh frame.
@@ -398,6 +401,13 @@ impl Flow<'_> {
         let mut y = top;
         let mut bottom = top;
         let mut blocks = Vec::new();
+        // The copy is this page's own placement of the header cells: a field
+        // in it resolves for this page, not for the page of the authored row.
+        let instance = crate::FieldInstance::of_page(
+            self.snapshot
+                .frame(frame_index)
+                .map_or(self.fields().page, |f| f.page),
+        );
         for group in groups.iter().take(repeat.groups) {
             let (_, fragment) = self.compose_fragment(
                 doc,
@@ -408,6 +418,7 @@ impl Flow<'_> {
                 frame_width,
                 y,
                 depth,
+                instance,
             );
             if !fragment.done {
                 return None;
@@ -457,6 +468,7 @@ impl Flow<'_> {
         frame_width: Length,
         top: Length,
         depth: Length,
+        instance: crate::FieldInstance,
     ) -> (State, Fragment) {
         let spacing = self.engine.flow.paragraph_spacing;
         let full_depth = self
@@ -507,6 +519,7 @@ impl Flow<'_> {
                     full_depth,
                     spacing,
                     &mut fragment.diagnostics,
+                    instance,
                 );
                 if let Some(c) = next.cursors.get_mut(i) {
                     *c = out.cursor;
@@ -565,6 +578,7 @@ impl Flow<'_> {
         full_depth: Length,
         spacing: Length,
         diagnostics: &mut Vec<Diagnostic>,
+        instance: crate::FieldInstance,
     ) -> CellOut {
         let width = span_sum(widths, cell.column, cell.colspan);
         let x: Length = widths.iter().take(cell.column).copied().sum();
@@ -634,7 +648,7 @@ impl Flow<'_> {
                 &subject,
                 diagnostics,
                 self.evaluation,
-                &self.fields(),
+                &self.fields().placed_as(instance),
             );
             if composed.lines.is_empty() {
                 break;

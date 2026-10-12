@@ -52,7 +52,7 @@ use reprise_shape::{HarfRust, ShapingAdapter};
 use serde::{Deserialize, Serialize};
 
 pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
-pub use inline::{AtomLayout, AtomPaint, AtomRole};
+pub use inline::{AtomLayout, AtomPaint, AtomRole, FieldInstance};
 pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,

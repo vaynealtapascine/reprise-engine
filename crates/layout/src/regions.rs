@@ -29,7 +29,7 @@ pub(crate) struct Plan {
     pub diagnostics: Vec<Diagnostic>,
     /// Field texts a finished pass resolved, for the next pass to compose
     /// with (see `docs/inline.md`). Derived; never stored in the document.
-    pub fields: BTreeMap<reprise_doc::InlineId, String>,
+    pub fields: crate::inline::FieldValues,
 }
 
 impl Plan {

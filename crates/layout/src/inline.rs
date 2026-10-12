@@ -73,6 +73,10 @@ pub struct AtomLayout {
     /// The box in frame space: inline start and top, advance by height.
     pub rect: Rect<FrameSpace>,
     pub baseline: Length,
+    /// Which placement of its paragraph this is (see [`FieldInstance`]).
+    /// Left out of JSON for content placed once.
+    #[serde(skip_serializing_if = "FieldInstance::is_single")]
+    pub instance: FieldInstance,
     /// Paint color for text, from the surrounding run.
     #[serde(skip)]
     pub color: [u8; 4],
@@ -429,14 +433,61 @@ fn strong_rtl(c: char) -> Option<bool> {
     }
 }
 
+/// Which placement of an object a resolved field text belongs to.
+///
+/// An object is one record, but content can be placed more than once: a
+/// header or footer shows the same paragraph, with the same objects, on every
+/// page, and a repeated table header row shows its cells again on each
+/// continuation frame. Each placement is composed separately and may resolve
+/// differently (`page-number` is 3 in page 3's footer and 4 in page 4's), so
+/// resolved values are keyed by [`FieldKey`], the object and its placement,
+/// never by the object alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FieldInstance {
+    /// The paragraph is placed once, wherever flow puts it: body text, a cell,
+    /// a note. Its page is not part of the key, so a value found on one page
+    /// can be tried again on another.
+    #[default]
+    Single,
+    /// One page's copy of shared content, by 0-based page index.
+    Page(u32),
+}
+
+impl FieldInstance {
+    pub fn is_single(&self) -> bool {
+        *self == FieldInstance::Single
+    }
+
+    /// The instance of content repeated onto 0-based page `page`.
+    pub fn of_page(page: usize) -> FieldInstance {
+        FieldInstance::Page(u32::try_from(page).unwrap_or(u32::MAX))
+    }
+}
+
+/// A resolved field text's key: the object and the placement it is resolved
+/// for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct FieldKey {
+    pub id: InlineId,
+    pub instance: FieldInstance,
+}
+
+/// The resolved field texts a pass composes with.
+pub(crate) type FieldValues = BTreeMap<FieldKey, String>;
+
 /// What a field may assume while a pass composes: the page being composed,
-/// the pages made so far, and texts a previous pass resolved.
+/// the pages made so far, the placement being composed, and texts a previous
+/// pass resolved.
 #[derive(Clone, Copy)]
 pub(crate) struct FieldEnv<'a> {
     /// 0-based.
     pub page: usize,
     pub pages: usize,
-    pub values: Option<&'a BTreeMap<InlineId, String>>,
+    /// The placement the composed paragraph is: repeated content sets
+    /// [`FieldInstance::Page`].
+    pub instance: FieldInstance,
+    pub values: Option<&'a FieldValues>,
 }
 
 impl FieldEnv<'_> {
@@ -444,12 +495,22 @@ impl FieldEnv<'_> {
     pub(crate) const UNPLACED: FieldEnv<'static> = FieldEnv {
         page: 0,
         pages: 1,
+        instance: FieldInstance::Single,
         values: None,
     };
 
+    /// The same environment for the placement `instance`.
+    pub(crate) fn placed_as(self, instance: FieldInstance) -> Self {
+        FieldEnv { instance, ..self }
+    }
+
     /// The text a field composes with.
     pub(crate) fn text(&self, id: InlineId, object: &InlineObject) -> String {
-        if let Some(text) = self.values.and_then(|v| v.get(&id)) {
+        let key = FieldKey {
+            id,
+            instance: self.instance,
+        };
+        if let Some(text) = self.values.and_then(|v| v.get(&key)) {
             return text.clone();
         }
         field_function(object).map_or_else(String::new, |f| f.guess(object, self))
@@ -533,22 +594,36 @@ impl FieldFunction for TextField {
     }
 }
 
+/// The blocks of a finished pass that fields can be in: the flowed and
+/// placed blocks, then the copies of repeated table header rows.
+fn field_blocks(snapshot: &LayoutSnapshot) -> impl Iterator<Item = &crate::BlockLayout> {
+    snapshot
+        .blocks
+        .iter()
+        .chain(snapshot.repeated_headers.iter().flat_map(|h| &h.blocks))
+}
+
 /// Every field's text as a finished pass places it, with the fields that
 /// couldn't resolve (they keep the text they were composed with).
 pub(crate) fn resolve_fields(
     doc: &Document,
     snapshot: &LayoutSnapshot,
-) -> (BTreeMap<InlineId, String>, Vec<(NodeId, String)>) {
+) -> (FieldValues, Vec<(NodeId, String)>) {
     let mut out = BTreeMap::new();
     let mut failed = Vec::new();
-    for block in &snapshot.blocks {
-        let Ok(objects) = doc.inline_objects(block.node) else {
-            continue;
-        };
-        if objects.is_empty() {
+    let mut objects: BTreeMap<NodeId, BTreeMap<InlineId, reprise_doc::InlineEntry>> =
+        BTreeMap::new();
+    for block in field_blocks(snapshot) {
+        if block.lines.iter().all(|l| l.atoms.is_empty()) {
             continue;
         }
-        let objects: BTreeMap<_, _> = objects.into_iter().map(|e| (e.id, e)).collect();
+        let objects = objects.entry(block.node).or_insert_with(|| {
+            doc.inline_objects(block.node)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|e| (e.id, e))
+                .collect()
+        });
         for line in &block.lines {
             let Some(page) = snapshot.frame(line.frame).map(|f| f.page) else {
                 continue;
@@ -565,12 +640,16 @@ pub(crate) fn resolve_fields(
                     doc,
                     snapshot,
                 };
+                let key = FieldKey {
+                    id: atom.id,
+                    instance: atom.instance,
+                };
                 match function.resolve(&entry.object, &at) {
                     Ok(text) => {
-                        out.insert(atom.id, text);
+                        out.insert(key, text);
                     }
                     Err(why) => {
-                        out.insert(atom.id, atom.text());
+                        out.insert(key, atom.text());
                         failed.push((block.node, why));
                     }
                 }
@@ -581,14 +660,20 @@ pub(crate) fn resolve_fields(
 }
 
 /// The field texts a pass composed with, read back from its atoms.
-pub(crate) fn assumed_fields(snapshot: &LayoutSnapshot) -> BTreeMap<InlineId, String> {
-    snapshot
-        .blocks
-        .iter()
+pub(crate) fn assumed_fields(snapshot: &LayoutSnapshot) -> FieldValues {
+    field_blocks(snapshot)
         .flat_map(|b| &b.lines)
         .flat_map(|l| &l.atoms)
         .filter(|a| a.kind == FIELD)
-        .map(|a| (a.id, a.text()))
+        .map(|a| {
+            (
+                FieldKey {
+                    id: a.id,
+                    instance: a.instance,
+                },
+                a.text(),
+            )
+        })
         .collect()
 }
 
@@ -597,8 +682,8 @@ pub(crate) fn assumed_fields(snapshot: &LayoutSnapshot) -> BTreeMap<InlineId, St
 pub(crate) fn next_fields(
     doc: &Document,
     snapshot: &LayoutSnapshot,
-    current: &BTreeMap<InlineId, String>,
-) -> BTreeMap<InlineId, String> {
+    current: &FieldValues,
+) -> FieldValues {
     let (resolved, _) = resolve_fields(doc, snapshot);
     if resolved == assumed_fields(snapshot) {
         current.clone()
@@ -739,6 +824,7 @@ pub(crate) fn prepare_atoms(
 #[derive(Clone, Debug)]
 pub(crate) struct Sized {
     pub id: InlineId,
+    pub instance: FieldInstance,
     pub kind: String,
     pub size: AtomBox,
     pub paint: AtomPaint,
@@ -785,6 +871,7 @@ pub(crate) fn size_atoms(
             atom.at,
             Sized {
                 id: atom.id,
+                instance: fields.instance,
                 kind: atom.object.kind.clone(),
                 size,
                 paint,

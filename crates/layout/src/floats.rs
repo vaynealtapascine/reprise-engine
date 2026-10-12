@@ -121,6 +121,7 @@ impl Floats {
                     &crate::inline::FieldEnv {
                         page,
                         pages: page.saturating_add(1),
+                        instance: crate::FieldInstance::Single,
                         values: None,
                     },
                 );

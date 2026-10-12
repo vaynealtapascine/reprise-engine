@@ -849,6 +849,7 @@ impl Flow<'_> {
         crate::inline::FieldEnv {
             page: self.page,
             pages: self.page.saturating_add(1),
+            instance: crate::inline::FieldInstance::Single,
             values: Some(&self.plan.fields),
         }
     }
@@ -1451,6 +1452,7 @@ fn place_atoms(
                         atom.size.ascent + atom.size.descent,
                     ),
                     baseline,
+                    instance: atom.instance,
                     color,
                     paint: atom.paint.clone(),
                 });
