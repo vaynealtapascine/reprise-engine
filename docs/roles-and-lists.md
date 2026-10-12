@@ -285,6 +285,22 @@ treat it as body (`role.unknown`); the package bit already refuses them.
 3.  Map it to a CSS `list-style-type` and HTML `ol type` (`semantic_html.rs`)
     and to a PDF `ListNumbering` (`pdf_tags.rs`).
 
+### Number formats outside lists
+
+`reprise_doc::NumberFormat` is the engine's one way of writing a counter as
+text, and it is public API on purpose. `render(n)` gives the text, or `None`
+where the format has no form for `n` (roman outside 1 to 3,999, alphabetic below
+1). `render_or_decimal(n)` is the same with the shared fallback: the number in
+decimal, plus a flag so the caller can report it (lists report
+`list.counter-range`). Both are defined for every `i64`, never panic, and are
+pure. `token()` and `parse()` are the stored spelling.
+
+Section page numbers (wave 2: restarts in decimal, roman or alphabetic form) use
+exactly this: store a `NumberFormat` token with the section, count pages from the
+restart value, and show `format.render_or_decimal(page_number)`. Nothing about a
+page number needs a list. A new format added for lists (see above) is available to
+page numbers at once.
+
 ## How later features plug in
 
 -   **Table of contents and navigation pane:** read `outline()` (level, text,

@@ -45,18 +45,44 @@ pub const MAX_TEMPLATE: usize = 64;
 /// How many `base` links inheritance follows.
 pub const MAX_BASE_DEPTH: usize = 16;
 
-/// How a level's counter is shown. Adding a format: see "Extension points"
-/// in `docs/roles-and-lists.md`.
+/// How a counter is shown: the numbering formats of list markers.
+///
+/// This is also the engine's shared way of writing a number as text, so other
+/// features reuse it rather than carry their own: page-number restarts in
+/// sections ask for [`NumberFormat::Decimal`], [`NumberFormat::LowerRoman`],
+/// [`NumberFormat::UpperRoman`], [`NumberFormat::LowerAlpha`] or
+/// [`NumberFormat::UpperAlpha`] through [`NumberFormat::render_or_decimal`],
+/// and figure or heading numbers read the same formats through lists.
+///
+/// Adding a format: see "Extension points" in `docs/roles-and-lists.md`.
+///
+/// ```
+/// use reprise_doc::NumberFormat;
+///
+/// assert_eq!(NumberFormat::LowerRoman.render(4).as_deref(), Some("iv"));
+/// assert_eq!(NumberFormat::UpperAlpha.render(28).as_deref(), Some("AB"));
+/// // Roman numerals stop at 3,999; the shared fallback is decimal.
+/// assert_eq!(NumberFormat::UpperRoman.render(4000), None);
+/// assert_eq!(
+///     NumberFormat::UpperRoman.render_or_decimal(4000),
+///     ("4000".to_string(), true)
+/// );
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NumberFormat {
-    /// No counter: the template is a glyph.
+    /// No counter: the template is a glyph such as `•`. Never ordered.
     Bullet,
+    /// `1`, `2`, `3` … Any integer, negatives included.
     Decimal,
-    /// `01`, `02`, … `09`, `10` (the extension proof).
+    /// `01`, `02` … `09`, then `10`, `11` … (the extension proof). Any integer.
     DecimalLeadingZero,
+    /// `a`, `b` … `z`, `aa`, `ab` … Defined from 1; `0` and below fall back.
     LowerAlpha,
+    /// `A`, `B` … `Z`, `AA`, `AB` … Defined from 1; `0` and below fall back.
     UpperAlpha,
+    /// `i`, `ii`, `iii`, `iv` … Defined for 1 to 3,999; outside that, fall back.
     LowerRoman,
+    /// `I`, `II`, `III`, `IV` … Defined for 1 to 3,999; outside that, fall back.
     UpperRoman,
     /// No marker unless the template has literal text.
     None,
@@ -65,6 +91,8 @@ pub enum NumberFormat {
 }
 
 impl NumberFormat {
+    /// The stored token, such as `lower-roman`. Round-trips through
+    /// [`NumberFormat::parse`]; an unknown format keeps its original token.
     pub fn token(&self) -> &str {
         match self {
             NumberFormat::Bullet => "bullet",
@@ -79,6 +107,8 @@ impl NumberFormat {
         }
     }
 
+    /// Reads a stored token. A token this engine doesn't know becomes
+    /// [`NumberFormat::Unknown`], kept verbatim and shown as decimal.
     pub fn parse(token: &str) -> NumberFormat {
         match token {
             "bullet" => NumberFormat::Bullet,
@@ -98,9 +128,11 @@ impl NumberFormat {
         !matches!(self, NumberFormat::Bullet | NumberFormat::None)
     }
 
-    /// `n` in this format, or `None` when the format can't show it (the
-    /// caller falls back to decimal with `list.counter-range`). A bullet
-    /// counter in a template shows as decimal; `none` shows nothing.
+    /// `n` in this format, or `None` when the format can't show it: a roman
+    /// numeral outside 1 to 3,999, or an alphabetic one below 1. The caller
+    /// falls back to decimal (see [`NumberFormat::render_or_decimal`]). A
+    /// bullet counter in a template shows as decimal; `none` shows nothing.
+    /// Never panics, for any `n`.
     pub fn render(&self, n: i64) -> Option<String> {
         match self {
             NumberFormat::Decimal | NumberFormat::Bullet | NumberFormat::Unknown(_) => {
@@ -116,6 +148,16 @@ impl NumberFormat {
             NumberFormat::LowerRoman => roman(n).map(|s| s.to_ascii_lowercase()),
             NumberFormat::UpperRoman => roman(n),
             NumberFormat::None => Some(String::new()),
+        }
+    }
+
+    /// [`NumberFormat::render`], or `n` in decimal when the format can't show
+    /// it. The flag is `true` for that fallback, so a caller can report it
+    /// (lists report `list.counter-range`).
+    pub fn render_or_decimal(&self, n: i64) -> (String, bool) {
+        match self.render(n) {
+            Some(text) => (text, false),
+            None => (n.to_string(), true),
         }
     }
 }
@@ -968,16 +1010,14 @@ fn render_marker(
                         format!("numbering format {raw:?} is not known; shown as decimal"),
                     ));
                 }
-                match level.format.render(n) {
-                    Some(s) => out.push_str(&s),
-                    None => {
-                        notes.push(Note::warning(
-                            codes::LIST_COUNTER_RANGE,
-                            format!("{} can't show {n}; shown as decimal", level.format),
-                        ));
-                        out.push_str(&n.to_string());
-                    }
+                let (text, fell_back) = level.format.render_or_decimal(n);
+                if fell_back {
+                    notes.push(Note::warning(
+                        codes::LIST_COUNTER_RANGE,
+                        format!("{} can't show {n}; shown as decimal", level.format),
+                    ));
                 }
+                out.push_str(&text);
             }
             _ => out.push('%'),
         }
@@ -1028,6 +1068,65 @@ mod tests {
             NumberFormat::parse("klingon"),
             NumberFormat::Unknown("klingon".into())
         );
+    }
+
+    /// The public contract page-number restarts rely on: every format at its
+    /// edges, and the decimal fallback with its flag. Nothing panics for any
+    /// `i64`.
+    #[test]
+    fn render_contract_at_the_edges() {
+        use NumberFormat as F;
+        let cases: [(F, i64, Option<&str>); 22] = [
+            (F::Decimal, 0, Some("0")),
+            (F::Decimal, -7, Some("-7")),
+            (F::DecimalLeadingZero, 0, Some("00")),
+            (F::DecimalLeadingZero, 9, Some("09")),
+            (F::DecimalLeadingZero, 10, Some("10")),
+            (F::LowerAlpha, 0, None),
+            (F::LowerAlpha, -1, None),
+            (F::LowerAlpha, 1, Some("a")),
+            (F::LowerAlpha, 26, Some("z")),
+            (F::LowerAlpha, 27, Some("aa")),
+            (F::UpperAlpha, 52, Some("AZ")),
+            (F::UpperAlpha, 53, Some("BA")),
+            (F::LowerRoman, 0, None),
+            (F::LowerRoman, 1, Some("i")),
+            (F::LowerRoman, 4, Some("iv")),
+            (F::LowerRoman, 1994, Some("mcmxciv")),
+            (F::UpperRoman, 3999, Some("MMMCMXCIX")),
+            (F::UpperRoman, 4000, None),
+            (F::UpperRoman, i64::MIN, None),
+            (F::None, 5, Some("")),
+            (F::Bullet, 5, Some("5")),
+            (F::Unknown("x".into()), 5, Some("5")),
+        ];
+        for (format, n, expected) in cases {
+            assert_eq!(format.render(n).as_deref(), expected, "{format} {n}");
+        }
+        for format in [
+            F::Bullet,
+            F::Decimal,
+            F::DecimalLeadingZero,
+            F::LowerAlpha,
+            F::UpperAlpha,
+            F::LowerRoman,
+            F::UpperRoman,
+            F::None,
+            F::Unknown("x".into()),
+        ] {
+            for n in [i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX - 1, i64::MAX] {
+                let (text, fell_back) = format.render_or_decimal(n);
+                assert_eq!(fell_back, format.render(n).is_none(), "{format} {n}");
+                if fell_back {
+                    assert_eq!(text, n.to_string(), "{format} {n}");
+                }
+            }
+        }
+        assert_eq!(
+            F::UpperRoman.render_or_decimal(4000),
+            ("4000".to_string(), true)
+        );
+        assert_eq!(F::LowerAlpha.render_or_decimal(3), ("c".to_string(), false));
     }
 
     #[test]
