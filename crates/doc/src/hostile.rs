@@ -340,3 +340,18 @@ pub fn corrupt_format(doc: &Document, range: crate::RangeId, raw: &str) -> loro:
     doc.commit();
     Ok(())
 }
+
+/// Overwrites an annotation's envelope with `raw`, as a peer that bypasses
+/// the kernel could. Commits.
+pub fn corrupt_annotation(
+    doc: &Document,
+    annotation: crate::RangeId,
+    raw: &str,
+) -> loro::LoroResult<()> {
+    doc.doc
+        .get_tree("ranges")
+        .get_meta(annotation.0)?
+        .insert(crate::annotation::KEY, raw)?;
+    doc.commit();
+    Ok(())
+}

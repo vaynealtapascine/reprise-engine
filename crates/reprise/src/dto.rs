@@ -94,6 +94,11 @@ pub struct State {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<Vec<NamedList>>", optional)]
     pub lists: Vec<NamedList>,
+    /// Links and comment anchors, compact: where each is and what it is for,
+    /// without a link's address (ask `annotation` for that). At most
+    /// [`MAX_STATE_ANNOTATIONS`], in ID order; a `bindings.limit` diagnostic
+    /// says when more were left out. The queries are not cut short that way.
+    pub annotations: Vec<AnnotationBrief>,
 }
 /// Integer physical page setup; absent patch fields remain unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -505,6 +510,25 @@ pub enum Command {
     BackspaceAtStart {
         node: String,
     },
+    /// Adds a link or a comment anchor over `start..end` of a block (UTF-8
+    /// bytes, not empty). Its ID is in `Applied.annotations`. A link does not
+    /// style its text: Cmd+K is this command plus a `format-text` in one
+    /// transaction.
+    AddAnnotation {
+        node: String,
+        start: u32,
+        end: u32,
+        annotation: AnnotationPayload,
+    },
+    /// Replaces an annotation's payload; its kind cannot change.
+    UpdateAnnotation {
+        id: String,
+        annotation: AnnotationPayload,
+    },
+    /// Removes an annotation. Undo brings it back with the same ID.
+    RemoveAnnotation {
+        id: String,
+    },
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default, deny_unknown_fields)]
@@ -597,6 +621,8 @@ pub struct Applied {
     pub lists: Vec<String>,
     pub effects: Vec<Effect>,
     pub diagnostics: Vec<Diagnostic>,
+    /// The annotations `add-annotation` created, in command order.
+    pub annotations: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -1102,6 +1128,9 @@ pub struct DisplayPage {
     pub settled: bool,
     pub complete: bool,
     pub display: DisplayList,
+    /// The links drawn on this page, for hit-testing and hover cards. The
+    /// display list is unchanged by links.
+    pub links: Vec<PageLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1591,4 +1620,154 @@ pub struct OutlineEntry {
     pub level: u8,
     pub text: String,
     pub page: Option<u32>,
+}
+
+/// The most annotations `State.annotations` lists.
+pub const MAX_STATE_ANNOTATIONS: usize = 2048;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnnotationKind {
+    Link,
+    Comment,
+}
+
+/// Where a link goes: a URL (`http`, `https`, `mailto` or `tel`; anything
+/// else is refused with `annotation.link-scheme`), or inside the document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum LinkDestination {
+    Url { url: String },
+    Node { node: String },
+    Heading { node: String },
+    Range { range: String },
+}
+
+/// What an annotation is. A comment names its thread only; the thread's
+/// messages are not stored here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum AnnotationPayload {
+    Link { target: LinkDestination },
+    Comment { thread: String },
+}
+
+/// Whether an annotation is over text, or all of its text was deleted and
+/// its kind keeps a point (a comment).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnnotationStatus {
+    Active,
+    Orphaned,
+}
+
+/// One paragraph's part of an annotation, in UTF-8 bytes. An orphan has one
+/// empty span (`start == end`) where its point is, or none if its block is gone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AnnotationSpan {
+    pub node: String,
+    pub start: u32,
+    pub end: u32,
+}
+
+/// An annotation, compact: what `State.annotations` lists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AnnotationBrief {
+    pub id: String,
+    pub kind: AnnotationKind,
+    pub status: AnnotationStatus,
+    pub spans: Vec<AnnotationSpan>,
+    /// A comment's thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thread: Option<String>,
+}
+
+/// An annotation with its payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Annotation {
+    pub id: String,
+    /// The peer that created it.
+    pub author: String,
+    pub status: AnnotationStatus,
+    pub spans: Vec<AnnotationSpan>,
+    pub payload: AnnotationPayload,
+}
+
+/// A bounded query result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AnnotationList {
+    pub annotations: Vec<Annotation>,
+    /// More matched than one query returns (4,096).
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AnnotationsAt {
+    pub node: String,
+    pub at: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AnnotationsIn {
+    pub node: String,
+    pub start: u32,
+    pub end: u32,
+}
+
+/// One stretch of one line fragment of a span, three ways: in its frame's
+/// logical space, as page bounds, and as the page positions of its corners
+/// (exact in rotated, mirrored, vertical and spiral frames). All lengths are
+/// 1/1024 pt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SpanRect {
+    pub page: u32,
+    pub frame: u32,
+    pub node: String,
+    pub line: u32,
+    pub frame_rect: Rect,
+    pub bounds: Rect,
+    /// Inline start and block start, inline end and block start, inline end
+    /// and block end, inline start and block end.
+    pub corners: [Point; 4],
+    /// On a derived copy of a repeated table header row.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub repeated: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SpanTop {
+    pub page: u32,
+    pub y: i32,
+}
+
+/// Where an annotation is on the pages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AnnotationGeometry {
+    pub id: String,
+    pub rects: Vec<SpanRect>,
+    /// The first page it is on and the smallest y there, to align a sidebar.
+    pub top: Option<SpanTop>,
+    pub truncated: bool,
+    /// Pieces with no line on any page.
+    pub unplaced: u32,
+}
+
+/// A link on one page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageLink {
+    pub id: String,
+    pub target: LinkDestination,
+    pub rects: Vec<SpanRect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageLinks {
+    pub token: LayoutToken,
+    pub page: u32,
+    pub links: Vec<PageLink>,
+    pub truncated: bool,
 }

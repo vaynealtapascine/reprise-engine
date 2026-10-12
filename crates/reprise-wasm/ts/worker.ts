@@ -4,7 +4,8 @@ import init, { Workspace, DocumentSession, setPanicHandler } from "./reprise_was
 import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
   DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, FontSettings, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied,
-  OutlineEntry, ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face } from "./types.js";
+  OutlineEntry, ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face,
+  Annotation, AnnotationList, AnnotationsAt, AnnotationsIn, AnnotationKind, AnnotationGeometry, PageLinks } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
@@ -26,6 +27,12 @@ type Request = Payload<{ id: string } & (
   | { kind: "cancel"; job: number }
   | { kind: "outline" }
   | { kind: "marks"; page: number }
+  | { kind: "annotation"; request: Payload<string> }
+  | { kind: "annotations-at"; request: Payload<AnnotationsAt> }
+  | { kind: "annotations-in"; request: Payload<AnnotationsIn> }
+  | { kind: "annotations-of-kind"; request: Payload<AnnotationKind> }
+  | { kind: "annotation-geometry"; request: Payload<string> }
+  | { kind: "page-links"; page: number }
   | { kind: "save" }
   | { kind: "sync-export"; request?: Payload<SyncRequest> }
   | { kind: "sync-info" }
@@ -50,6 +57,10 @@ export type Response = Payload<{ id: string } & (
   | { kind: "layout"; job: number; progress: Payload<LayoutProgress>; pages: Payload<DisplayPage>[] }
   | { kind: "outline"; headings: Payload<OutlineEntry[]> }
   | { kind: "marks"; page: Payload<MarksPage> }
+  | { kind: "annotation"; annotation: Payload<Annotation | null> }
+  | { kind: "annotations"; list: Payload<AnnotationList> }
+  | { kind: "annotation-geometry"; geometry: Payload<AnnotationGeometry | null> }
+  | { kind: "page-links"; links: Payload<PageLinks> }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
   | { kind: "sync-packet"; packet: Payload<SyncPacket> }
@@ -139,6 +150,12 @@ scope.onmessage = (event: MessageEvent<Request>) => {
         case "cancel": current().cancel(data.job); if (data.job === active) release(); post({ id, kind: "ack" }); break;
         case "outline": post({ id, kind: "outline", headings: current().outline() }); break;
         case "marks": post({ id, kind: "marks", page: current().marks(data.page) }); break;
+        case "annotation": post({ id, kind: "annotation", annotation: current().annotation(data.request) }); break;
+        case "annotations-at": post({ id, kind: "annotations", list: current().annotations_at(data.request) }); break;
+        case "annotations-in": post({ id, kind: "annotations", list: current().annotations_in(data.request) }); break;
+        case "annotations-of-kind": post({ id, kind: "annotations", list: current().annotations_of_kind(data.request) }); break;
+        case "annotation-geometry": post({ id, kind: "annotation-geometry", geometry: current().annotation_geometry(data.request) }); break;
+        case "page-links": post({ id, kind: "page-links", links: current().page_links(data.page) }); break;
         case "save": { release(); const content = current().save(); post({ id, kind: "saved", content }, [content.data.bytes.buffer]); break; }
         case "sync-export": {
           if (data.request) {

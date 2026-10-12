@@ -47,11 +47,18 @@ pub fn save(&mut self) -> Result<Payload<Bytes>>
 pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>>
 pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>>
 pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>>
+pub fn page_links(&self, page: u32) -> Result<Payload<PageLinks>>
+pub fn annotation(&self, request: &Payload<String>) -> Result<Payload<Option<Annotation>>>
+pub fn annotations_at( &self, request: &Payload<AnnotationsAt>, ) -> Result<Payload<AnnotationList>>
+pub fn annotations_in( &self, request: &Payload<AnnotationsIn>, ) -> Result<Payload<AnnotationList>>
+pub fn annotations_of_kind( &self, request: &Payload<AnnotationKind>, ) -> Result<Payload<AnnotationList>>
+pub fn annotation_geometry( &self, request: &Payload<String>, ) -> Result<Payload<Option<AnnotationGeometry>>>
 pub fn display_json(&self, page: u32) -> Result<Payload<String>>
 pub fn glyph_outlines( &self, request: &Payload<GlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
 pub fn glyph_outlines_styled( &self, request: &Payload<StyledGlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
 pub fn svg(&self, page: u32) -> Result<Payload<String>>
 pub fn png(&self, page: u32, scale_permille: u32) -> Result<Payload<Bytes>>
+pub fn outline(&self) -> Result<Payload<Vec<OutlineEntry>>>
 pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>>
 pub fn diagnostics(&self) -> Payload<Vec<Diagnostic>>
 pub fn diagnostics_for( &self, request: &Payload<DiagnosticFilter>, ) -> Result<Payload<DiagnosticList>>
@@ -78,6 +85,7 @@ pub fn new(data: T) -> Self
 pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error>
 pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error>
 pub const MAX_DIAGNOSTICS: u32 = 1000;
+pub const MAX_STATE_ANNOTATIONS: usize = 2048;
 collab
 pub fn sync_export(&self, request: &Payload<SyncRequest>) -> Result<Payload<SyncPacket>>
 pub fn sync_import(&mut self, request: &Payload<SyncPacket>) -> Result<Payload<SyncReport>>
@@ -89,18 +97,3 @@ pub fn undo_report(&mut self) -> Result<Payload<EditReport>>
 pub fn redo_report(&mut self) -> Result<Payload<EditReport>>
 pub fn presence(&self, request: &Payload<Presence>) -> Result<Payload<Awareness>>
 pub fn resolve_presence(&self, request: &Payload<Awareness>) -> Result<Payload<PresenceView>>
-
-Block semantics (required package bit 14):
-  apply/batch commands: set-role, create-list, update-list, delete-list,
-  set-list-item, remove-list-item, set-list-level, indent-list-item,
-  restart-list, continue-list, enter, backspace-at-start.
-  Batch.expected_revision applies to every command; set-role + apply-style
-  share one undo step. ListRef is existing {id} or new {index} in CreateList order.
-  State.blocks: optional role (absent = body), optional list {id,level,value,restart,marker}.
-  State.lists: optional NamedList[] {id,definition,error}; Applied.lists: new IDs.
-  ListDefinition: base?, levels[] with level 0..8, format?, text?, start?, indent?, hanging?, marker?.
-  Counter start/value/restart are canonical signed i64 decimal strings.
-  DocumentSession::outline() -> Payload<Vec<OutlineEntry>> {node,level,text,page?};
-  pages are zero-based and null without current layout. WASM has outline();
-  worker outline request returns {kind:"outline",headings:Payload<OutlineEntry[]>}.
-  ReadingStep: optional role and first-line marker; start/end remain authored text byte offsets.

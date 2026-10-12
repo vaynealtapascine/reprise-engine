@@ -216,6 +216,22 @@ pub enum Command {
     BackspaceAtStart {
         node: NodeId,
     },
+    /// Adds an annotation (a link or comment anchor) over a nonempty span,
+    /// with its kind's edge policy. Its ID is in [`crate::Applied::annotations`].
+    AddAnnotation {
+        node: NodeId,
+        range: Range<usize>,
+        data: reprise_doc::annotation::AnnotationData,
+    },
+    /// Replaces an annotation's payload; its kind cannot change.
+    UpdateAnnotation {
+        id: reprise_doc::RangeId,
+        data: reprise_doc::annotation::AnnotationData,
+    },
+    /// Removes an annotation, readable or not. Undo restores it with its ID.
+    RemoveAnnotation {
+        id: reprise_doc::RangeId,
+    },
 }
 
 /// A list a command names: one that exists, or the `n`th made by this

@@ -24,6 +24,12 @@ pub struct Report {
     /// Number of Link annotations and how many have a `/StructParent`.
     pub links: usize,
     pub tagged_links: usize,
+    /// For each Link annotation, in page order: its `/Contents`.
+    pub link_contents: Vec<String>,
+    /// The URI of each Link annotation with a URI action.
+    pub link_uris: Vec<String>,
+    /// How many Link annotations go to a destination in the document.
+    pub link_destinations: usize,
     pub lang: Option<String>,
     pub xmp: String,
     pub display_doc_title: bool,
@@ -180,6 +186,17 @@ pub fn check(bytes: &[u8]) -> Report {
                     report.links += 1;
                     if d.get(b"StructParent").is_ok() {
                         report.tagged_links += 1;
+                    }
+                    report
+                        .link_contents
+                        .push(d.get(b"Contents").map(text).unwrap_or_default());
+                    let action = d.get(b"A").ok().and_then(|a| dict(&doc, a));
+                    match action.and_then(|a| a.get(b"URI").ok()) {
+                        Some(uri) => report.link_uris.push(text(uri)),
+                        None if d.get(b"Dest").is_ok() || action.is_some() => {
+                            report.link_destinations += 1;
+                        }
+                        None => {}
                     }
                 }
             }

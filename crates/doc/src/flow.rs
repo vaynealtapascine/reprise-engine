@@ -594,6 +594,7 @@ impl Document {
             return Ok(false);
         }
         let text = self.block(id)?.text;
+        self.record_annotation_restore(id, 0..text.len())?;
         text.delete(0..text.len())?;
         if id.is_break() {
             self.set_record_active(id, false)?;
@@ -747,13 +748,15 @@ impl Document {
         // own flow cannot create a tree cycle.
         self.check_not_inside(staged, placement)?;
         let formatting = self.prepare_format_copy(id, 0..len, Some(staged))?;
+        let annotations = self.annotations_to_move(id, 0..len);
         self.put(staged, placement)?;
         self.restore_block(staged)?;
         self.copy_semantics_to(id, staged)?;
         self.record_transfer(id, 0, staged, 0, len)?;
         self.supersede(id, staged)?;
         self.delete_block(id)?;
-        self.write_format_copy(staged, 0, formatting)
+        self.write_format_copy(staged, 0, formatting)?;
+        self.move_annotations(staged, 0, annotations)
     }
 }
 

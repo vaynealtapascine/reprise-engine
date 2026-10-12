@@ -264,10 +264,13 @@ impl Document {
             .position(|&c| c == id)
             .ok_or(DocError::NoNode(id))?;
         let formatting = self.prepare_format_copy(id, at..end, Some(new))?;
+        let annotations = self.annotations_to_move(id, at..end);
         self.record_transfer(id, at, new, 0, end - at)?;
+        self.record_annotation_restore(id, at..end)?;
         block.text.delete(at..end)?;
         self.activate_block_at(new, parent, index + 1)?;
-        self.write_format_copy(new, 0, formatting)
+        self.write_format_copy(new, 0, formatting)?;
+        self.move_annotations(new, 0, annotations)
     }
 
     /// Joins `second` onto the end of `first`. When `second` is the
@@ -299,11 +302,21 @@ impl Document {
         }
         let at = a.text.len();
         let formatting = self.prepare_format_copy(second, 0..b.text.len(), Some(first))?;
+        let copied = b.text.len();
+        let annotations = self.annotations_to_move(second, 0..copied);
         a.text.insert(at, &b.text.to_string())?;
         self.record_transfer(second, 0, first, at, b.text.len())?;
         self.supersede(second, first)?;
         self.delete_block(second)?;
-        self.write_format_copy(first, at, formatting)
+        self.write_format_copy(first, at, formatting)?;
+        let moved = !annotations.is_empty();
+        self.move_annotations(first, at, annotations)?;
+        // Redo recreates the inserted copy under new IDs: hint the moved
+        // annotations' ends so they can be found there again.
+        if moved {
+            self.record_annotation_restore(first, at..at + copied)?;
+        }
+        Ok(())
     }
 }
 
@@ -376,7 +389,9 @@ impl UndoStack {
         let done = self.replay(items, true)?;
         if done > 0 {
             self.log().redo.push((serial, done));
-            Document::wrap(self.doc.clone()).capture_restored_lineage();
+            let doc = Document::wrap(self.doc.clone());
+            doc.capture_restored_lineage();
+            doc.restore_annotation_anchors();
         }
         Ok(done > 0)
     }
@@ -389,7 +404,9 @@ impl UndoStack {
         let done = self.replay(items, false)?;
         if done > 0 {
             self.log().undo.push((serial, done));
-            Document::wrap(self.doc.clone()).capture_restored_lineage();
+            let doc = Document::wrap(self.doc.clone());
+            doc.capture_restored_lineage();
+            doc.restore_annotation_anchors();
         }
         Ok(done > 0)
     }

@@ -28,6 +28,8 @@ pub const DEFAULT_TITLE: &str = "Untitled document";
 pub const FIGURE_ALT_MISSING: Code = Code::new("pdf.figure-alt-missing");
 /// A note reference could not be linked to its note.
 pub const REFERENCE_UNLINKED: Code = Code::new("pdf.reference-unlinked");
+/// A document link had no clickable area or no target, so it is only tagged.
+pub const LINK_UNRESOLVED: Code = Code::new("pdf.link-unresolved");
 /// A heading level outside H1 to H6 was clamped.
 pub const HEADING_LEVEL: Code = Code::new("pdf.heading-level");
 /// Structure nested deeper than [`MAX_DEPTH`] was flattened.
@@ -77,6 +79,25 @@ pub struct Link {
     pub alt: String,
 }
 
+/// Where a document link goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkTo {
+    /// The node with this [`Node::key`], by destination.
+    Node(u32),
+    /// An external address, as a URI action. The caller has validated it.
+    Uri(String),
+}
+
+/// A link annotation over linked text, one per run of the link.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DocLink {
+    /// The clickable area, in the page space of the link's first run.
+    pub rect: Rect<PageSpace>,
+    pub to: LinkTo,
+    /// The annotation's `/Contents`, for assistive technology.
+    pub alt: String,
+}
+
 /// What a structure node is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -90,6 +111,8 @@ pub enum Role {
     Note { id: Option<String> },
     /// `Reference`, wrapping a `Link` when `link` is set.
     Reference { link: Option<Link> },
+    /// `Link`, wrapping the linked content and its annotation when `link` is set.
+    Link { link: Option<DocLink> },
     /// `Div`: a float or another grouping that has no tag of its own.
     Div,
     /// `Table`.

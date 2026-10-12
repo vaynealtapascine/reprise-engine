@@ -74,6 +74,8 @@ pub struct Applied {
     pub relations: Vec<RelationId>,
     /// The list definitions it created (by `CreateList` or a paste), in order.
     pub lists: Vec<reprise_doc::ListId>,
+    /// The annotations it created (by `AddAnnotation`), in command order.
+    pub annotations: Vec<reprise_doc::RangeId>,
     /// What its commands did to positions, in order.
     pub effects: Vec<Effect>,
 }
@@ -221,6 +223,7 @@ impl Editor {
             .collect::<Result<Vec<_>, _>>()
             .map_err(store)?;
         let mut made_relations = Vec::new();
+        let mut made_annotations = Vec::new();
         for step in &plan.steps {
             match step {
                 Step::AlignLine {
@@ -241,6 +244,14 @@ impl Editor {
                     self.doc
                         .pin_line(*node, *at, *edge, *target, *target_at, *target_edge)
                         .map_err(store)?,
+                ),
+                Step::AddAnnotation { node, range, data } => made_annotations.push(
+                    self.doc
+                        .add_annotation_prechecked(*node, range.clone(), data)
+                        .map_err(|e| EditError {
+                            command: None,
+                            reason: Reason::from(e),
+                        })?,
                 ),
                 Step::AddRelation { new } => {
                     self.step(step, &mut blocks, &relations, &lists)
@@ -288,6 +299,7 @@ impl Editor {
             blocks,
             relations: made_relations,
             lists,
+            annotations: made_annotations,
             effects,
         })
     }
@@ -312,7 +324,7 @@ impl Editor {
                 self.doc.block(*node)?.text.insert(*at, text)?;
             }
             Step::DeleteText { node, range } => {
-                self.doc.block(*node)?.text.delete(range.clone())?;
+                self.doc.delete_text(*node, range.clone())?;
             }
             Step::Split { node, at, new } => {
                 let made = self.doc.split_block(*node, *at)?;
@@ -389,6 +401,15 @@ impl Editor {
             }
             Step::RemoveListItem { node } => self.doc.remove_list_item(*node)?,
             Step::SetListRestart { node, value } => self.doc.set_list_restart(*node, *value)?,
+            Step::UpdateAnnotation { id, data } => self
+                .doc
+                .update_annotation(*id, data)
+                .map_err(|e| reprise_doc::DocError::Store(e.to_string()))?,
+            Step::RemoveAnnotation { id } => self
+                .doc
+                .remove_annotation(*id)
+                .map_err(|e| reprise_doc::DocError::Store(e.to_string()))?,
+            Step::AddAnnotation { .. } => return Err(missing()),
         }
         Ok(())
     }

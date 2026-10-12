@@ -276,7 +276,7 @@ impl Document {
     /// Whether the `ranges` root exists. Merely opening a root container with
     /// `get_tree` materialises it in exported state, so reads that must not
     /// change saved bytes check first.
-    fn has_ranges_root(&self) -> bool {
+    pub(crate) fn has_ranges_root(&self) -> bool {
         matches!(self.doc.get_value(), loro::LoroValue::Map(m) if m.contains_key("ranges"))
     }
 

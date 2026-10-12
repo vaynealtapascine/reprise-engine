@@ -271,6 +271,7 @@ when a `format1` envelope carries `clear`. An older reader would silently drop
 those properties, styles or masks, so it must refuse. Untouched documents,
 including those that only name built-in styles, keep their old mask. See
 `docs/paragraph-styles.md`; the bit number may be renumbered on integration.
+
 ## Block semantics feature (required bit 14)
 
 `REQUIRED_BLOCK_SEMANTICS` is declared whenever any paragraph metadata or break
@@ -280,3 +281,12 @@ definitions and values reset to body whose history is retained. A reader whose
 known required mask predates bit 14 refuses before decoding the document
 section. Documents that never used roles or lists retain their old required
 mask. Numbering is derived and never persisted. See `docs/roles-and-lists.md`.
+
+## Annotations feature (required bit 16)
+
+`REQUIRED_ANNOTATIONS` is declared whenever any persistent range carries an
+`annot1` annotation envelope or an `annot-restore1` restore hint, including
+removed (tombstoned), unreadable and future-kind records. An older reader would
+show such ranges as bare ranges and copy them without their data, so it must
+refuse the package. Documents without annotations keep their old required mask.
+See `docs/annotations.md`. Bits 14 and 15 are reserved for lists and inline objects.

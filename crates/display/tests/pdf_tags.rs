@@ -597,3 +597,83 @@ fn named_artifact_runs_paint_as_artifacts_and_must_not_also_be_leaves() {
         .is_err()
     );
 }
+
+#[test]
+fn document_links_are_link_elements_with_uri_or_destination_annotations() {
+    let (runs, fonts) = runs(&["Title", "go to the site", "mail us", "back up", "lost"]);
+    let pages = [page(glyphs(runs))];
+    let rect = |x: i32| Rect::new(Point::new(pt(x), pt(30)), pt(30), pt(14));
+    let link = |x: i32, to: tags::LinkTo, alt: &str| Role::Link {
+        link: Some(tags::DocLink {
+            rect: rect(x),
+            to,
+            alt: alt.into(),
+        }),
+    };
+    let mut heading = Node::new(
+        Role::Heading {
+            level: 1,
+            title: "Title".into(),
+        },
+        vec![leaf(0, 0)],
+    );
+    heading.key = Some(1 << 24);
+    heading.at = Some(Point::new(pt(10), pt(20)));
+    let structure = vec![
+        Child::Node(heading),
+        node(
+            Role::P,
+            vec![
+                part(0, 1, 0..6),
+                node(
+                    link(
+                        10,
+                        tags::LinkTo::Uri("https://site.example/?a=1&b=2".into()),
+                        "site: https://site.example",
+                    ),
+                    vec![part(0, 1, 6..14)],
+                ),
+            ],
+        ),
+        node(
+            link(
+                40,
+                tags::LinkTo::Uri("mailto:me@example.com".into()),
+                "mail: me@example.com",
+            ),
+            vec![leaf(0, 2)],
+        ),
+        node(
+            link(70, tags::LinkTo::Node(1 << 24), "back up: Title"),
+            vec![leaf(0, 3)],
+        ),
+        // A target that names no node, and a link with no area.
+        node(
+            link(100, tags::LinkTo::Node(999), "lost: nowhere"),
+            vec![leaf(0, 4)],
+        ),
+    ];
+    let t = render(&pages, &fonts, &Default::default(), structure).unwrap();
+    assert!(t.ua, "{:?}", t.notes);
+    assert_eq!(codes(&t), [tags::LINK_UNRESOLVED.to_string()]);
+    assert_eq!(t.notes[0].severity, reprise_diag::Severity::Warning);
+    let r = check(&t.bytes);
+    assert_eq!(r.roles.iter().filter(|role| *role == "Link").count(), 3);
+    assert_eq!(r.roles.iter().filter(|role| *role == "Span").count(), 1);
+    assert_eq!((r.links, r.tagged_links), (3, 3));
+    assert_eq!(
+        r.link_uris,
+        ["https://site.example/?a=1&b=2", "mailto:me@example.com"]
+    );
+    assert_eq!(r.link_destinations, 1);
+    assert_eq!(
+        r.link_contents,
+        [
+            "site: https://site.example",
+            "mail: me@example.com",
+            "back up: Title"
+        ]
+    );
+    // The unlinked one still reads, tagged as a plain Span.
+    assert!(r.text.contains("lost"));
+}

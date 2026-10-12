@@ -23,7 +23,14 @@ styles: Array<NamedStyle>,
  * The distinct resolved paragraph styles that `blocks[].style.resolved`
  * indexes. Blocks sharing a style share an entry.
  */
-resolved: Array<ResolvedStyle>, };
+resolved: Array<ResolvedStyle>,
+/**
+ * Links and comment anchors, compact: where each is and what it is for,
+ * without a link's address (ask `annotation` for that). At most
+ * [`MAX_STATE_ANNOTATIONS`], in ID order; a `bindings.limit` diagnostic
+ * says when more were left out. The queries are not cut short that way.
+ */
+annotations: Array<AnnotationBrief>, };
 export type Clock = { peer: string, counter: number, };
 export type Block = { id: string, parent: string | null, kind: BlockKind, text: string,
 /**
@@ -97,10 +104,14 @@ export type BlockStyle = {
          */
         tag: string, value: number, };
         export type TextRun = { start: number, end: number, style: TextStyle, };
-        export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, };
+        export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, };
         export type Transaction = { commands: Array<Command>, };
         export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
-        export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, };
+        export type Applied = { blocks: Array<string>, relations: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>,
+        /**
+         * The annotations `add-annotation` created, in command order.
+         */
+        annotations: Array<string>, };
         export type FontStyle = "normal" | "italic" | "oblique";
         export type FontDeclaration = { family: string, weight: number, style: FontStyle, stretch: number, face_index: number, };
         export type GenericFamily = "serif" | "sans-serif" | "monospace" | "script";
@@ -158,7 +169,12 @@ export type BlockStyle = {
         export type Stroke = { color: [number, number, number, number], width: number, };
         export type DisplayItem = { "type": "glyphs" } & GlyphRun | { "type": "image", asset: string, rect: DisplayRect, alt: string, layer: Layer, } | { "type": "path", path: Array<Segment>, fill: [number, number, number, number] | null, stroke: Stroke | null, layer: Layer, } | { "type": "group", transform: Matrix, clip: Array<Segment> | null, items: Array<DisplayItem>, };
         export type DisplayList = { width: number, height: number, items: Array<DisplayItem>, };
-        export type DisplayPage = { token: LayoutToken, page: number, settled: boolean, complete: boolean, display: DisplayList, };
+        export type DisplayPage = { token: LayoutToken, page: number, settled: boolean, complete: boolean, display: DisplayList,
+        /**
+         * The links drawn on this page, for hit-testing and hover cards. The
+         * display list is unchanged by links.
+         */
+        links: Array<PageLink>, };
         export type GlyphRequest = { face: Face, glyphs: Array<number>, };
         export type GlyphOutlines = { units_per_em: number, glyphs: Array<GlyphOutline>, };
         export type GlyphOutline = { id: number, path: string, ink_bounds?: GlyphBounds, };
@@ -229,6 +245,50 @@ export type BlockStyle = {
          * `-outside`, `-conflict` or `-invalid`).
          */
         diagnostic: string | null, };
+        export type AnnotationKind = "link" | "comment";
+        export type LinkDestination = { "type": "url", url: string, } | { "type": "node", node: string, } | { "type": "heading", node: string, } | { "type": "range", range: string, };
+        export type AnnotationPayload = { "kind": "link", target: LinkDestination, } | { "kind": "comment", thread: string, };
+        export type AnnotationStatus = "active" | "orphaned";
+        export type AnnotationSpan = { node: string, start: number, end: number, };
+        export type AnnotationBrief = { id: string, kind: AnnotationKind, status: AnnotationStatus, spans: Array<AnnotationSpan>,
+        /**
+         * A comment's thread.
+         */
+        thread?: string, };
+        export type Annotation = { id: string,
+        /**
+         * The peer that created it.
+         */
+        author: string, status: AnnotationStatus, spans: Array<AnnotationSpan>, payload: AnnotationPayload, };
+        export type AnnotationList = { annotations: Array<Annotation>,
+        /**
+         * More matched than one query returns (4,096).
+         */
+        truncated: boolean, };
+        export type AnnotationsAt = { node: string, at: number, };
+        export type AnnotationsIn = { node: string, start: number, end: number, };
+        export type SpanRect = { page: number, frame: number, node: string, line: number, frame_rect: Rect, bounds: Rect,
+        /**
+         * Inline start and block start, inline end and block start, inline end
+         * and block end, inline start and block end.
+         */
+        corners: [Point, Point, Point, Point],
+        /**
+         * On a derived copy of a repeated table header row.
+         */
+        repeated?: boolean, };
+        export type SpanTop = { page: number, y: number, };
+        export type AnnotationGeometry = { id: string, rects: Array<SpanRect>,
+        /**
+         * The first page it is on and the smallest y there, to align a sidebar.
+         */
+        top: SpanTop | null, truncated: boolean,
+        /**
+         * Pieces with no line on any page.
+         */
+        unplaced: number, };
+        export type PageLink = { id: string, target: LinkDestination, rects: Array<SpanRect>, };
+        export type PageLinks = { token: LayoutToken, page: number, links: Array<PageLink>, truncated: boolean, };
         export type MarksPage = { token: LayoutToken, page: number, marks: Array<Mark>, };
         export type DiagnosticFilter = {
             /**
@@ -292,6 +352,11 @@ export type BlockStyle = {
                     free(): void;
                     [Symbol.dispose](): void;
                     anchor_selection(request: Payload<Selection>): Payload<StableSelection>;
+                    annotation(request: Payload<string>): Payload<Annotation | null>;
+                    annotation_geometry(request: Payload<string>): Payload<AnnotationGeometry | null>;
+                    annotations_at(request: Payload<AnnotationsAt>): Payload<AnnotationList>;
+                    annotations_in(request: Payload<AnnotationsIn>): Payload<AnnotationList>;
+                    annotations_of_kind(request: Payload<AnnotationKind>): Payload<AnnotationList>;
                     apply(request: Payload<Transaction>): Payload<Applied>;
                     awareness(content: Uint8Array): Payload<Awareness>;
                     batch(request: Payload<Batch>): Payload<BatchReport>;
@@ -317,6 +382,7 @@ export type BlockStyle = {
                     local_selection(): Payload<Selection | null>;
                     marks(page: number): Payload<MarksPage>;
                     move_cursor(request: Payload<Move>): Payload<Cursor>;
+                    page_links(page: number): Payload<PageLinks>;
                     partial_page(job: number, page: number): Payload<DisplayPage>;
                     paste(request: Payload<Paste>, content: Uint8Array): Payload<Applied>;
                     png(page: number, scale_permille: number): Payload<Bytes>;
@@ -396,6 +462,11 @@ export type BlockStyle = {
                     readonly __wbg_documentsession_free: (a: number, b: number) => void;
                     readonly __wbg_workspace_free: (a: number, b: number) => void;
                     readonly documentsession_anchor_selection: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_annotation: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_annotation_geometry: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_annotations_at: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_annotations_in: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_annotations_of_kind: (a: number, b: any) => [number, number, number];
                     readonly documentsession_apply: (a: number, b: any) => [number, number, number];
                     readonly documentsession_awareness: (a: number, b: any) => [number, number, number];
                     readonly documentsession_batch: (a: number, b: any) => [number, number, number];
@@ -421,6 +492,7 @@ export type BlockStyle = {
                     readonly documentsession_local_selection: (a: number) => [number, number, number];
                     readonly documentsession_marks: (a: number, b: number) => [number, number, number];
                     readonly documentsession_move_cursor: (a: number, b: any) => [number, number, number];
+                    readonly documentsession_page_links: (a: number, b: number) => [number, number, number];
                     readonly documentsession_partial_page: (a: number, b: number, c: number) => [number, number, number];
                     readonly documentsession_paste: (a: number, b: any, c: any) => [number, number, number];
                     readonly documentsession_png: (a: number, b: number, c: number) => [number, number, number];

@@ -5,6 +5,7 @@ use std::ops::Range;
 use loro::{Container, LoroValue, ValueOrContainer};
 use serde::{Deserialize, Serialize};
 
+use crate::annotation::OnEmpty;
 use crate::relation::{CopyAction, CopySet, plan_copy};
 use crate::text::{Affinity, Empty, RangePolicy};
 use crate::{
@@ -64,7 +65,29 @@ pub struct FragmentRange {
     pub node: NodeId,
     pub bytes: Range<usize>,
     pub policy: RangePolicy,
+    /// The annotation this range carries (see `docs/annotations.md`).
+    /// Absent from fragments without annotations; older strict readers
+    /// refuse a fragment that has one rather than paste a bare range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<crate::annotation::AnnotationData>,
 }
+
+/// What a copy is for. It decides which annotations come along.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyScope {
+    /// Text the user copies to paste somewhere: annotation kinds whose
+    /// [`CopyPolicy`] is `Drop` (a comment thread has one anchor) stay behind.
+    Clipboard,
+    /// The whole document rebuilt as another (a duplicate): every readable
+    /// annotation comes along, orphaned ones included, with new identities.
+    Document,
+}
+
+/// An annotation was left out of a copy or paste: a kind that is not
+/// copied (Info), or a link whose internal target is outside the copy and
+/// the target document (Warning: the text is pasted without its link).
+pub const ANNOTATION_DROPPED: reprise_diag::Code =
+    reprise_diag::Code::new("clipboard.annotation-dropped");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -187,6 +210,7 @@ impl Fragment {
             }
         }
         let mut ranges = BTreeSet::new();
+        let mut annotations = 0usize;
         for range in &self.ranges {
             let (block, _) = nodes
                 .get(&range.node)
@@ -198,6 +222,17 @@ impl Fragment {
                 return Err(FragmentError::Invalid(
                     "duplicate range or invalid UTF-8 range".into(),
                 ));
+            }
+            if let Some(data) = &range.annotation {
+                annotations += 1;
+                if annotations > crate::annotation::MAX_ANNOTATIONS {
+                    return Err(FragmentError::Limit("annotations"));
+                }
+                if range.bytes.is_empty() && data.kind().spec().on_empty != OnEmpty::Orphan {
+                    return Err(FragmentError::Invalid("empty annotation range".into()));
+                }
+                data.validate()
+                    .map_err(|e| FragmentError::Invalid(e.to_string()))?;
             }
         }
         let mut relations = BTreeSet::new();
@@ -261,6 +296,17 @@ impl Document {
         source: &str,
         selection: &[CopyBlock],
         schemas: &SchemaRegistry,
+    ) -> Result<Fragment, FragmentError> {
+        self.copy_fragment_scoped(source, selection, schemas, CopyScope::Clipboard)
+    }
+
+    /// [`Document::copy_fragment`] for a stated purpose (see [`CopyScope`]).
+    pub fn copy_fragment_scoped(
+        &self,
+        source: &str,
+        selection: &[CopyBlock],
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
     ) -> Result<Fragment, FragmentError> {
         let bad = |e: DocError| FragmentError::Invalid(e.to_string());
         let mut fragment = Fragment {
@@ -410,6 +456,47 @@ impl Document {
             if start > end || (start == end && !bytes.is_empty()) {
                 continue;
             }
+            // Annotations travel with their data; kinds that are not copied
+            // and records this engine cannot read are left out and reported.
+            let annotation = match get_str(&meta, crate::annotation::KEY) {
+                None if meta.get(crate::annotation::KEY).is_none() => None,
+                raw => match raw.map(|r| crate::annotation::AnnotationData::read(&r)) {
+                    Some(Ok(data))
+                        if scope == CopyScope::Document
+                            || data.kind().spec().copy
+                                == crate::annotation::CopyPolicy::Duplicate =>
+                    {
+                        // An empty span is an orphan: only kinds that keep
+                        // their point can be copied that way.
+                        if start == end && data.kind().spec().on_empty != OnEmpty::Orphan {
+                            continue;
+                        }
+                        Some(data)
+                    }
+                    Some(Ok(data)) => {
+                        let message = format!("{} annotations are not copied", data.kind().name());
+                        if !fragment.notes.iter().any(|n| n.message == message) {
+                            fragment
+                                .notes
+                                .push(reprise_diag::Note::info(ANNOTATION_DROPPED, message));
+                        }
+                        continue;
+                    }
+                    _ => {
+                        if !fragment
+                            .notes
+                            .iter()
+                            .any(|n| n.code == crate::annotation::UNREADABLE)
+                        {
+                            fragment.notes.push(reprise_diag::Note::warning(
+                                crate::annotation::UNREADABLE,
+                                "an unreadable annotation was left out of the copy",
+                            ));
+                        }
+                        continue;
+                    }
+                },
+            };
             let meta = tree
                 .get_meta(id)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
@@ -453,6 +540,7 @@ impl Document {
                 node,
                 bytes: start - cut.start..end - cut.start,
                 policy,
+                annotation,
             });
         }
         let copied = CopySet {
@@ -480,12 +568,31 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
     ) -> Result<Fragment, FragmentError> {
+        self.copy_all_scoped(source, schemas, CopyScope::Clipboard)
+    }
+
+    /// The whole document as a fragment to rebuild it elsewhere (a duplicate):
+    /// [`CopyScope::Document`], so every readable annotation comes along.
+    pub fn copy_document_fragment(
+        &self,
+        source: &str,
+        schemas: &SchemaRegistry,
+    ) -> Result<Fragment, FragmentError> {
+        self.copy_all_scoped(source, schemas, CopyScope::Document)
+    }
+
+    fn copy_all_scoped(
+        &self,
+        source: &str,
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
+    ) -> Result<Fragment, FragmentError> {
         let selection: Vec<_> = self
             .blocks()
             .into_iter()
             .map(|node| CopyBlock { node, bytes: None })
             .collect();
-        let mut fragment = self.copy_fragment(source, &selection, schemas)?;
+        let mut fragment = self.copy_fragment_scoped(source, &selection, schemas, scope)?;
         // A full-document copy also carries unreferenced authored definitions.
         // Tombstones belong to history and are intentionally not replayed.
         for (id, read) in self.lists() {

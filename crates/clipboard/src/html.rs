@@ -1,8 +1,14 @@
 //! A conservative clipboard reader, not a browser. It never fetches or executes anything.
 use std::collections::BTreeMap;
 
+use std::ops::Range;
+
 use reprise_diag::Note;
-use reprise_doc::{BlockKind, Document, LengthExpr, NodeId, SchemaRegistry, Style, TableColumns};
+use reprise_doc::annotation::{AnnotationData, LinkTarget, validate_url};
+use reprise_doc::fragment::FragmentRange;
+use reprise_doc::{
+    BlockKind, Document, LengthExpr, NodeId, RangeId, SchemaRegistry, Style, TableColumns,
+};
 use reprise_geom::Length;
 
 use crate::{ClipboardError, NativeFragment, codes};
@@ -29,9 +35,41 @@ pub struct Import {
     pub notes: Vec<Note>,
 }
 
-fn fragment(doc: Document, notes: Vec<Note>) -> Result<Import, ClipboardError> {
+/// The peer of the synthetic ranges that carry imported links: not one the
+/// import document uses, so their IDs cannot collide with its own.
+const LINK_PEER: u64 = u64::MAX;
+
+/// The most links one import keeps. Past it the text stays and the links go.
+const MAX_HTML_LINKS: usize = 4096;
+
+fn fragment(
+    doc: Document,
+    mut notes: Vec<Note>,
+    links: Vec<(NodeId, Range<usize>, AnnotationData)>,
+) -> Result<Import, ClipboardError> {
+    let mut fragment = doc.copy_all_fragment("clipboard-import", &SchemaRegistry::builtin())?;
+    // Links are ranges of their own. They are added to the fragment rather
+    // than the import document, whose annotation index would be rebuilt for
+    // every link.
+    for (i, (node, bytes, data)) in links.into_iter().enumerate() {
+        let Some(id) = i32::try_from(i)
+            .ok()
+            .and_then(|i| RangeId::parse(&format!("{i}@{LINK_PEER}")))
+        else {
+            break;
+        };
+        fragment.ranges.push(FragmentRange {
+            id,
+            node,
+            bytes,
+            policy: data.kind().spec().policy,
+            annotation: Some(data),
+        });
+    }
+    fragment.validate()?;
+    notes.extend(fragment.notes.iter().cloned());
     let fragment = NativeFragment {
-        fragment: doc.copy_all_fragment("clipboard-import", &SchemaRegistry::builtin())?,
+        fragment,
         resources: BTreeMap::new(),
         notes: notes.clone(),
     };
@@ -55,7 +93,7 @@ pub fn import_plain(text: &str) -> Result<Import, ClipboardError> {
         doc.append_block(BlockKind::Paragraph, "", part)
             .map_err(store)?;
     }
-    fragment(doc, Vec::new())
+    fragment(doc, Vec::new(), Vec::new())
 }
 
 fn entities(text: &str) -> String {
@@ -396,6 +434,32 @@ struct Reader {
     /// An `li` was opened: its first paragraph is an item at this level,
     /// restarting at `value` when given.
     item: Option<(u8, Option<i64>)>,
+    /// The anchor open in the input, if its address was accepted.
+    link: Option<OpenLink>,
+    /// Linked stretches of the block being read.
+    pending_links: Vec<(Range<usize>, Dest)>,
+    /// An `id` seen before the block it names exists.
+    pending_id: Option<String>,
+    /// Blocks by the `id` they were given, for `#id` links.
+    ids: BTreeMap<String, NodeId>,
+    /// Links to a block of the same HTML: (block, bytes, target `id`).
+    internal: Vec<(NodeId, Range<usize>, String)>,
+    /// Links ready for the fragment.
+    links: Vec<(NodeId, Range<usize>, AnnotationData)>,
+    link_overflow: bool,
+}
+
+/// Where an accepted anchor goes.
+#[derive(Clone)]
+enum Dest {
+    Url(String),
+    Fragment(String),
+}
+
+struct OpenLink {
+    dest: Dest,
+    /// Where its text starts in the open block.
+    start: usize,
 }
 
 /// One open `ol`/`ul`.
@@ -592,6 +656,14 @@ impl Reader {
                 );
             }
         }
+        // An anchor still open continues into the next block.
+        if let Some(open) = self.link.as_mut() {
+            if self.text.len() > open.start {
+                self.pending_links
+                    .push((open.start..self.text.len(), open.dest.clone()));
+            }
+            open.start = 0;
+        }
         let node = if let Some(cell) = self.cell {
             self.doc
                 .append_cell_block(cell, BlockKind::Paragraph, "", &self.text)
@@ -599,6 +671,21 @@ impl Reader {
             self.doc.append_block(BlockKind::Paragraph, "", &self.text)
         }
         .map_err(store)?;
+        if let Some(id) = self.pending_id.take() {
+            self.ids.entry(id).or_insert(node);
+        }
+        for (bytes, dest) in std::mem::take(&mut self.pending_links) {
+            match dest {
+                Dest::Url(url) if self.links.len() < MAX_HTML_LINKS => {
+                    self.links
+                        .push((node, bytes, AnnotationData::Link(LinkTarget::Url { url })))
+                }
+                Dest::Fragment(id) if self.links.len() + self.internal.len() < MAX_HTML_LINKS => {
+                    self.internal.push((node, bytes, id));
+                }
+                _ => self.link_overflow = true,
+            }
+        }
         self.doc.set_overrides(node, &self.style).map_err(store)?;
         if self.role != reprise_doc::Role::Body {
             self.doc.set_role(node, self.role).map_err(store)?;
@@ -672,6 +759,89 @@ impl Reader {
         });
         Ok(())
     }
+    /// An `<a>`: its address goes through the same validation as any link
+    /// (`reprise_doc::annotation::validate_url`). A refused address keeps the
+    /// text and reports why, by the stable code of the refusal.
+    fn open_link(&mut self, attrs: &BTreeMap<String, String>) {
+        // HTML has no nested anchors: a new one closes the open one.
+        self.close_link();
+        if self.pending_id.is_none()
+            && let Some(id) = attrs.get("id").or_else(|| attrs.get("name"))
+        {
+            self.pending_id = Some(id.clone());
+        }
+        let Some(href) = attrs.get("href") else {
+            return;
+        };
+        let href = href.trim();
+        let dest = if let Some(id) = href.strip_prefix('#') {
+            if id.len() > 256 {
+                once(
+                    &mut self.notes,
+                    codes::HTML_APPROXIMATED,
+                    "an internal link with an oversized target was imported as text",
+                    false,
+                );
+                return;
+            }
+            Dest::Fragment(id.to_string())
+        } else {
+            match validate_url(href) {
+                Ok(()) => Dest::Url(href.to_string()),
+                Err(refused) => {
+                    let code = refused.code().unwrap_or(codes::HTML_APPROXIMATED);
+                    once(
+                        &mut self.notes,
+                        code,
+                        "a link with an address that is not allowed was imported as text",
+                        false,
+                    );
+                    return;
+                }
+            }
+        };
+        self.link = Some(OpenLink {
+            dest,
+            start: self.text.len(),
+        });
+    }
+
+    fn close_link(&mut self) {
+        if let Some(open) = self.link.take()
+            && self.text.len() > open.start
+        {
+            self.pending_links
+                .push((open.start..self.text.len(), open.dest));
+        }
+    }
+
+    /// Resolves `#id` links now that every block has been read.
+    fn finish_links(&mut self) {
+        for (node, bytes, id) in std::mem::take(&mut self.internal) {
+            match self.ids.get(&id) {
+                Some(&target) => self.links.push((
+                    node,
+                    bytes,
+                    AnnotationData::Link(LinkTarget::Node { node: target }),
+                )),
+                None => once(
+                    &mut self.notes,
+                    codes::HTML_APPROXIMATED,
+                    "a link to an anchor that is not in the pasted HTML was imported as text",
+                    false,
+                ),
+            }
+        }
+        if self.link_overflow {
+            once(
+                &mut self.notes,
+                codes::HTML_APPROXIMATED,
+                "more links than an import keeps were imported as text",
+                false,
+            );
+        }
+    }
+
     fn tag(
         &mut self,
         name: &str,
@@ -679,6 +849,10 @@ impl Reader {
         attrs: &BTreeMap<String, String>,
     ) -> Result<(), ClipboardError> {
         let cell = matches!(name, "td" | "th");
+        let block = matches!(
+            name,
+            "p" | "div" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre"
+        );
         let known = |k: &String| {
             k == "dir"
                 || k == "style"
@@ -690,6 +864,8 @@ impl Reader {
                 || (k == "class"
                     && crate::semantic_html::role_of(name, attrs.get("class").map(String::as_str))
                         .is_some())
+                || (block && k == "id")
+                || (name == "a" && matches!(k.as_str(), "href" | "rel" | "target" | "id" | "name"))
         };
         if !attrs.keys().all(known) {
             once(
@@ -700,6 +876,8 @@ impl Reader {
             );
         }
         match (name, closing) {
+            ("a", false) => self.open_link(attrs),
+            ("a", true) => self.close_link(),
             ("br", false) => {
                 let start = self.text.len();
                 self.text.push('\n');
@@ -723,6 +901,9 @@ impl Reader {
                 false,
             ) => {
                 self.flush(false)?;
+                if let Some(id) = attrs.get("id") {
+                    self.pending_id = Some(id.clone());
+                }
                 if name == "li" {
                     let level = self.lists.last().map_or(0, |l| usize::from(l.level));
                     // An explicit value, or the list's start on its first item.
@@ -940,6 +1121,13 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         lists: Vec::new(),
         list: None,
         item: None,
+        link: None,
+        pending_links: Vec::new(),
+        pending_id: None,
+        ids: BTreeMap::new(),
+        internal: Vec::new(),
+        links: Vec::new(),
+        link_overflow: false,
     };
     let mut rest = html;
     let mut stack = Vec::<String>::new();
@@ -1043,6 +1231,13 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
                         false,
                     );
                 }
+                // An anchor closed by its parent's end tag ends there.
+                if stack
+                    .get(at.saturating_add(1)..)
+                    .is_some_and(|t| t.iter().any(|n| n == "a"))
+                {
+                    reader.close_link();
+                }
                 stack.truncate(at);
             } else {
                 once(
@@ -1101,9 +1296,11 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
             true,
         );
     }
+    reader.close_link();
     reader.flush(false)?;
     reader.finish_table()?;
-    fragment(reader.doc, reader.notes)
+    reader.finish_links();
+    fragment(reader.doc, reader.notes, reader.links)
 }
 
 #[cfg(test)]
