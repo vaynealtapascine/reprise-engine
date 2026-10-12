@@ -318,9 +318,11 @@ the footer of page 4) rather than a second identity for the object.
 **Known gap.** Fields inside floats and notes are composed with the page they
 are on (so `page-number` is right) but not resolved by the loop: their blocks
 are produced while the next plan is built, after the snapshot the loop reads.
-A `page-count` or `page-of` in a note body therefore keeps its guess. Fields in
-the body that point into a note resolve normally. Closing this means resolving
-`Plan.blocks` as well; the keying already supports it.
+A `page-count` or `page-of` in a note body therefore keeps its guess, and a
+`page-of` whose target is a note body is reported `layout.field-target` (the
+target is not in the pass's blocks). Closing this means resolving `Plan.blocks`
+as well and keying the region cache on the field values; the keying already
+supports it.
 
 ## Editing (30)
 
