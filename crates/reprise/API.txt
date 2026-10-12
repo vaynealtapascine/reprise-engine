@@ -48,6 +48,12 @@ pub fn save(&mut self) -> Result<Payload<Bytes>>
 pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>>
 pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>>
 pub fn display_page(&self, page: u32) -> Result<Payload<DisplayPage>>
+pub fn page_links(&self, page: u32) -> Result<Payload<PageLinks>>
+pub fn annotation(&self, request: &Payload<String>) -> Result<Payload<Option<Annotation>>>
+pub fn annotations_at( &self, request: &Payload<AnnotationsAt>, ) -> Result<Payload<AnnotationList>>
+pub fn annotations_in( &self, request: &Payload<AnnotationsIn>, ) -> Result<Payload<AnnotationList>>
+pub fn annotations_of_kind( &self, request: &Payload<AnnotationKind>, ) -> Result<Payload<AnnotationList>>
+pub fn annotation_geometry( &self, request: &Payload<String>, ) -> Result<Payload<Option<AnnotationGeometry>>>
 pub fn display_json(&self, page: u32) -> Result<Payload<String>>
 pub fn glyph_outlines( &self, request: &Payload<GlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
 pub fn glyph_outlines_styled( &self, request: &Payload<StyledGlyphRequest>, ) -> Result<Payload<GlyphOutlines>>
@@ -79,6 +85,7 @@ pub fn new(data: T) -> Self
 pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error>
 pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error>
 pub const MAX_DIAGNOSTICS: u32 = 1000;
+pub const MAX_STATE_ANNOTATIONS: usize = 2048;
 collab
 pub fn sync_export(&self, request: &Payload<SyncRequest>) -> Result<Payload<SyncPacket>>
 pub fn sync_import(&mut self, request: &Payload<SyncPacket>) -> Result<Payload<SyncReport>>

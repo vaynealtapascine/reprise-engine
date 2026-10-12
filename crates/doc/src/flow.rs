@@ -608,6 +608,7 @@ impl Document {
             return Ok(false);
         }
         let text = self.block(id)?.text;
+        self.record_annotation_restore(id, 0..text.len())?;
         text.delete(0..text.len())?;
         if id.is_break() {
             self.set_record_active(id, false)?;
@@ -764,12 +765,14 @@ impl Document {
         // its text has the copied length before lineage is recorded.
         self.stage_inline_copies(staged, &self.inline_slice(id, 0..len)?)?;
         let formatting = self.prepare_format_copy(id, 0..len, Some(staged))?;
+        let annotations = self.annotations_to_move(id, 0..len);
         self.put(staged, placement)?;
         self.restore_block(staged)?;
         self.record_transfer(id, 0, staged, 0, len)?;
         self.supersede(id, staged)?;
         self.delete_block(id)?;
-        self.write_format_copy(staged, 0, formatting)
+        self.write_format_copy(staged, 0, formatting)?;
+        self.move_annotations(staged, 0, annotations)
     }
 }
 

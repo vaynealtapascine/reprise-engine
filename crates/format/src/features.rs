@@ -34,6 +34,10 @@ pub const REQUIRED_PARAGRAPH_STYLES: u64 = 1 << 13;
 /// Older readers must refuse inline object records, live or retired, since
 /// they would drop the objects and their U+FFFC characters (`docs/inline.md`).
 pub const REQUIRED_INLINE_OBJECTS: u64 = 1 << 15;
+/// Older readers must refuse annotations (links, comment anchors), which they
+/// would otherwise show as bare ranges and copy without their data. Bits 14
+/// and 15 belong to lists and inline objects (fixed at integration).
+pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
@@ -41,7 +45,8 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_MARKS
     | REQUIRED_PAGE_SETUP
     | REQUIRED_PARAGRAPH_STYLES
-    | REQUIRED_INLINE_OBJECTS;
+    | REQUIRED_INLINE_OBJECTS
+    | REQUIRED_ANNOTATIONS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -52,6 +57,9 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_annotations() {
+        flags.required |= REQUIRED_ANNOTATIONS;
+    }
     if document.has_page_setup() {
         flags.required |= REQUIRED_PAGE_SETUP;
     }

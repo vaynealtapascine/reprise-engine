@@ -230,11 +230,28 @@ impl InlineKind for ImageKind {
                 None
             }
         };
-        if image.is_none() { return Measured { size: AtomBox::default(), paint: AtomPaint::None, notes }; }
-        if ["width", "height"].iter().filter_map(|name| object.param(name)).filter_map(reprise_doc::InlineSize::parse).any(|s| match s {
-            reprise_doc::InlineSize::Pt(l) => l < Length::ZERO,
-            reprise_doc::InlineSize::Em(n) | reprise_doc::InlineSize::Percent(n) => n < 0,
-        }) { notes.push((Severity::Warning, codes::IMAGE_SIZE, "negative inline image size clamped to zero".into())); }
+        if image.is_none() {
+            return Measured {
+                size: AtomBox::default(),
+                paint: AtomPaint::None,
+                notes,
+            };
+        }
+        if ["width", "height"]
+            .iter()
+            .filter_map(|name| object.param(name))
+            .filter_map(reprise_doc::InlineSize::parse)
+            .any(|s| match s {
+                reprise_doc::InlineSize::Pt(l) => l < Length::ZERO,
+                reprise_doc::InlineSize::Em(n) | reprise_doc::InlineSize::Percent(n) => n < 0,
+            })
+        {
+            notes.push((
+                Severity::Warning,
+                codes::IMAGE_SIZE,
+                "negative inline image size clamped to zero".into(),
+            ));
+        }
         let intrinsic = image.as_ref().and_then(|image| {
             let Some(bytes) = env.engine.assets.get(&image.asset) else {
                 notes.push((

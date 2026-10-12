@@ -23,6 +23,10 @@ use loro::{
 use reprise_text::{Anchor, Empty, RangePolicy, Resolved, Text};
 use serde::{Deserialize, Serialize};
 
+pub mod annotation;
+mod annotation_restore;
+#[cfg(test)]
+mod annotation_tests;
 mod changes;
 pub mod codes;
 pub mod context;
@@ -332,6 +336,8 @@ pub struct Document {
     lineage: std::sync::Mutex<transfers::LineageCache>,
     /// Formatting records by flow host, per revision (see `formatting`).
     formats: std::sync::Mutex<formatting::FormatCache>,
+    /// Annotations, per revision (see `annotation`).
+    annotations: std::sync::Mutex<annotation::AnnotationCache>,
     /// Which editing step this replica's next commits belong to (see
     /// [`UndoStack`]).
     pub(crate) steps: std::sync::Arc<edit::StepLog>,
@@ -353,6 +359,7 @@ impl Document {
             flows,
             lineage: Default::default(),
             formats: Default::default(),
+            annotations: Default::default(),
             steps: Default::default(),
         }
     }

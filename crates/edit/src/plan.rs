@@ -146,6 +146,18 @@ pub(crate) enum Step {
         node: NodeId,
         at: usize,
     },
+    AddAnnotation {
+        node: NodeId,
+        range: Range<usize>,
+        data: reprise_doc::annotation::AnnotationData,
+    },
+    UpdateAnnotation {
+        id: reprise_doc::RangeId,
+        data: reprise_doc::annotation::AnnotationData,
+    },
+    RemoveAnnotation {
+        id: reprise_doc::RangeId,
+    },
     /// Stages the object and shows it. Staging commits what was pending in
     /// the step first, so the object joins the step's undo history.
     InsertInline {
@@ -745,6 +757,28 @@ impl Model<'_> {
                 self.plan.steps.push(Step::RemoveRelation { id: *id });
                 Ok(())
             }
+            Command::AddAnnotation { node, range, data } => self.add_annotation(*node, range, data),
+            Command::UpdateAnnotation { id, data } => {
+                self.annotation_unremoved(*id)?;
+                self.doc
+                    .check_annotation_update(*id, data)
+                    .map_err(Reason::from)?;
+                let payload = serde_json::to_vec(data).map_err(|e| Reason::Store(e.to_string()))?;
+                self.add_payload(payload.len())?;
+                self.plan.steps.push(Step::UpdateAnnotation {
+                    id: *id,
+                    data: data.clone(),
+                });
+                Ok(())
+            }
+            Command::RemoveAnnotation { id } => {
+                self.annotation_unremoved(*id)?;
+                self.doc
+                    .check_annotation_removal(*id)
+                    .map_err(Reason::from)?;
+                self.plan.steps.push(Step::RemoveAnnotation { id: *id });
+                Ok(())
+            }
             Command::InsertInline { node, at, object } => self.insert_inline(*node, *at, object),
             Command::UpdateInline { node, at, patch } => self.update_inline(*node, *at, patch),
         }
@@ -759,7 +793,9 @@ impl Model<'_> {
         object.validate().map_err(Reason::Inline)?;
         self.require(node)?;
         if !self.doc.in_flow(node) {
-            return Err(Reason::Inline("inline objects need a flow paragraph".into()));
+            return Err(Reason::Inline(
+                "inline objects need a flow paragraph".into(),
+            ));
         }
         self.add_payload(inline_size(object))?;
         let s = self.text(node)?;
@@ -872,6 +908,56 @@ impl Model<'_> {
         Ok(())
     }
 
+    /// An annotation this transaction has not already removed.
+    fn annotation_unremoved(&self, id: reprise_doc::RangeId) -> Result<(), Reason> {
+        if self
+            .plan
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::RemoveAnnotation { id: r } if *r == id))
+        {
+            return Err(reprise_doc::annotation::AnnotationError::Missing(id).into());
+        }
+        Ok(())
+    }
+
+    fn add_annotation(
+        &mut self,
+        node: NodeId,
+        range: &Range<usize>,
+        data: &reprise_doc::annotation::AnnotationData,
+    ) -> Result<(), Reason> {
+        let text = self.text(node)?;
+        if range.is_empty() {
+            return Err(reprise_doc::annotation::AnnotationError::Empty.into());
+        }
+        if text.get(range.clone()).is_none() {
+            return Err(Reason::BadRange {
+                node,
+                range: range.clone(),
+            });
+        }
+        let payload = serde_json::to_vec(data).map_err(|e| Reason::Store(e.to_string()))?;
+        self.add_payload(payload.len())?;
+        let pending = self
+            .plan
+            .steps
+            .iter()
+            .filter(|s| matches!(s, Step::AddAnnotation { .. }))
+            .count();
+        // The document checks the payload, its targets and capacity; the
+        // span was checked against the text as this transaction leaves it.
+        self.doc
+            .check_annotation_data(data, pending)
+            .map_err(Reason::from)?;
+        self.plan.steps.push(Step::AddAnnotation {
+            node,
+            range: range.clone(),
+            data: data.clone(),
+        });
+        Ok(())
+    }
+
     fn current_overrides(&self, node: NodeId) -> Result<Style, Reason> {
         self.require(node)?;
         Ok(self
@@ -921,7 +1007,9 @@ impl Model<'_> {
         // Refused by the store too, but only after earlier steps wrote: check
         // here, so that the whole transaction is refused.
         if text.contains(OBJECT) {
-            return Err(Reason::Inline("U+FFFC is an inline object, not text".into()));
+            return Err(Reason::Inline(
+                "U+FFFC is an inline object, not text".into(),
+            ));
         }
         self.add_payload(text.len())?;
         let s = self.text(node)?;

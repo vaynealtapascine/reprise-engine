@@ -341,3 +341,63 @@ console.log("paragraph style WASM smoke passed");
 }
 paperTarget.free(); paperOpen.free(); paperPeer.free(); paper.free(); ws.free();
 console.log("page setup WASM smoke passed");
+
+// Annotations: links and comment anchors (docs/annotations.md).
+{
+  const wa = new wasm.Workspace();
+  const plain = { families: ["Source Serif Pro", "serif"], size: null, line_height: null };
+  const a = wa.create(p({ document_id: "a0112233445566778899aabbccddeeff", peer_id: "120" }));
+  const node = a.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "read the manual now", style: plain }] })).data.blocks[0];
+  assert.throws(() => a.apply(p({ commands: [{ kind: "add-annotation", node, start: 9, end: 15, annotation: { kind: "link", target: { type: "url", url: "javascript:alert(1)" } } }] })), e => e.data.code === "annotation.link-scheme" && e.data.command === 0);
+  assert.throws(() => a.apply(p({ commands: [{ kind: "add-annotation", node, start: 9, end: 15, annotation: { kind: "bookmark", name: "x" } }] })), e => e.data.code === "bindings.invalid");
+  const added = a.apply(p({ commands: [
+    { kind: "add-annotation", node, start: 9, end: 15, annotation: { kind: "link", target: { type: "url", url: "https://manual.example/?a=1&b=2" } } },
+    { kind: "format-text", node, start: 9, end: 15, style: { decoration: { underline: true, strike: null }, color: [0, 0, 238, 255] } },
+    { kind: "add-annotation", node, start: 0, end: 4, annotation: { kind: "comment", thread: "t-1" } },
+  ] }));
+  const [link, note] = added.data.annotations;
+  assert.equal(added.data.annotations.length, 2);
+  const state = a.state().data;
+  assert.deepEqual(state.annotations.map(x => [x.kind, x.status, x.thread ?? null]), [["link", "active", null], ["comment", "active", "t-1"]]);
+  assert.deepEqual(a.annotation(p(link)).data.spans, [{ node, start: 9, end: 15 }]);
+  assert.equal(a.annotation(p(link)).data.payload.target.url, "https://manual.example/?a=1&b=2");
+  assert.deepEqual(a.annotations_at(p({ node, at: 10 })).data.annotations.map(x => x.id), [link]);
+  assert.deepEqual(a.annotations_in(p({ node, start: 0, end: 19 })).data.annotations.map(x => x.id), [note, link]);
+  assert.deepEqual(a.annotations_of_kind(p("comment")).data.annotations.map(x => x.id), [note]);
+  assert.throws(() => a.annotation_geometry(p(link)), e => e.data.code === "bindings.layout-required");
+  finish(a);
+  const geometry = a.annotation_geometry(p(link)).data;
+  assert.ok(geometry.rects.length >= 1 && geometry.rects[0].corners.length === 4);
+  assert.equal(geometry.top.page, 0);
+  const display = a.display_page(0).data;
+  assert.equal(display.links.length, 1);
+  assert.equal(display.links[0].id, link);
+  assert.deepEqual(display.links[0].target, { type: "url", url: "https://manual.example/?a=1&b=2" });
+  assert.deepEqual(a.page_links(0).data.links, display.links);
+  const displayWith = a.display_json(0).data;
+  // A batch with a stale revision is refused; a good one maps nothing but applies.
+  assert.throws(() => a.batch(p({ commands: [{ kind: "remove-annotation", id: link }], expected_revision: [{ peer: "120", counter: 0 }], selection: null })), e => e.data.code === "bindings.stale");
+  a.batch(p({ commands: [{ kind: "update-annotation", id: link, annotation: { kind: "link", target: { type: "url", url: "https://other.example" } } }], expected_revision: a.state().data.revision, selection: null }));
+  assert.equal(a.annotation(p(link)).data.payload.target.url, "https://other.example");
+  a.undo();
+  assert.equal(a.annotation(p(link)).data.payload.target.url, "https://manual.example/?a=1&b=2");
+  // Save, reopen, copy: the annotations come along, copies get new identities.
+  const bytes = a.save().data.bytes;
+  const reopened = wa.open(p({ peer_id: "121" }), bytes); finish(reopened);
+  assert.deepEqual(reopened.state().data.annotations, a.state().data.annotations);
+  assert.equal(reopened.display_json(0).data, displayWith);
+  const copy = wa.import_copy(p({ document_id: "a1112233445566778899aabbccddeeff", peer_id: "122" }), bytes);
+  assert.equal(copy.state().data.annotations.length, 2);
+  assert.ok(copy.state().data.annotations.every(x => x.id !== link && x.id !== note));
+  // A comment whose text is deleted is orphaned; undo brings it back.
+  a.apply(p({ commands: [{ kind: "delete-text", node, start: 0, end: 5 }] }));
+  assert.equal(a.annotation(p(note)).data.status, "orphaned");
+  a.undo();
+  assert.equal(a.annotation(p(note)).data.status, "active");
+  a.apply(p({ commands: [{ kind: "remove-annotation", id: link }] })); finish(a);
+  assert.equal(a.annotation(p(link)).data, null);
+  assert.equal(a.page_links(0).data.links.length, 0);
+  assert.throws(() => a.page_links(99), e => e.data.code === "bindings.invalid");
+  copy.free(); reopened.free(); a.free(); wa.free();
+  console.log("annotations WASM smoke passed");
+}

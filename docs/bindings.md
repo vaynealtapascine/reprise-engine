@@ -621,3 +621,47 @@ stored locally.
 
 The reference worker adds request kinds `import-copy`, `workspace-font`,
 `workspace-font-settings`, `batch`, `replace`, `replace-text` and `diagnostics`.
+
+## Annotations: links and comment anchors (`docs/annotations.md`)
+
+Commands (in `apply` and `batch`; both respect `expected_revision` and name the
+refused command's index):
+
+-   `add-annotation { node, start, end, annotation }`: `start..end` is a
+    nonempty range of UTF-8 bytes. `annotation` is
+    `{ kind: "link", target: { type: "url", url } | { type: "node", node } |
+    { type: "heading", node } | { type: "range", range } }` or
+    `{ kind: "comment", thread }`. URLs must be absolute with an `http`,
+    `https`, `mailto` or `tel` scheme and at most 8,192 bytes; thread IDs are 1
+    to 256 bytes of `[A-Za-z0-9._:-]`. The new ID is in `Applied.annotations`.
+-   `update-annotation { id, annotation }`: same kind, new payload.
+-   `remove-annotation { id }`.
+
+Refusals are errors with the annotation's code: `annotation.link-scheme`,
+`annotation.link-invalid`, `annotation.link-length`, `annotation.payload-invalid`,
+`annotation.empty`, `annotation.missing`, `annotation.limit`.
+
+A link is not styled by the engine. Cmd+K is one transaction of
+`add-annotation` and a `format-text` with the app's link style, so it is one
+undo step; unlinking is `remove-annotation` plus a `format-text` with `clear` for
+the same properties.
+
+`State.annotations` lists up to 2,048 annotations compactly (`id`, `kind`,
+`status` `active | orphaned`, `spans` of `{ node, start, end }`, a comment's
+`thread`), without a link's address; a `bindings.limit` diagnostic says when more
+exist. Queries (read-only, not cut short that way, at most 4,096 results and a
+`truncated` flag): `annotation(id)` with the payload, `annotations_at({ node,
+at })`, `annotations_in({ node, start, end })`, `annotations_of_kind(kind)`.
+
+Geometry needs a complete layout at the current revision
+(`bindings.layout-required` otherwise): `annotation_geometry(id)` gives
+`rects`, each with `page`, `frame`, `node`, `line`, `frame_rect`, page `bounds`
+and four page-space `corners`; `top { page, y }` aligns a sidebar entry;
+an orphaned comment has one zero-width rectangle; `unplaced` counts pieces
+with no line. `page_links(page)` and `DisplayPage.links` list the links drawn
+on a page with their targets and rectangles, for hit-testing and hover cards.
+The display list itself is unchanged.
+
+The reference worker adds request kinds `annotation`, `annotations-at`,
+`annotations-in`, `annotations-of-kind`, `annotation-geometry` and `page-links`
+(responses `annotation`, `annotations`, `annotation-geometry`, `page-links`).

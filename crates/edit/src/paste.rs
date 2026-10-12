@@ -39,6 +39,8 @@ pub(crate) struct Prepared {
     suffix: String,
     host: Option<NewBlock>,
     host_ranges: Vec<FragmentRange>,
+    /// Source and target are one document: internal link targets outside the copy stay.
+    same_namespace: bool,
     notes: Vec<Note>,
 }
 
@@ -85,6 +87,7 @@ pub(crate) fn prepare(
         suffix: String::new(),
         host: None,
         host_ranges: Vec::new(),
+        same_namespace: fragment.source == target,
         notes: Vec::new(),
     };
     if let Some((node, offset)) = at {
@@ -248,6 +251,40 @@ pub(crate) fn prepare(
                 reason: Reason::Schema(e),
             })?;
     }
+    // Annotations: an internal link target outside the copy survives only
+    // within one document. Otherwise the range is pasted without its link,
+    // so relations and the ID map still see it.
+    let copied_ids = IdMap {
+        nodes: fragment.blocks.iter().map(|b| (b.id, b.id)).collect(),
+        ranges: fragment.ranges.iter().map(|r| (r.id, r.id)).collect(),
+    };
+    let mut annotations = 0usize;
+    for range in &mut prepared.fragment.ranges {
+        let Some(data) = &range.annotation else {
+            continue;
+        };
+        if data
+            .remapped(&copied_ids, prepared.same_namespace)
+            .is_none()
+        {
+            range.annotation = None;
+            prepared.notes.push(Note::warning(
+                reprise_doc::fragment::ANNOTATION_DROPPED,
+                format!(
+                    "a link to content outside the copy was pasted as text (range {})",
+                    range.id
+                ),
+            ));
+        } else {
+            annotations += 1;
+        }
+    }
+    if annotations > 0
+        && doc.annotation_count().saturating_add(annotations)
+            > reprise_doc::annotation::MAX_ANNOTATIONS
+    {
+        return Err(invalid(FragmentError::Limit("annotations")));
+    }
     let total = fragment.blocks.iter().fold(
         prepared.prefix.len().saturating_add(prepared.suffix.len()),
         |n, b| n.saturating_add(b.text.len()),
@@ -288,6 +325,7 @@ pub(crate) fn write(
         suffix,
         host,
         host_ranges,
+        same_namespace,
         notes,
     } = prepared;
     let mut result = Pasted {
@@ -339,6 +377,7 @@ pub(crate) fn write(
             first,
             last,
             single: roots.len() == 1,
+            same_namespace,
         };
         return write_into_flow(doc, schemas, fragment, &names, styles, plan, result);
     }
@@ -433,6 +472,7 @@ pub(crate) fn write(
         }
         result.ids.ranges.insert(range.id, new);
     }
+    stage_annotations(doc, &fragment, &result, same_namespace)?;
     for relation in &fragment.relations {
         let mut new = doc
             .stage_relation(schemas, &relation.relation.remapped(&result.ids))
@@ -643,6 +683,7 @@ struct FlowPaste {
     first: Option<NodeId>,
     last: Option<NodeId>,
     single: bool,
+    same_namespace: bool,
 }
 
 /// The block a fragment block becomes, with imported style names.
@@ -691,6 +732,7 @@ fn write_into_flow(
         first,
         last,
         single,
+        same_namespace,
     } = plan;
     let inline = single && join_first;
     // The split comes first: it is staged, and everything after it may
@@ -785,6 +827,7 @@ fn write_into_flow(
         }
         result.ids.ranges.insert(range.id, new);
     }
+    stage_annotations(doc, &fragment, &result, same_namespace)?;
     for relation in &fragment.relations {
         let mut new = doc
             .stage_relation(schemas, &relation.relation.remapped(&result.ids))
@@ -883,4 +926,29 @@ impl Editor {
         self.doc.commit_step();
         result
     }
+}
+
+/// Writes the data of pasted annotation ranges once every pasted ID is
+/// known, so internal link targets follow the copy. Staged like the ranges:
+/// the paste's activation is the undoable part.
+fn stage_annotations(
+    doc: &Document,
+    fragment: &Fragment,
+    result: &Pasted,
+    same_namespace: bool,
+) -> Result<(), EditError> {
+    for range in &fragment.ranges {
+        let (Some(data), Some(&new)) = (&range.annotation, result.ids.ranges.get(&range.id)) else {
+            continue;
+        };
+        let Some(data) = data.remapped(&result.ids, same_namespace) else {
+            continue;
+        };
+        doc.stage_annotation_data(new, &data)
+            .map_err(|e| EditError {
+                command: None,
+                reason: Reason::Store(e.to_string()),
+            })?;
+    }
+    Ok(())
 }

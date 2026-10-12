@@ -207,7 +207,13 @@ pub(crate) fn first_fit(
             if need > height {
                 out.lines.truncate(lines);
                 out.notes.truncate(notes);
-                out.notes.push(Note::error(codes::LINE_HEIGHT_LIMIT, "inline line metrics exceeded four geometry attempts").at(start..pos));
+                out.notes.push(
+                    Note::error(
+                        codes::LINE_HEIGHT_LIMIT,
+                        "inline line metrics exceeded four geometry attempts",
+                    )
+                    .at(start..pos),
+                );
                 out.rest = Some(start);
                 out.block_end = at.y;
                 return;

@@ -155,6 +155,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         font_host_oblique()?,
         paragraph_style_storm()?,
         plumbing_mark_facts()?,
+        annotation_storm()?,
     ])
 }
 
@@ -3064,4 +3065,120 @@ pub fn plumbing_mark_facts() -> Result<Fixture, DocError> {
             "relation.missing-target",
         ],
     ))
+}
+
+/// Hundreds of overlapping and nested links and comment anchors over text with
+/// combining marks, ligatures, Hebrew and a ZWJ emoji. A split lands inside
+/// many of them, a deletion orphans some comments and hides some links, a
+/// concurrent peer edits payloads while another deletes text, and a hostile
+/// peer overwrites two envelopes (a forbidden scheme and garbage). Every replica
+/// resolves the same annotations, the two bad ones are reported and kept, and
+/// layout is unaffected.
+pub fn annotation_storm() -> Result<Fixture, DocError> {
+    use reprise_doc::annotation::{AnnotationData, CommentAnchor, LinkTarget};
+    let doc = document()?;
+    let text = "Hallway e\u{301}\u{301} office \u{5e9}\u{5dc}\u{5d5}\u{5dd} grows 1234 \
+                \u{1f469}\u{200d}\u{1f467} longer, and longer still, past every door";
+    let p = doc.append_block(BlockKind::Paragraph, "body", text)?;
+    doc.commit();
+    let len = text.len();
+    let mut ids = Vec::new();
+    for i in 0..300usize {
+        // Char boundaries only; grapheme clusters may still be split.
+        let mut start = (i * 7) % len;
+        while !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        // Every third one nests around the previous start; the rest overlap.
+        let mut end = (start + 1 + (i * 13) % 29).min(len);
+        while !text.is_char_boundary(end) {
+            end += 1;
+        }
+        if end <= start {
+            continue;
+        }
+        let data = if i % 3 == 0 {
+            AnnotationData::Comment(CommentAnchor {
+                thread: format!("storm-{i}"),
+            })
+        } else {
+            AnnotationData::Link(LinkTarget::Url {
+                url: format!("https://storm.example/{i}"),
+            })
+        };
+        ids.push(
+            doc.add_annotation(p, start..end, &data)
+                .map_err(|e| DocError::Store(e.to_string()))?,
+        );
+    }
+    doc.commit();
+    // Orphans and hidden links: delete a stretch that fully covers some.
+    let cut = text.find("1234").unwrap_or(0);
+    doc.delete_text(p, cut..cut + 5)?;
+    doc.commit();
+    let tail = doc.split_block(p, text.find("longer,").unwrap_or(1))?;
+    doc.commit();
+    let since = doc.version_vector();
+    // A peer edits payloads; another deletes text under them.
+    let replica = doc.fork(OTHER_PEER)?;
+    for (i, id) in ids.iter().enumerate().take(40) {
+        let data = if i % 3 == 0 {
+            AnnotationData::Comment(CommentAnchor {
+                thread: format!("edited-{i}"),
+            })
+        } else {
+            AnnotationData::Link(LinkTarget::Url {
+                url: format!("https://edited.example/{i}"),
+            })
+        };
+        // A kind never changes, and a record that is gone refuses an edit.
+        let _ = replica.update_annotation(*id, &data);
+    }
+    replica.commit();
+    let deleter = doc.fork(3)?;
+    deleter.delete_text(tail, 0..4)?;
+    deleter.commit();
+    let attacker = doc.fork(66)?;
+    let victim_url = attacker
+        .add_annotation(
+            p,
+            0..5,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://fine.example".into(),
+            }),
+        )
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    let victim_junk = attacker
+        .add_annotation(
+            p,
+            6..9,
+            &AnnotationData::Comment(CommentAnchor {
+                thread: "fine".into(),
+            }),
+        )
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    attacker.commit();
+    reprise_doc::hostile::corrupt_annotation(
+        &attacker,
+        victim_url,
+        r#"{"version":1,"kind":"link","payload":{"type":"url","url":"javascript:alert(1)"}}"#,
+    )
+    .map_err(|e| DocError::Store(e.to_string()))?;
+    reprise_doc::hostile::corrupt_annotation(&attacker, victim_junk, "[[[")
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    let sync = |e: reprise_doc::sync::SyncError| DocError::Store(e.to_string());
+    let edits = replica.export_delta(&since).map_err(sync)?;
+    let deletion = deleter.export_delta(&since).map_err(sync)?;
+    let attack = attacker.export_delta(&since).map_err(sync)?;
+    doc.import_packet(&edits).map_err(sync)?;
+    doc.import_packet(&deletion).map_err(sync)?;
+    doc.import_packet(&attack).map_err(sync)?;
+    replica.import_packet(&deletion).map_err(sync)?;
+    replica.import_packet(&attack).map_err(sync)?;
+    doc.commit();
+    replica.commit();
+    Ok(Fixture {
+        replica: Some(replica),
+        ..Fixture::new("annotation_storm", doc, &[])
+    })
 }

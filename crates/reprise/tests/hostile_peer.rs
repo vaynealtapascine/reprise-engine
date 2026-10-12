@@ -44,12 +44,25 @@ fn victim() -> DocumentSession {
         }))
         .unwrap();
     s.import_text(&Payload::new(TextImport {
-        text: "<h1>Title</h1><p>one <b>two</b> three</p>\
+        text: "<h1>Title</h1><p>one <a href=\"https://example.com/doc\"><b>two</b> three</a></p>\
                <table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>\
                <p>after the table</p>"
             .into(),
         html: true,
         at: None,
+    }))
+    .unwrap();
+    // A comment anchor too: links and comments are the two annotation kinds.
+    let title = s.state().unwrap().data.blocks[0].id.clone();
+    s.apply(&Payload::new(Transaction {
+        commands: vec![Command::AddAnnotation {
+            node: title,
+            start: 0,
+            end: 5,
+            annotation: AnnotationPayload::Comment {
+                thread: "hostile".into(),
+            },
+        }],
     }))
     .unwrap();
     s
@@ -117,6 +130,12 @@ fn observe(s: &mut DocumentSession, codes: &BTreeSet<String>, case: &str) -> Vec
     }
     let state = s.state().unwrap().data;
     seen.push(format!("{:?}", state.blocks));
+    // Annotations are observed too: what a hostile peer leaves readable is
+    // the same after a save and reopen, in the state and on the pages.
+    seen.push(format!("{:?}", state.annotations));
+    for &page in &progress.pages {
+        seen.push(format!("{:?}", s.page_links(page).unwrap().data.links));
+    }
     seen
 }
 

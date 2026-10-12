@@ -239,7 +239,10 @@ impl Notes {
                     if line.frame == index {
                         line.rect.origin.y += by;
                         line.baseline += by;
-                        for atom in &mut line.atoms { atom.rect.origin.y += by; atom.baseline += by; }
+                        for atom in &mut line.atoms {
+                            atom.rect.origin.y += by;
+                            atom.baseline += by;
+                        }
                     }
                 }
                 block.sync_image();

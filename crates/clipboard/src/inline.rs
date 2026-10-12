@@ -116,8 +116,8 @@ pub(crate) fn plain(text: &str, placed: &[Placed]) -> Result<String, ClipboardEr
 /// [`JSON_ATTR`], so import restores it exactly. The caller puts the result
 /// inside the surrounding run's span, so a field takes that run's styling.
 pub(crate) fn html(p: &Placed) -> Result<String, ClipboardError> {
-    let json = serde_json::to_string(&p.object)
-        .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+    let json =
+        serde_json::to_string(&p.object).map_err(|e| ClipboardError::Invalid(e.to_string()))?;
     let json = escape(&json);
     if let Ok(image) = p.object.as_image() {
         let mut style = String::new();

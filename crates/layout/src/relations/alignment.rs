@@ -61,7 +61,9 @@ fn translate(snapshot: &mut LayoutSnapshot, at: LineRef, shift: Length, narrow: 
         && let Some(line) = block.lines.get_mut(at.line)
     {
         line.rect.origin.x += shift;
-        for atom in &mut line.atoms { atom.rect.origin.x += shift; }
+        for atom in &mut line.atoms {
+            atom.rect.origin.x += shift;
+        }
         for run in &mut line.runs {
             run.x += shift;
         }

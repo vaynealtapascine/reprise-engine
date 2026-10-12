@@ -487,7 +487,7 @@ impl Document {
 
     /// The byte offset in `node`'s underlying text of byte `at` of its
     /// current text (they differ for a paragraph of a flow).
-    fn shared_byte(&self, node: NodeId, at: usize) -> Result<usize, DocError> {
+    pub(crate) fn shared_byte(&self, node: NodeId, at: usize) -> Result<usize, DocError> {
         let Ok(block) = self.block(node) else {
             return Ok(at);
         };

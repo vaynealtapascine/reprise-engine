@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::ops::Range;
 
 use reprise_diag::Code;
 use reprise_doc::text::OBJECT;
@@ -257,6 +258,7 @@ impl Exporter for PlainText {
             unplaced |= layout.is_some();
         }
         use Disposition::*;
+        let presence = crate::links::LinkIndex::new(doc).presence();
         let mut losses = report(
             [
                 Dropped,
@@ -292,11 +294,44 @@ impl Exporter for PlainText {
                     .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
             );
         }
+        losses.notes.extend(annotation_notes(
+            presence,
+            Some("link addresses are not in plain text; the linked text is kept"),
+            None,
+            "comment anchors are not in plain text",
+        ));
         Ok(ExportResult {
             bytes: out.into_bytes(),
             losses,
         })
     }
+}
+
+/// What a format leaves out of links and comment anchors, as notes. The loss
+/// report's ten features are fixed, so annotations report through its notes
+/// (`export.annotations`): `Info` for what the format cannot hold at all, as
+/// every format lacks something, and `Warning` where a link the format could
+/// hold was changed. A document with neither produces no note.
+pub(crate) fn annotation_notes(
+    presence: crate::links::Presence,
+    link_detail: Option<&str>,
+    changed: Option<&str>,
+    comments_detail: &str,
+) -> Vec<reprise_diag::Note> {
+    const CODE: Code = Code::new("export.annotations");
+    let mut notes = Vec::new();
+    if presence.links
+        && let Some(detail) = link_detail
+    {
+        notes.push(reprise_diag::Note::info(CODE, detail));
+    }
+    if let Some(detail) = changed {
+        notes.push(reprise_diag::Note::warning(CODE, detail));
+    }
+    if presence.comments {
+        notes.push(reprise_diag::Note::info(CODE, comments_detail));
+    }
+    notes
 }
 
 pub(crate) fn escape(text: &str) -> String {
@@ -334,6 +369,7 @@ fn paragraph(
     doc: &Document,
     node: NodeId,
     layout: Option<&LayoutSnapshot>,
+    links: &crate::links::LinkIndex<'_>,
     out: &mut String,
 ) -> Result<(), ClipboardError> {
     let block = doc
@@ -356,7 +392,12 @@ fn paragraph(
     append(
         out,
         &format!(
-            "<p dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            "<p{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            if links.is_target(node) {
+                format!(" id=\"{}\"", crate::links::target_id(node))
+            } else {
+                String::new()
+            },
             if base % 2 == 1 { "rtl" } else { "ltr" },
             escape(&family),
             points(style.size),
@@ -384,7 +425,64 @@ fn paragraph(
         .text_formats(node)
         .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
     let placed = crate::inline::placed(doc, node, layout)?;
+    let stretches = links.stretches(node, &text);
+    // The link open around the segments being written: its stretch index.
+    let mut open: Option<usize> = None;
     for run in formats.runs {
+        // The run, cut where links start and stop. Each piece is written as
+        // its own span, inside the anchor that covers it.
+        let mut pieces: Vec<(Range<usize>, Option<usize>)> = Vec::new();
+        let mut at = run.bytes.start;
+        for (i, stretch) in stretches.iter().enumerate() {
+            if stretch.bytes.end <= at || stretch.bytes.start >= run.bytes.end {
+                continue;
+            }
+            let (from, to) = (
+                stretch.bytes.start.max(at),
+                stretch.bytes.end.min(run.bytes.end),
+            );
+            if at < from {
+                pieces.push((at..from, None));
+            }
+            pieces.push((from..to, Some(i)));
+            at = to;
+        }
+        if at < run.bytes.end || pieces.is_empty() {
+            pieces.push((at..run.bytes.end, None));
+        }
+        let run_style = run.style.clone();
+        for (bytes, link) in pieces {
+            if link != open {
+                if open.is_some() {
+                    append(out, "</a>")?;
+                }
+                if let Some(i) = link {
+                    append(out, &format!("<a href=\"{}\">", escape(&stretches[i].href)))?;
+                }
+                open = link;
+            }
+            let run = reprise_doc::formatting::FormatRun {
+                bytes,
+                style: run_style.clone(),
+            };
+            html_run(&run, &text, &style, &placed, out)?;
+        }
+    }
+    if open.is_some() {
+        append(out, "</a>")?;
+    }
+    append(out, "</p>")
+}
+
+/// One formatted stretch of a paragraph, as a span when it has formatting.
+fn html_run(
+    run: &reprise_doc::formatting::FormatRun,
+    text: &str,
+    style: &reprise_doc::ComputedStyle,
+    placed: &[crate::inline::Placed],
+    out: &mut String,
+) -> Result<(), ClipboardError> {
+    {
         let mut css = String::new();
         if let Some(families) = &run.style.families {
             let families: Vec<_> = families.iter().map(|f| css_string(f)).collect();
@@ -433,7 +531,7 @@ fn paragraph(
         }
         // Objects sit inside the run's span, so a field takes the run's styling.
         let mut cursor = run.bytes.start;
-        for object in crate::inline::within(&placed, run.bytes.clone()) {
+        for object in crate::inline::within(placed, run.bytes.clone()) {
             let before = text.get(cursor..object.at).unwrap_or_default();
             append(out, &escape(before).replace(['\n', '\u{2028}'], "<br>"))?;
             append(out, &crate::inline::html(object)?)?;
@@ -445,7 +543,7 @@ fn paragraph(
             append(out, "</span>")?;
         }
     }
-    append(out, "</p>")
+    Ok(())
 }
 
 /// A CSS quoted string, subsequently escaped for its HTML attribute context.
@@ -468,6 +566,7 @@ fn html_node(
     doc: &Document,
     node: NodeId,
     layout: Option<&LayoutSnapshot>,
+    links: &crate::links::LinkIndex<'_>,
     out: &mut String,
     depth: usize,
     grid: Option<&reprise_doc::TableGrid>,
@@ -520,10 +619,10 @@ fn html_node(
     if let Some(open) = &open {
         append(out, open)?;
     } else {
-        paragraph(doc, node, layout, out)?;
+        paragraph(doc, node, layout, links, out)?;
     }
     for child in doc.children(Some(node)) {
-        html_node(doc, child, layout, out, depth + 1, grid)?;
+        html_node(doc, child, layout, links, out, depth + 1, grid)?;
     }
     if let Some(close) = close {
         append(out, close)?;
@@ -561,10 +660,12 @@ impl Exporter for Html {
             }
         }
         let mut out = String::from("<!doctype html><html><body>");
+        let links = crate::links::LinkIndex::new(doc);
         for node in roots {
-            html_node(doc, node, layout, &mut out, 0, None)?;
+            html_node(doc, node, layout, &links, &mut out, 0, None)?;
         }
         append(&mut out, "</body></html>")?;
+        let presence = links.presence();
         use Disposition::*;
         let mut losses = report(
             [
@@ -601,6 +702,14 @@ impl Exporter for Html {
                     .map(|d| reprise_diag::Note::new(d.severity, d.code, d.message)),
             );
         }
+        losses.notes.extend(annotation_notes(
+            presence,
+            None,
+            links.approximated.get().then_some(
+                "overlapping links were flattened (the first keeps the shared text) or a link to missing text was left as text",
+            ),
+            "comment anchors are not in HTML",
+        ));
         Ok(ExportResult {
             bytes: out.into_bytes(),
             losses,
@@ -700,6 +809,7 @@ pub fn export_pdf(
     validate_layout(doc, Some(layout))?;
     let (bytes, notes, ua) = crate::pdf_tags::render(doc, layout, fonts, assets, meta)?;
     use Disposition::*;
+    let presence = crate::links::LinkIndex::new(doc).presence();
     let mut losses = report(
         [
             Dropped,
@@ -731,6 +841,12 @@ pub fn export_pdf(
         ],
     );
     losses.notes.extend(notes);
+    losses.notes.extend(annotation_notes(
+        presence,
+        None,
+        None,
+        "comment anchors are not in the PDF",
+    ));
     losses.notes.extend(
         layout
             .diagnostics

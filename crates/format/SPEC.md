@@ -283,3 +283,12 @@ bit is absent from every existing package and snapshot. Bit 13 is paragraph
 styles (`REQUIRED_PARAGRAPH_STYLES`), so inline objects take 15 because 14 is
 reserved for block semantics on the lists workstream; the integrator may
 renumber. See `docs/inline.md`.
+
+## Annotations feature (required bit 16)
+
+`REQUIRED_ANNOTATIONS` is declared whenever any persistent range carries an
+`annot1` annotation envelope or an `annot-restore1` restore hint, including
+removed (tombstoned), unreadable and future-kind records. An older reader would
+show such ranges as bare ranges and copy them without their data, so it must
+refuse the package. Documents without annotations keep their old required mask.
+See `docs/annotations.md`. Bits 14 and 15 are reserved for lists and inline objects.
