@@ -13,6 +13,7 @@ fn mode(mode: WritingMode) -> u8 {
         WritingMode::HorizontalTb => 0,
         WritingMode::VerticalRl => 1,
         WritingMode::VerticalLr => 2,
+        WritingMode::SidewaysLr => 3,
     }
 }
 fn group(section: &Section) -> Group {

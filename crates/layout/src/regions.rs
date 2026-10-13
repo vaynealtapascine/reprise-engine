@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MAX_REGION_ITERATIONS: usize = 16;
 pub const MAX_NOTE_DEPTH: usize = 32;
 pub const MAX_REGION_RELATIONS: usize = 4096;
+mod physical;
 
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,8 @@ mod tests;
 pub(crate) struct Plan {
     pub exclusions: BTreeMap<crate::pages::FrameAddr, crate::pages::Entry<Vec<Rect<FrameSpace>>>>,
     pub reservations: BTreeMap<crate::pages::FrameAddr, crate::pages::Entry<Length>>,
+    pub physical_exclusions: physical::Boxes,
+    pub note_areas: physical::Areas,
     pub placement_owners: BTreeMap<RelationId, NodeId>,
     pub frame_sources: BTreeMap<crate::pages::FrameAddr, (crate::pages::Provenance, usize)>,
     pub blocks: Vec<BlockLayout>,
@@ -33,6 +36,8 @@ impl Plan {
     pub(crate) fn equivalent(&self, other: &Self) -> bool {
         self.exclusions == other.exclusions
             && self.reservations == other.reservations
+            && self.physical_exclusions == other.physical_exclusions
+            && self.note_areas == other.note_areas
             && self.canonical_blocks() == other.canonical_blocks()
             && self
                 .frame_sources

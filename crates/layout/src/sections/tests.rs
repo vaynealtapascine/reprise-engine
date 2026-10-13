@@ -518,3 +518,4 @@ fn endnote_continuations_use_the_last_pages_owner_and_responsive_geometry() {
     let mut session = LayoutSession::new(&engine);
     assert_eq!(session.layout(&doc).unwrap(), s);
 }
+mod bands;

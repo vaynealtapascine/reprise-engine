@@ -26,6 +26,7 @@ use reprise_shape::{
     reorder_line, visual_order,
 };
 
+pub(crate) mod bands;
 mod keeps;
 pub(crate) mod paragraph;
 pub(crate) mod stage;
@@ -56,7 +57,44 @@ pub(crate) fn run_with_sections(
     plan: &Plan,
     sections: std::sync::Arc<crate::sections::Table>,
 ) -> Vec<Pending> {
+    let continuous = sections.has_continuous;
     let mut cursor = Cursor::new_with_sections(engine, doc, template, snapshot, plan, sections);
+    if continuous {
+        let nodes = doc.top(reprise_doc::Domain::Body);
+        // A unit either consumes input, advances a frame, or advances one of
+        // the bounded preparation/search phases. Include table descendants.
+        let input = doc
+            .order(reprise_doc::Domain::Body)
+            .iter()
+            .fold(0usize, |n, node| {
+                n.saturating_add(
+                    doc.block(*node)
+                        .map_or(1, |b| b.text.len().saturating_add(64)),
+                )
+            });
+        let bound = input
+            .saturating_add((engine.flow.max_pages.max(1) as usize).saturating_mul(64))
+            .saturating_mul(25 * 32)
+            .max(1);
+        let mut next = 0usize;
+        for _ in 0..bound {
+            let start = (!cursor.busy()).then(|| nodes.get(next).copied()).flatten();
+            if !cursor.busy() && start.is_none() {
+                return cursor.finish(engine, template, snapshot, plan);
+            }
+            if start.is_some() {
+                next = next.saturating_add(1);
+            }
+            (cursor, _) = cursor.unit(engine, doc, template, snapshot, plan, None, start, &[], 1);
+        }
+        snapshot.diagnostics.push(Diagnostic::new(
+            Severity::Error,
+            codes::TEXT_UNPLACED,
+            Subject::Document,
+            "bounded section flow exhausted its work units",
+        ));
+        return cursor.finish(engine, template, snapshot, plan);
+    }
     for node in doc.top(reprise_doc::Domain::Body) {
         cursor = cursor.step(engine, doc, template, snapshot, plan, node, None);
     }
@@ -82,10 +120,16 @@ pub(crate) struct Cursor {
     catalog: crate::pages::Catalog,
     source: crate::pages::FrameSource,
     domain: Option<reprise_doc::Domain>,
-    section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    pub(crate) section_table: Option<std::sync::Arc<crate::sections::Table>>,
     section: usize,
     template: std::sync::Arc<ResolvedTemplate>,
     boundary_node: Option<NodeId>,
+    band: usize,
+    band_start: Option<std::rc::Rc<bands::BandStart>>,
+    band_nodes: Vec<NodeId>,
+    balance: Option<Box<bands::Balance>>,
+    queued_node: Option<NodeId>,
+    open_band: bool,
 }
 
 /// What keep lookahead reuses between paragraphs of one layout: the block
@@ -161,6 +205,7 @@ pub(crate) enum TableStep {
         next_header: usize,
         widths: Vec<Length>,
         repeat: Option<crate::table_flow::Repeat>,
+        current: Option<(usize, crate::table_flow::GroupStep)>,
     },
 }
 
@@ -278,6 +323,8 @@ impl Cursor {
             section_table,
             section,
             boundary_node: None,
+            band: 0,
+            open_band: false,
         };
         // Even an empty document gets a page.
         if flow.source.can_page() {
@@ -320,7 +367,7 @@ impl Cursor {
     }
     /// A block is in progress.
     pub(crate) fn busy(&self) -> bool {
-        self.active.is_some()
+        self.active.is_some() || self.balance.is_some() || self.queued_node.is_some()
     }
     /// The lines a paragraph in progress has placed so far.
     pub(crate) fn in_progress(&self) -> Option<BlockLayout> {
@@ -334,7 +381,7 @@ impl Cursor {
     /// the blocks after it, for speculative preparation. Returns the units
     /// charged (at least 1, at most `allowance.max(1)`).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn unit(
+    pub(crate) fn ordinary_unit(
         mut self,
         engine: &Engine,
         doc: &Document,
@@ -397,6 +444,15 @@ impl Cursor {
         flow.pending
     }
     pub(crate) fn page(&self) -> usize {
+        if let Some(Active::Table(t)) = &self.active
+            && let TableStep::Place {
+                current: Some((_, group)),
+                ..
+            } = t.as_ref()
+            && let Some(page) = group.first_page
+        {
+            return self.page.min(page);
+        }
         self.page
     }
     fn restore<'a>(
@@ -431,6 +487,8 @@ impl Cursor {
             section_table: self.section_table,
             section: self.section,
             boundary_node: self.boundary_node,
+            band: self.band,
+            open_band: self.open_band,
         }
     }
 }
@@ -478,9 +536,11 @@ pub(crate) struct Flow<'a> {
     catalog: crate::pages::Catalog,
     source: crate::pages::FrameSource,
     domain: Option<reprise_doc::Domain>,
-    section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    pub(crate) section_table: Option<std::sync::Arc<crate::sections::Table>>,
     section: usize,
     boundary_node: Option<NodeId>,
+    band: usize,
+    open_band: bool,
 }
 
 impl Flow<'_> {
@@ -515,12 +575,15 @@ impl Flow<'_> {
                 .specified_style(previous)
                 .is_ok_and(|s| s.compute(&self.engine.functions).keep_with_next)
         {
-            self.snapshot.diagnostics.push(Diagnostic::new(
+            let note = Diagnostic::new(
                 Severity::Warning,
                 codes::KEEP_UNSATISFIED,
                 Subject::Node(previous),
                 "manual boundary overrides keep-with-next",
-            ));
+            );
+            if !self.snapshot.diagnostics.contains(&note) {
+                self.snapshot.diagnostics.push(note);
+            }
         }
         use reprise_doc::sections::{BreakKind, SectionId};
         match kind {
@@ -537,6 +600,43 @@ impl Flow<'_> {
                 let Some(section) = table.sections.get(next) else {
                     return;
                 };
+                if self.open_band && section.start == crate::sections::Start::Continuous {
+                    self.open_band = false;
+                    let descriptor = self
+                        .snapshot
+                        .sections
+                        .as_ref()
+                        .and_then(|s| s.pages.get(self.page));
+                    let owner = descriptor.and_then(|p| table.get(p.section));
+                    let offset = descriptor
+                        .and_then(|p| p.bands.last())
+                        .map_or(Length::ZERO, |b| b.offset + b.depth);
+                    if let Some(owner) = owner
+                        && let Some(template) = crate::pages::PageFactory::append_band(
+                            self.snapshot,
+                            section,
+                            owner,
+                            self.page,
+                            offset,
+                            owner.geometry.block_extent() - offset,
+                        )
+                    {
+                        self.section = next;
+                        self.template = std::sync::Arc::new(template);
+                        self.thread = self.template.main_thread();
+                        self.max_depth = owner.geometry.block_extent() - offset;
+                        self.band = self
+                            .snapshot
+                            .sections
+                            .as_ref()
+                            .and_then(|s| s.pages.get(self.page))
+                            .map_or(0, |p| p.bands.len().saturating_sub(1));
+                        self.pos = 0;
+                        self.catalog.extend(self.snapshot);
+                        self.resize_fills();
+                        return;
+                    }
+                }
                 let parity = match section.start {
                     crate::sections::Start::OddPage => Some(1),
                     crate::sections::Start::EvenPage => Some(0),
@@ -692,6 +792,7 @@ impl Flow<'_> {
                         next_header: 0,
                         widths: Vec::new(),
                         repeat: None,
+                        current: None,
                     };
                     let TableStep::Rows(build) = std::mem::replace(step, placeholder) else {
                         return true;
@@ -706,6 +807,7 @@ impl Flow<'_> {
                         next_header: 0,
                         widths,
                         repeat: None,
+                        current: None,
                     };
                 }
             }
@@ -716,18 +818,26 @@ impl Flow<'_> {
                 next_header,
                 widths,
                 repeat,
+                current,
             } => {
                 // As `place_groups`: the repeat state starts when placing does.
                 let repeat = repeat.get_or_insert_with(|| {
                     crate::table_flow::Repeat::new(headers.len(), self.used() > Length::ZERO)
                 });
-                if let Some(group) = headers.get(*next_header).cloned() {
-                    self.place_group(doc, *node, group, *next_header, headers, widths, repeat);
-                    *next_header += 1;
-                } else if let Some(group) = bodies.pop_front() {
-                    self.place_group(doc, *node, group, usize::MAX, headers, widths, repeat);
+                if current.is_none() {
+                    if let Some(group) = headers.get(*next_header).cloned() {
+                        *current = Some((*next_header, crate::table_flow::GroupStep::new(group)));
+                        *next_header = next_header.saturating_add(1);
+                    } else if let Some(group) = bodies.pop_front() {
+                        *current = Some((usize::MAX, crate::table_flow::GroupStep::new(group)));
+                    }
                 }
-                return *next_header >= headers.len() && bodies.is_empty();
+                if let Some((index, group)) = current
+                    && group.unit(self, doc, *node, *index, headers, widths, repeat)
+                {
+                    *current = None;
+                }
+                return *next_header >= headers.len() && bodies.is_empty() && current.is_none();
             }
         }
         false
@@ -754,6 +864,12 @@ impl Flow<'_> {
             section_table: self.section_table,
             section: self.section,
             boundary_node: self.boundary_node,
+            band: self.band,
+            band_start: None,
+            band_nodes: Vec::new(),
+            balance: None,
+            queued_node: None,
+            open_band: self.open_band,
         }
     }
 
@@ -779,20 +895,41 @@ impl Flow<'_> {
         if !pushed {
             return false;
         }
+        if let Some(section) = self
+            .section_table
+            .as_ref()
+            .filter(|s| s.enabled)
+            .and_then(|s| s.sections.get(self.section))
+        {
+            self.template = section.template.clone();
+            self.thread = self.template.main_thread();
+            self.max_depth = self
+                .thread
+                .iter()
+                .filter_map(|i| self.template.frames.get(*i))
+                .map(|f| f.depth)
+                .max()
+                .unwrap_or_default();
+            self.band = 0;
+        }
         while self.page_base.len() < self.snapshot.pages.len().saturating_sub(1) {
             self.page_base.push(base);
         }
         self.page_base.push(base);
         self.catalog.extend(self.snapshot);
-        for _frame in &self.template.frames {
-            self.fills.push(Fill {
+        self.resize_fills();
+        true
+    }
+    fn resize_fills(&mut self) {
+        self.fills.resize(
+            self.snapshot.frames.len(),
+            Fill {
                 used: Length::ZERO,
                 empty: true,
                 after: Length::ZERO,
                 anchored: true,
-            });
-        }
-        true
+            },
+        );
     }
 
     /// The snapshot index of the frame the flow is in.
@@ -802,12 +939,26 @@ impl Flow<'_> {
     pub(crate) fn frame_index(&self) -> usize {
         self.source
             .single_index()
-            .or_else(|| {
-                self.thread
-                    .get(self.pos)
-                    .and_then(|&t| self.catalog.ordinal(self.page, t))
-            })
+            .or_else(|| self.thread.get(self.pos).and_then(|&t| self.main_index(t)))
             .unwrap_or(self.snapshot.frames.len())
+    }
+    fn main_index(&self, t: usize) -> Option<usize> {
+        if self.section_table.as_ref().is_some_and(|s| s.enabled) {
+            let column = self
+                .template
+                .frames
+                .iter()
+                .take(t)
+                .filter(|f| f.is_main_flow())
+                .count();
+            self.catalog.index(&crate::pages::FrameAddr::Main {
+                page: self.page,
+                band: self.band,
+                column,
+            })
+        } else {
+            self.catalog.ordinal(self.page, t)
+        }
     }
 
     /// Moves on to the next frame of the thread, or the first of a new page.
@@ -856,22 +1007,28 @@ impl Flow<'_> {
             Some(frame)
         })
     }
-    pub(crate) fn exclusions(&self, index: usize) -> Option<&Vec<Rect<FrameSpace>>> {
-        if self.plan.exclusions.is_empty() {
-            return None;
-        }
-        self.frame_reference(index)
+    pub(crate) fn exclusions(&self, index: usize) -> Option<Vec<Rect<FrameSpace>>> {
+        let mut boxes = self
+            .frame_reference(index)
             .and_then(|frame| self.plan.exclusions_for(&frame))
+            .cloned()
+            .unwrap_or_default();
+        boxes.extend(
+            self.plan
+                .physical_exclusions_for(&self.catalog, self.snapshot, index),
+        );
+        (!boxes.is_empty()).then_some(boxes)
     }
     pub(crate) fn depth(&self, index: usize, full: Length) -> Length {
-        if self.plan.reservations.is_empty() {
-            return full.max(Length::ZERO);
-        }
         (full
             - self
                 .frame_reference(index)
                 .and_then(|frame| self.plan.reservation_for(&frame))
-                .unwrap_or_default())
+                .unwrap_or_default()
+                .max(
+                    self.plan
+                        .physical_reservation_for(&self.catalog, self.snapshot, index),
+                ))
         .max(Length::ZERO)
     }
 
@@ -1071,6 +1228,8 @@ pub(crate) fn prepare_cached(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PositionKey {
+    band: usize,
+    source: crate::pages::FrameSource,
     page: usize,
     pos: usize,
     limit_hit: bool,
@@ -1082,6 +1241,11 @@ pub(crate) struct PositionKey {
 }
 #[derive(Clone)]
 pub(crate) struct Delta {
+    band: usize,
+    source: crate::pages::FrameSource,
+    template: std::sync::Arc<ResolvedTemplate>,
+    thread: Vec<usize>,
+    max_depth: Length,
     sections: Option<crate::SectionsLayout>,
     pages: Vec<PageLayout>,
     frames: Vec<FrameLayout>,
@@ -1107,6 +1271,8 @@ impl Flow<'_> {
     pub(crate) fn position_key(&self) -> PositionKey {
         let tail = self.page_base.last().copied().unwrap_or(0);
         PositionKey {
+            band: self.band,
+            source: self.source.clone(),
             page: self.page,
             pos: self.pos,
             limit_hit: self.limit_hit,
@@ -1141,6 +1307,11 @@ impl Flow<'_> {
     }
     fn delta(&self, before: Mark) -> Delta {
         Delta {
+            band: self.band,
+            source: self.source.clone(),
+            template: self.template.clone(),
+            thread: self.thread.clone(),
+            max_depth: self.max_depth,
             sections: self
                 .snapshot
                 .sections
@@ -1216,6 +1387,11 @@ impl Flow<'_> {
         self.page = delta.page;
         self.pos = delta.pos;
         self.limit_hit = delta.limit_hit;
+        self.band = delta.band;
+        self.source = delta.source;
+        self.template = delta.template;
+        self.thread = delta.thread;
+        self.max_depth = delta.max_depth;
         true
     }
 }

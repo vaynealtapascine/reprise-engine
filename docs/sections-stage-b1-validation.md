@@ -67,3 +67,16 @@ and one build job completed all targets successfully (`s4-doc-isolation.log`).
 The combined native suite and doc retry validate S4; the outer gate itself did
 not exit zero. S5 must end with a complete zero-exit full gate. No existing
 snapshot was changed.
+
+## S5 integrated checkpoint
+
+All 100 layout library tests pass, including 15 new S5 acceptance tests, in
+3.72 s. Workspace/all-targets clippy with `-D warnings` passes. Continuous
+full layout uses the same charged cursor units as incremental jobs; table row
+groups yield after each fragment or move. Search keeps ordinary output as its
+verified fallback, retains successful trial output, caps trials at 24 and
+bands at 32, and checks recorded `fit(H)` before searching. Note areas and
+float boxes retain full physical-source provenance and project into current
+band depths; no provenance comparison is weakened. Full workspace and WASM
+validation remain pending. Gate tooling disables the compiler wrapper locally
+after the S3/S4 rustdoc stalls, without changing machine configuration.

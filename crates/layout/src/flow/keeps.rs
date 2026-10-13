@@ -35,7 +35,6 @@ impl Flow<'_> {
                     .exclusions(index)
                     .into_iter()
                     .flatten()
-                    .copied()
                     .map(Polygon::rect)
                     .collect(),
                 margin: Length::ZERO,
@@ -50,14 +49,23 @@ impl Flow<'_> {
     /// made from the template in order, so a page not made yet has a known
     /// index.
     pub(crate) fn next_frame(&self) -> Option<(usize, usize)> {
-        if !self.source.can_page() {
+        if self.source.single_index().is_some() {
             return None;
         }
         if self.pos + 1 < self.thread.len() {
             let t = *self.thread.get(self.pos + 1)?;
-            return Some((self.catalog.ordinal(self.page, t)?, t));
+            return Some((self.main_index(t)?, t));
         }
-        let t = *self.thread.first()?;
+        if !self.source.can_page() {
+            return None;
+        }
+        let full = self
+            .section_table
+            .as_ref()
+            .filter(|s| s.enabled)
+            .and_then(|s| s.sections.get(self.section))
+            .map_or(self.template.as_ref(), |s| s.template.as_ref());
+        let t = *full.main_thread().first()?;
         let next_page = self.page + 1;
         if next_page >= self.snapshot.pages.len()
             && self.snapshot.pages.len() >= self.engine.flow.max_pages.max(1) as usize
@@ -65,9 +73,24 @@ impl Flow<'_> {
             return None;
         }
         Some((
-            crate::pages::PageFactory::preview(&self.template, self.snapshot, next_page, t)?,
+            crate::pages::PageFactory::preview(full, self.snapshot, next_page, t)?,
             t,
         ))
+    }
+    pub(crate) fn next_template(&self, index: usize) -> &ResolvedTemplate {
+        if self
+            .snapshot
+            .frame(index)
+            .is_some_and(|f| f.page == self.page)
+        {
+            &self.template
+        } else {
+            self.section_table
+                .as_ref()
+                .filter(|s| s.enabled)
+                .and_then(|s| s.sections.get(self.section))
+                .map_or(self.template.as_ref(), |s| s.template.as_ref())
+        }
     }
 
     /// The blocks after `node` in document order, built once per layout.

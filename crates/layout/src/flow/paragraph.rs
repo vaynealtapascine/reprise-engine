@@ -56,6 +56,9 @@ struct Preparing {
 }
 
 impl Paragraph {
+    pub(crate) fn clear_memo(&mut self) {
+        self.memo = None;
+    }
     pub(crate) fn new(node: NodeId) -> Self {
         Self {
             node,
@@ -113,7 +116,13 @@ impl Flow<'_> {
         let mut used = 1;
         if !p.started {
             p.started = true;
-            if let Some(evaluation) = self.evaluation {
+            if let Some(evaluation) = self.evaluation.filter(|_| {
+                !self.section_table.as_ref().is_some_and(|s| {
+                    s.sections
+                        .get(self.section.saturating_add(1))
+                        .is_some_and(|s| s.start == crate::sections::Start::Continuous)
+                })
+            }) {
                 let ahead = self.keep_lookahead(doc, p.node);
                 let key = FlowKey::new(self, doc, p.node, ahead);
                 if let Some(delta) = evaluation.flow_hit(p.node, &key, self.engine)
@@ -383,7 +392,8 @@ impl Flow<'_> {
                     if !move_on
                         && style.widows() > 1
                         && let Some((next_index, t)) = self.next_frame()
-                        && let Some(next) = template.frames.get(t)
+                        && let next_template = self.next_template(next_index)
+                        && let Some(next) = next_template.frames.get(t)
                         && next.writing_mode == frame.writing_mode
                     {
                         let next_room = self.room(next_index, next, prepared, rest);

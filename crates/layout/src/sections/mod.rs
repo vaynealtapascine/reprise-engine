@@ -1,5 +1,7 @@
 //! Frozen, read-only section resolution shared by body and region passes.
 mod geometry;
+mod spaces;
+pub(crate) use spaces::{FloatSpaces, name as float_space_name};
 #[cfg(test)]
 mod tests;
 
@@ -79,6 +81,8 @@ pub(crate) struct Table {
     pub by_id: BTreeMap<SectionId, usize>,
     pub initial: usize,
     pub enabled: bool,
+    pub has_continuous: bool,
+    pub float_spaces: FloatSpaces,
     pub diagnostics: Vec<Diagnostic>,
     diagnostic_order: BTreeMap<SectionId, usize>,
 }
@@ -463,12 +467,26 @@ impl Table {
             });
         // Orphan stories and inactive retained starts are authored state, but
         // they do not add section metadata to an otherwise legacy snapshot.
+        let has_continuous = sections.iter().any(|s| s.start == Start::Continuous);
+        let float_spaces = FloatSpaces::resolve(
+            &sections,
+            has_continuous
+                && doc.relations().iter().any(|(_, r)| {
+                    r.as_ref().is_ok_and(|r| {
+                        r.schema == reprise_doc::relation::builtin::FLOAT
+                            && r.owner.is_some()
+                            && engine.schemas.get(&r.schema).is_some()
+                    })
+                }),
+        );
         Arc::new(Self {
             sections,
             starts,
             by_id,
             initial,
             enabled,
+            has_continuous,
+            float_spaces,
             diagnostics,
             diagnostic_order,
         })

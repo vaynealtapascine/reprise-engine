@@ -209,11 +209,49 @@ impl Floats {
                     let top = (at - margin).max(Length::ZERO);
                     let right = (x + width + margin).min(frame.width);
                     let bottom = (at + height + margin).min(frame.depth);
-                    let exclusion = Rect::new(Point::new(left, top), right - left, bottom - top);
+                    let mut exclusion =
+                        Rect::new(Point::new(left, top), right - left, bottom - top);
                     out.diagnostics.extend(candidate_diagnostics);
-                    if let Some(frame) =
-                        crate::pages::Catalog::from_snapshot(scratch).reference(index)
-                    {
+                    let physical = scratch.frame(index).and_then(|main| {
+                        let name = crate::sections::float_space_name(main);
+                        let (source_index, source) =
+                            scratch.frames.iter().enumerate().rev().find(|(_, f)| {
+                                f.page == page
+                                    && f.role == reprise_doc::FrameRole::Flow(name.clone())
+                            })?;
+                        let origin = source
+                            .to_page
+                            .inverse()?
+                            .apply(main.to_page.apply(Point::origin()));
+                        Some((source_index, origin))
+                    });
+                    let catalog = crate::pages::Catalog::from_snapshot(scratch);
+                    if let Some((source_index, origin)) = physical {
+                        for line in &mut block.lines {
+                            line.frame = source_index;
+                            line.rect.origin.x += origin.x;
+                            line.rect.origin.y += origin.y;
+                            line.baseline += origin.y;
+                            line.available.start += origin.x;
+                            line.available.end += origin.x;
+                            for run in &mut line.runs {
+                                run.x += origin.x;
+                            }
+                            if let Some(marker) = &mut line.marker {
+                                marker.x += origin.x;
+                                marker.baseline += origin.y;
+                                for run in &mut marker.runs {
+                                    run.x += origin.x;
+                                }
+                            }
+                        }
+                        block.sync_image();
+                        exclusion.origin.x += origin.x;
+                        exclusion.origin.y += origin.y;
+                        if let Some(source) = catalog.reference(source_index) {
+                            out.exclude_physical(source, exclusion);
+                        }
+                    } else if let Some(frame) = catalog.reference(index) {
                         out.exclude(frame, exclusion);
                     }
                     self.next.insert(index, at + height + margin);

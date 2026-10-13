@@ -201,7 +201,7 @@ impl Notes {
             let mut capacity = area.depth;
             if let Some(inverse) = area.to_page().inverse() {
                 let catalog = crate::pages::Catalog::from_snapshot(scratch);
-                for (float_frame, entry) in &out.exclusions {
+                for (float_frame, entry) in out.exclusions.iter().chain(&out.physical_exclusions) {
                     let Some(float_index) = catalog.index(float_frame) else {
                         continue;
                     };
@@ -343,6 +343,22 @@ impl Notes {
                 block.sync_image();
             }
             let page = area.page;
+            if snapshot.sections.is_some() {
+                if let Some(source) = catalog.reference(index) {
+                    out.note_areas.insert(
+                        source.address.clone(),
+                        crate::pages::Entry::new(
+                            source,
+                            reprise_geom::Rect::new(
+                                Point::new(Length::ZERO, by),
+                                area.rect.width,
+                                occupied,
+                            ),
+                        ),
+                    );
+                }
+                continue;
+            }
             // Project the occupied notes box to each body's logical space.
             // Conservatively reserve from the earliest intersecting corner.
             for (i, body) in crate::pages::PageFactory::body_frames(snapshot, page) {

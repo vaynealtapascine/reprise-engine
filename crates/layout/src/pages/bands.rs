@@ -27,7 +27,9 @@ impl PageFactory {
                 o.width - o.right - offset - (d.width - d.right),
                 Length::ZERO,
             ),
-            WritingMode::VerticalLr => (o.left + offset - d.left, Length::ZERO),
+            WritingMode::VerticalLr | WritingMode::SidewaysLr => {
+                (o.left + offset - d.left, Length::ZERO)
+            }
         };
         let body = match mode {
             WritingMode::HorizontalTb => Rect::new(
@@ -40,7 +42,7 @@ impl PageFactory {
                 depth,
                 section.geometry.inline_extent(),
             ),
-            WritingMode::VerticalLr => Rect::new(
+            WritingMode::VerticalLr | WritingMode::SidewaysLr => Rect::new(
                 Point::new(o.left + offset, d.top),
                 depth,
                 section.geometry.inline_extent(),
@@ -113,7 +115,7 @@ impl PageFactory {
                         b.body.origin.x += b.body.width - depth;
                         b.body.width = depth;
                     }
-                    WritingMode::VerticalLr => b.body.width = depth,
+                    WritingMode::VerticalLr | WritingMode::SidewaysLr => b.body.width = depth,
                 }
             }
             for rule in metadata
@@ -127,7 +129,7 @@ impl PageFactory {
                         rule.rect.origin.x += rule.rect.width - depth;
                         rule.rect.width = depth;
                     }
-                    WritingMode::VerticalLr => rule.rect.width = depth,
+                    WritingMode::VerticalLr | WritingMode::SidewaysLr => rule.rect.width = depth,
                 }
             }
         }
@@ -139,31 +141,5 @@ impl PageFactory {
         let index = snapshot.frames.len();
         snapshot.frames.push(frame);
         index
-    }
-
-    pub(crate) fn float_sources(
-        snapshot: &mut LayoutSnapshot,
-        page: usize,
-        band: usize,
-        full_depth: Length,
-    ) {
-        let Some(body) = snapshot
-            .sections
-            .as_ref()
-            .and_then(|s| s.pages.get(page))
-            .and_then(|p| p.bands.get(band))
-            .cloned()
-        else {
-            return;
-        };
-        for (column, index) in body.frames.iter().enumerate() {
-            let Some(mut frame) = snapshot.frame(*index).cloned() else {
-                continue;
-            };
-            frame.name = format!("reprise.float.{}.{}", body.section, column);
-            frame.role = FrameRole::Flow(frame.name.clone());
-            frame.rect.height = full_depth;
-            Self::append_region(snapshot, frame);
-        }
     }
 }

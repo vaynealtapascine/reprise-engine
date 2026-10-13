@@ -3,6 +3,7 @@
 //! Checkpoints contain geometry and the active block, never completed prefix
 //! text. A successful trial is retained as output; committing never reflows it.
 use super::*;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(crate) const MAX_BANDS: usize = 32;
@@ -33,7 +34,7 @@ struct Trial {
 
 #[derive(Clone)]
 pub(super) struct Balance {
-    checkpoint: Arc<BandStart>,
+    checkpoint: Rc<BandStart>,
     nodes: Arc<Vec<NodeId>>,
     endpoint: NodeId,
     lo: i32,
@@ -51,8 +52,8 @@ fn header(snapshot: &LayoutSnapshot) -> LayoutSnapshot {
         revision: snapshot.revision.clone(),
         adapter: snapshot.adapter.clone(),
         composer: snapshot.composer.clone(),
-        medium: snapshot.medium.clone(),
-        settings: snapshot.settings.clone(),
+        medium: snapshot.medium,
+        settings: snapshot.settings,
         template: snapshot.template.clone(),
         pages: snapshot.pages.clone(),
         frames: snapshot.frames.clone(),
@@ -74,7 +75,7 @@ impl Cursor {
         self.band_nodes.clear();
         let mut cursor = self.clone();
         cursor.queued_node = None;
-        self.band_start = Some(Arc::new(BandStart {
+        self.band_start = Some(Rc::new(BandStart {
             cursor,
             header: header(snapshot),
             blocks: snapshot.blocks.len(),

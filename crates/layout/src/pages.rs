@@ -5,6 +5,7 @@ use reprise_doc::sections::SectionId;
 use reprise_doc::{FrameRole, MAIN_FLOW, WritingMode};
 use reprise_geom::{FrameSpace, PageSpace, Rect, Transform};
 use std::collections::BTreeMap;
+mod bands;
 
 #[cfg(test)]
 mod tests;
@@ -191,11 +192,12 @@ impl PageFactory {
             return false;
         }
         let page = snapshot.pages.len();
-        let first_content = snapshot.sections.as_ref().is_none_or(|s| {
-            !s.pages
-                .iter()
-                .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
-        });
+        let first_content = section.restart.is_some()
+            && snapshot.sections.as_ref().is_none_or(|s| {
+                !s.pages
+                    .iter()
+                    .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
+            });
         let previous = snapshot
             .sections
             .as_ref()
@@ -280,6 +282,13 @@ impl PageFactory {
                     band: 0,
                     rect,
                 }));
+        }
+        if kind != crate::PageKind::Filler {
+            for prototype in sections.float_spaces.for_section(section) {
+                let mut frame = prototype.clone();
+                frame.page = page;
+                Self::append_region(snapshot, frame);
+            }
         }
         true
     }
@@ -452,13 +461,17 @@ impl PageFactory {
 pub(crate) enum FrameSource {
     #[default]
     Paged,
+    Band,
     #[allow(dead_code)] // The plain running-story runner connects this in S6a.
-    OneFrame { index: usize, exhausted: bool },
+    OneFrame {
+        index: usize,
+        exhausted: bool,
+    },
 }
 impl FrameSource {
     pub fn next(&mut self) -> bool {
         match self {
-            Self::Paged => true,
+            Self::Paged | Self::Band => true,
             Self::OneFrame { exhausted, .. } => {
                 *exhausted = true;
                 false

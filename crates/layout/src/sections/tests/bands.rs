@@ -300,7 +300,7 @@ fn notes_reflow_an_earlier_band_and_share_the_carried_pages_owner() {
         &doc,
         &[("columns.count", json!(2)), ("columns.gap", json!(8192))],
     );
-    let a = block(&doc, &vec!["a"; 8].join("\n"));
+    let a = block(&doc, &["a"; 8].join("\n"));
     let b = block(&doc, "b");
     continuous(&doc, b, &[("columns.count", json!(1))]);
     let mut owners = Vec::new();
@@ -315,7 +315,7 @@ fn notes_reflow_an_earlier_band_and_share_the_carried_pages_owner() {
             &Relation::new(builtin::NOTE)
                 .owned_by(note)
                 .target("anchor", Target::Range(range))
-                .param("placement", Param::Text("footnote".into())),
+                .param("placement", Param::Text("page".into())),
         )
         .unwrap();
     }
@@ -353,7 +353,7 @@ fn notes_reflow_an_earlier_band_and_share_the_carried_pages_owner() {
     );
     assert!(
         snapshot
-            .diagnostics_with("layout.region-nonconvergent")
+            .diagnostics_with("layout.region-cycle")
             .next()
             .is_none()
     );
@@ -525,7 +525,7 @@ fn float_source_geometry_stays_valid_while_main_trial_depth_changes() {
     );
     assert!(
         snapshot
-            .diagnostics_with("layout.region-nonconvergent")
+            .diagnostics_with("layout.region-cycle")
             .next()
             .is_none()
     );
@@ -635,7 +635,7 @@ impl reprise_compose::Composer for NonMonotone {
         &self,
         request: &reprise_compose::ComposeRequest<'_>,
     ) -> reprise_compose::Composition {
-        use reprise_compose::{Available, Composer, GeometryProvider, LineQuery};
+        use reprise_compose::{Available, GeometryProvider, LineQuery};
         struct End;
         impl GeometryProvider for End {
             fn available(&self, _: &LineQuery<'_>) -> Available {
@@ -706,7 +706,7 @@ fn suspended_trials_keep_owned_state_and_reject_stale_or_cancelled_publication()
     let (engine, doc) = setup();
     page(&doc, 200, 200, 10);
     first(&doc, &[("columns.count", json!(2))]);
-    block(&doc, &vec!["a"; 12].join("\n"));
+    block(&doc, &["a"; 12].join("\n"));
     let b = block(&doc, "b");
     continuous(&doc, b, &[("columns.count", json!(1))]);
     let expected = engine.layout(&doc);
