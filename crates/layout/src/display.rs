@@ -413,6 +413,16 @@ impl LayoutSnapshot {
                 items: children,
             });
         }
+        if let Some(sections) = &self.sections {
+            for rule in sections.rules.iter().filter(|r| r.page == page) {
+                items.push(Item::Path {
+                    path: Path::rect(rule.rect),
+                    fill: Some(Color::BLACK),
+                    stroke: None,
+                    layer: Layer::Content,
+                });
+            }
+        }
         if options.debug && options.relations {
             items.extend(self.relation_links(page));
         }

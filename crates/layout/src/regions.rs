@@ -25,6 +25,7 @@ pub(crate) struct Plan {
     pub blocks: Vec<BlockLayout>,
     pub applied: BTreeSet<RelationId>,
     pub pages: usize,
+    pub page_requests: BTreeMap<usize, (reprise_doc::sections::SectionId, crate::PageKind)>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -40,6 +41,7 @@ impl Plan {
                 .eq(other.frame_sources.iter().map(|(a, (p, _))| (a, p)))
             && self.applied == other.applied
             && self.pages == other.pages
+            && self.page_requests == other.page_requests
     }
     pub fn exclusions_for(&self, frame: &crate::pages::FrameRef) -> Option<&Vec<Rect<FrameSpace>>> {
         self.exclusions.get(&frame.address)?.for_frame(frame)
@@ -156,19 +158,29 @@ pub(crate) fn run(
     engine: &Engine,
     doc: &Document,
     template: &ResolvedTemplate,
-    base: LayoutSnapshot,
+    mut base: LayoutSnapshot,
 ) -> LayoutSnapshot {
+    let sections = crate::sections::Table::resolve(engine, doc, template);
+    base.diagnostics.extend(sections.diagnostics.clone());
     let active = active(engine, doc);
     let mut plan = Plan::default();
     let mut history: Vec<Plan> = Vec::new();
     for iteration in 0..MAX_REGION_ITERATIONS {
         let mut snapshot = base.clone();
-        let pending = flow::run(engine, doc, template, &mut snapshot, &plan);
+        let pending = flow::run_with_sections(
+            engine,
+            doc,
+            template,
+            &mut snapshot,
+            &plan,
+            sections.clone(),
+        );
         if !active {
             crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
+            sections.sort_diagnostics(&mut snapshot);
             return snapshot;
         }
-        let next = allocate(engine, doc, template, &snapshot, None);
+        let next = allocate_with_sections(engine, doc, template, &snapshot, None, &sections);
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
             let applied = if outcome == Feedback::Converged {
@@ -178,6 +190,7 @@ pub(crate) fn run(
             };
             finish_feedback(&mut snapshot, &plan, next, outcome);
             crate::relations::run(engine, doc, &mut snapshot, pending, &applied);
+            sections.sort_diagnostics(&mut snapshot);
             return snapshot;
         }
         history.push(plan);
@@ -228,12 +241,25 @@ pub(crate) fn finish_feedback(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn allocate(
     engine: &Engine,
     doc: &Document,
     template: &ResolvedTemplate,
     flowed: &LayoutSnapshot,
     evaluation: Option<&crate::incremental::Evaluation>,
+) -> Plan {
+    let sections = crate::sections::Table::resolve(engine, doc, template);
+    allocate_with_sections(engine, doc, template, flowed, evaluation, &sections)
+}
+
+pub(crate) fn allocate_with_sections(
+    engine: &Engine,
+    doc: &Document,
+    template: &ResolvedTemplate,
+    flowed: &LayoutSnapshot,
+    evaluation: Option<&crate::incremental::Evaluation>,
+    sections: &crate::sections::Table,
 ) -> Plan {
     let mut scratch = flowed.clone();
     let mut out = Plan::default();
@@ -330,6 +356,7 @@ pub(crate) fn allocate(
                     &r,
                     anchor,
                     evaluation,
+                    sections,
                 );
             } else {
                 notes.place(
@@ -342,6 +369,7 @@ pub(crate) fn allocate(
                     &r,
                     anchor,
                     evaluation,
+                    sections,
                 );
             }
             progressed = true;
@@ -365,6 +393,15 @@ pub(crate) fn allocate(
         .map(|f| f.page.saturating_add(1))
         .max()
         .unwrap_or(0);
+    if let Some(metadata) = &scratch.sections {
+        out.page_requests.extend(
+            metadata
+                .pages
+                .iter()
+                .enumerate()
+                .map(|(page, p)| (page, (p.section, p.kind))),
+        );
+    }
     out.capture_frames(&scratch);
     for (id, relation) in doc.relations() {
         if let Ok(relation) = relation

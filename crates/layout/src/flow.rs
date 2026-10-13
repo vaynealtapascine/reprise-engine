@@ -48,14 +48,15 @@ pub(crate) struct Pending {
 
 /// Lays out every block, places the paragraphs and returns the blocks that
 /// wait for a relation to place them.
-pub(crate) fn run(
+pub(crate) fn run_with_sections(
     engine: &Engine,
     doc: &Document,
     template: &ResolvedTemplate,
     snapshot: &mut LayoutSnapshot,
     plan: &Plan,
+    sections: std::sync::Arc<crate::sections::Table>,
 ) -> Vec<Pending> {
-    let mut cursor = Cursor::new(engine, doc, template, snapshot, plan);
+    let mut cursor = Cursor::new_with_sections(engine, doc, template, snapshot, plan, sections);
     for node in doc.top(reprise_doc::Domain::Body) {
         cursor = cursor.step(engine, doc, template, snapshot, plan, node, None);
     }
@@ -63,7 +64,7 @@ pub(crate) fn run(
 }
 
 /// Owned continuation state; no borrowed snapshot survives a yield.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct Cursor {
     thread: Vec<usize>,
     max_depth: Length,
@@ -81,6 +82,10 @@ pub(crate) struct Cursor {
     catalog: crate::pages::Catalog,
     source: crate::pages::FrameSource,
     domain: Option<reprise_doc::Domain>,
+    section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    section: usize,
+    template: std::sync::Arc<ResolvedTemplate>,
+    boundary_node: Option<NodeId>,
 }
 
 /// What keep lookahead reuses between paragraphs of one layout: the block
@@ -172,14 +177,15 @@ impl TableStep {
 pub const TABLE_ROW_GROUP: usize = 16;
 
 impl Cursor {
-    pub(crate) fn new(
+    pub(crate) fn new_with_sections(
         engine: &Engine,
         doc: &Document,
         template: &ResolvedTemplate,
         snapshot: &mut LayoutSnapshot,
         plan: &Plan,
+        sections: std::sync::Arc<crate::sections::Table>,
     ) -> Self {
-        Self::new_in(
+        Self::new_source(
             engine,
             doc,
             template,
@@ -187,9 +193,11 @@ impl Cursor {
             plan,
             reprise_doc::Domain::Body,
             crate::pages::FrameSource::Paged,
+            Some(sections),
         )
     }
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Plain running adapters connect in S6a; exercised by S3 tests.
     pub(crate) fn new_in(
         engine: &Engine,
         doc: &Document,
@@ -199,6 +207,36 @@ impl Cursor {
         domain: reprise_doc::Domain,
         source: crate::pages::FrameSource,
     ) -> Self {
+        let sections = (domain == reprise_doc::Domain::Body)
+            .then(|| crate::sections::Table::resolve(engine, doc, template));
+        Self::new_source(
+            engine, doc, template, snapshot, plan, domain, source, sections,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn new_source(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        domain: reprise_doc::Domain,
+        source: crate::pages::FrameSource,
+        section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    ) -> Self {
+        let section = section_table.as_ref().map_or(0, |s| s.initial);
+        let template = section_table
+            .as_ref()
+            .and_then(|s| s.sections.get(section))
+            .map_or_else(
+                || std::sync::Arc::new(template.clone()),
+                |s| s.template.clone(),
+            );
+        if section_table.as_ref().is_some_and(|s| s.enabled) {
+            snapshot
+                .sections
+                .get_or_insert_with(crate::SectionsLayout::default);
+        }
         let thread = if source.can_page() {
             template.main_thread()
         } else {
@@ -237,6 +275,9 @@ impl Cursor {
             catalog,
             source,
             domain: Some(domain),
+            section_table,
+            section,
+            boundary_node: None,
         };
         // Even an empty document gets a page.
         if flow.source.can_page() {
@@ -339,7 +380,17 @@ impl Cursor {
     ) -> Vec<Pending> {
         let mut flow = self.restore(engine, template, snapshot, plan, None);
         while flow.snapshot.pages.len() < plan.pages {
-            if !flow.new_page() {
+            let page = flow.snapshot.pages.len();
+            let request = plan.page_requests.get(&page).copied();
+            let allocated = if let Some((owner, kind)) = request
+                && let Some(table) = flow.section_table.as_ref().filter(|s| s.enabled)
+                && let Some(section) = table.get(owner)
+            {
+                crate::pages::PageFactory::push_section(engine, table, section, kind, flow.snapshot)
+            } else {
+                flow.new_page()
+            };
+            if !allocated {
                 break;
             }
         }
@@ -351,14 +402,14 @@ impl Cursor {
     fn restore<'a>(
         self,
         engine: &'a Engine,
-        template: &'a ResolvedTemplate,
+        _template: &'a ResolvedTemplate,
         snapshot: &'a mut LayoutSnapshot,
         plan: &'a Plan,
         evaluation: Option<&'a crate::incremental::Evaluation>,
     ) -> Flow<'a> {
         Flow {
             engine,
-            template,
+            template: self.template,
             snapshot,
             plan,
             evaluation,
@@ -377,6 +428,9 @@ impl Cursor {
             catalog: self.catalog,
             source: self.source,
             domain: self.domain,
+            section_table: self.section_table,
+            section: self.section,
+            boundary_node: self.boundary_node,
         }
     }
 }
@@ -405,7 +459,7 @@ pub(crate) struct Flow<'a> {
     pub(crate) upcoming: &'a [NodeId],
     pub(crate) engine: &'a Engine,
     pub(crate) evaluation: Option<&'a crate::incremental::Evaluation>,
-    pub(crate) template: &'a ResolvedTemplate,
+    pub(crate) template: std::sync::Arc<ResolvedTemplate>,
     pub(crate) snapshot: &'a mut LayoutSnapshot,
     plan: &'a Plan,
     /// Template indices of the main flow's frames, in threading order.
@@ -424,10 +478,14 @@ pub(crate) struct Flow<'a> {
     catalog: crate::pages::Catalog,
     source: crate::pages::FrameSource,
     domain: Option<reprise_doc::Domain>,
+    section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    section: usize,
+    boundary_node: Option<NodeId>,
 }
 
 impl Flow<'_> {
     fn node(&mut self, doc: &Document, node: NodeId) {
+        self.transition(doc, node);
         // `table` runs the same phases as `table_unit`, back to back.
         if let Ok(Some(reprise_doc::TableRole::Table(columns))) = doc.table_role(node) {
             self.table(doc, node, &columns);
@@ -438,9 +496,107 @@ impl Flow<'_> {
         }
     }
 
+    fn transition(&mut self, doc: &Document, node: NodeId) {
+        if self.boundary_node == Some(node) {
+            return;
+        }
+        self.boundary_node = Some(node);
+        let Some(table) = self.section_table.clone().filter(|s| s.enabled) else {
+            return;
+        };
+        let Some(kind) = table.starts.get(&node).copied() else {
+            return;
+        };
+        if self.previous.is_none() {
+            return;
+        }
+        if let Some(previous) = self.previous
+            && doc
+                .specified_style(previous)
+                .is_ok_and(|s| s.compute(&self.engine.functions).keep_with_next)
+        {
+            self.snapshot.diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                codes::KEEP_UNSATISFIED,
+                Subject::Node(previous),
+                "manual boundary overrides keep-with-next",
+            ));
+        }
+        use reprise_doc::sections::{BreakKind, SectionId};
+        match kind {
+            BreakKind::Column => {
+                self.advance();
+            }
+            BreakKind::Page => {
+                self.page_break();
+            }
+            BreakKind::Section => {
+                let Some(&next) = table.by_id.get(&SectionId::Block(node)) else {
+                    return;
+                };
+                let Some(section) = table.sections.get(next) else {
+                    return;
+                };
+                let parity = match section.start {
+                    crate::sections::Start::OddPage => Some(1),
+                    crate::sections::Start::EvenPage => Some(0),
+                    _ => None,
+                };
+                if parity.is_some_and(|parity| {
+                    (self.snapshot.pages.len().saturating_add(1) % 2) != parity
+                }) && let Some(owner) = table.sections.get(self.section)
+                    && !crate::pages::PageFactory::push_section(
+                        self.engine,
+                        &table,
+                        owner,
+                        crate::PageKind::Filler,
+                        self.snapshot,
+                    )
+                {
+                    self.page_limit();
+                    return;
+                }
+                self.section = next;
+                self.template = section.template.clone();
+                self.thread = self.template.main_thread();
+                self.max_depth = self
+                    .thread
+                    .iter()
+                    .filter_map(|i| self.template.frames.get(*i))
+                    .map(|f| f.depth)
+                    .max()
+                    .unwrap_or_default();
+                self.page_break();
+            }
+        }
+    }
+    fn page_break(&mut self) {
+        if self.new_page() {
+            self.page = self.snapshot.pages.len().saturating_sub(1);
+            self.pos = 0;
+        } else {
+            self.page_limit();
+        }
+    }
+    fn page_limit(&mut self) {
+        if !self.limit_hit {
+            self.limit_hit = true;
+            self.snapshot.diagnostics.push(Diagnostic::new(
+                Severity::Error,
+                codes::PAGE_LIMIT,
+                Subject::Document,
+                format!(
+                    "the text needs more than {} pages; the rest was left out",
+                    self.snapshot.pages.len()
+                ),
+            ));
+        }
+    }
+
     /// Starts a block. Blocks that take one step are laid out here and give
     /// `None`; paragraphs, flowed images and tables give their machine.
     fn begin_block(&mut self, doc: &Document, node: NodeId) -> Option<Active> {
+        self.transition(doc, node);
         let flow = self;
         match doc.table_role(node) {
             Ok(Some(reprise_doc::TableRole::Table(columns))) => {
@@ -579,6 +735,7 @@ impl Flow<'_> {
 
     fn cursor(self) -> Cursor {
         Cursor {
+            template: self.template,
             thread: self.thread,
             max_depth: self.max_depth,
             page_base: self.page_base,
@@ -594,6 +751,9 @@ impl Flow<'_> {
             catalog: self.catalog,
             source: self.source,
             domain: self.domain,
+            section_table: self.section_table,
+            section: self.section,
+            boundary_node: self.boundary_node,
         }
     }
 
@@ -603,8 +763,24 @@ impl Flow<'_> {
             return false;
         }
         let base = self.snapshot.frames.len();
-        if !crate::pages::PageFactory::push(self.engine, self.template, self.snapshot) {
+        let pushed = if let Some(table) = self.section_table.as_ref().filter(|s| s.enabled) {
+            table.sections.get(self.section).is_some_and(|section| {
+                crate::pages::PageFactory::push_section(
+                    self.engine,
+                    table,
+                    section,
+                    crate::PageKind::Content,
+                    self.snapshot,
+                )
+            })
+        } else {
+            crate::pages::PageFactory::push(self.engine, &self.template, self.snapshot)
+        };
+        if !pushed {
             return false;
+        }
+        while self.page_base.len() < self.snapshot.pages.len().saturating_sub(1) {
+            self.page_base.push(base);
         }
         self.page_base.push(base);
         self.catalog.extend(self.snapshot);
@@ -667,7 +843,17 @@ impl Flow<'_> {
 
     fn frame_reference(&self, index: usize) -> Option<crate::pages::FrameRef> {
         self.catalog.reference(index).cloned().or_else(|| {
-            crate::pages::PageFactory::future_reference(self.template, self.snapshot, index)
+            let mut frame =
+                crate::pages::PageFactory::future_reference(&self.template, self.snapshot, index)?;
+            if let Some(section) = self
+                .section_table
+                .as_ref()
+                .and_then(|s| s.sections.get(self.section))
+            {
+                frame.provenance.section = section.id();
+                frame.provenance.life = section.life().into();
+            }
+            Some(frame)
         })
     }
     pub(crate) fn exclusions(&self, index: usize) -> Option<&Vec<Rect<FrameSpace>>> {
@@ -724,7 +910,7 @@ impl Flow<'_> {
             .and_then(|&i| self.template.frames.get(i));
         resolution_context(
             self.engine,
-            self.template,
+            &self.template,
             frame,
             frame.map_or(Length::ZERO, |f| f.width),
         )
@@ -738,7 +924,7 @@ impl Flow<'_> {
         let Some(evaluation) = self.evaluation else {
             return self.annotation_inner(doc, node);
         };
-        let key = crate::incremental::AnnotationKey::new(doc, node, self.template);
+        let key = crate::incremental::AnnotationKey::new(doc, node, &self.template);
         if let Some((pending, notes)) = evaluation.annotation_hit(node, &key, self.engine) {
             self.snapshot.diagnostics.extend(notes);
             return pending;
@@ -771,7 +957,7 @@ impl Flow<'_> {
             .template
             .margin_width()
             .unwrap_or_else(|| frame.map_or(Length::ZERO, |f| f.width));
-        let ctx = resolution_context(engine, self.template, frame, width);
+        let ctx = resolution_context(engine, &self.template, frame, width);
         let prepared = prepare_cached(
             engine,
             doc,
@@ -891,9 +1077,12 @@ pub(crate) struct PositionKey {
     pages: usize,
     frames: usize,
     fills: Vec<Fill>,
+    section: Option<(reprise_doc::sections::SectionId, String)>,
+    owner: Option<(reprise_doc::sections::SectionId, i64)>,
 }
 #[derive(Clone)]
 pub(crate) struct Delta {
+    sections: Option<crate::SectionsLayout>,
     pages: Vec<PageLayout>,
     frames: Vec<FrameLayout>,
     pub(crate) blocks: Vec<BlockLayout>,
@@ -924,6 +1113,18 @@ impl Flow<'_> {
             pages: self.snapshot.pages.len(),
             frames: self.snapshot.frames.len(),
             fills: self.fills.get(tail..).unwrap_or_default().to_vec(),
+            section: self
+                .section_table
+                .as_ref()
+                .filter(|s| s.enabled)
+                .and_then(|s| s.sections.get(self.section))
+                .map(|s| (s.id(), s.life().into())),
+            owner: self
+                .snapshot
+                .sections
+                .as_ref()
+                .and_then(|s| s.pages.get(self.page))
+                .map(|p| (p.section, p.counter)),
         }
     }
     pub(crate) fn plan(&self) -> &Plan {
@@ -940,6 +1141,20 @@ impl Flow<'_> {
     }
     fn delta(&self, before: Mark) -> Delta {
         Delta {
+            sections: self
+                .snapshot
+                .sections
+                .as_ref()
+                .map(|s| crate::SectionsLayout {
+                    pages: s.pages.get(before.pages..).unwrap_or_default().to_vec(),
+                    running: Vec::new(),
+                    rules: s
+                        .rules
+                        .iter()
+                        .filter(|r| r.page >= before.pages)
+                        .cloned()
+                        .collect(),
+                }),
             block_pages: self
                 .snapshot
                 .blocks
@@ -991,6 +1206,7 @@ impl Flow<'_> {
         {
             return false;
         }
+        crate::pages::PageFactory::replay_sections(self.snapshot, delta.sections);
         self.catalog.extend(self.snapshot);
         self.snapshot.blocks.extend(delta.blocks);
         self.snapshot.diagnostics.extend(delta.diagnostics);
@@ -1855,6 +2071,7 @@ mod tests {
             height: Length::ZERO,
             frames: vec![frame.clone()],
             page_setup: None,
+            thread: None,
         };
         let ctx = resolution_context(&engine, &template, Some(&frame), frame.width);
         assert_eq!(

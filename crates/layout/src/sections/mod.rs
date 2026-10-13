@@ -1,5 +1,7 @@
 //! Frozen, read-only section resolution shared by body and region passes.
 mod geometry;
+#[cfg(test)]
+mod tests;
 
 use crate::template::ResolvedTemplate;
 use crate::{Diagnostic, Engine, LayoutSnapshot, Subject, TemplateSource};
@@ -49,13 +51,17 @@ impl Section {
         let d = self.geometry.dimensions;
         json!({
             "template": self.template.name,
+            "template_source": self.template.source,
             "mode": self.mode,
             "rendered_mode": "paged",
             "geometry": { "width": d.width, "height": d.height, "top": d.top,
                 "right": d.right, "bottom": d.bottom, "left": d.left,
                 "provenance": self.geometry.provenance },
-            "columns": self.columns.as_ref().map(|c| json!({"widths": c.widths,
-                "count": c.widths.len(), "thread": c.thread, "gap": c.gap, "rule": c.rule})),
+            "columns": self.columns.as_ref().map_or_else(|| {
+                let widths: Vec<_> = self.template.frames.iter().filter(|f| f.is_main_flow()).map(|f| f.width).collect();
+                json!({"widths": widths, "count": widths.len(), "thread": self.template.main_thread(), "gap": null, "rule": 0, "generated": false})
+            }, |c| json!({"widths": c.widths,
+                "count": c.widths.len(), "thread": c.thread, "gap": c.gap, "rule": c.rule, "generated": true})),
             "direction": if self.geometry.rtl { "rtl" } else { "ltr" },
             "writing-mode": self.geometry.writing_mode,
             "header.distance": self.geometry.header_distance,
@@ -74,6 +80,7 @@ pub(crate) struct Table {
     pub initial: usize,
     pub enabled: bool,
     pub diagnostics: Vec<Diagnostic>,
+    diagnostic_order: BTreeMap<SectionId, usize>,
 }
 type Base = (Arc<PageTemplate>, Arc<ResolvedTemplate>);
 
@@ -121,6 +128,21 @@ impl Table {
         let mut format = "decimal".to_owned();
         for view in views {
             let mut notes = Warnings::new(view.id);
+            if view.id == SectionId::First
+                && mode_record.as_ref().is_some_and(|r| {
+                    r.get("v").and_then(Value::as_i64) != Some(1)
+                        || !matches!(
+                            r.get("mode").and_then(Value::as_str),
+                            Some("paged" | "pageless")
+                        )
+                })
+            {
+                notes.warn(
+                    "mode",
+                    "section.mode-unsupported",
+                    "unknown geometry mode or version is retained; paged layout is used",
+                );
+            }
             let selected = match view.own.get("template") {
                 None => base.clone(),
                 Some(Value::String(name)) => {
@@ -301,16 +323,22 @@ impl Table {
                 n
             });
             if let Some(value) = view.own.get("numbering.format") {
-                match value.as_str() {
-                    Some(
-                        token @ ("decimal" | "lower-roman" | "upper-roman" | "lower-alpha"
-                        | "upper-alpha"),
-                    ) => format = token.into(),
-                    _ => notes.warn(
+                use reprise_doc::lists::NumberFormat;
+                match value.as_str().map(NumberFormat::parse) {
+                    Some(NumberFormat::Bullet | NumberFormat::None) | None => notes.warn(
                         "numbering.format",
                         "section.property",
-                        "unsupported page numbering format; the preceding format is used",
+                        "page numbering requires an ordered format; the preceding format is used",
                     ),
+                    Some(NumberFormat::Unknown(token)) => {
+                        notes.warn(
+                            "numbering.format",
+                            "section.property",
+                            "unknown format is retained and renders decimal",
+                        );
+                        format = token;
+                    }
+                    Some(value) => format = value.token().into(),
                 }
             }
             let filler_running = text(
@@ -390,6 +418,30 @@ impl Table {
                 _ => None,
             })
             .collect();
+        let body = doc.top(Domain::Body);
+        let diagnostic_order: BTreeMap<_, _> = std::iter::once((SectionId::First, 0))
+            .chain(
+                body.iter()
+                    .enumerate()
+                    .map(|(i, node)| (SectionId::Block(*node), i.saturating_add(1))),
+            )
+            .collect();
+        for record in doc.start_records() {
+            if record.active
+                && record.kind.is_none()
+                && matches!(record.id, SectionId::Block(_))
+                && diagnostic_order.contains_key(&record.id)
+                && record.own.contains_key("break")
+            {
+                diagnostics.push(diagnostic(
+                    record.id,
+                    "break",
+                    "section.property",
+                    Severity::Warning,
+                    "unknown or unreadable break is retained and ignored",
+                ));
+            }
+        }
         let by_id: BTreeMap<_, _> = sections
             .iter()
             .enumerate()
@@ -418,6 +470,7 @@ impl Table {
             initial,
             enabled,
             diagnostics,
+            diagnostic_order,
         })
     }
     pub fn get(&self, id: SectionId) -> Option<&Section> {
@@ -442,7 +495,10 @@ impl Table {
                 _ => SectionId::First,
             };
             (
-                self.by_id.get(&id).copied().unwrap_or(usize::MAX),
+                self.diagnostic_order
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(usize::MAX),
                 d.message.split(':').next().unwrap_or_default().to_owned(),
                 d.code.as_str().to_owned(),
             )

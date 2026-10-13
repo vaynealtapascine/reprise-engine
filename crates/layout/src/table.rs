@@ -126,7 +126,12 @@ impl Flow<'_> {
         self.report_grid(&grid);
         let frame = self.snapshot.frame(self.frame_index()).cloned()?;
         let starting_frame = self.template.frames.get(self.current_template_index());
-        let ctx = resolution_context(self.engine, self.template, starting_frame, frame.rect.width);
+        let ctx = resolution_context(
+            self.engine,
+            &self.template,
+            starting_frame,
+            frame.rect.width,
+        );
         Some(TableBuild {
             node,
             columns: columns.clone(),

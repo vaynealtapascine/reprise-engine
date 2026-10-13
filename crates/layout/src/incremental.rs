@@ -363,7 +363,7 @@ impl FlowKey {
             inputs: Inputs::read(doc, node),
             previous: flow.previous,
             position: flow.position_key(),
-            template: flow.template.clone(),
+            template: (*flow.template).clone(),
             plan: flow.plan().clone(),
         }
     }
@@ -898,6 +898,7 @@ impl Evaluation {
         doc: &Document,
         template: &ResolvedTemplate,
         snapshot: &LayoutSnapshot,
+        sections: &crate::sections::Table,
     ) -> Plan {
         let key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
         if let Some(plan) = self
@@ -914,7 +915,14 @@ impl Evaluation {
             let mut cache = self.cache.borrow_mut();
             cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
         }
-        let plan = crate::regions::allocate(engine, doc, template, snapshot, Some(self));
+        let plan = crate::regions::allocate_with_sections(
+            engine,
+            doc,
+            template,
+            snapshot,
+            Some(self),
+            sections,
+        );
         let mut cache = self.cache.borrow_mut();
         if cache.regions.len() >= 16 {
             cache.regions.remove(0);
@@ -1213,6 +1221,7 @@ pub struct LayoutJob<'job, 'engine> {
     base: LayoutSnapshot,
     snapshot: LayoutSnapshot,
     template: ResolvedTemplate,
+    sections: Arc<crate::sections::Table>,
     nodes: Vec<NodeId>,
     next_node: usize,
     cursor: Option<Cursor>,
@@ -1250,6 +1259,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             blocks: Vec::new(),
             relations: Vec::new(),
             repeated_headers: Vec::new(),
+            sections: None,
             diagnostics: Vec::new(),
         };
         let template = crate::template::resolve(engine, doc, &mut base.diagnostics);
@@ -1257,9 +1267,18 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             name: template.name.clone(),
             source: template.source,
         };
+        let sections = crate::sections::Table::resolve(engine, doc, &template);
+        base.diagnostics.extend(sections.diagnostics.clone());
         let mut snapshot = base.clone();
         let plan = Plan::default();
-        let cursor = Cursor::new(engine, doc, &template, &mut snapshot, &plan);
+        let cursor = Cursor::new_with_sections(
+            engine,
+            doc,
+            &template,
+            &mut snapshot,
+            &plan,
+            sections.clone(),
+        );
         let active = crate::regions::active(engine, doc);
         Self {
             session,
@@ -1269,6 +1288,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             base,
             snapshot,
             template,
+            sections,
             nodes: doc.top(reprise_doc::Domain::Body),
             next_node: 0,
             cursor: Some(cursor),
@@ -1383,6 +1403,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         self.doc,
                         &self.template,
                         &self.snapshot,
+                        &self.sections,
                     );
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
@@ -1390,12 +1411,13 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         self.history.push(std::mem::replace(&mut self.plan, next));
                         self.iteration = self.iteration.saturating_add(1);
                         self.snapshot = self.base.clone();
-                        self.cursor = Some(Cursor::new(
+                        self.cursor = Some(Cursor::new_with_sections(
                             engine,
                             self.doc,
                             &self.template,
                             &mut self.snapshot,
                             &self.plan,
+                            self.sections.clone(),
                         ));
                         self.next_node = 0;
                         self.pass = Pass::Flow;
@@ -1470,6 +1492,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                     if let Some(key) = self.final_key.take() {
                         self.session.evaluation.finish(key, &self.snapshot);
                     }
+                    self.sections.sort_diagnostics(&mut self.snapshot);
                     self.pass = Pass::Complete;
                     self.record_graph(true);
                 }
@@ -1508,6 +1531,11 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         }
         if self.pass != Pass::Complete {
             snapshot.pages.truncate(sealed);
+            if let Some(sections) = &mut snapshot.sections {
+                sections.pages.truncate(sealed);
+                sections.rules.retain(|r| r.page < sealed);
+                sections.running.retain(|r| r.page < sealed);
+            }
             snapshot.frames.retain(|f| f.page < sealed);
             snapshot.blocks.retain_mut(|b| {
                 b.lines.retain(|l| snapshot.frames.get(l.frame).is_some());
@@ -1732,6 +1760,7 @@ pub struct LayoutContinuation {
     base: LayoutSnapshot,
     snapshot: LayoutSnapshot,
     template: ResolvedTemplate,
+    sections: Arc<crate::sections::Table>,
     nodes: Vec<NodeId>,
     next_node: usize,
     cursor: Option<Cursor>,
@@ -1777,6 +1806,7 @@ impl<'engine> LayoutSession<'engine> {
             base: state.base,
             snapshot: state.snapshot,
             template: state.template,
+            sections: state.sections,
             nodes: state.nodes,
             next_node: state.next_node,
             cursor: state.cursor,
@@ -1802,6 +1832,7 @@ impl LayoutJob<'_, '_> {
             base: self.base,
             snapshot: self.snapshot,
             template: self.template,
+            sections: self.sections,
             nodes: self.nodes,
             next_node: self.next_node,
             cursor: self.cursor,

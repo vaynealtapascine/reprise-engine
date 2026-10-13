@@ -65,7 +65,7 @@ impl Flow<'_> {
             return None;
         }
         Some((
-            crate::pages::PageFactory::preview(self.template, self.snapshot, next_page, t)?,
+            crate::pages::PageFactory::preview(&self.template, self.snapshot, next_page, t)?,
             t,
         ))
     }
@@ -88,6 +88,12 @@ impl Flow<'_> {
             .nodes
             .iter()
             .skip(at + 1)
+            .take_while(|node| {
+                !self
+                    .section_table
+                    .as_ref()
+                    .is_some_and(|s| s.starts.contains_key(node))
+            })
             .take(MAX_KEEP_CHAIN + 1)
             .copied()
             .collect()

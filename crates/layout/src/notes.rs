@@ -27,6 +27,7 @@ impl Notes {
         relation: &Relation,
         anchor: LineRef,
         evaluation: Option<&crate::incremental::Evaluation>,
+        sections: &crate::sections::Table,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(anchor_line) = scratch.line(anchor).cloned() else {
@@ -35,6 +36,37 @@ impl Notes {
         let Some(anchor_frame) = scratch.frame(anchor_line.frame).cloned() else {
             return;
         };
+        let anchor_owner = scratch
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.get(anchor_frame.page))
+            .map(|p| p.section);
+        let placement_hint = match relation.params.get("placement") {
+            Some(Param::Text(p)) => NotePlacement::parse(p),
+            _ => None,
+        };
+        let initial_owner = if placement_hint == Some(NotePlacement::End) {
+            let last = scratch
+                .blocks
+                .iter()
+                .flat_map(|b| &b.lines)
+                .filter_map(|l| scratch.frame(l.frame))
+                .filter(|f| matches!(&f.role, FrameRole::Flow(_)))
+                .map(|f| f.page)
+                .max()
+                .unwrap_or(0);
+            scratch
+                .sections
+                .as_ref()
+                .and_then(|s| s.pages.get(last))
+                .map(|p| p.section)
+        } else {
+            anchor_owner
+        };
+        let section_template = initial_owner
+            .and_then(|id| sections.get(id))
+            .map(|s| s.template.clone());
+        let template = section_template.as_deref().unwrap_or(template);
         let Some((ti, area)) = template
             .frames
             .iter()
@@ -49,6 +81,7 @@ impl Notes {
             ));
             return;
         };
+        let mut area = area.clone();
         let placement = match relation.params.get("placement") {
             Some(Param::Text(p)) => NotePlacement::parse(p),
             None => Some(NotePlacement::Page),
@@ -78,6 +111,16 @@ impl Notes {
             anchor_frame.page
         };
         let first_page = page;
+        let mut carry_owner = if placement == NotePlacement::End {
+            scratch
+                .sections
+                .as_ref()
+                .and_then(|s| s.pages.get(page.saturating_sub(1)))
+                .map(|p| p.section)
+        } else {
+            anchor_owner
+        };
+
         let Some(prepared) = prepare(
             engine,
             doc,
@@ -93,10 +136,61 @@ impl Notes {
         let mut start = 0;
         let mut lines = Vec::new();
         let mut completed = false;
-        while ensure_page(engine, template, scratch, page) {
-            let Some(index) = crate::pages::PageFactory::index(scratch, page, ti) else {
+        loop {
+            if sections.enabled
+                && scratch
+                    .sections
+                    .as_ref()
+                    .and_then(|s| s.pages.get(page))
+                    .is_some_and(|p| p.kind == crate::PageKind::Filler)
+            {
+                page = page.saturating_add(1);
+                continue;
+            }
+            let allocated = if sections.enabled {
+                carry_owner.is_some_and(|owner| {
+                    crate::pages::PageFactory::ensure_section(
+                        engine,
+                        sections,
+                        owner,
+                        crate::PageKind::NoteContinuation,
+                        scratch,
+                        page,
+                    )
+                })
+            } else {
+                ensure_page(engine, template, scratch, page)
+            };
+            if !allocated {
+                break;
+            }
+            if sections.enabled {
+                carry_owner = scratch
+                    .sections
+                    .as_ref()
+                    .and_then(|s| s.pages.get(page))
+                    .map(|p| p.section);
+            }
+            let index = if sections.enabled {
+                scratch
+                    .frames
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| {
+                        f.page == page && f.role == FrameRole::Notes && f.rect.height > Length::ZERO
+                    })
+                    .map(|(i, _)| i)
+            } else {
+                crate::pages::PageFactory::index(scratch, page, ti)
+            };
+            let Some(index) = index else {
                 break;
             };
+            if sections.enabled
+                && let Some(frame) = scratch.frame(index)
+            {
+                area = crate::template::ResolvedFrame::from_layout(frame);
+            }
             let previous = self.used.get(&index).copied().unwrap_or_default();
             let used = previous
                 + if previous > Length::ZERO {

@@ -293,7 +293,7 @@ impl Flow<'_> {
         };
         let index = self.frame_index();
         let fill = self.fills[index];
-        let template = self.template;
+        let template = self.template.clone();
         let frame = &template.frames[self.thread[self.pos]];
         let first = p.lines.is_empty();
         let image = prepared.image.is_some();

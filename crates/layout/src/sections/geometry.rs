@@ -392,7 +392,7 @@ pub(super) fn frames(
             (d.left, d.top + offset, geometry.block_extent(), *width)
         };
         let mut frame = FrameTemplate::new(
-            &format!("main.column.{i}"),
+            format!("main.column.{i}"),
             FrameRole::Flow(MAIN_FLOW.into()),
             (Dim::Pt(x), Dim::Pt(y)),
             (Dim::Pt(physical_width), Dim::Pt(physical_height)),

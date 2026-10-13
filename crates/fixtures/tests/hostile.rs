@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 103);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 104);
 }
 
 hostile_tests!(
@@ -1177,3 +1177,42 @@ hostile_tests!(plumbing_mark_facts);
 
 hostile_tests!(list_semantics_storm);
 hostile_tests!(annotation_storm);
+
+#[test]
+fn sections_geometry_hostile() {
+    let fixture = hostile::sections_geometry_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let sections = snapshot.sections.as_ref().unwrap();
+    assert_eq!(sections.pages.len(), 4);
+    assert_eq!(
+        sections.pages.iter().map(|p| p.counter).collect::<Vec<_>>(),
+        vec![1, 2, -2, -1]
+    );
+    assert_eq!(sections.pages[1].kind, reprise_layout::PageKind::Filler);
+    assert_eq!(snapshot.pages[0].width, Length::from_pt(612));
+    assert_eq!(snapshot.pages[0].height, Length::from_pt(792));
+    assert_eq!(snapshot.pages[3].width, Length::from_pt(792));
+    assert_eq!(snapshot.pages[3].height, Length::from_pt(612));
+    assert_eq!(sections.pages[0].bands[0].frames.len(), 64);
+    assert_eq!(sections.pages[2].bands[0].frames.len(), 3);
+    let frames = &sections.pages[2].bands[0].frames;
+    assert_eq!(
+        frames
+            .iter()
+            .map(|i| snapshot.frames[*i].rect.width)
+            .collect::<Vec<_>>(),
+        vec![Length::from_pt(144), Length::ZERO, Length::from_pt(288)]
+    );
+    assert_eq!(sections.rules.len(), 2);
+    assert!(snapshot.frames.iter().all(|f| f.page != 1));
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|page| page.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}

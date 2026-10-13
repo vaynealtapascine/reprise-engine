@@ -62,6 +62,7 @@ pub(crate) struct Catalog {
     mains: BTreeMap<usize, usize>,
     others: BTreeMap<(usize, String), usize>,
     counts: BTreeMap<usize, usize>,
+    lives: BTreeMap<SectionId, String>,
 }
 fn role_key(role: &FrameRole) -> String {
     match role {
@@ -82,12 +83,21 @@ impl Catalog {
             let t = self.counts.entry(page).or_default();
             self.ordinals.insert((page, *t), index);
             *t = t.saturating_add(1);
+            let descriptor = snapshot.sections.as_ref().and_then(|s| s.pages.get(page));
+            let band = descriptor.and_then(|p| {
+                p.bands.iter().enumerate().find_map(|(b, band)| {
+                    band.frames
+                        .iter()
+                        .position(|i| *i == index)
+                        .map(|column| (b, column, band))
+                })
+            });
             let address = if frame.role == FrameRole::Flow(MAIN_FLOW.into()) {
                 let column = self.mains.entry(page).or_default();
                 let address = FrameAddr::Main {
                     page,
-                    band: 0,
-                    column: *column,
+                    band: band.map_or(0, |(b, _, _)| b),
+                    column: band.map_or(*column, |(_, c, _)| c),
                 };
                 *column = column.saturating_add(1);
                 address
@@ -102,9 +112,28 @@ impl Catalog {
                 *ordinal = ordinal.saturating_add(1);
                 address
             };
+            if let Some((_, _, band)) = band {
+                self.lives.insert(band.section, band.life.clone());
+            }
+            let section = band
+                .map(|(_, _, b)| b.section)
+                .or_else(|| descriptor.map(|p| p.section))
+                .unwrap_or(SectionId::First);
             let provenance = Provenance {
-                section: SectionId::First,
-                life: "0".into(),
+                section: band
+                    .map(|(_, _, b)| b.section)
+                    .or_else(|| descriptor.map(|p| p.section))
+                    .unwrap_or(SectionId::First),
+                life: self
+                    .lives
+                    .get(&section)
+                    .cloned()
+                    .or_else(|| {
+                        descriptor
+                            .and_then(|p| p.bands.first())
+                            .map(|b| b.life.clone())
+                    })
+                    .unwrap_or_else(|| "0".into()),
                 rect: frame.rect,
                 to_page: frame.to_page,
                 writing_mode: frame.writing_mode,
@@ -151,6 +180,130 @@ impl PageFactory {
         );
         true
     }
+    pub fn push_section(
+        engine: &Engine,
+        sections: &crate::sections::Table,
+        section: &crate::sections::Section,
+        kind: crate::PageKind,
+        snapshot: &mut LayoutSnapshot,
+    ) -> bool {
+        if snapshot.pages.len() >= engine.flow.max_pages.max(1) as usize {
+            return false;
+        }
+        let page = snapshot.pages.len();
+        let first_content = snapshot.sections.as_ref().is_none_or(|s| {
+            !s.pages
+                .iter()
+                .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
+        });
+        let previous = snapshot
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.last())
+            .map(|p| p.counter);
+        let counter =
+            if kind == crate::PageKind::Content && first_content && section.restart.is_some() {
+                section.restart.unwrap_or(1)
+            } else if let Some(previous) = previous {
+                if previous == i64::MAX {
+                    let note = crate::sections::diagnostic(
+                        section.id(),
+                        "numbering.restart",
+                        "section.page-counter",
+                        reprise_diag::Severity::Warning,
+                        "page counter saturates at i64::MAX",
+                    );
+                    if !snapshot.diagnostics.contains(&note) {
+                        snapshot.diagnostics.push(note);
+                    }
+                }
+                previous.saturating_add(1)
+            } else {
+                sections
+                    .sections
+                    .first()
+                    .and_then(|s| s.restart)
+                    .unwrap_or(1)
+            };
+        let base = snapshot.frames.len();
+        let frames: Vec<_> = if kind == crate::PageKind::Filler {
+            Vec::new()
+        } else {
+            section
+                .template
+                .frames
+                .iter()
+                .map(|f| f.layout(page))
+                .collect()
+        };
+        let body: Vec<_> = frames
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.role == FrameRole::Flow(MAIN_FLOW.into()))
+            .map(|(i, _)| base.saturating_add(i))
+            .collect();
+        Self::append(
+            snapshot,
+            PageLayout {
+                width: section.template.width,
+                height: section.template.height,
+            },
+            frames,
+        );
+        let metadata = snapshot
+            .sections
+            .get_or_insert_with(crate::SectionsLayout::default);
+        metadata.pages.push(crate::PageDescriptor {
+            section: section.id(),
+            kind,
+            counter,
+            label: counter.to_string(),
+            bands: if kind == crate::PageKind::Content {
+                vec![crate::Band {
+                    section: section.id(),
+                    life: section.life().into(),
+                    frames: body,
+                    body: section.geometry.body_rect(),
+                    offset: reprise_geom::Length::ZERO,
+                    depth: section.geometry.block_extent(),
+                    balanced: false,
+                }]
+            } else {
+                Vec::new()
+            },
+        });
+        if kind == crate::PageKind::Content {
+            metadata
+                .rules
+                .extend(section.rules.iter().copied().map(|rect| crate::ColumnRule {
+                    page,
+                    band: 0,
+                    rect,
+                }));
+        }
+        true
+    }
+    pub fn ensure_section(
+        engine: &Engine,
+        sections: &crate::sections::Table,
+        owner: SectionId,
+        kind: crate::PageKind,
+        snapshot: &mut LayoutSnapshot,
+        page: usize,
+    ) -> bool {
+        if page >= engine.flow.max_pages.max(1) as usize {
+            return false;
+        }
+        let Some(section) = sections.get(owner) else {
+            return false;
+        };
+        while snapshot.pages.len() <= page {
+            if !Self::push_section(engine, sections, section, kind, snapshot) {
+                return false;
+            }
+        }
+        true
+    }
     fn append(
         snapshot: &mut LayoutSnapshot,
         page: PageLayout,
@@ -192,6 +345,16 @@ impl PageFactory {
         snapshot.pages.extend(pages);
         snapshot.frames.extend(frames);
         true
+    }
+    pub fn replay_sections(snapshot: &mut LayoutSnapshot, metadata: Option<crate::SectionsLayout>) {
+        if let Some(metadata) = metadata {
+            let current = snapshot
+                .sections
+                .get_or_insert_with(crate::SectionsLayout::default);
+            current.pages.extend(metadata.pages);
+            current.running.extend(metadata.running);
+            current.rules.extend(metadata.rules);
+        }
     }
     pub fn index(snapshot: &LayoutSnapshot, page: usize, ordinal: usize) -> Option<usize> {
         snapshot

@@ -684,6 +684,7 @@ impl DocumentSession {
                 }
             })
             .collect();
+        let resolved_sections = self.engine.section_state(self.doc());
         let sections: Vec<_> = self
             .doc()
             .section_table()
@@ -694,7 +695,7 @@ impl DocumentSession {
                 first_block: s.first_block.map(|n| n.to_string()),
                 end: s.end.map(|n| n.to_string()),
                 own: section_own(&s.own),
-                resolved: None,
+                resolved: resolved_sections.get(&s.id).cloned(),
                 unknown_keys: s.unknown_keys,
                 bindings: s
                     .bindings

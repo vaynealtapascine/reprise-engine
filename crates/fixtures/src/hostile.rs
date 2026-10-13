@@ -157,6 +157,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         plumbing_mark_facts()?,
         list_semantics_storm()?,
         annotation_storm()?,
+        sections_geometry_hostile()?,
     ])
 }
 
@@ -3257,4 +3258,71 @@ pub fn annotation_storm() -> Result<Fixture, DocError> {
         replica: Some(replica),
         ..Fixture::new("annotation_storm", doc, &[])
     })
+}
+
+/// Section geometry, zero-weight threading, hostile bounds, parity and ownership.
+pub fn sections_geometry_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
+    let doc = document()?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(Length::from_pt(612)),
+        height: Some(Length::from_pt(792)),
+        top: Some(Length::from_pt(72)),
+        right: Some(Length::from_pt(72)),
+        bottom: Some(Length::from_pt(72)),
+        left: Some(Length::from_pt(72)),
+    })?;
+
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &SectionProperties::from([
+            ("width".into(), (-1).into()),
+            ("left".into(), (14_745_600).into()),
+            ("right".into(), (14_745_600).into()),
+            ("columns.count".into(), (1000).into()),
+            ("columns.gap".into(), (0).into()),
+            ("template".into(), ("missing-spatial-template").into()),
+            ("mode".into(), ("pageless").into()),
+            ("numbering.format".into(), ("future-format").into()),
+        ]),
+        &[],
+    )?;
+    doc.append_block(BlockKind::Paragraph, "body", "cap")?;
+    let b = doc.append_block(BlockKind::Paragraph, "body", "weighted rtl")?;
+    let c = doc.append_block(BlockKind::Paragraph, "body", "landscape")?;
+    let life = doc.mint_lifetime(b)?;
+    doc.activate_start(
+        b,
+        &life,
+        BreakKind::Section,
+        &SectionProperties::from([
+            ("start".into(), ("odd-page").into()),
+            ("columns.widths".into(), ("1,0,2").into()),
+            ("columns.rule".into(), (1024).into()),
+            ("direction".into(), ("rtl").into()),
+            ("numbering.restart".into(), ("-2").into()),
+        ]),
+    )?;
+    let life = doc.mint_lifetime(c)?;
+    doc.activate_start(
+        c,
+        &life,
+        BreakKind::Section,
+        &SectionProperties::from([("orientation".into(), ("landscape").into())]),
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "sections_geometry_hostile",
+        doc,
+        &[
+            "section.property",
+            "section.geometry",
+            "section.columns-limit",
+            "section.template",
+            "section.mode-unsupported",
+            "section.column-narrow",
+            "compose.overflow",
+        ],
+    ))
 }
