@@ -196,6 +196,23 @@ impl Plan {
             .any(|s| matches!(s, Step::FormatText { .. }));
         for step in &self.steps {
             let node = match step {
+                Step::RenameStyle { from, .. } => {
+                    // Rename reauthors the source's captured properties. A
+                    // remote/legacy record may be unreadable or out of bounds;
+                    // earlier patches in this batch can repair it, so exercise
+                    // the resulting value instead of rejecting the old one.
+                    if doc.style_record(from).is_some_and(|record| {
+                        reprise_doc::StylePatch {
+                            set: record.style,
+                            ..Default::default()
+                        }
+                        .validate()
+                        .is_err()
+                    }) {
+                        return Ok(true);
+                    }
+                    continue;
+                }
                 Step::Split { node, .. } | Step::MoveCopy { node, .. } => node,
                 Step::Join { first, second } => {
                     if explicit

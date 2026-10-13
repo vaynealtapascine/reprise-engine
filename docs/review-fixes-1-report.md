@@ -10,6 +10,8 @@ brief's explicit redesign clause; findings 8–10 are not claimed fixed.
   implicit capacity effects on an isolated same-peer replica before publication.
   Basic malformed input and ancestry checks run first. Refusals preserve bytes,
   retained history, revision and undo/redo; late errors retain their command index.
+  Reauthoring malformed imported style properties during rename follows that
+  boundary too, while permitting a preceding repair in the same batch.
 - Decisions 07/29: fresh documents and independent copies carry durable document
   identity. Source snapshots, deltas and legacy updates cannot merge into a copy
   by rewriting only the outer packet ID, including after reopen/transitive copy.
@@ -28,8 +30,9 @@ brief's explicit redesign clause; findings 8–10 are not claimed fixed.
 
 - `bda0d74 fix(engine): preflight refused edits and bind independent copies`
 - `dc307c8 docs(styles): specify durable identity migration and unresolved compatibility`
-- A final checkpoint contains the linear parent scan, documentation corrections
-  and this report; obtain its hash with `git log --oneline f13a4ee..HEAD`.
+- `a4da353 perf(doc): avoid sibling indexing during edit preflight`
+- The verification handoff commit records the final gate output; obtain the full
+  list with `git log --oneline f13a4ee..HEAD`.
 
 Every commit has the requested GPT-6.1-Sol coauthor trailer. Nothing was pushed.
 
@@ -55,12 +58,16 @@ Supporting edits beyond its explicitly named files are listed in full here.
 
 No dependencies, DTO shapes, API version, package feature mask or PacketBound
 literal changed. Generated WASM declarations change only the cap documentation.
+The delegated WASM probe kept `.r3-repro/` artifacts in this worktree and added
+that exact ignore rule to the shared Git metadata's `.git/info/exclude`; this is
+the only reported metadata edit outside the source worktree.
 
 ## 4. Design choices and narrowed behavior
 
 The small planner still handles completely modeled effects without copying the
 document, including ordinary typing. Paste, replacement and structural formatting
-transfers additionally execute the actual writes in isolation and replay successful
+transfers, and renames capturing invalid imported properties, additionally
+execute the actual writes in isolation and replay successful
 plans locally, preserving undo origin and deterministic ID allocation. Trial
 history is never merged into the live editor.
 
@@ -172,7 +179,7 @@ corresponding production changes:
 
 | Finding | Regression and observed failure |
 | --- | --- |
-| 1 | `refusal_atomicity`: late join and replacement changed frozen history/undo state |
+| 1 | `refusal_atomicity`: late join and replacement changed frozen history/undo state; the later malformed-style rename probe also reproduced deletion before refusal |
 | 2 | `rewritten_source_envelope_cannot_contaminate_reopened_or_transitive_copy`: rewritten envelope merged source history |
 | 3 | `legacy_and_framed_import_refuse_wire_limit_before_parsing`: got `bindings.store`, expected `bindings.limit` |
 | 4 | WASM smoke extra font-setting key: missing expected exception; prebuilt-package probe also showed the active job became stale |
@@ -186,6 +193,15 @@ and text/HTML replacement. Native tests cover late capacity, pending raw writes,
 read-root purity and bounded deep staging. Packet tests cover exact total cap,
 cap+1 and both maximum-length version vectors. Part B's acceptance cases remain
 specified in the addendum rather than implemented tests.
+`rename-refusal-before.log` records the additional rename failure; its companion
+tests verify refusal preserves bytes/history/undo and a preceding repair succeeds
+as one undo step. This changes publication validation, not Part B style identity.
+
+The six crowded native refusal tests passed in 333.45s on this machine, including
+fixture preparation and persistence comparisons. Exhaustive staging of a large
+formatting history is still expensive; that timing is not an isolated benchmark
+of preflight. Ordinary model-only typing avoids staging. Further capacity-model
+optimization must retain the byte/history/undo refusal guarantees.
 
 Final gate results and verbatim tails will be appended after all running checks
 finish. Logs are under `G:/reprise-target/eng-fixes1/`.

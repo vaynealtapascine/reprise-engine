@@ -5,13 +5,15 @@
 - Refused editor transactions, paste and selection replacement preserve authored
   bytes, retained CRDT history, revision and undo/redo. The planner checks basic
   input and explicit capacity effects. Plans with possible implicit formatting
-  transfers, paste and replacement then run exhaustively on an isolated same-peer
+  transfers or reauthoring invalid imported style properties, paste and
+  replacement then run exhaustively on an isolated same-peer
   document, including formatting copies and post-deletion paste checks.
   Only a successful preflight is replayed through the live editor's undo origin.
   A standalone plain text splice has no staging or implicit transfers; its
   complete effect is checked by the paragraph model, retaining the typing path.
   The model also accounts for explicit multi-command format actions. Composite
-  formatting transfers and paste/replacement require a committed store for
+  formatting transfers, invalid imported style captures and paste/replacement
+  require a committed store for
   isolated preflight: direct core writes made after `Editor::new` must be
   committed first. A refusal uses `edit.invalid-command` (Error) and publishes
   none of those pending writes. Facade sessions maintain this boundary already.

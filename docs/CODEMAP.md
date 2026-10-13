@@ -13,7 +13,9 @@
 
 New multi-write commands must model every fallible capacity effect or join
 `Plan::needs_trial` for isolated execution. The copy/transfer cases include reset
-format actions as well as explicit formatting. Lists, inline and section commands
+format actions as well as explicit formatting. Rename also captures potentially
+invalid imported style values; staging allows an earlier repair in the same batch.
+Lists, inline and section commands
 should use that same publication boundary when integrated.
 
 Each crate lives in `crates/<name>` and is published to the workspace as `reprise-<name>`.

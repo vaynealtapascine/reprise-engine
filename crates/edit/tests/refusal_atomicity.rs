@@ -221,6 +221,86 @@ fn malformed_style_and_relation_batches_do_not_materialise_roots() {
 }
 
 #[test]
+fn renaming_a_malformed_imported_style_preserves_prior_content_and_history() {
+    let doc = Document::new(1).unwrap();
+    let a = doc.append_block(BlockKind::Paragraph, "", "AB").unwrap();
+    // The legacy/native store can retain values a local style edit would refuse.
+    doc.define_style(
+        "Old",
+        &reprise_doc::Style {
+            weight: Some(1500),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.commit();
+    let mut e = Editor::new(doc, reprise_fixtures::engine().schemas.clone());
+    let before = frozen(&e);
+    let error = e
+        .apply(&Transaction::from(vec![
+            Command::DeleteText {
+                node: a,
+                range: 1..2,
+            },
+            Command::RenameStyle {
+                from: "Old".into(),
+                to: "New".into(),
+            },
+        ]))
+        .unwrap_err();
+    assert_eq!(error.command, Some(1));
+    assert!(
+        frozen(&e) == before,
+        "rename refusal changed bytes, revision or undo"
+    );
+}
+
+#[test]
+fn a_batch_can_repair_an_imported_style_before_renaming_it() {
+    let doc = Document::new(1).unwrap();
+    let a = doc.append_block(BlockKind::Paragraph, "", "AB").unwrap();
+    doc.define_style(
+        "Old",
+        &reprise_doc::Style {
+            weight: Some(1500),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.commit();
+    let old_style = doc.style("Old").unwrap();
+    let mut e = Editor::new(doc, reprise_fixtures::engine().schemas.clone());
+    e.apply(&Transaction::from(vec![
+        Command::DeleteText {
+            node: a,
+            range: 1..2,
+        },
+        Command::PatchStyle {
+            name: "Old".into(),
+            patch: reprise_doc::StylePatch {
+                set: reprise_doc::Style {
+                    weight: Some(700),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        },
+        Command::RenameStyle {
+            from: "Old".into(),
+            to: "New".into(),
+        },
+    ]))
+    .unwrap();
+    assert_eq!(e.document().block(a).unwrap().text.to_string(), "A");
+    assert_eq!(e.document().style("New").unwrap().weight, Some(700));
+    assert_eq!(e.undo_count(), 1);
+    e.undo().unwrap();
+    assert_eq!(e.document().block(a).unwrap().text.to_string(), "AB");
+    assert_eq!(e.document().style("Old").unwrap(), old_style);
+    assert!(e.document().style("New").is_none());
+}
+
+#[test]
 fn deep_unrelated_trees_refuse_staging_without_entering_the_recursive_codec() {
     let doc = Document::new(1).unwrap();
     let a = doc.append_block(BlockKind::Paragraph, "", "AB").unwrap();
