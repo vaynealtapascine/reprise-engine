@@ -94,7 +94,10 @@ impl Cursor {
     }
 
     fn compatible(&self, section: &crate::sections::Section, snapshot: &LayoutSnapshot) -> bool {
-        let owner = snapshot.sections.as_ref().and_then(|s| s.pages.get(self.page));
+        let owner = snapshot
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.get(self.page));
         let owner = owner.and_then(|p| self.section_table.as_ref()?.get(p.section));
         owner.is_some_and(|owner| {
             owner.template.width == section.template.width
@@ -120,11 +123,15 @@ impl Cursor {
         allowance: usize,
     ) -> (Self, usize) {
         if !self.section_table.as_ref().is_some_and(|s| s.enabled) {
-            return self.ordinary_unit(engine, doc, template, snapshot, plan, evaluation,
-                start, upcoming, allowance);
+            return self.ordinary_unit(
+                engine, doc, template, snapshot, plan, evaluation, start, upcoming, allowance,
+            );
         }
         if let Some(balance) = self.balance.take() {
-            return (self.balance_unit(*balance, engine, doc, template, snapshot, plan), 1);
+            return (
+                self.balance_unit(*balance, engine, doc, template, snapshot, plan),
+                1,
+            );
         }
         if self.band_start.is_none() {
             self.checkpoint(snapshot);
@@ -133,16 +140,40 @@ impl Cursor {
         if self.active.is_none()
             && let Some(node) = start
             && self.boundary_node != Some(node)
-            && self.section_table.as_ref().is_some_and(|s| s.enabled && s.starts.contains_key(&node))
+            && self
+                .section_table
+                .as_ref()
+                .is_some_and(|s| s.enabled && s.starts.contains_key(&node))
         {
             self.queued_node = Some(node);
-            if !self.open_band && let Some(section) = self.continuous(node) {
-                let bands = snapshot.sections.as_ref().and_then(|s| s.pages.get(self.page))
+            if !self.open_band
+                && self.continuous(node).is_some()
+                && let Some(previous) = self.previous
+                && doc
+                    .specified_style(previous)
+                    .is_ok_and(|s| s.compute(&engine.functions).keep_with_next)
+            {
+                snapshot.diagnostics.push(Diagnostic::new(
+                    Severity::Warning,
+                    codes::KEEP_UNSATISFIED,
+                    Subject::Node(previous),
+                    "manual boundary overrides keep-with-next",
+                ));
+            }
+            if !self.open_band
+                && let Some(section) = self.continuous(node)
+            {
+                let bands = snapshot
+                    .sections
+                    .as_ref()
+                    .and_then(|s| s.pages.get(self.page))
                     .map_or(0, |p| p.bands.len());
                 if self.compatible(section, snapshot) && bands < MAX_BANDS {
                     if let Some(checkpoint) = self.band_start.clone() {
                         let full = checkpoint.cursor.max_depth;
-                        if full > Length::ZERO && fit(snapshot, &checkpoint, full, checkpoint.diagnostics) {
+                        if full > Length::ZERO
+                            && fit(snapshot, &checkpoint, full, checkpoint.diagnostics)
+                        {
                             self.balance = Some(Box::new(Balance {
                                 checkpoint,
                                 nodes: Arc::new(std::mem::take(&mut self.band_nodes)),
@@ -157,23 +188,43 @@ impl Cursor {
                         }
                     }
                     snapshot.diagnostics.push(crate::sections::diagnostic(
-                        section.id(), "start", "section.continuous-new-page", Severity::Warning,
+                        section.id(),
+                        "start",
+                        "section.continuous-new-page",
+                        Severity::Warning,
                         "ordinary reference does not fit; its output is kept at full depth",
                     ));
                 } else {
                     snapshot.diagnostics.push(crate::sections::diagnostic(
-                        section.id(), "start",
-                        if bands >= MAX_BANDS { "section.band-limit" } else { "section.continuous-new-page" },
+                        section.id(),
+                        "start",
+                        if bands >= MAX_BANDS {
+                            "section.band-limit"
+                        } else {
+                            "section.continuous-new-page"
+                        },
                         Severity::Warning,
-                        if bands >= MAX_BANDS { "at most 32 bands share one page" } else { "page size, writing mode or template differs from the page owner" },
+                        if bands >= MAX_BANDS {
+                            "at most 32 bands share one page"
+                        } else {
+                            "page size, writing mode or template differs from the page owner"
+                        },
                     ));
                 }
             }
+            let before = (self.page, self.band, self.section);
+            let checkpoint = self.band_start.take();
+            let nodes = std::mem::take(&mut self.band_nodes);
             let mut flow = self.restore(engine, template, snapshot, plan, evaluation);
             flow.transition(doc, node);
             let mut cursor = flow.cursor();
             cursor.queued_node = Some(node);
-            cursor.checkpoint(snapshot);
+            if before != (cursor.page, cursor.band, cursor.section) {
+                cursor.checkpoint(snapshot);
+            } else {
+                cursor.band_start = checkpoint;
+                cursor.band_nodes = nodes;
+            }
             return (cursor, 1);
         }
         if let Some(node) = start {
@@ -217,12 +268,23 @@ impl Cursor {
                 }
             } else {
                 let busy = trial.output.cursor.active.is_some();
-                let start = (!busy).then(|| balance.nodes.get(trial.next).copied()).flatten();
+                let start = (!busy)
+                    .then(|| balance.nodes.get(trial.next).copied())
+                    .flatten();
                 if busy || start.is_some() {
-                    if start.is_some() { trial.next = trial.next.saturating_add(1); }
+                    if start.is_some() {
+                        trial.next = trial.next.saturating_add(1);
+                    }
                     let (cursor, _) = trial.output.cursor.ordinary_unit(
-                        engine, doc, template, &mut trial.output.snapshot, plan, None,
-                        start, &[], 1,
+                        engine,
+                        doc,
+                        template,
+                        &mut trial.output.snapshot,
+                        plan,
+                        None,
+                        start,
+                        &[],
+                        1,
                     );
                     trial.output.cursor = cursor;
                 } else {
@@ -242,9 +304,14 @@ impl Cursor {
             cursor.catalog = crate::pages::Catalog::from_snapshot(&scratch);
             // Only the active continuation can include text before C. Its memo
             // was for the reference and must never record scratch output.
-            if let Some(Active::Paragraph(p)) = &mut cursor.active { p.clear_memo(); }
+            if let Some(Active::Paragraph(p)) = &mut cursor.active {
+                p.clear_memo();
+            }
             balance.trial = Some(Trial {
-                output: Output { cursor, snapshot: scratch },
+                output: Output {
+                    cursor,
+                    snapshot: scratch,
+                },
                 next: 0,
                 depth,
                 ended: false,
@@ -255,10 +322,16 @@ impl Cursor {
         if let Some(output) = balance.kept.take() {
             snapshot.blocks.truncate(balance.checkpoint.blocks);
             snapshot.blocks.extend(output.snapshot.blocks);
-            snapshot.diagnostics.truncate(balance.checkpoint.diagnostics);
+            snapshot
+                .diagnostics
+                .truncate(balance.checkpoint.diagnostics);
             snapshot.diagnostics.extend(output.snapshot.diagnostics);
-            snapshot.repeated_headers.truncate(balance.checkpoint.repeats);
-            snapshot.repeated_headers.extend(output.snapshot.repeated_headers);
+            snapshot
+                .repeated_headers
+                .truncate(balance.checkpoint.repeats);
+            snapshot
+                .repeated_headers
+                .extend(output.snapshot.repeated_headers);
             snapshot.frames = output.snapshot.frames;
             snapshot.sections = output.snapshot.sections;
             self = output.cursor;
@@ -267,10 +340,16 @@ impl Cursor {
         self.clip_band(snapshot, Length(balance.hi), true);
         self.catalog = crate::pages::Catalog::from_snapshot(snapshot);
         if balance.lo != balance.hi {
-            let section = self.section_table.as_ref().and_then(|t| t.sections.get(self.section));
+            let section = self
+                .section_table
+                .as_ref()
+                .and_then(|t| t.sections.get(self.section));
             if let Some(section) = section {
                 snapshot.diagnostics.push(crate::sections::diagnostic(
-                    section.id(), "columns", "section.balance-approx", Severity::Info,
+                    section.id(),
+                    "columns",
+                    "section.balance-approx",
+                    Severity::Info,
                     "24 trials exhausted; the shallowest verified depth tested is kept",
                 ));
             }
@@ -284,18 +363,27 @@ impl Cursor {
     }
 
     fn clip_band(&mut self, snapshot: &mut LayoutSnapshot, depth: Length, balanced: bool) {
-        let frames = snapshot.sections.as_mut().and_then(|s| s.pages.get_mut(self.page))
-            .and_then(|p| p.bands.get_mut(self.band)).map(|b| {
+        let frames = snapshot
+            .sections
+            .as_mut()
+            .and_then(|s| s.pages.get_mut(self.page))
+            .and_then(|p| p.bands.get_mut(self.band))
+            .map(|b| {
                 b.depth = depth;
                 b.balanced = balanced;
                 b.frames.clone()
-            }).unwrap_or_default();
+            })
+            .unwrap_or_default();
         let mut template = (*self.template).clone();
         for index in frames {
-            if let Some(frame) = snapshot.frames.get_mut(index) { frame.rect.height = depth; }
+            if let Some(frame) = snapshot.frames.get_mut(index) {
+                frame.rect.height = frame.rect.height.min(depth);
+            }
         }
         for frame in &mut template.frames {
-            if frame.is_main_flow() { frame.depth = depth; }
+            if frame.is_main_flow() {
+                frame.depth = frame.depth.min(depth);
+            }
         }
         self.template = Arc::new(template);
         self.max_depth = depth;
@@ -304,16 +392,31 @@ impl Cursor {
 }
 
 /// The same recorded-outcome predicate checks reference and scratch trials.
-fn fit(snapshot: &LayoutSnapshot, checkpoint: &BandStart, depth: Length, diagnostic_start: usize) -> bool {
-    let diagnostics = snapshot.diagnostics.get(diagnostic_start..).unwrap_or_default();
-    let frames = checkpoint.header.sections.as_ref()
+fn fit(
+    snapshot: &LayoutSnapshot,
+    checkpoint: &BandStart,
+    depth: Length,
+    diagnostic_start: usize,
+) -> bool {
+    let diagnostics = snapshot
+        .diagnostics
+        .get(diagnostic_start..)
+        .unwrap_or_default();
+    let frames = checkpoint
+        .header
+        .sections
+        .as_ref()
         .and_then(|s| s.pages.get(checkpoint.cursor.page))
-        .and_then(|p| p.bands.get(checkpoint.cursor.band)).map(|b| &b.frames);
-    !diagnostics.iter().any(|d| d.severity == Severity::Error
-        || d.code == codes::FRAME_OVERFLOW || d.code == codes::KEEP_UNSATISFIED)
-        && snapshot.blocks.iter().flat_map(|b| &b.lines).all(|line| {
-            snapshot.frame(line.frame).is_some()
-                && (frames.is_none_or(|frames| !frames.contains(&line.frame))
-                    || line.rect.origin.y + line.rect.height <= depth)
-        })
+        .and_then(|p| p.bands.get(checkpoint.cursor.band))
+        .map(|b| &b.frames);
+    !diagnostics.iter().any(|d| {
+        d.severity == Severity::Error
+            || d.code == codes::FRAME_OVERFLOW
+            || d.code == reprise_compose::codes::OVERFLOW
+            || d.code == codes::KEEP_UNSATISFIED
+    }) && snapshot.blocks.iter().flat_map(|b| &b.lines).all(|line| {
+        snapshot.frame(line.frame).is_some()
+            && (frames.is_none_or(|frames| !frames.contains(&line.frame))
+                || line.rect.origin.y + line.rect.height <= depth)
+    })
 }
