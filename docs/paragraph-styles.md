@@ -309,9 +309,10 @@ set the property explicitly to turn a built-in's keep off.
 
 ## Review addendum: durable identity and compatibility (proposed, 2026-10-12)
 
-This is a design addendum, not an implemented stored form. Review-fixes Part A
-is independent of it. Part B needs a wider migration design than a local rename
-patch, so implementation stops at this addendum as the fix brief permits.
+This is a design addendum for the identity/compatibility migration. Review-fixes
+Part A is independent of it. Durable identity and built-in adoption need a wider
+migration design than a local rename patch, as described below. The independent
+authored-graph copy correction can proceed without selecting that migration.
 Required package bit **18** remains reserved for this work; bits 14–17 belong
 to lists, inline, annotations and sections. No read may allocate identity,
 materialise a built-in definition, or set a package feature bit.
@@ -415,3 +416,25 @@ pinned built-in identity rather than a mutable display name. Headers/footers and
 table cells share the same parent graph and context resolution. The style menu
 uses stable identity for selection and display names for presentation; partial
 clipboard and HTML remain explicit appearance projections.
+
+### Implementation checkpoint: copying the existing authored graph
+
+The current `styles` and `styles1` roots already encode the complete name-based
+graph. An opaque native `AuthoredStyleGraph` will capture both roots, including
+unused records, raw property values, forwarding records and tombstones. It is
+bounded before allocation and imported only into a fresh document with no style
+roots. Container-valued properties outside the documented nested style-map form
+are refused explicitly rather than silently flattened or discarded. This is an
+in-memory transfer type, not a new persistence or clipboard format.
+
+Whole-document duplication will install that graph into new history before
+pasting content. A dedicated editor entry point for a whole-document fragment
+will preserve the already-installed graph: it validates and stages the same
+content, range and relation operations as normal paste, but skips the appearance
+projection's style clash/materialisation phase. The entry point requires an
+empty content target. Partial clipboard paste keeps its existing projection.
+
+This corrects inheritance after copying independently of durable identity.
+No new package bit, stored representation, DTO or snapshot is needed for that
+correction. The durable-identity and built-in migration remains subject to the
+compatibility ambiguity and unchanged-snapshot constraints above.
