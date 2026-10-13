@@ -35,3 +35,13 @@ body depth. The filler content list is empty. The word "cap" exceeds a clamped
 column's measure, explaining the existing compose.overflow warning. Every
 section diagnostic and the two physical rule paths were reviewed. No existing
 snapshot was re-recorded or changed.
+
+S4 gate caught an integration-scope conflict: registering the effective geometry
+fixture in `all()` makes the existing all-fixture native clipboard roundtrip
+require section transport, assigned to S9. The clipboard test is unchanged.
+The effective fixture and both reviewed goldens remain in its dedicated
+layout/backend test. `all()` instead registers a separate retained/inactive
+section fixture with hostile column bounds and unknown lifetime keys. This
+registration deviation is temporary until S9; all previously registered fixtures
+remain unchanged. Its two additional goldens show ordinary one-page body layout.
+The orchestrator approved the separate fixtures on 2026-10-14. The retained fixture passes its bounded dedicated test; hand review confirms a 420x300 pt page, ordinary 220x228 pt main frame at (36,36), two complete paragraph lines, no section metadata, no diagnostics and unchanged content-only rendering.

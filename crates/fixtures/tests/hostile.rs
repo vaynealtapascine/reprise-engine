@@ -1216,3 +1216,24 @@ fn sections_geometry_hostile() {
     );
     check(fixture);
 }
+
+#[test]
+fn sections_retained_hostile() {
+    let fixture = hostile::sections_retained_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    assert!(snapshot.sections.is_none());
+    assert_eq!(snapshot.pages.len(), 1);
+    assert_eq!(snapshot.pages[0].width, Length::from_pt(420));
+    assert_eq!(snapshot.pages[0].height, Length::from_pt(300));
+    assert_eq!(snapshot.blocks.len(), 2);
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|p| p.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}

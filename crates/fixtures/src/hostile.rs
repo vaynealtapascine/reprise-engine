@@ -157,7 +157,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         plumbing_mark_facts()?,
         list_semantics_storm()?,
         annotation_storm()?,
-        sections_geometry_hostile()?,
+        sections_retained_hostile()?,
     ])
 }
 
@@ -3325,4 +3325,40 @@ pub fn sections_geometry_hostile() -> Result<Fixture, DocError> {
             "compose.overflow",
         ],
     ))
+}
+
+/// Inactive section generations must never alter legacy body geometry. The
+/// effective geometry fixture is exercised separately until S9 transports
+/// section boundaries through the shared suite's complete-copy roundtrip.
+pub fn sections_retained_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::sections::{BreakKind, SectionProperties};
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Retained geometry stays inert.",
+    )?;
+    let tail = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "The body keeps its ordinary frames.",
+    )?;
+    for count in [1000, 0, -1, i32::MAX] {
+        let life = doc.mint_lifetime(tail)?;
+        doc.activate_start(
+            tail,
+            &life,
+            BreakKind::Section,
+            &SectionProperties::from([
+                ("columns.count".into(), count.into()),
+                ("columns.widths".into(), "1,0,2147483647".into()),
+                ("width".into(), (-1).into()),
+                ("start".into(), "odd-page".into()),
+                ("future.geometry".into(), "retained".into()),
+            ]),
+        )?;
+        doc.deactivate_start(tail)?;
+    }
+    doc.commit();
+    Ok(Fixture::new("sections_retained_hostile", doc, &[]))
 }
