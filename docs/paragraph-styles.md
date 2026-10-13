@@ -404,3 +404,16 @@ new allocations add their local counter to that floor. These are scalar authored
 allocation metadata, never a source causal vector or imported operations.
 Transitive copies advance the floor again. Capture budgets include added keys;
 invalid clock metadata is retained and refuses allocation rather than guessing.
+
+### Transporting historical built-in interpretation
+
+Required sync bit 5, `legacy-builtins1`, declares the known paragraph-v1 built-in
+interpretation of an old document without `styles2`. It also carries an empty
+legacy schema root that JSON operations alone cannot represent. It is mutually
+exclusive with `style-identities1` on exported packets. Reads/export do not adopt
+or mutate the source. A receiver lacking identity semantics pins this declared
+context with a staged `styles2.legacy-builtins1` operation before publishing the
+import result. This advances its real revision, persists required bit 18, and
+keeps the metadata out of user undo. Existing upgraded receivers keep their
+already pinned context. Native merge uses the same adoption rule. Adoption's
+additional operation and actor are capacity-checked before merging.
