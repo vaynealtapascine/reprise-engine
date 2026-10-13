@@ -114,3 +114,15 @@ since C, rather than repeatedly visiting completed prefix text. All 103 layout
 tests pass in 3.63 s and workspace/all-targets clippy passes. Native/WASM parity
 now includes two additional spatial-template cases. The restarted full gate
 will be recorded separately as s5-full-gate-2.log.
+
+## Final S5 gate: complete
+
+The restarted bounded full gate exits zero: s5-full-gate-2-exit.txt is 0 and
+s5-full-gate-2.log ends with GATE DONE. All prescribed static/WASM/TypeScript/
+smoke/worker checks pass, including all six package-driven native/WASM cases.
+The full native workspace suite, including doc tests, passes 1,240 tests.
+No doc-test retry is needed. Incremental binaries finish in 171.51 s, 22.83 s
+fuzz and 42.60 s steps, below or close to main's 235/52/about 40 s baselines.
+Every existing golden is unchanged; only the six reviewed additions exist.
+Frozen contract, Cargo manifest/lock and PROGRESS diffs from implementation
+base are empty. S1–S5 are complete; stop before S6a.

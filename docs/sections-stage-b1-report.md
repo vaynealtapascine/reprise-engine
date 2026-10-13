@@ -1,8 +1,8 @@
 # Sections Stage B1 final report
 
 Worktree: `F:/reprise-wt/eng-sections2`, branch `ws/sections2`, implementation
-base `0cc69f9`. Scope is S1–S5 only. Final gate results are appended below when
-validation finishes.
+base `0cc69f9`. S1–S5 are complete. The bounded full gate exited zero on
+2026-10-14. Work stops here; S6a and later slices are not implemented.
 
 ## 1. Summary by decision and slice
 
@@ -203,8 +203,22 @@ belong to S11; running navigation belongs to S6a. Required feature bit is
 
 ## 10. Verification
 
-Final full-gate log: `G:/reprise-target/eng-sections/s5-full-gate-2.log`.
-The command tails, exit status and timing checks are appended after completion.
+Final full-gate log: `G:/reprise-target/eng-sections/s5-full-gate-2.log`;
+exit evidence: `s5-full-gate-2-exit.txt` contains **0**. Every prescribed step
+passed: types; debug WASM with a 1 MiB stack; web and Node wasm-bindgen;
+strict TypeScript and CommonJS worker build; smoke and worker smoke; six
+additional actual native/WASM package parity cases; fmt; workspace/all-targets
+clippy `-D warnings`; the prescribed wasm32 crate check; and the complete
+workspace native suite including doc tests. The suite passed **1,240 tests**
+with no failures. Native compilation took 9m 15s; the gate completed within
+its timeout. No wrapper/doc retry was needed for this final gate.
+
+The regression-sensitive binaries passed in **171.51 s** (`incremental.rs`),
+**22.83 s** (`incremental_fuzz.rs`) and **42.60 s** (`incremental_steps.rs`),
+below or close to the supplied main baselines of 235/52/about 40 s.
+All existing snapshots are unchanged; only the six reviewed additions listed
+above appear in the snapshot diff. Contract/dependency/PROGRESS diffs are empty.
+The verbatim command tails are appended below.
 
 ## Branch log before the final report commits
 
@@ -354,4 +368,73 @@ docs/sections-stage-b1-validation.md
 tools/check-sections.sh
 tools/sections-parity.cjs
 docs/sections-stage-b1-report.md
+~~~
+
+### fmt (verbatim gate tail)
+
+~~~text
+=== fmt
+=== rc=0
+~~~
+
+### clippy (verbatim gate tail)
+
+~~~text
+=== clippy
+    Checking reprise v0.1.0 (F:\reprise-wt\eng-sections2\crates\reprise)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.65s
+=== rc=0
+~~~
+
+### wasmcheck (verbatim gate tail)
+
+~~~text
+=== wasmcheck
+    Checking reprise-layout v0.0.0 (F:\reprise-wt\eng-sections2\crates\layout)
+    Checking reprise-edit v0.0.0 (F:\reprise-wt\eng-sections2\crates\edit)
+    Checking reprise-format v0.0.0 (F:\reprise-wt\eng-sections2\crates\format)
+    Checking reprise-fixtures v0.0.0 (F:\reprise-wt\eng-sections2\crates\fixtures)
+    Checking reprise-clipboard v0.0.0 (F:\reprise-wt\eng-sections2\crates\clipboard)
+    Checking reprise v0.1.0 (F:\reprise-wt\eng-sections2\crates\reprise)
+    Checking reprise-wasm v0.1.0 (F:\reprise-wt\eng-sections2\crates\reprise-wasm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.63s
+=== rc=0
+~~~
+
+`cargo fmt --all` also ran directly after the gate, exited zero and produced
+no output (`G:/reprise-target/eng-sections/s5-final-fmt.log`).
+
+### cargo test --workspace --no-fail-fast (verbatim final tail)
+
+~~~text
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests reprise_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests reprise_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== rc=0
+=== GATE DONE
+~~~
+
+### Additional actual native/WASM parity (verbatim)
+
+~~~text
+=== sections-native
+   Compiling reprise v0.1.0 (F:\reprise-wt\eng-sections2\crates\reprise)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.48s
+     Running `G:/reprise-target/eng-sections\debug\examples\sections_parity.exe 'G:/reprise-target/eng-sections/sections-parity'`
+sections native parity: 6 bounded cases generated
+=== rc=0
+=== sections-wasm
+sections native/WASM parity: geometry, continuous and vertical bands, notes and floats passed
+=== rc=0
 ~~~
