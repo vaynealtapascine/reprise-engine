@@ -37,6 +37,7 @@ committed design addendum under the brief's explicit redesign clause.
 - `1e5ed21 fix(edit): preflight captured malformed style values`
 - `4cec4a5 fix(sync): scope historical packages without authored migration`
 - `2e24dc2 docs(styles): isolate authored graph duplication from migration`
+- `99ce2d2 fix(styles): duplicate the complete authored graph in fresh history`
 - The verification handoff commit records the final gate output; obtain the full
   list with `git log --oneline f13a4ee..HEAD`.
 
@@ -61,6 +62,8 @@ Supporting edits beyond its explicitly named files are listed in full here.
   `crates/reprise/tests/{collab.rs,hostile_peer.rs,import_copy.rs,packet_bound.rs,plumbing_edit.rs,plumbing_marks.rs,workspace_fonts.rs,sync_lineage_delta.hex}`.
 - `crates/reprise-wasm/src/lib.rs`, `crates/reprise-wasm/ts/{smoke.cjs,reprise_wasm.d.ts}`.
 - `docs/{CODEMAP.md,contracts.md,collaboration.md,plumbing.md,paragraph-styles.md,review-fixes-1-report.md}`.
+- `docs/style-migration-probes.rs`: standalone expected-failing tests for deferred
+  findings 8/10, deliberately outside the passing workspace gate.
 
 No dependencies, DTO shapes, API version, package feature mask or PacketBound
 literal changed. Generated WASM declarations change only the cap documentation.
@@ -169,8 +172,11 @@ None added; no license changes.
    No Part B stored migration or feature activation was implemented.
 7. Whole-document style duplication preserves the authored graph and creates
    fresh history. This corrects copy behavior without changing existing storage.
+8. Historical facade package context scopes frames without authored migration;
+   unverifiable unmarked legacy binary imports are refused. Historical packages
+   must use current framed sync. Raw unscoped native documents remain compatible.
 
-The first five and seventh are documented in `contracts.md`; the sixth is the dedicated
+The first five, seventh and eighth are documented in `contracts.md`; the sixth is the dedicated
 `paragraph-styles.md` addendum. Integrators should review the staging restriction
 and metadata compatibility choice explicitly.
 
@@ -223,6 +229,12 @@ referenced tombstones and built-in forwarding. Native graph tests cover raw
 unreadable values, pure capture, fresh peer history, bounds and malformed
 containers; editor tests check atomic refusal of bad fragments and occupied
 targets. Identity/built-in acceptance cases remain specified in the addendum.
+The standalone `docs/style-migration-probes.rs` was compiled against the current
+native library and run separately: all three pending-migration acceptance tests
+failed as expected (lost blue color; no built-in required signal; 20pt versus
+10pt legacy heading). `style-migration-probes.log` records these failures.
+They are explicitly outside the passing workspace gate, and findings 8/10
+remain unfixed; no ignored acceptance tests were added to Cargo suites.
 `rename-refusal-before.log` records the additional rename failure; its companion
 tests verify refusal preserves bytes/history/undo and a preceding repair succeeds
 as one undo step. This changes publication validation, not Part B style identity.

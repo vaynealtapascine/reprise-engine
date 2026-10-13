@@ -440,3 +440,13 @@ This corrects inheritance after copying independently of durable identity.
 No new package bit, stored representation, DTO or snapshot is needed for that
 correction. The durable-identity and built-in migration remains subject to the
 compatibility ambiguity and unchanged-snapshot constraints above.
+
+`docs/style-migration-probes.rs` retains three standalone acceptance tests for
+the deferred migration, outside the passing workspace gate. Against the current
+native library, they fail with the renamed color absent, built-in use lacking a
+required paragraph semantic signal, and an unmarked undefined heading resolving
+to 20pt instead of its legacy 10pt fallback. Compile with `rustc --edition=2024
+--test docs/style-migration-probes.rs --extern reprise_doc=<current rlib>
+-L dependency=<target>/debug/deps -o <target>/style-migration-probes.exe`.
+Run the resulting test executable; all three failures are expected until the
+coordinated migration is implemented.
