@@ -189,6 +189,8 @@ struct Inputs {
     styles: Vec<(String, Option<reprise_doc::StyleRecord>)>,
     /// Inline parameters change geometry without changing the text.
     inline: Vec<(reprise_doc::InlineId, reprise_doc::InlineObject)>,
+    /// List geometry and role/list notes: a renumbered item re-lays out.
+    semantics: crate::list_marker::Semantics,
 }
 impl Inputs {
     fn read(doc: &Document, node: NodeId) -> Option<Self> {
@@ -220,6 +222,7 @@ impl Inputs {
                 .into_iter()
                 .map(|e| (e.id, e.object))
                 .collect(),
+            semantics: crate::list_marker::semantics(doc, node),
         })
     }
     fn dependencies(&self, engine: &Engine, node: NodeId) -> BTreeSet<Dependency> {
@@ -259,6 +262,7 @@ impl Inputs {
             || self.image != old.image
             || self.formatting != old.formatting
             || self.inline != old.inline
+            || self.semantics != old.semantics
         {
             out.insert(Dependency::Node(node));
         }

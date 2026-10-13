@@ -227,6 +227,7 @@ impl Exporter for PlainText {
                 let text = crate::inline::plain(&source, &placed)?;
                 // Reading order is block precedence with lines in source order. Export
                 // the whole authored block, including a tail omitted by a page limit.
+                append(&mut out, &item_prefix(doc, block.node))?;
                 append(&mut out, &text)?;
                 unplaced |= block.lines.last().is_none_or(|l| l.text.end < source.len());
                 previous = Some(block.node);
@@ -253,6 +254,7 @@ impl Exporter for PlainText {
             {
                 append(&mut out, separator(doc, previous, node))?;
             }
+            append(&mut out, &item_prefix(doc, node))?;
             append(&mut out, &text)?;
             previous = Some(node);
             unplaced |= layout.is_some();
@@ -304,6 +306,18 @@ impl Exporter for PlainText {
             bytes: out.into_bytes(),
             losses,
         })
+    }
+}
+
+/// A list item's marker in plain text: four spaces per level, the marker and
+/// a space. Empty for other blocks.
+fn item_prefix(doc: &Document, node: NodeId) -> String {
+    match doc.list_item(node) {
+        Some(item) if !item.marker.is_empty() => {
+            format!("{}{} ", "    ".repeat(usize::from(item.level)), item.marker)
+        }
+        Some(item) => "    ".repeat(usize::from(item.level)),
+        None => String::new(),
     }
 }
 
@@ -389,10 +403,12 @@ fn paragraph(
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace(['\n', '\r', '\u{c}'], " ");
+    let (tag, class) = crate::semantic_html::element(doc.role(node).unwrap_or_default());
     append(
         out,
         &format!(
-            "<p{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            "<{tag}{}{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default(),
             if links.is_target(node) {
                 format!(" id=\"{}\"", crate::links::target_id(node))
             } else {
@@ -471,7 +487,7 @@ fn paragraph(
     if open.is_some() {
         append(out, "</a>")?;
     }
-    append(out, "</p>")
+    append(out, &format!("</{tag}>"))
 }
 
 /// One formatted stretch of a paragraph, as a span when it has formatting.
@@ -562,6 +578,23 @@ fn css_string(value: &str) -> String {
     out.push('"');
     out
 }
+/// Opens or closes `ol`/`ul` before a block; tables close every list.
+fn list_boundary(
+    doc: &Document,
+    node: NodeId,
+    lists: &mut crate::semantic_html::ListWriter,
+    out: &mut String,
+) -> Result<(), ClipboardError> {
+    if doc
+        .table_role(node)
+        .map_err(|e| ClipboardError::Invalid(e.to_string()))?
+        .is_some()
+    {
+        return lists.close(out);
+    }
+    lists.before(doc, node, out)
+}
+
 fn html_node(
     doc: &Document,
     node: NodeId,
@@ -621,9 +654,12 @@ fn html_node(
     } else {
         paragraph(doc, node, layout, links, out)?;
     }
+    let mut lists = crate::semantic_html::ListWriter::default();
     for child in doc.children(Some(node)) {
+        list_boundary(doc, child, &mut lists, out)?;
         html_node(doc, child, layout, links, out, depth + 1, grid)?;
     }
+    lists.close(out)?;
     if let Some(close) = close {
         append(out, close)?;
     }
@@ -661,9 +697,12 @@ impl Exporter for Html {
         }
         let mut out = String::from("<!doctype html><html><body>");
         let links = crate::links::LinkIndex::new(doc);
+        let mut lists = crate::semantic_html::ListWriter::default();
         for node in roots {
+            list_boundary(doc, node, &mut lists, &mut out)?;
             html_node(doc, node, layout, &links, &mut out, 0, None)?;
         }
+        lists.close(&mut out)?;
         append(&mut out, "</body></html>")?;
         let presence = links.presence();
         use Disposition::*;

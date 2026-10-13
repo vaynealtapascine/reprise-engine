@@ -91,6 +91,9 @@ pub struct State {
     /// The distinct resolved paragraph styles that `blocks[].style.resolved`
     /// indexes. Blocks sharing a style share an entry.
     pub resolved: Vec<ResolvedStyle>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<NamedList>>", optional)]
+    pub lists: Vec<NamedList>,
     /// Links and comment anchors, compact: where each is and what it is for,
     /// without a link's address (ask `annotation` for that). At most
     /// [`MAX_STATE_ANNOTATIONS`], in ID order; a `bindings.limit` diagnostic
@@ -163,6 +166,12 @@ pub struct Block {
     pub formatting: Option<Vec<TextRun>>,
     /// The block's paragraph style: the one additive per-block field.
     pub style: BlockStyle,
+    #[serde(default, skip_serializing_if = "BlockRole::is_body")]
+    #[ts(as = "Option<BlockRole>", optional)]
+    pub role: BlockRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub list: Option<ListItem>,
     /// The live inline objects of this paragraph in text order, present only
     /// when there are some (`docs/inline.md`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -461,6 +470,51 @@ pub enum Command {
         node: String,
         style: Option<String>,
     },
+    SetRole {
+        node: String,
+        role: BlockRole,
+    },
+    CreateList {
+        definition: ListDefinition,
+    },
+    UpdateList {
+        list: String,
+        definition: ListDefinition,
+    },
+    DeleteList {
+        list: ListRef,
+    },
+    SetListItem {
+        node: String,
+        list: ListRef,
+        level: u8,
+    },
+    RemoveListItem {
+        node: String,
+    },
+    SetListLevel {
+        node: String,
+        level: u8,
+    },
+    IndentListItem {
+        node: String,
+        by: i8,
+    },
+    /// Canonical signed i64 decimal string; null clears the restart.
+    RestartList {
+        node: String,
+        value: Option<String>,
+    },
+    ContinueList {
+        node: String,
+    },
+    Enter {
+        node: String,
+        at: u32,
+    },
+    BackspaceAtStart {
+        node: String,
+    },
     /// Adds a link or a comment anchor over `start..end` of a block (UTF-8
     /// bytes, not empty). Its ID is in `Applied.annotations`. A link does not
     /// style its text: Cmd+K is this command plus a `format-text` in one
@@ -581,6 +635,9 @@ pub enum Effect {
 pub struct Applied {
     pub blocks: Vec<String>,
     pub relations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub lists: Vec<String>,
     pub effects: Vec<Effect>,
     pub diagnostics: Vec<Diagnostic>,
     /// The annotations `add-annotation` created, in command order.
@@ -779,6 +836,13 @@ pub struct ReadingStep {
     /// trailing whitespace included, so a reader can slice without `move`.
     pub start: u32,
     pub end: u32,
+    #[serde(default, skip_serializing_if = "BlockRole::is_body")]
+    #[ts(as = "Option<BlockRole>", optional)]
+    pub role: BlockRole,
+    /// A derived label on the first line; byte ranges still refer only to authored text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker: Option<String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -1495,6 +1559,86 @@ pub struct MarksPage {
     pub token: LayoutToken,
     pub page: u32,
     pub marks: Vec<Mark>,
+}
+
+/// Semantic tokens. An absent State role means body; appearance is independent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum BlockRole {
+    #[default]
+    Body,
+    #[serde(rename = "heading-1")]
+    Heading1,
+    #[serde(rename = "heading-2")]
+    Heading2,
+    #[serde(rename = "heading-3")]
+    Heading3,
+    #[serde(rename = "heading-4")]
+    Heading4,
+    #[serde(rename = "heading-5")]
+    Heading5,
+    #[serde(rename = "heading-6")]
+    Heading6,
+    Title,
+    Subtitle,
+    Quote,
+    Code,
+    Verse,
+}
+impl BlockRole {
+    fn is_body(&self) -> bool {
+        *self == Self::Body
+    }
+}
+/// Existing list identity, or zero-based CreateList index in this transaction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ListRef {
+    Existing { id: String },
+    New { index: u32 },
+}
+/// Unset properties inherit from base and then engine defaults. Updating replaces
+/// the authored definition; unchanged properties do not emit CRDT writes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct ListDefinition {
+    pub base: Option<String>,
+    pub levels: Vec<ListLevel>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct ListLevel {
+    pub level: u8,
+    /// bullet, decimal, decimal-leading-zero, lower/upper-alpha, lower/upper-roman, none.
+    pub format: Option<String>,
+    pub text: Option<String>,
+    /// Canonical signed i64 decimal string.
+    pub start: Option<String>,
+    /// Integer 1/1024 pt, logical inline start.
+    pub indent: Option<i32>,
+    pub hanging: Option<i32>,
+    pub marker: Option<TextStyle>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct NamedList {
+    pub id: String,
+    pub definition: Option<ListDefinition>,
+    pub error: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ListItem {
+    pub id: String,
+    pub level: u8,
+    pub value: String,
+    pub restart: bool,
+    pub marker: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct OutlineEntry {
+    pub node: String,
+    pub level: u8,
+    pub text: String,
+    pub page: Option<u32>,
 }
 
 /// The most annotations `State.annotations` lists.

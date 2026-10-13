@@ -31,8 +31,8 @@ use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule, Stroke};
 use krilla::surface::Surface;
 use krilla::tagging::{
-    Artifact, ArtifactType, ContentTag, Identifier, Node as TagNode, SpanTag, TableHeaderScope,
-    Tag, TagGroup, TagId, TagTree,
+    Artifact, ArtifactType, ContentTag, Identifier, ListNumbering, Node as TagNode, SpanTag,
+    TableHeaderScope, Tag, TagGroup, TagId, TagTree,
 };
 use krilla::text::{Font, GlyphId, KrillaGlyph};
 use reprise_diag::Note;
@@ -45,8 +45,8 @@ pub mod tags;
 
 use tags::{
     CellRole, Child, Content, DEFAULT_LANG, DEFAULT_TITLE, DocLink, FIGURE_ALT_MISSING,
-    HEADING_LEVEL, LINK_UNRESOLVED, Link, LinkTo, MAX_DEPTH, Node, REFERENCE_UNLINKED, RUN_SPLIT,
-    Role, STRUCTURE_DEPTH, Scope, Structure, UA_NOT_MET,
+    HEADING_LEVEL, LINK_UNRESOLVED, Link, LinkTo, MAX_DEPTH, Node, Numbering, REFERENCE_UNLINKED,
+    RUN_SPLIT, Role, STRUCTURE_DEPTH, Scope, Structure, UA_NOT_MET,
 };
 
 fn pt(l: Length) -> f32 {
@@ -704,6 +704,23 @@ impl Tree<'_> {
             Role::TableBody => TagGroup::new(Tag::TBody),
             Role::Row => TagGroup::new(Tag::TR),
             Role::Cell(cell) => cell_group(cell),
+            Role::Title => TagGroup::new(Tag::Title),
+            Role::BlockQuote => TagGroup::new(Tag::BlockQuote),
+            Role::Code => TagGroup::new(Tag::Code),
+            Role::List(numbering) => TagGroup::new(Tag::L(match numbering {
+                Numbering::None => ListNumbering::None,
+                Numbering::Disc => ListNumbering::Disc,
+                Numbering::Circle => ListNumbering::Circle,
+                Numbering::Square => ListNumbering::Square,
+                Numbering::Decimal => ListNumbering::Decimal,
+                Numbering::LowerRoman => ListNumbering::LowerRoman,
+                Numbering::UpperRoman => ListNumbering::UpperRoman,
+                Numbering::LowerAlpha => ListNumbering::LowerAlpha,
+                Numbering::UpperAlpha => ListNumbering::UpperAlpha,
+            })),
+            Role::ListItem => TagGroup::new(Tag::LI),
+            Role::Label => TagGroup::new(Tag::Lbl),
+            Role::ListBody => TagGroup::new(Tag::LBody),
         };
         group.children = children;
         Some(group.into())

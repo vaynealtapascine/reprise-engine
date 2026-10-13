@@ -609,6 +609,21 @@ pub(crate) fn write(
     } else {
         BTreeMap::new()
     };
+    write_semantics(
+        doc,
+        &fragment,
+        &mut result,
+        join_first.then_some(first).flatten(),
+        same_namespace,
+    )?;
+    // The first pasted paragraph joined the caret's paragraph, which it
+    // replaces here: it keeps that paragraph's role and membership.
+    if join_first
+        && let (Some((host, _)), Some(first)) = (at, first)
+        && let Some(&new) = result.ids.nodes.get(&first)
+    {
+        doc.copy_semantics_to(host, new).map_err(store)?;
+    }
     write_formats(doc, &fragment, &result.ids, &shifts)?;
     result.end = roots.last().and_then(|b| {
         let shift = shifts.get(&b.id).copied().unwrap_or(0);
@@ -637,6 +652,68 @@ pub(crate) fn write(
         .collect();
     doc.remap_inline_targets(&target_nodes).map_err(store)?;
     Ok(result)
+}
+
+/// Pasted roles and lists. Into the document the fragment was copied from, an
+/// item whose definition is still live stays in that list, so pasting items
+/// into their own list continues its numbering, as in Google Docs and Word.
+/// Anywhere else (another document, or a definition since deleted) each
+/// definition the fragment carries is staged with a fresh ID and activated,
+/// with its `base` remapped. Every pasted block takes its role and membership.
+/// A first block joined into the paragraph at the caret leaves that
+/// paragraph's own role and membership alone.
+fn write_semantics(
+    doc: &Document,
+    fragment: &Fragment,
+    result: &mut Pasted,
+    kept: Option<NodeId>,
+    same_namespace: bool,
+) -> Result<(), EditError> {
+    let mut lists = BTreeMap::new();
+    let mut fresh = BTreeSet::new();
+    for (old, def) in &fragment.lists {
+        if same_namespace && doc.is_list_live(*old) {
+            lists.insert(*old, *old);
+            continue;
+        }
+        let mut own = def.clone();
+        own.base = None;
+        let new = doc.stage_list(&own).map_err(store)?;
+        doc.activate_list(new).map_err(store)?;
+        lists.insert(*old, new);
+        fresh.insert(*old);
+        result.applied.lists.push(new);
+    }
+    for (old, def) in &fragment.lists {
+        if fresh.contains(old)
+            && let (Some(base), Some(&new)) = (def.base, lists.get(old))
+            && let Some(&base) = lists.get(&base)
+        {
+            let mut own = def.clone();
+            own.base = Some(base);
+            doc.update_list(new, &own).map_err(store)?;
+        }
+    }
+    for block in &fragment.blocks {
+        if Some(block.id) == kept {
+            continue;
+        }
+        let Some(&node) = result.ids.nodes.get(&block.id) else {
+            continue;
+        };
+        if let Some(role) = block.role {
+            doc.set_role(node, role).map_err(store)?;
+        }
+        if let Some(item) = &block.list
+            && let Some(&list) = lists.get(&item.list)
+        {
+            doc.set_list_item(node, list, item.level).map_err(store)?;
+            if item.restart.is_some() {
+                doc.set_list_restart(node, item.restart).map_err(store)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn write_formats(
@@ -889,6 +966,8 @@ fn write_into_flow(
     for new in result.relations.values() {
         doc.restore_relation(*new).map_err(store)?;
     }
+    let kept = if join_first { first } else { None };
+    write_semantics(doc, &fragment, &mut result, kept, same_namespace)?;
     write_formats(doc, &fragment, &result.ids, &joined)?;
     result.end = fragment
         .blocks

@@ -324,6 +324,18 @@ values. A `page-count` in a footnote says how many pages the document has and a
 `fields_in_notes_resolve_like_fields_in_the_body` and
 `a_page_of_can_point_into_a_note_and_out_of_one`).
 
+**Lists.** A list item's marker is derived and drawn in the hanging indent; it
+is not text, so it never shifts an object's byte offset, and the item's inset is
+a geometry wrapper the composer sees before it sees the objects' cells. The
+marker rides the first line's baseline, and a tall object raises only its own
+line. In reading order the marker (a PDF `Lbl`) comes first and each object is
+its own three-byte run among the text runs. Enter, Backspace and split or join
+of an item move the item's objects with its text and keep its list membership
+(the planner models both side by side); a copy or HTML round trip carries items
+and objects together, and the pasted items get a fresh definition and new object
+identities. A document that uses both declares bits 14 and 15 (tests
+`inline_lists` in `fixtures`, `edit`, `clipboard` and `reprise`).
+
 ## Editing (30)
 
 -   The atom is one grapheme cell whose width is its advance, so carets stop

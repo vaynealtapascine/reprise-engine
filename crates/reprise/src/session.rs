@@ -464,6 +464,7 @@ impl DocumentSession {
             .map(|n| (n, 0u32))
             .collect();
         let mut blocks = Vec::new();
+        let numbering = self.doc().list_numbering();
         // A peer can write a node whose envelope doesn't read (collaboration
         // invariant I2): leave it out, keep its children, and say so.
         let mut malformed = Vec::new();
@@ -507,6 +508,8 @@ impl DocumentSession {
                     reprise_doc::BlockKind::Image => BlockKind::Image,
                 },
                 text: block.text.to_string(),
+                role: cv::role_out(self.doc().role(node).unwrap_or_default()),
+                list: numbering.items.get(&node).map(cv::list_item_out),
                 // Unreadable formatting is reported by layout diagnostics.
                 formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
                 style: {
@@ -641,7 +644,39 @@ impl DocumentSession {
                 })
             })
             .collect();
+        // A peer can create any number of definitions; a cut listing must not
+        // make the whole state unreadable. Items still show their markers.
+        let mut raw_lists = self.doc().lists();
+        if raw_lists.len() > reprise_doc::fragment::MAX_FRAGMENT_LISTS {
+            raw_lists.truncate(reprise_doc::fragment::MAX_FRAGMENT_LISTS);
+            diagnostics.push(Diagnostic {
+                code: "bindings.limit".into(),
+                severity: Severity::Warning,
+                message: format!(
+                    "more than {} list definitions; the listing is cut short",
+                    reprise_doc::fragment::MAX_FRAGMENT_LISTS
+                ),
+                subject: None,
+                start: None,
+                end: None,
+            });
+        }
+        let lists = raw_lists
+            .into_iter()
+            .map(|(id, read)| {
+                let (definition, error) = match read {
+                    Ok(d) => (Some(cv::list_definition_out(d)), None),
+                    Err(e) => (None, Some(e)),
+                };
+                NamedList {
+                    id: id.to_string(),
+                    definition,
+                    error,
+                }
+            })
+            .collect();
         Ok(Payload::new(State {
+            lists,
             annotations,
             styles,
             resolved: table,
@@ -1623,6 +1658,33 @@ impl DocumentSession {
         })?;
         Ok(Payload::new(Bytes { bytes }))
     }
+    /// Semantic heading order without requiring layout; page is zero-based and
+    /// absent if no current layout places the heading.
+    pub fn outline(&self) -> Result<Payload<Vec<OutlineEntry>>> {
+        let layout = self.current().ok();
+        let entries = self.doc().outline();
+        if entries.len() > 100_000 {
+            return Err(Error::Limit("outline headings".into()));
+        }
+        Ok(Payload::new(
+            entries
+                .into_iter()
+                .map(|e| {
+                    let page = layout
+                        .and_then(|l| l.block(e.node))
+                        .and_then(|b| b.lines.first())
+                        .and_then(|line| layout.and_then(|l| l.frames.get(line.frame)))
+                        .and_then(|f| u32::try_from(f.page).ok());
+                    OutlineEntry {
+                        node: e.node.to_string(),
+                        level: e.level,
+                        text: e.text,
+                        page,
+                    }
+                })
+                .collect(),
+        ))
+    }
     pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>> {
         let layout = self.current()?;
         let steps = layout
@@ -1638,6 +1700,10 @@ impl DocumentSession {
                     page: u32::try_from(s.page).unwrap_or(u32::MAX),
                     start: u32::try_from(line.text.start).unwrap_or(u32::MAX),
                     end: u32::try_from(line.text.end).unwrap_or(u32::MAX),
+                    role: cv::role_out(self.doc().role(s.line.node).unwrap_or_default()),
+                    marker: (s.line.line == 0)
+                        .then(|| self.doc().list_item(s.line.node).map(|i| i.marker))
+                        .flatten(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;

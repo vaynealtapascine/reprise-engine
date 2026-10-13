@@ -622,6 +622,15 @@ stored locally.
 The reference worker adds request kinds `import-copy`, `workspace-font`,
 `workspace-font-settings`, `batch`, `replace`, `replace-text` and `diagnostics`.
 
+## Block roles, lists and outline
+
+See [roles-and-lists.md](roles-and-lists.md#app-seam-after-main-integration) for
+owned command shapes, role/style batch pairing, 64-bit counter strings, list
+identity remapping, marker byte semantics and the outline worker query.
+`outline()` works without layout; page numbers become available only for a
+current placed layout. `State` omits body roles and empty list registries, so
+untouched document payloads keep their prior form.
+
 ## Annotations: links and comment anchors (`docs/annotations.md`)
 
 Commands (in `apply` and `batch`; both respect `expected_revision` and name the

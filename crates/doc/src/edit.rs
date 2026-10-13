@@ -240,6 +240,7 @@ impl Document {
         })?;
         self.stage_inline_copies(new, &objects)?;
         self.split_block_into(id, at, new)?;
+        self.copy_semantics_to(id, new)?;
         Ok(new)
     }
 

@@ -937,6 +937,8 @@ pub(crate) struct Prepared {
     /// Inline objects (see `docs/inline.md`) and the frame they are sized for.
     pub(crate) atoms: Vec<crate::inline::PreparedAtom>,
     pub(crate) atom_frame: crate::inline::AtomFrame,
+    /// A list item's marker and indents.
+    pub(crate) marker: Option<crate::list_marker::PreparedMarker>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1007,9 +1009,17 @@ impl Prepared {
     /// says they had to be reduced (`layout.indent-clamped`).
     pub(crate) fn indents(&self, width: Length) -> (Indents, bool) {
         Indents::bounded(
-            self.style.indent_start,
+            if self.marker.is_some() {
+                Length::ZERO
+            } else {
+                self.style.indent_start
+            },
             self.style.indent_end,
-            self.style.indent_first,
+            if self.marker.is_some() {
+                Length::ZERO
+            } else {
+                self.style.indent_first
+            },
             width,
         )
     }
@@ -1076,6 +1086,7 @@ impl Prepared {
                     width: image.rect.width,
                     runs: Vec::new(),
                     atoms: Vec::new(),
+                    marker: None,
                     explanation: Explanation {
                         reason: BreakReason::End,
                         score: None,
@@ -1095,6 +1106,15 @@ impl Prepared {
             items: &self.items,
             fonts: &engine.fonts,
             adapter: engine.shaper.as_ref(),
+        };
+        // A list item's text is inset from the room's logical inline start.
+        let inset = self
+            .marker
+            .as_ref()
+            .map(|m| crate::list_marker::Inset::new(geometry, m, start == 0, self.style.size));
+        let geometry: &dyn GeometryProvider = match &inset {
+            Some(inset) => inset,
+            None => geometry,
         };
         // Inline objects become advance cells of their boxes' advance.
         let sized = crate::inline::size_atoms(
@@ -1178,12 +1198,45 @@ impl Prepared {
         if let Some(e) = evaluation {
             e.composed(self.text.len(), composition.lines.len());
         }
+        let mut lines: Vec<LineLayout> = composition
+            .lines
+            .into_iter()
+            .map(|l| line_layout(engine, self, frame, l, subject, diagnostics, &sized))
+            .collect();
+        if let (Some(inset), Some(marker)) = (&inset, &self.marker)
+            && start == 0
+        {
+            if inset.clamped.get() {
+                diagnostics.push(Diagnostic::new(
+                    Severity::Warning,
+                    codes::LIST_INDENT,
+                    subject.clone(),
+                    "a list indent leaves less than one em of room; reduced",
+                ));
+            }
+            if let Some(first) = lines.first_mut() {
+                let edges = inset.first_edges(first.rect.origin.y).unwrap_or_else(|| {
+                    // The composer asked at another offset: rebuild from the line.
+                    let inset = marker.first_inset;
+                    if marker.rtl {
+                        crate::list_marker::Edges {
+                            lo: first.available.start,
+                            hi: first.available.end + inset,
+                            inset,
+                        }
+                    } else {
+                        crate::list_marker::Edges {
+                            lo: first.available.start - inset,
+                            hi: first.available.end,
+                            inset,
+                        }
+                    }
+                });
+                first.marker = crate::list_marker::place(engine, marker, first, edges);
+            }
+        }
         Composed {
-            lines: composition
-                .lines
-                .into_iter()
-                .map(|l| line_layout(engine, self, frame, l, subject, diagnostics, &sized))
-                .collect(),
+            lines,
             rest: composition.rest,
             block_end: composition.block_end,
         }
@@ -1418,6 +1471,7 @@ fn line_layout(
         explanation: fragment.explanation,
         runs,
         atoms,
+        marker: None,
     }
 }
 

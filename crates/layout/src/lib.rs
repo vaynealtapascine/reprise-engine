@@ -25,6 +25,7 @@ mod image;
 pub mod incremental;
 mod inline;
 mod inline_display;
+mod list_marker;
 pub mod marks;
 mod notes;
 pub mod plugins;
@@ -56,8 +57,8 @@ pub use inline::{AtomLayout, AtomPaint, AtomRole, FieldInstance};
 pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
     BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
-    PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader, Resolution, Subject,
-    TargetLayout, TemplateSource, TemplateUsed,
+    MarkerLayout, PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader,
+    Resolution, Subject, TargetLayout, TemplateSource, TemplateUsed,
 };
 
 /// Engine settings for the flow. Like the rest of the engine configuration

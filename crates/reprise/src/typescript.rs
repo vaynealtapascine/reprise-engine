@@ -56,6 +56,13 @@ pub fn declarations() -> String {
     text.push_str(&Style::decl(&cfg));
     text.push('\n');
     for decl in [
+        BlockRole::decl(&cfg),
+        ListRef::decl(&cfg),
+        ListDefinition::decl(&cfg),
+        ListLevel::decl(&cfg),
+        NamedList::decl(&cfg),
+        ListItem::decl(&cfg),
+        OutlineEntry::decl(&cfg),
         StyleProperty::decl(&cfg),
         NamedStyle::decl(&cfg),
         BlockStyle::decl(&cfg),
