@@ -19,5 +19,5 @@ step worker-smoke node crates/reprise-wasm/ts/worker-smoke.cjs "$T/pkg-node" "$T
 step fmt cargo fmt --all -- --check
 step clippy cargo clippy -q --workspace --all-targets -- -D warnings
 step wasmcheck cargo check -q --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm
-step test cargo test --workspace --no-fail-fast
+step test timeout --kill-after=10s 3600 cargo test --workspace --no-fail-fast
 echo '=== GATE DONE'

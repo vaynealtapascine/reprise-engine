@@ -21,7 +21,8 @@ The S4 geometry drafts in the checkpoint were not registered or compiled.
 
 Targeted validation: all 85 layout library tests pass, the new named hostile
 fixture passes, and workspace/all-targets clippy with `-D warnings` passes.
-The full gate is pending in `G:/reprise-target/eng-sections/s4-full-gate.log`.
+The full gate is pending in `G:/reprise-target/eng-sections/s4-bounded-full-gate.log`.
+The initial gate was stopped and restarted with the orchestrator-required timeouts.
 
 Only two new snapshots were recorded: `hostile__sections_geometry_hostile.snap`
 and `hostile__content_sections_geometry_hostile.snap`. Hand review confirms
