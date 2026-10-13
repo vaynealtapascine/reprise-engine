@@ -15,6 +15,8 @@ const MAX_VALUE_DEPTH: usize = 64;
 pub struct AuthoredStyleGraph {
     nested: Option<BTreeMap<String, BTreeMap<String, LoroValue>>>,
     flat: Option<BTreeMap<String, LoroValue>>,
+    identities: Option<BTreeMap<String, LoroValue>>,
+    legacy_builtins: bool,
 }
 
 fn invalid() -> DocError {
@@ -128,13 +130,22 @@ impl Document {
             .style_graph_root("styles1")?
             .map(|root| properties(&root, &mut budget))
             .transpose()?;
-        Ok(AuthoredStyleGraph { nested, flat })
+        let identities = self
+            .style_graph_root(crate::style_identity::ROOT)?
+            .map(|root| properties(&root, &mut budget))
+            .transpose()?;
+        Ok(AuthoredStyleGraph {
+            nested,
+            flat,
+            identities,
+            legacy_builtins: self.legacy_builtin_context(),
+        })
     }
 
     /// Install an opaque graph in fresh history. Refuses before writing if
     /// either target style root already exists. Does not commit.
     pub fn restore_authored_style_graph(&self, graph: &AuthoredStyleGraph) -> Result<(), DocError> {
-        if self.has_root("styles") || self.has_root("styles1") {
+        if self.has_root("styles") || self.has_root("styles1") || self.has_style_identities() {
             return Err(invalid());
         }
         if let Some(records) = &graph.nested {
@@ -151,6 +162,17 @@ impl Document {
             for (key, value) in properties {
                 root.insert(key, value.clone())?;
             }
+        }
+        if let Some(properties) = &graph.identities {
+            let root = self.doc.get_map(crate::style_identity::ROOT);
+            for (key, value) in properties {
+                root.insert(key, value.clone())?;
+            }
+        }
+        if graph.legacy_builtins {
+            self.doc
+                .get_map(crate::style_identity::ROOT)
+                .insert("legacy-builtins1", "1")?;
         }
         Ok(())
     }

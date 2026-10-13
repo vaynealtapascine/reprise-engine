@@ -488,7 +488,8 @@ impl DocumentSession {
                 formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
                 style: {
                     let overrides = serde_json::to_string(&block.overrides).unwrap_or_default();
-                    let k = (block.style.clone(), overrides);
+                    let reference = self.doc().style_reference(node);
+                    let k = (reference.clone(), overrides);
                     let index = match indices.get(&k) {
                         Some(i) => *i,
                         None => {
@@ -498,7 +499,7 @@ impl DocumentSession {
                                 .or_insert_with(|| {
                                     let used = reprise_doc::specify_parts(
                                         self.doc(),
-                                        block.style.clone(),
+                                        reference.clone(),
                                         &block.overrides,
                                     )
                                     .compute(&self.engine.functions)

@@ -153,6 +153,17 @@ impl Document {
     /// The named style `name` as stored, without following a rename. `None`
     /// when the document never defined it and it is not built in.
     pub fn style_record(&self, name: &str) -> Option<StyleRecord> {
+        let owner = self.style_owner(name);
+        let mut record = self.raw_style_record(&owner, true)?;
+        let label = self.owner_label(&owner);
+        if record.status == StyleStatus::Live && label != name {
+            record.status = StyleStatus::Renamed(label);
+        }
+        record.style = self.public_style(record.style);
+        Some(record)
+    }
+
+    pub(crate) fn raw_style_record(&self, name: &str, allow_builtin: bool) -> Option<StyleRecord> {
         let nested = self.nested_style(name);
         let flat = self.flat_styles();
         let state = flat.as_ref().and_then(|m| get_str(m, &key("state", name)));
@@ -165,7 +176,7 @@ impl Document {
             None => StyleStatus::Live,
         };
         let defined = state.as_deref() == Some("defined");
-        let builtin = if nested.is_none() && !defined {
+        let builtin = if allow_builtin && nested.is_none() && !defined {
             builtin_style(name)
         } else {
             None
@@ -252,7 +263,8 @@ impl Document {
             .map(|s| s.to_string())
             .collect();
         let mut scanned = 0usize;
-        let mut cut = false;
+        let mut cut = self.identity_listing_cut();
+        names.extend(self.identity_labels());
         if self.has_root("styles") {
             for name in self.doc.get_map("styles").keys() {
                 scanned += 1;
@@ -299,6 +311,10 @@ impl Document {
     pub fn define_named_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
         check_name(name)?;
         validate_style(style)?;
+        self.author_style_identities()?;
+        let owner = self.definition_owner(name)?;
+        let name = owner.as_str();
+        let style = self.authored_parent(style)?;
         let flat = self.doc.get_map(STYLES);
         let nested = self.nested_style(name);
         for property in STORED_KEYS {
@@ -328,6 +344,19 @@ impl Document {
     pub fn patch_named_style(&self, name: &str, patch: &StylePatch) -> Result<(), DocError> {
         check_name(name)?;
         patch.validate()?;
+        let owner = self.style_owner(name);
+        let name = owner.as_str();
+        if self
+            .raw_style_record(name, true)
+            .is_some_and(|record| record.builtin)
+        {
+            self.pin_builtin_owner(name)?;
+        }
+        self.author_style_identities()?;
+        let patch = StylePatch {
+            set: self.authored_parent(&patch.set)?,
+            clear: patch.clear.clone(),
+        };
         let flat = self.doc.get_map(STYLES);
         for property in patch.supplied() {
             if let Some(value) = patch.set.stored(property) {
@@ -349,8 +378,8 @@ impl Document {
         Ok(())
     }
 
-    /// Renames `from` to `to`: `to` is defined with `from`'s effective
-    /// properties, and `from` forwards to it. Does not commit.
+    /// Renames the selector while retaining its immutable property owner.
+    /// Does not commit.
     pub fn rename_named_style(&self, from: &str, to: &str) -> Result<(), DocError> {
         check_name(to)?;
         let record = self
@@ -360,19 +389,21 @@ impl Document {
         if from == to {
             return Ok(());
         }
-        self.define_named_style(to, &record.style)?;
-        self.doc
-            .get_map(STYLES)
-            .insert(&key("state", from), format!("renamed:{to}"))?;
+        // Retain the existing malformed-capture refusal policy before any
+        // write, while no longer copying properties to a different owner.
+        validate_style(&record.style)?;
+        self.rename_owner(from, to)?;
         Ok(())
     }
 
     /// Deletes `name`, keeping its properties: whatever names it resolves
     /// through its parent. Does not commit.
     pub fn delete_named_style(&self, name: &str) -> Result<(), DocError> {
+        self.author_style_identities()?;
+        let owner = self.style_owner(name);
         self.doc
             .get_map(STYLES)
-            .insert(&key("state", name), "deleted")?;
+            .insert(&key("state", &owner), "deleted")?;
         Ok(())
     }
 
@@ -396,6 +427,10 @@ impl Document {
     pub fn patch_overrides(&self, node: NodeId, patch: &StylePatch) -> Result<(), DocError> {
         self.block(node)?;
         patch.validate()?;
+        let patch = StylePatch {
+            set: self.authored_paragraph_style(&patch.set)?,
+            clear: patch.clear.clone(),
+        };
         for property in patch.supplied() {
             let Some(value) = patch.set.stored(property) else {
                 continue;

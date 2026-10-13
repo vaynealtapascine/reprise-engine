@@ -233,7 +233,7 @@ impl Document {
         self.prepare_format_copy(id, at..block.text.len(), None)?;
         let new = self.stage_block(&NewBlock {
             kind: block.kind,
-            style: block.style.unwrap_or_default(),
+            style: self.style_reference(id).unwrap_or_default(),
             overrides: block.overrides,
             text: tail,
         })?;

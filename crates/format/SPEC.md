@@ -280,3 +280,14 @@ removed (tombstoned), unreadable and future-kind records. An older reader would
 show such ranges as bare ranges and copy them without their data, so it must
 refuse the package. Documents without annotations keep their old required mask.
 See `docs/annotations.md`. Bits 14 and 15 are reserved for lists and inline objects.
+
+## Stable style owners and built-in semantics (required bit 18)
+
+`REQUIRED_STYLE_IDENTITIES` (`1 << 18`) declares retained `styles2` root presence,
+including an emptied root after undo. Immutable owners remain in `styles` and
+`styles1`; `styles2` contains name aliases, display labels and pinned built-in-v1
+base/context markers. Versioned block/parent references use the reserved control
+prefixes specified in `docs/paragraph-styles.md`. Readers without bit 18 refuse
+before decoding document semantics. Reads do not create the root or set this bit.
+Unmarked historical unresolved names retain legacy fallback; explicitly defined
+styles and old marked paragraph-style interpretation remain authoritative.

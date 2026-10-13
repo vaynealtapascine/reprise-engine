@@ -467,3 +467,11 @@ packet-byte golden in `tests/sync_delta.hex` is checked by actual WASM bindings.
 Diverged packet validation reads live lengths only for containers the store proves
 unchanged since the packet dependencies; concurrently edited texts still use the
 isolated shadow checkout.
+
+### Stable style owners (required sync bit 4)
+
+`style-identities1` declares versioned block/parent references and `styles2`
+identity metadata. Successful import retains even an empty root, so the receiver
+saves required package bit 18 after undo too. Root/reference operations lacking
+the flag refuse before import. Legacy property-key patches remain admissible:
+rename never relocates their immutable owner, so queued edits merge with it.

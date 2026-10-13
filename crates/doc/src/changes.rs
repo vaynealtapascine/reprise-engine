@@ -241,7 +241,9 @@ impl Document {
                         .extend(event.tree.iter().copied().map(RangeId));
                     report.ranges.extend(event.node.map(RangeId));
                 }
-                Some("styles" | "page_templates" | "page_setup") => report.styles = true,
+                Some("styles" | "styles1" | "styles2" | "page_templates" | "page_setup") => {
+                    report.styles = true
+                }
                 _ => report.other = true,
             }
         }

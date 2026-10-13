@@ -302,7 +302,11 @@ impl Document {
             let meta = self
                 .meta_of(node)
                 .map_err(|e| FragmentError::Invalid(e.to_string()))?;
-            let style = block.style.unwrap_or_default();
+            let style = if scope == CopyScope::Document {
+                self.style_reference(node).unwrap_or_default()
+            } else {
+                block.style.unwrap_or_default()
+            };
             for name in [Some(style.clone()), block.overrides.parent.clone()]
                 .into_iter()
                 .flatten()

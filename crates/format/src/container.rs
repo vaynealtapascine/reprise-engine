@@ -471,6 +471,21 @@ mod paragraph_style_tests {
     use super::*;
     use reprise_doc::{BlockKind, Document, PersistenceMode, Style, StylePatch};
 
+    #[test]
+    fn builtin_use_requires_identity_reader_bit_18() {
+        let doc = Document::new(1).unwrap();
+        doc.append_block(BlockKind::Paragraph, "Heading 1", "title")
+            .unwrap();
+        let bytes = save(&doc);
+        let decoded = Container::decode(&bytes, Limits::default()).unwrap();
+        assert_ne!(decoded.0.header.features.required & (1 << 18), 0);
+        let old = crate::features::KNOWN_REQUIRED & !(1 << 18);
+        assert!(matches!(
+            Container::decode_known(&bytes, Limits::default(), old),
+            Err(FormatError::RequiredFeatures(_))
+        ));
+    }
+
     fn save(doc: &Document) -> Vec<u8> {
         crate::Package::new(doc, DocumentId([7; 16]), PersistenceMode::History)
             .unwrap()

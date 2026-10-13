@@ -46,7 +46,7 @@ impl Document {
     /// Updates with missing dependencies are not document files.
     pub fn import(bytes: &[u8], peer: u64) -> Result<Document, DocError> {
         validate_snapshot(bytes)?;
-        let doc = Document::new(peer)?;
+        let mut doc = Document::new(peer)?;
         let status = doc.doc.import(bytes)?;
         if status.pending.is_some() {
             return Err(DocError::Store("snapshot has missing dependencies".into()));
@@ -66,6 +66,7 @@ impl Document {
         }
         doc.doc.set_peer_id(peer)?;
         doc.doc.get_tree("content").enable_fractional_index(0);
+        doc.legacy_builtins = !doc.has_style_identities() && doc.has_paragraph_styles();
         Ok(doc)
     }
 }

@@ -1144,3 +1144,11 @@ Additive; the design is `docs/paragraph-styles.md`.
     live styles).
 -   **Package.** Required bit 13, `REQUIRED_PARAGRAPH_STYLES` (see
     `crates/format/SPEC.md`).
+
+Stable style ownership (review-fixes 1): native `Document::style_identity(name)`
+returns an opaque document-scoped owner token, and `style_reference(node)` returns
+the underlying resolution/copy reference. Public labels remain strings.
+`AuthoredStyleGraph` also preserves `styles2` and built-in interpretation in fresh
+history. Required package bit 18 and sync bit 4 declare the stored semantics in
+`docs/paragraph-styles.md`; all existing DTO shapes remain unchanged. Unmarked
+legacy unresolved names use their legacy fallback; builtin authoring is tagged.

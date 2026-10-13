@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | doc | `src/identity.rs`, `src/lib.rs`, `src/style/store.rs`, `src/sync.rs`, `src/sync_tests.rs` | Durable document binding and immutable runtime package scope for unmarked stores, read-pure lookup guards, committed/bounded same-peer edit trials, versioned lineage prefix and total wire limits |
 | doc/edit/reprise | `doc/src/style_graph.rs`, `edit/src/paste.rs`, `edit/tests/style_graph_copy.rs`, `reprise/src/session.rs`, `reprise/tests/import_copy.rs` | Bounded raw authored style graph duplication, preserving aliases/tombstones/unused records and bypassing clipboard appearance materialisation |
-| design | `docs/paragraph-styles.md`, `docs/style-migration-probes.rs` | Deferred identity/built-in migration design and standalone expected-failing acceptance probes (outside the passing workspace gate) |
+| design | `docs/paragraph-styles.md`, `crates/doc/src/style_identity_tests.rs` | Selected immutable-owner and built-in compatibility design, with normal Cargo regression tests |
 | edit | `src/{editor,error,plan,paste,replace}.rs`, `tests/refusal_atomicity.rs` | Isolated execution for implicit capacity effects, typed staging preconditions and command-indexed refusal; retained history/undo matrix |
 | font / reprise | `font/src/lib.rs`, `reprise/src/session.rs`, `session/collab.rs`, `reprise/tests/{import_copy,packet_bound,plumbing_edit,plumbing_marks,workspace_fonts}.rs` | Face provenance and scope precedence; durable copy isolation; transport, refusal and mark regressions |
 | layout | `src/flow.rs`, `src/flow/keeps.rs`, `src/{table_flow,notes,floats,codes}.rs`, `src/relations/alignment.rs` | Shared logical indent measure, cell spacing, unsupported auxiliary property diagnostics, missing-target explanations |
@@ -345,3 +345,11 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `reprise-wasm` | `src/lib.rs`, `ts/worker.ts` | Annotation queries and worker kinds | 04 |
 | `fixtures`, `clipboard` | `src/hostile.rs` (`annotation_storm`), `clipboard/tests/annotation_storm.rs` | Hundreds of overlapping and nested annotations, a split, a deletion, concurrent edits and a hostile peer's envelopes | 37 |
 | docs | `docs/annotations.md` | Design note: building block, registry, behaviour, geometry, formats, suggestion mode, App seam | 10, 12, 13, 15, 29, 33, 35 |
+
+### Stable style owner implementation
+
+| Crate | Files | Responsibility | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/style_identity.rs`, `src/style_identity_tests.rs`, `src/{style,style/store,style_graph,sync}.rs` | Immutable owners, versioned references, merge-safe labels, built-in pins, read-pure legacy interpretation and whole-graph transfer | 05, 07, 29, 37 |
+| `format` | `src/features.rs`, `src/container.rs`, `SPEC.md` | Required style-identity bit 18, pure feature detection and old-reader refusal | 34 |
+| `edit` | `src/plan.rs` | Trial all fallible style-identity writes before publishing an edit; ordinary typing avoids staging | 29 |

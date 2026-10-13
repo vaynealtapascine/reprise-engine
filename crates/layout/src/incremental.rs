@@ -194,7 +194,7 @@ impl Inputs {
         let block = doc.block(node).ok()?;
         // The reference resolver's own walk, including the next missing or
         // cyclic name, so diagnostic changes cannot hide in reuse.
-        let mut styles = reprise_doc::style_chain(doc, block.style.clone()).0;
+        let mut styles = reprise_doc::style_chain(doc, doc.style_reference(node)).0;
         // A cut chain still depends on the name it stopped at.
         if let Some((_, Some(record))) = styles.last() {
             let next = match &record.status {

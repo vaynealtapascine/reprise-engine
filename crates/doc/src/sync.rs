@@ -14,8 +14,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loro::{
-    Container, ContainerID, ContainerType, JsonOpContent, JsonSchema, JsonTextOp, JsonTreeOp,
-    TreeID, VersionVector,
+    Container, ContainerID, ContainerType, JsonMapOp, JsonOpContent, JsonSchema, JsonTextOp,
+    JsonTreeOp, TreeID, VersionVector,
 };
 use reprise_diag::{Code, Note, Severity};
 
@@ -64,15 +64,18 @@ impl Features {
     pub const SNAPSHOT_JSON: Features = Features(1 << 2);
     /// A 32-byte durable document ID prefixes the JSON body.
     pub const DOCUMENT_LINEAGE: Features = Features(1 << 3);
+    /// Durable style owners and versioned built-in references.
+    pub const STYLE_IDENTITIES: Features = Features(1 << 4);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3));
+    pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3) | (1 << 4));
 
-    const NAMES: [(Features, &'static str); 4] = [
+    const NAMES: [(Features, &'static str); 5] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),
         (Features::DOCUMENT_LINEAGE, "document-lineage1"),
+        (Features::STYLE_IDENTITIES, "style-identities1"),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -301,7 +304,7 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         PacketKind::Delta => Features::DELTA_JSON,
         PacketKind::Snapshot => Features::SNAPSHOT_JSON,
     };
-    if features.0 & !Features::DOCUMENT_LINEAGE.0 != needed.0 {
+    if features.0 & !(Features::DOCUMENT_LINEAGE.0 | Features::STYLE_IDENTITIES.0) != needed.0 {
         return Err(invalid("packet features don't match its kind"));
     }
     let since = r.vector()?;
@@ -430,6 +433,11 @@ impl Document {
                         Features::DOCUMENT_LINEAGE.0
                     } else {
                         0
+                    }
+                    | if self.has_style_identities() {
+                        Features::STYLE_IDENTITIES.0
+                    } else {
+                        0
                     },
             ),
             kind: PacketKind::Delta,
@@ -445,7 +453,9 @@ impl Document {
         let (mut header, body) = read_header(&packet)?;
         header.kind = PacketKind::Snapshot;
         header.features = Features(
-            Features::SNAPSHOT_JSON.0 | (header.features.0 & Features::DOCUMENT_LINEAGE.0),
+            Features::SNAPSHOT_JSON.0
+                | (header.features.0
+                    & (Features::DOCUMENT_LINEAGE.0 | Features::STYLE_IDENTITIES.0)),
         );
         write_packet(&header, body)
     }
@@ -477,6 +487,9 @@ impl Document {
             return Err(SyncError::Missing {
                 have: self.version_vector(),
             });
+        }
+        if header.features.0 & Features::STYLE_IDENTITIES.0 != 0 {
+            self.retain_style_identities();
         }
         Ok(report)
     }
@@ -527,6 +540,15 @@ impl Document {
             for op in &change.ops {
                 if i64::from(op.counter) != end {
                     return Err(invalid("operation counters are not contiguous"));
+                }
+                if header.features.0 & Features::STYLE_IDENTITIES.0 == 0 {
+                    let identity_root = matches!(&op.container, ContainerID::Root { name, .. } if name.as_str() == crate::style_identity::ROOT);
+                    let identity_reference = matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, value: loro::LoroValue::String(value) }) if matches!(key.as_str(), "style" | "parent") && (value.starts_with("\u{1}style1:") || value.starts_with("\u{2}builtin1:")));
+                    if identity_root || identity_reference {
+                        return Err(invalid(
+                            "style identity operations require style-identities1",
+                        ));
+                    }
                 }
                 check_op(&op.content)?;
                 let len = op_len(&op.content);

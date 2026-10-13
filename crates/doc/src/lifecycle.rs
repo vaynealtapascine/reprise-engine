@@ -111,6 +111,8 @@ impl Document {
     /// changes first; call before the transaction's own undoable operations.
     pub fn stage_block(&self, block: &NewBlock) -> Result<NodeId, DocError> {
         crate::check_authored(&block.text)?;
+        let style_reference = self.authored_style_reference(&block.style)?;
+        let overrides = self.authored_paragraph_style(&block.overrides)?;
         self.commit_part();
         self.doc.set_next_commit_origin(STAGE_ORIGIN);
         let tree = self.tree("content");
@@ -118,13 +120,11 @@ impl Document {
         let meta = tree.get_meta(id)?;
         meta.insert(DELETED, true)?;
         meta.insert("kind", block.kind.as_str())?;
-        meta.insert("style", block.style.as_str())?;
+        meta.insert("style", style_reference)?;
         meta.insert_container("text", LoroText::new())?
             .insert_utf8(0, &block.text)?;
         if block.overrides != crate::Style::default() {
-            block
-                .overrides
-                .write(&meta.insert_container("overrides", LoroMap::new())?)?;
+            overrides.write(&meta.insert_container("overrides", LoroMap::new())?)?;
         }
         self.doc.commit();
         Ok(NodeId::tree(id))

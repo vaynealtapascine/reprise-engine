@@ -509,7 +509,10 @@ impl Document {
             ))?;
         self.stage_mark(id.node, pos, |rec| {
             rec.insert("kind", block.kind.as_str())?;
-            rec.insert("style", block.style.clone().unwrap_or_default())?;
+            rec.insert(
+                "style",
+                get_str(&self.meta_of(id)?, "style").unwrap_or_default(),
+            )?;
             if block.overrides != crate::Style::default() {
                 block
                     .overrides

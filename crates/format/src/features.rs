@@ -35,6 +35,8 @@ pub const REQUIRED_PARAGRAPH_STYLES: u64 = 1 << 13;
 /// would otherwise show as bare ranges and copy without their data. Bits 14
 /// and 15 belong to lists and inline objects (fixed at integration).
 pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
+/// Durable style owners, editable labels and versioned built-in references.
+pub const REQUIRED_STYLE_IDENTITIES: u64 = 1 << 18;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
@@ -42,7 +44,8 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_MARKS
     | REQUIRED_PAGE_SETUP
     | REQUIRED_PARAGRAPH_STYLES
-    | REQUIRED_ANNOTATIONS;
+    | REQUIRED_ANNOTATIONS
+    | REQUIRED_STYLE_IDENTITIES;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -53,6 +56,9 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_style_identities() {
+        flags.required |= REQUIRED_STYLE_IDENTITIES;
+    }
     if document.has_annotations() {
         flags.required |= REQUIRED_ANNOTATIONS;
     }

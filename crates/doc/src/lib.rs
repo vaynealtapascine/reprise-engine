@@ -62,6 +62,9 @@ mod resolve;
 mod structure;
 mod style;
 mod style_graph;
+mod style_identity;
+#[cfg(test)]
+mod style_identity_tests;
 pub mod sync;
 #[cfg(test)]
 mod sync_tests;
@@ -328,6 +331,9 @@ pub struct Document {
     /// The trusted package identity, also for legacy stores without a marker.
     /// This is context, not a Loro operation or an authored migration.
     sync_scope: Option<String>,
+    /// Compatibility context inferred from legacy paragraph-style storage.
+    legacy_builtins: bool,
+    style_identities: std::sync::Mutex<style_identity::IdentityCache>,
     /// A lazily built replica that sync checks out to read text lengths at
     /// past versions (see `sync`). Checking out `doc` itself would clear
     /// its undo history.
@@ -358,6 +364,8 @@ impl Document {
         Document {
             doc,
             sync_scope: None,
+            legacy_builtins: false,
+            style_identities: Default::default(),
             shadow: std::sync::Mutex::new(None),
             lineage_pending: std::sync::Mutex::new(Vec::new()),
             flows,
@@ -383,6 +391,7 @@ impl Document {
         doc.set_peer_id(peer)?;
         let mut fork = Document::wrap(doc);
         fork.sync_scope = self.sync_scope.clone();
+        fork.legacy_builtins = self.legacy_builtins;
         Ok(fork)
     }
 
@@ -397,6 +406,7 @@ impl Document {
         doc.set_peer_id(self.doc.peer_id())?;
         let mut fork = Document::wrap(doc);
         fork.sync_scope = self.sync_scope.clone();
+        fork.legacy_builtins = self.legacy_builtins;
         Ok(fork)
     }
 
@@ -413,11 +423,17 @@ impl Document {
         {
             return Err(DocError::UncommittedEdit);
         }
-        for root in ["content", "ranges", "relations"] {
-            if !self.has_root(root) {
+        let roots = match self.doc.get_value() {
+            LoroValue::Map(roots) => roots,
+            _ => return Err(DocError::Store("unreadable document roots".into())),
+        };
+        for value in roots.values() {
+            let LoroValue::Container(id) = value else {
                 continue;
-            }
-            let tree = self.tree(root);
+            };
+            let Some(Container::Tree(tree)) = self.doc.get_container(id.clone()) else {
+                continue;
+            };
             // Node listings also compute sibling indices, which is quadratic
             // in a wide range tree. Only physical IDs and parents are needed.
             let parents: std::collections::BTreeMap<_, _> = tree
@@ -459,6 +475,9 @@ impl Document {
             .export(loro::ExportMode::updates(&self.doc.oplog_vv()))
             .map_err(|e| DocError::Export(e.to_string()))?;
         self.doc.import(&updates)?;
+        if other.has_style_identities() {
+            self.retain_style_identities();
+        }
         Ok(())
     }
 
@@ -494,12 +513,14 @@ impl Document {
     }
 
     pub fn define_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
+        let owner = self.definition_owner(name)?;
+        let style = self.authored_paragraph_style(style)?;
         let map = self
             .doc
             .get_map("styles")
-            .insert_container(name, LoroMap::new())?;
+            .insert_container(&owner, LoroMap::new())?;
         style.write(&map)?;
-        self.reset_flat_style(name)?;
+        self.reset_flat_style(&owner)?;
         Ok(())
     }
 
@@ -518,11 +539,12 @@ impl Document {
         text: &str,
     ) -> Result<NodeId, DocError> {
         check_authored(text)?;
+        let style_reference = self.authored_style_reference(style)?;
         let tree = self.tree("content");
         let id = tree.create(None)?;
         let meta = tree.get_meta(id)?;
         meta.insert("kind", kind.as_str())?;
-        meta.insert("style", style)?;
+        meta.insert("style", style_reference)?;
         let t = meta.insert_container("text", LoroText::new())?;
         t.insert_utf8(0, text)?;
         Ok(NodeId::tree(id))
@@ -561,7 +583,7 @@ impl Document {
         Ok(Block {
             id,
             kind,
-            style: get_str(&meta, "style"),
+            style: get_str(&meta, "style").map(|reference| self.reference_label(&reference)),
             overrides,
             text,
         })
@@ -570,11 +592,13 @@ impl Document {
     /// Sets the name of a block's style. Does not commit.
     pub fn set_style_name(&self, id: NodeId, name: &str) -> Result<(), DocError> {
         self.block(id)?;
-        self.meta_of(id)?.insert("style", name)?;
+        self.meta_of(id)?
+            .insert("style", self.authored_style_reference(name)?)?;
         Ok(())
     }
 
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
+        let style = self.authored_paragraph_style(style)?;
         self.clear_mark_patches(id)?;
         self.clear_para_patches(id)?;
         let meta = self.meta_of(id)?;

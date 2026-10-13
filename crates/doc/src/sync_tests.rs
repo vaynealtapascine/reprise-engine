@@ -537,3 +537,27 @@ fn saved_documents_with_invalid_tree_positions_are_refused() {
     let bytes = a.try_export(crate::PersistenceMode::History).unwrap();
     assert!(Document::import(&bytes, 9).is_err());
 }
+
+#[test]
+fn identity_feature_transfers_empty_root_and_rejects_downgraded_references() {
+    let (a, b, node) = pair();
+    a.set_style_name(node, "Heading 1").unwrap();
+    a.commit();
+    let packet = a.export_delta(&b.version_vector()).unwrap();
+    let (header, body) = read_header(&packet).unwrap();
+    assert_ne!(header.features.0 & Features::STYLE_IDENTITIES.0, 0);
+    let before = b.try_export(crate::PersistenceMode::History).unwrap();
+    let mut downgraded = header.clone();
+    downgraded.features.0 &= !Features::STYLE_IDENTITIES.0;
+    assert!(b.import_packet(&repack(&downgraded, body)).is_err());
+    assert_eq!(
+        before,
+        b.try_export(crate::PersistenceMode::History).unwrap()
+    );
+    b.import_packet(&packet).unwrap();
+    assert!(b.has_style_identities());
+    assert_eq!(
+        a.computed_style(node).unwrap(),
+        b.computed_style(node).unwrap()
+    );
+}

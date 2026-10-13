@@ -172,6 +172,9 @@ impl Document {
     /// another peer's independent paragraph property.
     pub fn set_alignment(&self, node: NodeId, alignment: Alignment) -> Result<(), DocError> {
         self.block(node)?;
+        if alignment == Alignment::Justify {
+            self.author_style_identities()?;
+        }
         self.doc
             .get_map(PATCHES)
             .insert(&format!("{node}/alignment"), alignment.keyword())?;

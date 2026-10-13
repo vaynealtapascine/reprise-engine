@@ -187,6 +187,19 @@ impl Plan {
     /// Explicit formatting counts are fully modelled. Structural copies can
     /// also write reset/copy actions; exercise those on the resulting state.
     pub(crate) fn needs_trial(&self, doc: &Document) -> Result<bool, DocError> {
+        if self.created.iter().any(|created| match created {
+            Created::Staged(block) => {
+                doc.style_record(&block.style).is_some_and(|r| r.builtin)
+                    || block.overrides.parent.is_some()
+                    || reprise_doc::PARAGRAPH_KEYS
+                        .iter()
+                        .any(|key| block.overrides.stored(key).is_some())
+                    || block.overrides.alignment == Some(reprise_doc::marks::Alignment::Justify)
+            }
+            Created::Split => false,
+        }) {
+            return Ok(true);
+        }
         if self.paste.is_some() {
             return Ok(true);
         }
@@ -196,22 +209,40 @@ impl Plan {
             .any(|s| matches!(s, Step::FormatText { .. }));
         for step in &self.steps {
             let node = match step {
-                Step::RenameStyle { from, .. } => {
-                    // Rename reauthors the source's captured properties. A
-                    // remote/legacy record may be unreadable or out of bounds;
-                    // earlier patches in this batch can repair it, so exercise
-                    // the resulting value instead of rejecting the old one.
-                    if doc.style_record(from).is_some_and(|record| {
-                        reprise_doc::StylePatch {
-                            set: record.style,
-                            ..Default::default()
-                        }
-                        .validate()
-                        .is_err()
-                    }) {
-                        return Ok(true);
-                    }
-                    continue;
+                // Alias allocation and imported property validation can refuse.
+                // Exercise preceding repairs and the resulting metadata state.
+                Step::RenameStyle { .. } => return Ok(true),
+                Step::SetAlignment {
+                    alignment: reprise_doc::marks::Alignment::Justify,
+                    ..
+                } => return Ok(true),
+                Step::FormatText { style, .. } if !style.clear.is_empty() => return Ok(true),
+                Step::DefineStyle { .. } | Step::PatchStyle { .. } | Step::DeleteStyle { .. } => {
+                    return Ok(true);
+                }
+                Step::SetStyleName { name, .. }
+                    if doc.has_style_identities()
+                        || doc.style_record(name).is_some_and(|r| r.builtin) =>
+                {
+                    return Ok(true);
+                }
+                Step::SetOverrides { style, .. }
+                    if style.parent.is_some()
+                        || reprise_doc::PARAGRAPH_KEYS
+                            .iter()
+                            .any(|k| style.stored(k).is_some())
+                        || style.alignment == Some(reprise_doc::marks::Alignment::Justify) =>
+                {
+                    return Ok(true);
+                }
+                Step::PatchOverrides { patch, .. }
+                    if patch.set.parent.is_some()
+                        || reprise_doc::PARAGRAPH_KEYS
+                            .iter()
+                            .any(|k| patch.set.stored(k).is_some())
+                        || patch.set.alignment == Some(reprise_doc::marks::Alignment::Justify) =>
+                {
+                    return Ok(true);
                 }
                 Step::Split { node, .. } | Step::MoveCopy { node, .. } => node,
                 Step::Join { first, second } => {
@@ -1137,7 +1168,7 @@ impl Model<'_> {
             let new = self.plan.created.len();
             self.plan.created.push(Created::Staged(Box::new(NewBlock {
                 kind: block.kind,
-                style: block.style.unwrap_or_default(),
+                style: self.doc.style_reference(node).unwrap_or_default(),
                 overrides,
                 text,
             })));
