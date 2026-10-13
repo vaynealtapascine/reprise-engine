@@ -91,3 +91,77 @@ impl Plan {
         entry.value.push(rect);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reprise_doc::sections::SectionId;
+    use reprise_geom::{Matrix, Transform};
+
+    #[test]
+    fn physical_constraints_reproject_current_bands_and_require_full_source_provenance() {
+        let doc = Document::new(1).unwrap();
+        let node = doc.append_block(BlockKind::Paragraph, "", "x").unwrap();
+        let engine = Engine::new(reprise_font::FontStore::default());
+        let mut snapshot = engine.layout(&doc);
+        // Use the existing non-main frame as a stable physical source plane.
+        snapshot.frames[1].to_page = snapshot.frames[0].to_page;
+        let catalog = Catalog::from_snapshot(&snapshot);
+        let source = catalog.reference(1).unwrap();
+        let rect = Rect::new(
+            Point::new(Length::ZERO, Length::from_pt(50)),
+            Length::from_pt(100),
+            Length::from_pt(10),
+        );
+        let mut plan = Plan::default();
+        plan.exclude_physical(source, rect);
+        plan.note_areas
+            .insert(source.address.clone(), Entry::new(source, rect));
+        assert_eq!(plan.physical_exclusions_for(&catalog, &snapshot, 0), [rect]);
+        assert_eq!(
+            plan.physical_reservation_for(&catalog, &snapshot, 0),
+            snapshot.frames[0].rect.height - Length::from_pt(50)
+        );
+        snapshot.frames[0].rect.height = Length::from_pt(60);
+        let mut shifted = *snapshot.frames[0].to_page.matrix();
+        shifted.ty += Length::from_pt(30);
+        snapshot.frames[0].to_page = Transform::new(shifted);
+        let catalog = Catalog::from_snapshot(&snapshot);
+        let projected = plan.physical_exclusions_for(&catalog, &snapshot, 0);
+        assert_eq!(projected[0].origin.y, Length::from_pt(20));
+        assert_eq!(
+            plan.physical_reservation_for(&catalog, &snapshot, 0),
+            Length::from_pt(40)
+        );
+        let mut variants = vec![source.provenance.clone(); 6];
+        variants[0].section = SectionId::Block(node);
+        variants[1].life = "99@1".into();
+        variants[2].rect.width += Length(1);
+        variants[3].to_page = Transform::new(Matrix::translate(Length(1), Length::ZERO));
+        variants[4].writing_mode = reprise_doc::WritingMode::VerticalRl;
+        variants[5].running = Some(("header".into(), node));
+        for provenance in variants {
+            let mut stale = plan.clone();
+            stale
+                .physical_exclusions
+                .get_mut(&source.address)
+                .unwrap()
+                .provenance = provenance.clone();
+            stale
+                .note_areas
+                .get_mut(&source.address)
+                .unwrap()
+                .provenance = provenance;
+            assert!(
+                stale
+                    .physical_exclusions_for(&catalog, &snapshot, 0)
+                    .is_empty()
+            );
+            assert_eq!(
+                stale.physical_reservation_for(&catalog, &snapshot, 0),
+                Length::ZERO
+            );
+            assert!(!plan.equivalent(&stale));
+        }
+    }
+}

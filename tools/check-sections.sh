@@ -16,6 +16,8 @@ step tsc tsc -p crates/reprise-wasm/ts/tsconfig.json
 step tsc-worker tsc -p crates/reprise-wasm/ts/tsconfig.json --noEmit false --module commonjs --moduleResolution node --outDir "$T/worker-cjs"
 step smoke node crates/reprise-wasm/ts/smoke.cjs "$T/pkg-node"
 step worker-smoke node crates/reprise-wasm/ts/worker-smoke.cjs "$T/pkg-node" "$T/worker-cjs/worker.js"
+step sections-native cargo run -p reprise --example sections_parity -- "$T/sections-parity"
+step sections-wasm node tools/sections-parity.cjs "$T/pkg-node" "$T/sections-parity"
 step fmt cargo fmt --all -- --check
 step clippy cargo clippy --workspace --all-targets -- -D warnings
 step wasmcheck cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm

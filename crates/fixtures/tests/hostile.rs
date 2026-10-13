@@ -1237,3 +1237,51 @@ fn sections_retained_hostile() {
     );
     check(fixture);
 }
+
+#[test]
+fn sections_bands_hostile() {
+    let fixture = hostile::sections_bands_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let metadata = snapshot.sections.as_ref().unwrap();
+    assert_eq!(metadata.pages.len(), 1);
+    let page = &metadata.pages[0];
+    assert_eq!(page.section, reprise_doc::sections::SectionId::First);
+    assert_eq!(page.counter, 1);
+    assert_eq!(
+        page.bands
+            .iter()
+            .map(|b| (b.offset, b.depth, b.balanced))
+            .collect::<Vec<_>>(),
+        vec![
+            (Length::ZERO, Length::from_pt(12), true),
+            (Length::from_pt(12), Length::from_pt(24), true),
+            (Length::from_pt(36), Length::from_pt(144), false)
+        ]
+    );
+    assert_eq!(
+        page.bands
+            .iter()
+            .map(|b| b.frames.len())
+            .collect::<Vec<_>>(),
+        [1, 2, 1]
+    );
+    let b = &page.bands[1];
+    assert_eq!(snapshot.frames[b.frames[0]].rect.width, Length::from_pt(40));
+    assert_eq!(snapshot.frames[b.frames[1]].rect.width, Length::from_pt(80));
+    assert_eq!(metadata.rules.len(), 1);
+    assert_eq!(metadata.rules[0].rect.origin.x, Length(114 * 1024 + 512));
+    assert_eq!(metadata.rules[0].rect.origin.y, Length::from_pt(22));
+    assert_eq!(metadata.rules[0].rect.height, Length::from_pt(24));
+    let mut session = reprise_layout::incremental::LayoutSession::new(&fixture.engine);
+    assert_eq!(snapshot, session.layout(&fixture.doc).unwrap());
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|p| p.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}

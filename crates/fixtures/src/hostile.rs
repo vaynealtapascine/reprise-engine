@@ -3362,3 +3362,66 @@ pub fn sections_retained_hostile() -> Result<Fixture, DocError> {
     doc.commit();
     Ok(Fixture::new("sections_retained_hostile", doc, &[]))
 }
+
+/// Effective continuous bands stay dedicated until S9 adds clipboard transport.
+pub fn sections_bands_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
+    let doc = document()?;
+    doc.define_style(
+        "band",
+        &Style {
+            family: Some("Source Serif Pro".into()),
+            size: Some(LengthExpr::Pt(Length::from_pt(10))),
+            line_height: Some(LengthExpr::Pt(Length::from_pt(12))),
+            ..Style::default()
+        },
+    )?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(Length::from_pt(200)),
+        height: Some(Length::from_pt(200)),
+        top: Some(Length::from_pt(10)),
+        right: Some(Length::from_pt(10)),
+        bottom: Some(Length::from_pt(10)),
+        left: Some(Length::from_pt(10)),
+    })?;
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &SectionProperties::from([("columns.count".into(), 1.into())]),
+        &[],
+    )?;
+    doc.append_block(BlockKind::Paragraph, "band", "a")?;
+    let b = doc.append_block(BlockKind::Paragraph, "band", "b\nb\nb\nb")?;
+    let c = doc.append_block(BlockKind::Paragraph, "band", "c")?;
+    for (node, properties) in [
+        (
+            b,
+            SectionProperties::from([
+                ("start".into(), "continuous".into()),
+                ("columns.widths".into(), "1,2".into()),
+                ("columns.gap".into(), 10240.into()),
+                ("columns.rule".into(), 1024.into()),
+                ("left".into(), 30720.into()),
+                ("right".into(), 40960.into()),
+                ("top".into(), 61440.into()),
+                ("bottom".into(), 61440.into()),
+                ("direction".into(), "rtl".into()),
+                ("numbering.restart".into(), "-7".into()),
+            ]),
+        ),
+        (
+            c,
+            SectionProperties::from([
+                ("start".into(), "continuous".into()),
+                ("columns.count".into(), 1.into()),
+                ("left".into(), 8192.into()),
+                ("right".into(), 9216.into()),
+            ]),
+        ),
+    ] {
+        let life = doc.mint_lifetime(node)?;
+        doc.activate_start(node, &life, BreakKind::Section, &properties)?;
+    }
+    doc.commit();
+    Ok(Fixture::new("sections_bands_hostile", doc, &[]))
+}

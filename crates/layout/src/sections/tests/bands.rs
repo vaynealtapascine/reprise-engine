@@ -736,3 +736,70 @@ fn suspended_trials_keep_owned_state_and_reject_stale_or_cancelled_publication()
     assert!(matches!(job.partial(), Err(JobError::Cancelled)));
     assert!(matches!(job.complete(), Err(JobError::Cancelled)));
 }
+
+#[test]
+fn unequal_columns_balance_with_widows_and_an_unbroken_keep_chain() {
+    let (engine, doc) = setup();
+    page(&doc, 200, 200, 10);
+    first(
+        &doc,
+        &[
+            ("columns.widths", json!("1,3")),
+            ("columns.gap", json!(10240)),
+        ],
+    );
+    let a = block(&doc, &["a"; 8].join("\n"));
+    doc.set_overrides(
+        a,
+        &reprise_doc::Style {
+            widows: Some(3),
+            orphans: Some(3),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let heading = block(&doc, "heading");
+    doc.set_overrides(
+        heading,
+        &reprise_doc::Style {
+            keep_with_next: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let tail = block(&doc, "b\nb\nb\nb");
+    doc.set_overrides(
+        tail,
+        &reprise_doc::Style {
+            keep_together: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let endpoint = block(&doc, "next section");
+    continuous(&doc, endpoint, &[("columns.count", json!(1))]);
+    let snapshot = engine.layout(&doc);
+    let band = &snapshot.sections.as_ref().unwrap().pages[0].bands[0];
+    assert!(band.balanced, "{:?}", snapshot.diagnostics);
+    assert_eq!(band.depth, Length::from_pt(96));
+    assert_eq!(
+        snapshot.block(heading).unwrap().lines[0].frame,
+        snapshot.block(tail).unwrap().lines[0].frame
+    );
+    assert!(
+        snapshot
+            .block(tail)
+            .unwrap()
+            .lines
+            .iter()
+            .all(|l| l.frame == snapshot.block(heading).unwrap().lines[0].frame)
+    );
+    assert!(
+        snapshot
+            .diagnostics_with("layout.keep-unsatisfied")
+            .next()
+            .is_none()
+    );
+    assert_eq!(snapshot.block(a).unwrap().lines.len(), 8);
+    assert_eq!(snapshot, complete_by_units(&engine, &doc));
+}

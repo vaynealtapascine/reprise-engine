@@ -80,3 +80,25 @@ float boxes retain full physical-source provenance and project into current
 band depths; no provenance comparison is weakened. Full workspace and WASM
 validation remain pending. Gate tooling disables the compiler wrapper locally
 after the S3/S4 rustdoc stalls, without changing machine configuration.
+
+S5 acceptance now includes unequal widths with successful widows/orphans and
+an unbroken keep chain, plus full physical-source provenance rejection. All
+102 layout tests pass in 3.84 s. The unchanged incremental_steps binary passes
+all five tests in 41.90 s. Workspace/all-targets clippy remains clean.
+
+Two new dedicated band goldens were recorded and reviewed: a 200x200 pt page
+owned by first (counter 1), 1/2/1 main frames, band offsets 0/12/36 pt and depths
+12/24/144 pt, only the first two balanced. The weighted RTL band has widths
+40/80 pt at x=120/30 pt and y=22 pt; four 12 pt lines fill both columns. Its
+1 pt black rule starts at x=114.5 pt and y=22 pt and ends at y=46 pt. The last
+band is x=8 pt, y=46 pt, width=183 pt. Incoming 60 pt block margins are ignored
+on the owned page and its -7 restart remains pending. There are no diagnostics.
+The content golden contains six glyph lines and exactly that rule path. The
+inherited non-main margin frame is unchanged. This fixture stays dedicated
+under the approved S9 transport coverage split. No old goldens changed.
+
+The sections_parity example generates four authored packages and native facade
+outputs: bounded geometry/parity/counters, ordinary continuous bands, vertical
+continuous bands, and notes plus floats. The gate compares actual WASM display
+JSON bytes, diagnostics and State.sections with the native outputs, using
+budgets zero and one. The native generator passes; actual WASM check is pending.
