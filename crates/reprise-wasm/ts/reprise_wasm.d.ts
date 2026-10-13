@@ -13,7 +13,7 @@ export type PageSetup = { width: number, height: number, margins: PageMargins, o
 export type PageMargins = { top: number, right: number, bottom: number, left: number, };
 export type PageOrientation = "portrait" | "landscape" | "square";
 export type PageTemplateSource = "builtin" | "document";
-export type State = { document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>,
+export type State = { sections?: Array<SectionState>, stories?: Array<StoryState>, document_id: string, peer_id: string, revision: Array<Clock>, can_undo: boolean, can_redo: boolean, page_setup: PageSetup, blocks: Array<Block>, diagnostics: Array<Diagnostic>,
 /**
  * The live named styles, built-ins included, sorted by name (at most
  * 1,024; a `bindings.limit` diagnostic says when more were left out).
@@ -31,8 +31,13 @@ resolved: Array<ResolvedStyle>, lists?: Array<NamedList>,
  * says when more were left out. The queries are not cut short that way.
  */
 annotations: Array<AnnotationBrief>, };
+export type SectionState = { id: string, life: string, first_block: string | null, end: string | null, own: Record<string, unknown>, resolved?: unknown, bindings: Array<SectionBinding>, unknown_keys: Array<string>, };
+export type SectionBinding = { slot: string, variant: string, authored: string, story: string | null, resolved: string | null, from_section: string, };
+export type StoryState = { id: string, bound_by: Array<StoryBinding>, blocks: Array<Block>, };
+export type StoryBinding = { section: string, slot: string, variant: string, };
+export type SectionStart = { kind: string, life: string, own: Record<string, unknown>, };
 export type Clock = { peer: string, counter: number, };
-export type Block = { id: string, parent: string | null, kind: BlockKind, text: string,
+export type Block = { starts?: SectionStart, id: string, parent: string | null, kind: BlockKind, text: string,
 /**
  * Resolved character formatting as disjoint byte runs covering `text`,
  * present only when some formatting action covers this block. A run's

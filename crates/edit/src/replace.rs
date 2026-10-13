@@ -236,6 +236,15 @@ impl Editor {
             command: None,
             reason: Reason::SelectionGone,
         })?;
+        if self.doc.domain_of(resolved.anchor.node) != self.doc.domain_of(resolved.focus.node) {
+            return Err(EditError {
+                command: None,
+                reason: Reason::CrossDomain {
+                    first: resolved.anchor.node,
+                    second: resolved.focus.node,
+                },
+            });
+        }
         // A selection inside one block, the common case of typing over a
         // word, needs no document order.
         let (nodes, rank) = if resolved.anchor.node == resolved.focus.node {

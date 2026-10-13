@@ -53,6 +53,12 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error("an effective break already exists at {0}")]
+    BreakExists(NodeId),
+    #[error("{first} and {second} are in different traversal domains")]
+    CrossDomain { first: NodeId, second: NodeId },
+    #[error("invalid section edit: {0}")]
+    Section(String),
     #[error(transparent)]
     PageSetup(reprise_doc::page_setup::PageSetupError),
     #[error("alignment relation limit exceeded")]

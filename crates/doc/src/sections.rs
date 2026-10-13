@@ -549,3 +549,6 @@ fn values(map: &LoroMap) -> SectionProperties {
 
 #[cfg(test)]
 mod tests;
+
+mod views;
+pub use views::{BindingView, SectionView, known_property};

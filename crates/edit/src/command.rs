@@ -15,6 +15,37 @@ use reprise_doc::{ListId, NewBlock, NodeId, Relation, RelationId, Style};
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Command {
+    InsertBreak {
+        at: BreakAt,
+        kind: reprise_doc::sections::BreakKind,
+        patch: reprise_doc::sections::SectionProperties,
+    },
+    RemoveBreak {
+        block: NodeId,
+    },
+    SetSection {
+        section: reprise_doc::sections::SectionId,
+        patch: reprise_doc::sections::SectionProperties,
+        clear: Vec<String>,
+    },
+    CreateStory {
+        blocks: Vec<NewBlock>,
+    },
+    SetRegion {
+        section: reprise_doc::sections::SectionId,
+        slot: String,
+        variant: String,
+        binding: RegionBinding,
+    },
+    CreateRegion {
+        section: reprise_doc::sections::SectionId,
+        slot: String,
+        variant: String,
+        from: StoryFrom,
+    },
+    DeleteStory {
+        story: NodeId,
+    },
     /// Patch only supplied properties. Medium is an explicit validation input.
     SetPageSetup {
         patch: reprise_doc::page_setup::PageSetupPatch,
@@ -271,4 +302,22 @@ pub enum Effect {
     /// A paragraph of a flow moved by copying: `node` was deleted, and its
     /// text is now `new`'s, at the same offsets.
     Moved { node: NodeId, new: NodeId },
+}
+
+/// A paragraph position, or the leading edge of any body top-level block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreakAt {
+    Position { node: NodeId, offset: usize },
+    Before(NodeId),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionBinding {
+    Inherit,
+    None,
+    Story(NodeId),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoryFrom {
+    Empty,
+    CopyOf(NodeId),
 }

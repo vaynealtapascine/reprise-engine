@@ -339,3 +339,8 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 
 | `fixtures`, `reprise` | `fixtures/tests/section_domains.rs`, `reprise/tests/section_domains.rs` | Every hostile fixture with an unbound story preserves body JSON; facade compatibility aliases stay body-only | 06, 33, 38 |
 | tools | `tools/check-sections.sh` | Full types/WASM/web/Node/TypeScript/worker/native gate scoped to sections2 and G: build caches | 38, 39 |
+
+| Section transactions and sequential story cloning | `crates/edit/src/command.rs`, `plan/sections.rs`, `editor.rs`, `paste.rs`; validation precedes staging, split-returned addresses and fresh lifetime IDs survive undo. |
+| Section binding inheritance and authored state | `crates/doc/src/sections/views.rs`, `crates/reprise/src/{dto,session,typescript}.rs`; one forward scan includes the empty first section, stories stay available for recovery. |
+| Story list numbering | `crates/doc/src/lists.rs`, `crates/edit/src/plan/semantic.rs`; reset counters per domain in one aggregate cache. |
+| Section transaction hostility | `crates/edit/tests/sections.rs`, `crates/reprise/tests/section_domains.rs`; concurrency, UTF-8/inherited splits, story clones, range refusal, undo/redo and state introspection. |

@@ -77,6 +77,12 @@ pub struct Open {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct State {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<SectionState>>", optional)]
+    pub sections: Vec<SectionState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<StoryState>>", optional)]
+    pub stories: Vec<StoryState>,
     pub document_id: String,
     pub peer_id: String,
     pub revision: Vec<Clock>,
@@ -154,6 +160,9 @@ pub struct Clock {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Block {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub starts: Option<SectionStart>,
     pub id: String,
     pub parent: Option<String>,
     pub kind: BlockKind,
@@ -1770,4 +1779,48 @@ pub struct PageLinks {
     pub page: u32,
     pub links: Vec<PageLink>,
     pub truncated: bool,
+}
+
+/// Current-lifetime values retain unknown keys. Raw i64s use decimal strings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionState {
+    pub id: String,
+    pub life: String,
+    pub first_block: Option<String>,
+    pub end: Option<String>,
+    #[ts(type = "Record<string, unknown>")]
+    pub own: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "unknown", optional)]
+    pub resolved: Option<serde_json::Value>,
+    pub bindings: Vec<SectionBinding>,
+    pub unknown_keys: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionBinding {
+    pub slot: String,
+    pub variant: String,
+    pub authored: String,
+    pub story: Option<String>,
+    pub resolved: Option<String>,
+    pub from_section: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct StoryState {
+    pub id: String,
+    pub bound_by: Vec<StoryBinding>,
+    pub blocks: Vec<Block>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct StoryBinding {
+    pub section: String,
+    pub slot: String,
+    pub variant: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionStart {
+    pub kind: String,
+    pub life: String,
+    #[ts(type = "Record<string, unknown>")]
+    pub own: serde_json::Value,
 }

@@ -376,6 +376,9 @@ impl DocumentSession {
     fn anchor_caret(&self, c: &Caret) -> Result<reprise_edit::StableCaret> {
         let caret = cv::caret(c)?;
         reprise_edit::StableCaret::anchor(self.doc(), caret).map_err(|e| match e {
+            reprise_edit::StableError::CrossDomain { .. } => {
+                Error::Invalid("selection endpoints are in different domains".into())
+            }
             reprise_edit::StableError::NoBlock(n) => Error::InvalidId(n.to_string()),
             reprise_edit::StableError::BadOffset(_) => {
                 Error::Invalid("caret is not at a UTF-8 boundary in its block".into())

@@ -76,6 +76,7 @@ pub struct Applied {
     pub lists: Vec<reprise_doc::ListId>,
     /// The annotations it created (by `AddAnnotation`), in command order.
     pub annotations: Vec<reprise_doc::RangeId>,
+    pub stories: Vec<NodeId>,
     /// What its commands did to positions, in order.
     pub effects: Vec<Effect>,
 }
@@ -222,10 +223,69 @@ impl Editor {
             .map(|l| self.doc.stage_list(l))
             .collect::<Result<Vec<_>, _>>()
             .map_err(store)?;
+        let stories = plan
+            .stories
+            .iter()
+            .map(|s| match s {
+                plan::StoryCreation::Blocks(blocks) => self.doc.stage_story(blocks),
+                plan::StoryCreation::Copy(_) => self.doc.stage_story(&[]),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(store)?;
         let mut made_relations = Vec::new();
         let mut made_annotations = Vec::new();
         for step in &plan.steps {
             match step {
+                Step::InsertStart {
+                    target,
+                    kind,
+                    properties,
+                } => {
+                    let id = match target {
+                        plan::Slot::Real(id) => *id,
+                        plan::Slot::New(i) => {
+                            blocks.get(*i).copied().flatten().ok_or_else(|| {
+                                store(reprise_doc::DocError::Store(
+                                    "split address is missing".into(),
+                                ))
+                            })?
+                        }
+                    };
+                    let life = self.doc.mint_lifetime(id).map_err(store)?;
+                    self.doc
+                        .activate_start(id, &life, *kind, properties)
+                        .map_err(store)?;
+                }
+                Step::RemoveStart { block } => self.doc.deactivate_start(*block).map_err(store)?,
+                Step::SetSection {
+                    section,
+                    patch,
+                    clear,
+                } => write_section(&self.doc, *section, patch, clear).map_err(store)?,
+                Step::CreateStory { new, binding } => {
+                    let story = stories.get(*new).copied().ok_or_else(|| {
+                        store(reprise_doc::DocError::Store(
+                            "staged story is missing".into(),
+                        ))
+                    })?;
+                    self.doc.activate_story(story).map_err(store)?;
+                    if let Some(plan::StoryCreation::Copy(prepared)) = plan.stories.get(*new) {
+                        crate::paste::write(
+                            &self.doc,
+                            &self.schemas,
+                            (**prepared).clone().into_story(story),
+                        )?;
+                    }
+                    if let Some((section, key)) = binding {
+                        write_section(
+                            &self.doc,
+                            *section,
+                            &[(key.clone(), serde_json::Value::String(story.to_string()))].into(),
+                            &[],
+                        )
+                        .map_err(store)?;
+                    }
+                }
                 Step::AlignLine {
                     node,
                     at,
@@ -300,6 +360,7 @@ impl Editor {
             relations: made_relations,
             lists,
             annotations: made_annotations,
+            stories,
             effects,
         })
     }
@@ -314,6 +375,10 @@ impl Editor {
         let missing = || reprise_doc::DocError::Store("a staged item is missing".into());
         let staged = |i: usize| blocks.get(i).copied().flatten().ok_or_else(missing);
         match step {
+            Step::InsertStart { .. }
+            | Step::RemoveStart { .. }
+            | Step::SetSection { .. }
+            | Step::CreateStory { .. } => return Err(missing()),
             Step::SetPageSetup(patch) => self.doc.set_page_setup_patch(*patch)?,
             Step::SetAlignment { node, alignment } => self.doc.set_alignment(*node, *alignment)?,
             Step::SetTabs { node, tabs } => self.doc.set_tab_stops(*node, tabs)?,
@@ -471,4 +536,22 @@ fn store(e: reprise_doc::DocError) -> EditError {
         command: None,
         reason: Reason::Store(e.to_string()),
     }
+}
+
+fn write_section(
+    doc: &Document,
+    section: reprise_doc::sections::SectionId,
+    patch: &reprise_doc::sections::SectionProperties,
+    clear: &[String],
+) -> Result<(), reprise_doc::DocError> {
+    let life = match section {
+        reprise_doc::sections::SectionId::First => "0".to_owned(),
+        _ => doc
+            .effective_starts()
+            .into_iter()
+            .find(|r| r.id == section)
+            .and_then(|r| r.life)
+            .ok_or_else(|| reprise_doc::DocError::Store("section lifetime missing".into()))?,
+    };
+    doc.write_section_properties(section, &life, patch, clear)
 }

@@ -43,3 +43,5 @@ pub use paste::Pasted;
 pub use plan::{MAX_ANCESTORS, MAX_COMMANDS, MAX_INSERT_BYTES, MAX_TRANSACTION_BYTES};
 pub use replace::{Replaced, StagedReplacement};
 pub use stable::{MAX_ANCHOR_BYTES, Resolution, StableCaret, StableError, StableSelection};
+
+pub use command::{BreakAt, RegionBinding, StoryFrom};

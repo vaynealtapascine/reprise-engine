@@ -23,6 +23,7 @@ use reprise_doc::{
 use crate::command::Command;
 use crate::error::{EditError, Reason};
 
+mod sections;
 mod semantic;
 
 /// The most commands one transaction may hold.
@@ -36,8 +37,26 @@ pub const MAX_TRANSACTION_BYTES: usize = 16 << 20;
 /// `TreeDepthLimit` error (and `edit.limit` diagnostic), never silent truncation.
 pub const MAX_ANCESTORS: usize = 1024;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Step {
+    InsertStart {
+        target: Slot,
+        kind: reprise_doc::sections::BreakKind,
+        properties: reprise_doc::sections::SectionProperties,
+    },
+    RemoveStart {
+        block: NodeId,
+    },
+    SetSection {
+        section: reprise_doc::sections::SectionId,
+        patch: reprise_doc::sections::SectionProperties,
+        clear: Vec<String>,
+    },
+    CreateStory {
+        new: usize,
+        binding: Option<(reprise_doc::sections::SectionId, String)>,
+    },
+
     SetPageSetup(reprise_doc::page_setup::PageSetupPatch),
     SetAlignment {
         node: NodeId,
@@ -189,7 +208,7 @@ pub(crate) enum Step {
 }
 
 /// A block the transaction creates.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Created {
     /// Staged before the steps run, then placed.
     Staged(Box<NewBlock>),
@@ -197,9 +216,10 @@ pub(crate) enum Created {
     Split,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Plan {
     pub paste: Option<crate::paste::Prepared>,
+    pub stories: Vec<StoryCreation>,
     /// The blocks the transaction creates, in command order. Staged ones are
     /// staged first; steps name them by index.
     pub created: Vec<Created>,
@@ -212,7 +232,7 @@ pub(crate) struct Plan {
     pub effects: Vec<PlannedEffect>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum PlannedEffect {
     Text {
         node: NodeId,
@@ -240,8 +260,8 @@ pub(crate) enum PlannedEffect {
 
 /// A child in the model: a block that exists, or the nth block the
 /// transaction creates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Slot {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Slot {
     Real(NodeId),
     New(usize),
 }
@@ -270,6 +290,14 @@ struct Model<'a> {
     members: BTreeMap<NodeId, Option<(crate::ListRef, u8)>>,
     /// Lists this transaction has deleted.
     dead_lists: BTreeSet<crate::ListRef>,
+    starts: BTreeMap<
+        Slot,
+        (
+            reprise_doc::sections::BreakKind,
+            reprise_doc::sections::SectionProperties,
+        ),
+    >,
+    first: reprise_doc::sections::SectionProperties,
 }
 
 /// Validates `commands` and turns them into a plan.
@@ -327,6 +355,22 @@ pub(crate) fn plan(
         styles: BTreeMap::new(),
         members: BTreeMap::new(),
         dead_lists: BTreeSet::new(),
+        starts: doc
+            .effective_starts()
+            .into_iter()
+            .filter_map(|r| match (r.id, r.kind) {
+                (reprise_doc::sections::SectionId::Block(id), Some(kind)) => {
+                    Some((Slot::Real(id), (kind, r.own)))
+                }
+                _ => None,
+            })
+            .collect(),
+        first: doc
+            .start_records()
+            .into_iter()
+            .find(|r| r.id == reprise_doc::sections::SectionId::First)
+            .map(|r| r.own)
+            .unwrap_or_default(),
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
@@ -493,6 +537,32 @@ impl Model<'_> {
 
     fn run(&mut self, command: &Command) -> Result<(), Reason> {
         match command {
+            Command::InsertBreak { at, kind, patch } => self.insert_break(*at, *kind, patch),
+            Command::RemoveBreak { block } => self.remove_break(*block),
+            Command::SetSection {
+                section,
+                patch,
+                clear,
+            } => self.set_section(*section, patch, clear),
+            Command::CreateStory { blocks } => self.create_story(blocks, None),
+            Command::SetRegion {
+                section,
+                slot,
+                variant,
+                binding,
+            } => self.set_region(*section, slot, variant, *binding),
+            Command::CreateRegion {
+                section,
+                slot,
+                variant,
+                from,
+            } => self.create_region(*section, slot, variant, *from),
+            Command::DeleteStory { story } => {
+                self.require_story(*story)?;
+                self.killed.insert(*story);
+                self.plan.steps.push(Step::Delete { node: *story });
+                Ok(())
+            }
             Command::SetPageSetup { patch, medium } => self.set_page_setup(*patch, medium),
             Command::SwapPageOrientation { medium } => {
                 let setup = self.page_dimensions(medium)?;
@@ -1024,6 +1094,9 @@ impl Model<'_> {
         }
         self.require(first)?;
         self.require(second)?;
+        if self.domain(first)? != self.domain(second)? {
+            return Err(Reason::CrossDomain { first, second });
+        }
         if self.doc.kind_of(first) != self.doc.kind_of(second) {
             return Err(Reason::KindMismatch { first, second });
         }
@@ -1217,4 +1290,10 @@ fn dead_block(reason: Reason, node: NodeId) -> Reason {
         Reason::NoSuchBlock(_) => Reason::DeadBlock(node),
         other => other,
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum StoryCreation {
+    Blocks(Vec<NewBlock>),
+    Copy(Box<crate::paste::Prepared>),
 }

@@ -11,6 +11,11 @@ pub enum Domain {
 }
 
 impl Document {
+    /// Isolated validation replica with identical operation-ID allocation.
+    pub fn validation_fork(&self) -> Result<Document, crate::DocError> {
+        self.fork(self.doc.peer_id())
+    }
+
     pub(crate) fn is_story_node(&self, id: TreeID) -> bool {
         self.tree("content")
             .get_meta(id)

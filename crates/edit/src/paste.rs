@@ -27,7 +27,7 @@ pub struct Pasted {
     pub end: Option<(NodeId, usize)>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Prepared {
     fragment: Fragment,
     at: Option<(NodeId, usize)>,
@@ -1005,4 +1005,14 @@ fn stage_annotations(
             })?;
     }
     Ok(())
+}
+
+impl Prepared {
+    pub(crate) fn into_story(mut self, story: NodeId) -> Self {
+        self.parent = Some(story);
+        self.index = 0;
+        self.at = None;
+        self.fragment.page_setup_patch = None;
+        self
+    }
 }

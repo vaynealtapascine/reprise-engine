@@ -39,6 +39,19 @@ pub fn declarations() -> String {
     text.push_str(&PageTemplateSource::decl(&cfg));
     text.push_str("\nexport ");
     text.push_str(&State::decl(&cfg));
+    for declaration in [
+        SectionState::decl(&cfg),
+        SectionBinding::decl(&cfg),
+        StoryState::decl(&cfg),
+        StoryBinding::decl(&cfg),
+        SectionStart::decl(&cfg),
+    ] {
+        text.push_str(
+            "
+export ",
+        );
+        text.push_str(&declaration);
+    }
     text.push('\n');
     text.push_str("export ");
     text.push_str(&Clock::decl(&cfg));
