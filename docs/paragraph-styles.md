@@ -309,6 +309,43 @@ set the property explicitly to turn a built-in's keep off.
 
 ## Review addendum: durable identity and compatibility (proposed, 2026-10-12)
 
+### Selected implementation policy (2026-10-14)
+
+The resumed brief requires completing the migration. Keep existing nested and
+flat property keys as immutable document-scoped owners. `styles2` stores flat
+`alias/<name>` selectors and `label/<owner>` display labels. Renames modify only
+these selectors/labels; concurrent legacy-key property patches still reach the
+same owner. Two peers' first patches retain the existing deterministic name
+owner. Reusing a renamed/deleted name allocates a fresh owner from the local peer
+and next operation counter; old block/parent references keep their former owner.
+Identity tokens are opaque, versioned references distinct from display names.
+Competing labels use Loro's deterministic per-key rule; label collisions receive
+deterministic owner-hash suffixes, so each owner remains selectable.
+
+Existing strings in block/parent fields are legacy owner references. New identity
+references and built-in-v1 references use reserved control-prefixed strings in
+the same field, not extra metadata operations. Public block/style queries decode
+labels; resolution and incremental keys use the underlying references. Current
+writers tag built-in use, including inheritance. Untagged, unmarked legacy
+references use legacy fallback; explicit legacy definitions remain authoritative.
+Existing paragraph-style opt-ins retain their current built-in interpretation.
+
+Any new identity or built-in authoring creates `styles2`, even when empty. Root
+presence persists in binary history/shallow snapshots without adding operations,
+so node IDs/revisions and existing layout goldens stay unchanged. Required package
+bit **18** declares the new semantics, including retained root presence after
+undo. Required sync bit **4** (`style-identities1`) carries the same declaration
+across JSON sync, including an empty root; decoding a successful declared packet
+retains that root. Reads never create it or set the package bit. Unaware package
+and sync readers refuse. Authored-graph duplication includes this root and reuses
+its local tokens in the copy's fresh document namespace, preserving all edges
+without importing source operation history. Partial clipboard remains an
+appearance projection and does not transfer identity ownership.
+
+The earlier redesign discussion below records the rejected eager property-copy
+migration. The selected policy avoids its concurrent-adoption and snapshot-ID
+problems; the previously deferred probes become normal regression tests.
+
 This is a design addendum for the identity/compatibility migration. Review-fixes
 Part A is independent of it. Durable identity and built-in adoption need a wider
 migration design than a local rename patch, as described below. The independent
