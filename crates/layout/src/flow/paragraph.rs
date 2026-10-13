@@ -116,8 +116,9 @@ impl Flow<'_> {
             if let Some(evaluation) = self.evaluation {
                 let ahead = self.keep_lookahead(doc, p.node);
                 let key = FlowKey::new(self, doc, p.node, ahead);
-                if let Some(delta) = evaluation.flow_hit(p.node, &key, self.engine) {
-                    self.apply_delta(delta);
+                if let Some(delta) = evaluation.flow_hit(p.node, &key, self.engine)
+                    && self.apply_delta(delta)
+                {
                     p.finished = true;
                     return used;
                 }

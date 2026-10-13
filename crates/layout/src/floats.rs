@@ -35,10 +35,9 @@ impl Floats {
             return;
         };
         let thread = template.main_thread();
-        let Some(first) = thread
-            .iter()
-            .position(|&i| i == line.frame % template.frames.len().max(1))
-        else {
+        let Some(first) = thread.iter().position(|&i| {
+            crate::pages::PageFactory::index(scratch, source.page, i) == Some(line.frame)
+        }) else {
             out.diagnostics.push(Diagnostic::new(
                 Severity::Error,
                 codes::RELATION_NO_FRAME,
@@ -70,9 +69,10 @@ impl Floats {
             let Some(frame) = template.frames.get(ti) else {
                 return;
             };
-            let index = page
-                .saturating_mul(template.frames.len())
-                .saturating_add(ti);
+            let Some(index) = crate::pages::PageFactory::preview(template, scratch, page, ti)
+            else {
+                return;
+            };
             let context =
                 crate::flow::resolution_context(engine, template, Some(frame), frame.width);
             let size = doc
@@ -160,7 +160,11 @@ impl Floats {
                     let bottom = (at + height + margin).min(frame.depth);
                     let exclusion = Rect::new(Point::new(left, top), right - left, bottom - top);
                     out.diagnostics.extend(candidate_diagnostics);
-                    out.exclusions.entry(index).or_default().push(exclusion);
+                    if let Some(frame) =
+                        crate::pages::Catalog::from_snapshot(scratch).reference(index)
+                    {
+                        out.exclude(frame, exclusion);
+                    }
                     self.next.insert(index, at + height + margin);
                     scratch.blocks.push(block.clone());
                     out.blocks.push(block);

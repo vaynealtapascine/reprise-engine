@@ -371,7 +371,7 @@ impl Flow<'_> {
     /// that do not exist yet. Only an estimate for keeping groups together.
     fn fresh_depth(&self) -> Length {
         let thread = self.template.main_thread();
-        let here = self.frame_index() % self.template.frames.len().max(1);
+        let here = self.current_template_index();
         let next = thread
             .iter()
             .position(|&i| i == here)

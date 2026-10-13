@@ -94,9 +94,9 @@ impl Notes {
         let mut lines = Vec::new();
         let mut completed = false;
         while ensure_page(engine, template, scratch, page) {
-            let index = page
-                .saturating_mul(template.frames.len())
-                .saturating_add(ti);
+            let Some(index) = crate::pages::PageFactory::index(scratch, page, ti) else {
+                break;
+            };
             let previous = self.used.get(&index).copied().unwrap_or_default();
             let used = previous
                 + if previous > Length::ZERO {
@@ -106,8 +106,18 @@ impl Notes {
                 };
             let mut capacity = area.depth;
             if let Some(inverse) = area.to_page().inverse() {
-                for (float_frame, boxes) in &out.exclusions {
-                    let Some(frame) = scratch.frame(*float_frame).filter(|f| f.page == page) else {
+                let catalog = crate::pages::Catalog::from_snapshot(scratch);
+                for (float_frame, entry) in &out.exclusions {
+                    let Some(float_index) = catalog.index(float_frame) else {
+                        continue;
+                    };
+                    let Some(reference) = catalog.reference(float_index) else {
+                        continue;
+                    };
+                    let Some(boxes) = entry.for_frame(reference) else {
+                        continue;
+                    };
+                    let Some(frame) = scratch.frame(float_index).filter(|f| f.page == page) else {
                         continue;
                     };
                     for rect in boxes {
@@ -221,14 +231,14 @@ impl Notes {
 
     /// Align all notes on a page to the area's bottom and reserve intersected
     /// body depth. This is allocation, not mutation of authored frame geometry.
-    pub fn finish(self, template: &ResolvedTemplate, out: &mut Plan) {
-        let frames = template.frames.len();
+    pub fn finish(self, snapshot: &LayoutSnapshot, out: &mut Plan) {
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
         for (index, used) in self.used {
-            let Some(area) = template.frames.get(index % frames.max(1)) else {
+            let Some(area) = snapshot.frame(index) else {
                 continue;
             };
-            let occupied = used.min(area.depth);
-            let by = (area.depth - occupied).max(Length::ZERO);
+            let occupied = used.min(area.rect.height);
+            let by = (area.rect.height - occupied).max(Length::ZERO);
             for block in &mut out.blocks {
                 for line in &mut block.lines {
                     if line.frame == index {
@@ -238,41 +248,34 @@ impl Notes {
                 }
                 block.sync_image();
             }
-            let page = index / frames.max(1);
+            let page = area.page;
             // Project the occupied notes box to each body's logical space.
             // Conservatively reserve from the earliest intersecting corner.
-            for (i, body) in template
-                .frames
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| f.is_main_flow())
-            {
-                let Some(inverse) = body.to_page().inverse() else {
+            for (i, body) in crate::pages::PageFactory::body_frames(snapshot, page) {
+                let Some(inverse) = body.to_page.inverse() else {
                     continue;
                 };
                 let corners = [
                     Point::new(Length::ZERO, by),
-                    Point::new(area.width, by),
-                    Point::new(Length::ZERO, area.depth),
-                    Point::new(area.width, area.depth),
+                    Point::new(area.rect.width, by),
+                    Point::new(Length::ZERO, area.rect.height),
+                    Point::new(area.rect.width, area.rect.height),
                 ];
                 let mapped: Vec<_> = corners
                     .into_iter()
-                    .map(|p| inverse.apply(area.to_page().apply(p)))
+                    .map(|p| inverse.apply(area.to_page.apply(p)))
                     .collect();
                 let left = mapped.iter().map(|p| p.x).min().unwrap_or_default();
                 let right = mapped.iter().map(|p| p.x).max().unwrap_or_default();
                 let top = mapped.iter().map(|p| p.y).min().unwrap_or_default();
                 let bottom = mapped.iter().map(|p| p.y).max().unwrap_or_default();
                 if right > Length::ZERO
-                    && left < body.width
+                    && left < body.rect.width
                     && bottom > Length::ZERO
-                    && top < body.depth
+                    && top < body.rect.height
+                    && let Some(frame) = catalog.reference(i)
                 {
-                    out.reservations.insert(
-                        page.saturating_mul(frames).saturating_add(i),
-                        body.depth - top.max(Length::ZERO),
-                    );
+                    out.reserve(frame, body.rect.height - top.max(Length::ZERO));
                 }
             }
         }

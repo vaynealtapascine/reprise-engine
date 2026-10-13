@@ -344,3 +344,5 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | Section binding inheritance and authored state | `crates/doc/src/sections/views.rs`, `crates/reprise/src/{dto,session,typescript}.rs`; one forward scan includes the empty first section, stories stay available for recovery. |
 | Story list numbering | `crates/doc/src/lists.rs`, `crates/edit/src/plan/semantic.rs`; reset counters per domain in one aggregate cache. |
 | Section transaction hostility | `crates/edit/tests/sections.rs`, `crates/reprise/tests/section_domains.rs`; concurrency, UTF-8/inherited splits, story clones, range refusal, undo/redo and state introspection. |
+
+| `layout` | `src/pages.rs`, `src/pages/tests.rs`; `src/flow.rs`, `src/flow/keeps.rs`, `src/flow/paragraph.rs`, `src/regions.rs`, `src/regions/tests.rs`, `src/floats.rs`, `src/notes.rs`, `src/table.rs`, `src/table_flow.rs`, `src/incremental.rs` | Central page allocation and limit, stable logical frame addresses with provenance, guarded feedback placements/reservations/exclusions, physical page accounting and the exhausted one-frame story adapter (sections S3) | 05, 20, 24, 26–28, 37, 38 |

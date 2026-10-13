@@ -1005,22 +1005,9 @@ impl Evaluation {
         } else {
             reasons.insert(Dependency::Node(node));
         }
-        let frame_count = key.template.frames.len().max(1);
-        let mut pages: BTreeSet<_> = delta
-            .blocks
-            .iter()
-            .flat_map(|b| &b.lines)
-            .map(|l| l.frame / frame_count)
-            .collect();
+        let mut pages = delta.block_pages.clone();
         if let Some(old) = cache.flow.get(&node).and_then(|v| v.last()) {
-            let old_count = old.key.template.frames.len().max(1);
-            pages.extend(
-                old.delta
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.lines)
-                    .map(|l| l.frame / old_count),
-            );
+            pages.extend(&old.delta.block_pages);
         }
         cache.counters.reflowed_pages.extend(pages);
         cache.counters.compositions = cache.counters.compositions.saturating_add(1);
@@ -1413,12 +1400,18 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         self.next_node = 0;
                         self.pass = Pass::Flow;
                     } else {
+                        let applied = if outcome == crate::regions::Feedback::Converged {
+                            next.applied_for(&self.snapshot)
+                        } else {
+                            self.plan.applied_for(&self.snapshot)
+                        };
                         crate::regions::finish_feedback(
                             &mut self.snapshot,
                             &self.plan,
                             next,
                             outcome,
                         );
+                        self.plan.applied = applied;
                         self.pass = Pass::Relations;
                     }
                 }

@@ -78,6 +78,9 @@ pub(crate) struct Cursor {
     /// The block in progress, between units of an incremental job.
     active: Option<Active>,
     keeps: Keeps,
+    catalog: crate::pages::Catalog,
+    source: crate::pages::FrameSource,
+    domain: Option<reprise_doc::Domain>,
 }
 
 /// What keep lookahead reuses between paragraphs of one layout: the block
@@ -176,13 +179,42 @@ impl Cursor {
         snapshot: &mut LayoutSnapshot,
         plan: &Plan,
     ) -> Self {
-        let thread = template.main_thread();
+        Self::new_in(
+            engine,
+            doc,
+            template,
+            snapshot,
+            plan,
+            reprise_doc::Domain::Body,
+            crate::pages::FrameSource::Paged,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_in(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        domain: reprise_doc::Domain,
+        source: crate::pages::FrameSource,
+    ) -> Self {
+        let thread = if source.can_page() {
+            template.main_thread()
+        } else {
+            (0..template.frames.len().min(1)).collect()
+        };
         let max_depth = thread
             .iter()
             .map(|&t| template.frames[t].depth)
             .max()
             .unwrap_or_default();
-        let thread_is_empty = thread.is_empty();
+        let thread_is_empty = thread.is_empty()
+            || source.is_exhausted()
+            || source
+                .single_index()
+                .is_some_and(|i| snapshot.frame(i).is_none());
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
         let mut flow = Flow {
             engine,
             evaluation: None,
@@ -202,9 +234,30 @@ impl Cursor {
             region_owners: crate::regions::owners(engine, doc),
             upcoming: &[],
             keeps: Keeps::default(),
+            catalog,
+            source,
+            domain: Some(domain),
         };
         // Even an empty document gets a page.
-        flow.new_page();
+        if flow.source.can_page() {
+            flow.new_page();
+        } else {
+            flow.page = flow
+                .source
+                .single_index()
+                .and_then(|i| flow.snapshot.frame(i))
+                .map_or(0, |f| f.page);
+            flow.page_base.push(flow.source.single_index().unwrap_or(0));
+            flow.fills.resize(
+                flow.snapshot.frames.len(),
+                Fill {
+                    used: Length::ZERO,
+                    empty: true,
+                    after: Length::ZERO,
+                    anchored: true,
+                },
+            );
+        }
 
         flow.cursor()
     }
@@ -321,6 +374,9 @@ impl Cursor {
             previous: self.previous,
             upcoming: &[],
             keeps: self.keeps,
+            catalog: self.catalog,
+            source: self.source,
+            domain: self.domain,
         }
     }
 }
@@ -365,6 +421,9 @@ pub(crate) struct Flow<'a> {
     pos: usize,
     limit_hit: bool,
     pub(crate) keeps: Keeps,
+    catalog: crate::pages::Catalog,
+    source: crate::pages::FrameSource,
+    domain: Option<reprise_doc::Domain>,
 }
 
 impl Flow<'_> {
@@ -532,23 +591,24 @@ impl Flow<'_> {
             previous: self.previous,
             active: None,
             keeps: self.keeps,
+            catalog: self.catalog,
+            source: self.source,
+            domain: self.domain,
         }
     }
 
     /// Makes the next page from the template, unless the limit is reached.
     fn new_page(&mut self) -> bool {
-        let limit = self.engine.flow.max_pages.max(1) as usize;
-        if self.snapshot.pages.len() >= limit {
+        if !self.source.can_page() {
             return false;
         }
-        let page = self.snapshot.pages.len();
-        self.page_base.push(self.snapshot.frames.len());
-        self.snapshot.pages.push(PageLayout {
-            width: self.template.width,
-            height: self.template.height,
-        });
-        for frame in &self.template.frames {
-            self.snapshot.frames.push(frame.layout(page));
+        let base = self.snapshot.frames.len();
+        if !crate::pages::PageFactory::push(self.engine, self.template, self.snapshot) {
+            return false;
+        }
+        self.page_base.push(base);
+        self.catalog.extend(self.snapshot);
+        for _frame in &self.template.frames {
             self.fills.push(Fill {
                 used: Length::ZERO,
                 empty: true,
@@ -560,13 +620,27 @@ impl Flow<'_> {
     }
 
     /// The snapshot index of the frame the flow is in.
+    pub(crate) fn current_template_index(&self) -> usize {
+        self.thread.get(self.pos).copied().unwrap_or(0)
+    }
     pub(crate) fn frame_index(&self) -> usize {
-        self.page_base[self.page] + self.thread[self.pos]
+        self.source
+            .single_index()
+            .or_else(|| {
+                self.thread
+                    .get(self.pos)
+                    .and_then(|&t| self.catalog.ordinal(self.page, t))
+            })
+            .unwrap_or(self.snapshot.frames.len())
     }
 
     /// Moves on to the next frame of the thread, or the first of a new page.
     /// False when the page limit stops it, which is reported once.
     pub(crate) fn advance(&mut self) -> bool {
+        if !self.source.next() {
+            self.limit_hit = true;
+            return false;
+        }
         if self.pos + 1 < self.thread.len() {
             self.pos += 1;
             return true;
@@ -591,13 +665,26 @@ impl Flow<'_> {
         false
     }
 
+    fn frame_reference(&self, index: usize) -> Option<crate::pages::FrameRef> {
+        self.catalog.reference(index).cloned().or_else(|| {
+            crate::pages::PageFactory::future_reference(self.template, self.snapshot, index)
+        })
+    }
+    pub(crate) fn exclusions(&self, index: usize) -> Option<&Vec<Rect<FrameSpace>>> {
+        if self.plan.exclusions.is_empty() {
+            return None;
+        }
+        self.frame_reference(index)
+            .and_then(|frame| self.plan.exclusions_for(&frame))
+    }
     pub(crate) fn depth(&self, index: usize, full: Length) -> Length {
+        if self.plan.reservations.is_empty() {
+            return full.max(Length::ZERO);
+        }
         (full
             - self
-                .plan
-                .reservations
-                .get(&index)
-                .copied()
+                .frame_reference(index)
+                .and_then(|frame| self.plan.reservation_for(&frame))
                 .unwrap_or_default())
         .max(Length::ZERO)
     }
@@ -621,9 +708,7 @@ impl Flow<'_> {
     /// Tables retain rectangular columns: pass below all float exclusions in
     /// this frame instead of overlapping them or changing column widths.
     pub(crate) fn table_top(&self) -> Length {
-        self.plan
-            .exclusions
-            .get(&self.frame_index())
+        self.exclusions(self.frame_index())
             .into_iter()
             .flatten()
             .map(|r| r.origin.y + r.height)
@@ -812,6 +897,7 @@ pub(crate) struct Delta {
     pages: Vec<PageLayout>,
     frames: Vec<FrameLayout>,
     pub(crate) blocks: Vec<BlockLayout>,
+    pub(crate) block_pages: std::collections::BTreeSet<usize>,
     diagnostics: Vec<Diagnostic>,
     fills: Vec<Fill>,
     page_base: Vec<usize>,
@@ -854,6 +940,16 @@ impl Flow<'_> {
     }
     fn delta(&self, before: Mark) -> Delta {
         Delta {
+            block_pages: self
+                .snapshot
+                .blocks
+                .get(before.blocks..)
+                .unwrap_or_default()
+                .iter()
+                .flat_map(|b| &b.lines)
+                .filter_map(|l| self.snapshot.frame(l.frame))
+                .map(|f| f.page)
+                .collect(),
             pages: self
                 .snapshot
                 .pages
@@ -890,9 +986,12 @@ impl Flow<'_> {
             tail: before.tail,
         }
     }
-    fn apply_delta(&mut self, delta: Delta) {
-        self.snapshot.pages.extend(delta.pages);
-        self.snapshot.frames.extend(delta.frames);
+    fn apply_delta(&mut self, delta: Delta) -> bool {
+        if !crate::pages::PageFactory::replay(self.engine, self.snapshot, delta.pages, delta.frames)
+        {
+            return false;
+        }
+        self.catalog.extend(self.snapshot);
         self.snapshot.blocks.extend(delta.blocks);
         self.snapshot.diagnostics.extend(delta.diagnostics);
         self.fills.truncate(delta.tail);
@@ -901,6 +1000,7 @@ impl Flow<'_> {
         self.page = delta.page;
         self.pos = delta.pos;
         self.limit_hit = delta.limit_hit;
+        true
     }
 }
 

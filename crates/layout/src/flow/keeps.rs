@@ -32,9 +32,7 @@ impl Flow<'_> {
                     reversed: prepared.base_level % 2 == 1,
                 },
                 exclusions: self
-                    .plan()
-                    .exclusions
-                    .get(&index)
+                    .exclusions(index)
                     .into_iter()
                     .flatten()
                     .copied()
@@ -52,9 +50,12 @@ impl Flow<'_> {
     /// made from the template in order, so a page not made yet has a known
     /// index.
     pub(crate) fn next_frame(&self) -> Option<(usize, usize)> {
+        if !self.source.can_page() {
+            return None;
+        }
         if self.pos + 1 < self.thread.len() {
             let t = *self.thread.get(self.pos + 1)?;
-            return Some((self.page_base.get(self.page)? + t, t));
+            return Some((self.catalog.ordinal(self.page, t)?, t));
         }
         let t = *self.thread.first()?;
         let next_page = self.page + 1;
@@ -63,11 +64,10 @@ impl Flow<'_> {
         {
             return None;
         }
-        let base = self
-            .page_base
-            .get(self.page)?
-            .checked_add(self.template.frames.len())?;
-        Some((base + t, t))
+        Some((
+            crate::pages::PageFactory::preview(self.template, self.snapshot, next_page, t)?,
+            t,
+        ))
     }
 
     /// The blocks after `node` in document order, built once per layout.
@@ -76,7 +76,7 @@ impl Flow<'_> {
             .keeps
             .order
             .get_or_insert_with(|| {
-                let nodes = doc.top(reprise_doc::Domain::Body);
+                let nodes = doc.top(self.domain.unwrap_or(reprise_doc::Domain::Body));
                 let index = nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
                 Arc::new(BlockOrder { nodes, index })
             })

@@ -206,3 +206,5 @@ impl Engine {
         regions::run(self, doc, &template, snapshot)
     }
 }
+
+mod pages;

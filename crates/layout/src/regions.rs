@@ -2,10 +2,7 @@
 use crate::flow;
 use crate::relations::resolve::Resolver;
 use crate::template::ResolvedTemplate;
-use crate::{
-    BlockLayout, Diagnostic, Engine, LayoutSnapshot, LineRef, PageLayout, Resolution, Subject,
-    codes,
-};
+use crate::{BlockLayout, Diagnostic, Engine, LayoutSnapshot, LineRef, Resolution, Subject, codes};
 use reprise_diag::Severity;
 use reprise_doc::relation::builtin;
 use reprise_doc::{BlockKind, Document, NodeId, Relation, RelationId, ResolutionContext};
@@ -21,8 +18,10 @@ mod tests;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Plan {
-    pub exclusions: BTreeMap<usize, Vec<Rect<FrameSpace>>>,
-    pub reservations: BTreeMap<usize, Length>,
+    pub exclusions: BTreeMap<crate::pages::FrameAddr, crate::pages::Entry<Vec<Rect<FrameSpace>>>>,
+    pub reservations: BTreeMap<crate::pages::FrameAddr, crate::pages::Entry<Length>>,
+    pub placement_owners: BTreeMap<RelationId, NodeId>,
+    pub frame_sources: BTreeMap<crate::pages::FrameAddr, (crate::pages::Provenance, usize)>,
     pub blocks: Vec<BlockLayout>,
     pub applied: BTreeSet<RelationId>,
     pub pages: usize,
@@ -33,9 +32,106 @@ impl Plan {
     pub(crate) fn equivalent(&self, other: &Self) -> bool {
         self.exclusions == other.exclusions
             && self.reservations == other.reservations
-            && self.blocks == other.blocks
+            && self.canonical_blocks() == other.canonical_blocks()
+            && self
+                .frame_sources
+                .iter()
+                .map(|(a, (p, _))| (a, p))
+                .eq(other.frame_sources.iter().map(|(a, (p, _))| (a, p)))
             && self.applied == other.applied
             && self.pages == other.pages
+    }
+    pub fn exclusions_for(&self, frame: &crate::pages::FrameRef) -> Option<&Vec<Rect<FrameSpace>>> {
+        self.exclusions.get(&frame.address)?.for_frame(frame)
+    }
+    pub fn reservation_for(&self, frame: &crate::pages::FrameRef) -> Option<Length> {
+        self.reservations
+            .get(&frame.address)?
+            .for_frame(frame)
+            .copied()
+    }
+    pub fn exclude(&mut self, frame: &crate::pages::FrameRef, rect: Rect<FrameSpace>) {
+        let entry = self
+            .exclusions
+            .entry(frame.address.clone())
+            .or_insert_with(|| crate::pages::Entry::new(frame, Vec::new()));
+        if entry.provenance != frame.provenance {
+            *entry = crate::pages::Entry::new(frame, Vec::new());
+        }
+        entry.value.push(rect);
+    }
+    pub fn reserve(&mut self, frame: &crate::pages::FrameRef, depth: Length) {
+        self.reservations.insert(
+            frame.address.clone(),
+            crate::pages::Entry::new(frame, depth),
+        );
+    }
+    fn capture_frames(&mut self, snapshot: &LayoutSnapshot) {
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
+        for block in &self.blocks {
+            for line in &block.lines {
+                if let Some(frame) = catalog.reference(line.frame) {
+                    self.frame_sources.insert(
+                        frame.address.clone(),
+                        (frame.provenance.clone(), line.frame),
+                    );
+                }
+            }
+        }
+    }
+    fn canonical_blocks(&self) -> Vec<BlockLayout> {
+        let indices: BTreeMap<_, _> = self
+            .frame_sources
+            .iter()
+            .enumerate()
+            .map(|(canonical, (_, (_, index)))| (*index, canonical))
+            .collect();
+        let mut blocks = self.blocks.clone();
+        for block in &mut blocks {
+            for line in &mut block.lines {
+                if let Some(&index) = indices.get(&line.frame) {
+                    line.frame = index;
+                }
+            }
+            block.sync_image();
+        }
+        blocks
+    }
+    fn blocks_for(&self, snapshot: &LayoutSnapshot) -> Vec<BlockLayout> {
+        let current = crate::pages::Catalog::from_snapshot(snapshot);
+        let indices: BTreeMap<_, _> = self
+            .frame_sources
+            .iter()
+            .filter_map(|(address, (provenance, old))| {
+                let index = current.index(address)?;
+                (current.reference(index)?.provenance == *provenance).then_some((*old, index))
+            })
+            .collect();
+        self.blocks
+            .iter()
+            .filter_map(|block| {
+                let mut block = block.clone();
+                for line in &mut block.lines {
+                    line.frame = *indices.get(&line.frame)?;
+                }
+                block.sync_image();
+                Some(block)
+            })
+            .collect()
+    }
+    pub(crate) fn applied_for(&self, snapshot: &LayoutSnapshot) -> BTreeSet<RelationId> {
+        let valid: BTreeSet<_> = self.blocks_for(snapshot).iter().map(|b| b.node).collect();
+        // A relation owner is unique in one region allocation. Invalid frame
+        // provenance must not suppress the ordinary unplaced-owner diagnostic.
+        self.applied
+            .iter()
+            .filter(|id| {
+                self.placement_owners
+                    .get(id)
+                    .is_some_and(|n| valid.contains(n))
+            })
+            .copied()
+            .collect()
     }
 }
 
@@ -76,9 +172,9 @@ pub(crate) fn run(
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
             let applied = if outcome == Feedback::Converged {
-                next.applied.clone()
+                next.applied_for(&snapshot)
             } else {
-                plan.applied.clone()
+                plan.applied_for(&snapshot)
             };
             finish_feedback(&mut snapshot, &plan, next, outcome);
             crate::relations::run(engine, doc, &mut snapshot, pending, &applied);
@@ -121,10 +217,10 @@ pub(crate) fn finish_feedback(
     outcome: Feedback,
 ) {
     if outcome == Feedback::Converged {
-        snapshot.blocks.extend(next.blocks);
+        snapshot.blocks.extend(next.blocks_for(snapshot));
         snapshot.diagnostics.extend(next.diagnostics);
     } else {
-        snapshot.blocks.extend(plan.blocks.clone());
+        snapshot.blocks.extend(plan.blocks_for(snapshot));
         snapshot.diagnostics.extend(plan.diagnostics.clone());
         snapshot.diagnostics.push(Diagnostic::new(Severity::Warning,
             if outcome == Feedback::Oscillated { codes::REGION_CYCLE } else { codes::REGION_LIMIT },
@@ -260,7 +356,7 @@ pub(crate) fn allocate(
             out.diagnostics.push(Diagnostic::new(Severity::Error, codes::NOTE_DEPTH, Subject::Relation(id), "unresolved region dependency, cycle, missing anchor or nesting beyond 32 rounds; owner omitted"));
         }
     }
-    notes.finish(template, &mut out);
+    notes.finish(&scratch, &mut out);
     out.pages = out
         .blocks
         .iter()
@@ -269,6 +365,15 @@ pub(crate) fn allocate(
         .map(|f| f.page.saturating_add(1))
         .max()
         .unwrap_or(0);
+    out.capture_frames(&scratch);
+    for (id, relation) in doc.relations() {
+        if let Ok(relation) = relation
+            && let Some(owner) = relation.owner
+            && out.applied.contains(&id)
+        {
+            out.placement_owners.insert(id, owner);
+        }
+    }
     out
 }
 
@@ -287,20 +392,7 @@ pub(crate) fn ensure_page(
     snapshot: &mut LayoutSnapshot,
     page: usize,
 ) -> bool {
-    if page >= engine.flow.max_pages.max(1) as usize {
-        return false;
-    }
-    while snapshot.pages.len() <= page {
-        let page = snapshot.pages.len();
-        snapshot.pages.push(PageLayout {
-            width: template.width,
-            height: template.height,
-        });
-        for frame in &template.frames {
-            snapshot.frames.push(frame.layout(page));
-        }
-    }
-    true
+    crate::pages::PageFactory::ensure(engine, template, snapshot, page)
 }
 
 #[allow(clippy::too_many_arguments)]

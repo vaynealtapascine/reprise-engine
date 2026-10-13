@@ -486,8 +486,46 @@ fn extreme_float_padding_keeps_the_entire_frame_excluded() {
     let template = crate::template::resolve(&engine, &doc, &mut Vec::new());
     base.blocks.retain(|b| b.node == body);
     let plan = super::allocate(&engine, &doc, &template, &base, None);
-    let excluded = plan.exclusions.values().next().unwrap().first().unwrap();
+    let excluded = plan
+        .exclusions
+        .values()
+        .next()
+        .unwrap()
+        .value
+        .first()
+        .unwrap();
     assert_eq!(excluded.origin, reprise_geom::Point::origin());
     assert_eq!(excluded.width, Length::from_pt(100));
     assert_eq!(excluded.height, Length::from_pt(60));
+}
+
+#[test]
+fn stale_placements_are_omitted_and_do_not_suppress_owner_diagnostics() {
+    let (engine, doc) = setup(Length::from_pt(60));
+    let node = doc
+        .append_block(BlockKind::Paragraph, "s", "placed")
+        .unwrap();
+    let snapshot = engine.layout(&doc);
+    let relation = RelationId::parse("99@1").unwrap();
+    let mut plan = Plan {
+        blocks: snapshot.blocks.clone(),
+        applied: BTreeSet::from([relation]),
+        placement_owners: BTreeMap::from([(relation, node)]),
+        ..Default::default()
+    };
+    plan.capture_frames(&snapshot);
+    assert_eq!(plan.applied_for(&snapshot), BTreeSet::from([relation]));
+    let mut changed = snapshot.clone();
+    changed.frames[0].rect.width += Length(1);
+    assert!(plan.blocks_for(&changed).is_empty());
+    assert!(plan.applied_for(&changed).is_empty());
+
+    let mut shifted = snapshot.clone();
+    let mut unrelated = shifted.frames[0].clone();
+    unrelated.role = FrameRole::Margin;
+    shifted.frames.insert(0, unrelated);
+    let blocks = plan.blocks_for(&shifted);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].lines[0].frame, 1);
+    assert_eq!(plan.applied_for(&shifted), BTreeSet::from([relation]));
 }
