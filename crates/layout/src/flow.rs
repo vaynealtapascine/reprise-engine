@@ -506,11 +506,30 @@ impl Flow<'_> {
                 let repeat = repeat.get_or_insert_with(|| {
                     crate::table_flow::Repeat::new(headers.len(), self.used() > Length::ZERO)
                 });
+                let instance = self.fields().instance;
                 if let Some(group) = headers.get(*next_header).cloned() {
-                    self.place_group(doc, *node, group, *next_header, headers, widths, repeat);
+                    self.place_group(
+                        doc,
+                        *node,
+                        group,
+                        *next_header,
+                        headers,
+                        widths,
+                        repeat,
+                        instance,
+                    );
                     *next_header += 1;
                 } else if let Some(group) = bodies.pop_front() {
-                    self.place_group(doc, *node, group, usize::MAX, headers, widths, repeat);
+                    self.place_group(
+                        doc,
+                        *node,
+                        group,
+                        usize::MAX,
+                        headers,
+                        widths,
+                        repeat,
+                        instance,
+                    );
                 }
                 return *next_header >= headers.len() && bodies.is_empty();
             }

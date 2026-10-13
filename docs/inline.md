@@ -276,9 +276,17 @@ Each placement is composed separately and may resolve differently, so a resolved
 value is keyed by the object **and the placement**, not by the object alone:
 
 ```rust
+#[non_exhaustive]
 pub enum FieldInstance { Single, Page(u32) }     // reprise_layout
 struct FieldKey { id: InlineId, instance: FieldInstance }
 ```
+
+`FieldInstance` is `#[non_exhaustive]` on purpose: sections add a running-content
+placement (page, slot, repeat) as a new variant, and nothing outside the layout
+crate may match it exhaustively. Table cells take the placement from their caller
+(`place_groups`/`place_group` carry an `instance`; body tables pass the flow's own,
+`Single`), so a table inside running content resolves its fields for that
+placement without a change here.
 
 -   `Single` (the default) is content placed once, wherever flow puts it; its
     page is not part of the key, so a value found on one page can be tried again

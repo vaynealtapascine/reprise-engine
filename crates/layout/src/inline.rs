@@ -442,8 +442,12 @@ fn strong_rtl(c: char) -> Option<bool> {
 /// differently (`page-number` is 3 in page 3's footer and 4 in page 4's), so
 /// resolved values are keyed by [`FieldKey`], the object and its placement,
 /// never by the object alone.
+///
+/// Non-exhaustive: further placements (running content of a section, with its
+/// slot and repetition) are added as variants, so match with a wildcard.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum FieldInstance {
     /// The paragraph is placed once, wherever flow puts it: body text, a cell,
     /// a note. Its page is not part of the key, so a value found on one page

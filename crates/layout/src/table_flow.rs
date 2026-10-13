@@ -134,13 +134,16 @@ fn span_sum(widths: &[Length], column: usize, span: usize) -> Length {
 }
 
 impl Flow<'_> {
-    /// Places every group of a table, in order.
+    /// Places every group of a table, in order. `instance` is the placement the
+    /// cells' fields resolve for: whoever composes the table says which copy of
+    /// the content it is (the flow's own, for body tables).
     pub(crate) fn place_groups(
         &mut self,
         doc: &Document,
         table: NodeId,
         mut groups: Vec<Group>,
         widths: &[Length],
+        instance: crate::FieldInstance,
     ) {
         let split = groups.iter().take_while(|g| g.header).count();
         let bodies = groups.split_off(split);
@@ -156,10 +159,20 @@ impl Flow<'_> {
                 &headers,
                 widths,
                 &mut repeat,
+                instance,
             );
         }
         for group in bodies {
-            self.place_group(doc, table, group, usize::MAX, &headers, widths, &mut repeat);
+            self.place_group(
+                doc,
+                table,
+                group,
+                usize::MAX,
+                &headers,
+                widths,
+                &mut repeat,
+                instance,
+            );
         }
     }
 
@@ -173,6 +186,7 @@ impl Flow<'_> {
         groups: &[Group],
         widths: &[Length],
         repeat: &mut Repeat,
+        instance: crate::FieldInstance,
     ) {
         let group = &owned;
         let spacing = self.engine.flow.paragraph_spacing;
@@ -221,7 +235,7 @@ impl Flow<'_> {
                 frame.rect.width,
                 top,
                 depth,
-                crate::FieldInstance::Single,
+                instance,
             );
             if copy.is_some() && !fragment.placed && !fragment.done {
                 // The copy would leave the body no room: the body wins.
@@ -237,7 +251,7 @@ impl Flow<'_> {
                     frame.rect.width,
                     top,
                     depth,
-                    crate::FieldInstance::Single,
+                    instance,
                 );
             }
             if !fragment.done
@@ -260,7 +274,7 @@ impl Flow<'_> {
                     frame.rect.width,
                     head,
                     self.fresh_depth(),
-                    crate::FieldInstance::Single,
+                    instance,
                 );
                 if fresh.done {
                     // Keep the group together: start it on a fresh frame.
