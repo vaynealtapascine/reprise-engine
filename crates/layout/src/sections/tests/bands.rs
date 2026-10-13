@@ -803,3 +803,80 @@ fn unequal_columns_balance_with_widows_and_an_unbroken_keep_chain() {
     assert_eq!(snapshot.block(a).unwrap().lines.len(), 8);
     assert_eq!(snapshot, complete_by_units(&engine, &doc));
 }
+
+#[test]
+fn continuous_spatial_templates_preserve_authored_depths_and_overflow_detection() {
+    for oversized in [false, true] {
+        let (engine, doc) = setup();
+        doc.set_page_template(
+            &PageTemplate::new("spatial", Dim::pt(200), Dim::pt(200))
+                .with_frame(FrameTemplate::new(
+                    "short",
+                    FrameRole::Flow("main".into()),
+                    (Dim::pt(0), Dim::pt(0)),
+                    (Dim::pt(100), Dim::pt(80)),
+                ))
+                .with_frame(FrameTemplate::new(
+                    "tall",
+                    FrameRole::Flow("main".into()),
+                    (Dim::pt(100), Dim::pt(0)),
+                    (Dim::pt(100), Dim::pt(120)),
+                )),
+        )
+        .unwrap();
+        first(&doc, &[("mode", json!("paged")), ("bottom", json!(0))]);
+        block(&doc, "a\na\na\na");
+        let b = block(&doc, "b");
+        continuous(&doc, b, &[]);
+        if oversized {
+            doc.set_overrides(
+                b,
+                &reprise_doc::Style {
+                    line_height: Some(LengthExpr::Pt(Length::from_pt(150))),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let c = block(&doc, "c");
+            continuous(&doc, c, &[]);
+        }
+        let snapshot = engine.layout(&doc);
+        let bands = &snapshot.sections.as_ref().unwrap().pages[0].bands;
+        assert_eq!(bands[0].depth, Length::from_pt(24));
+        assert_eq!(bands[1].offset, Length::from_pt(24));
+        assert_eq!(
+            snapshot.frames[bands[1].frames[0]].rect.height,
+            Length::from_pt(80)
+        );
+        assert_eq!(
+            snapshot.frames[bands[1].frames[1]].rect.height,
+            Length::from_pt(120)
+        );
+        assert_eq!(
+            snapshot.frames[bands[1].frames[0]].to_page.matrix().ty,
+            Length::from_pt(24)
+        );
+        assert!(!bands[1].balanced);
+        if oversized {
+            assert_eq!(snapshot.pages.len(), 2, "{:?}", snapshot.diagnostics);
+            assert!(
+                snapshot
+                    .diagnostics_with("layout.frame-overflow")
+                    .any(|d| d.subject == Subject::Node(b))
+            );
+            assert_eq!(
+                snapshot
+                    .diagnostics_with("section.continuous-new-page")
+                    .count(),
+                1
+            );
+        } else {
+            assert!(
+                snapshot.diagnostics.is_empty(),
+                "{:?}",
+                snapshot.diagnostics
+            );
+        }
+        assert_eq!(snapshot, complete_by_units(&engine, &doc));
+    }
+}

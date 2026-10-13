@@ -12,7 +12,7 @@ fn properties(entries: &[(&str, Value)]) -> SectionProperties {
         .map(|(k, v)| ((*k).into(), v.clone()))
         .collect()
 }
-fn document() -> Result<Document> {
+fn styled_document() -> Result<Document> {
     let doc = Document::new(1)?;
     doc.define_style(
         "band",
@@ -23,6 +23,10 @@ fn document() -> Result<Document> {
             ..Default::default()
         },
     )?;
+    Ok(doc)
+}
+fn document() -> Result<Document> {
+    let doc = styled_document()?;
     doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
         width: Some(Length::from_pt(200)),
         height: Some(Length::from_pt(200)),
@@ -147,6 +151,59 @@ fn geometry() -> Result<Document> {
     doc.commit();
     Ok(doc)
 }
+fn spatial(oversized: bool) -> Result<Document> {
+    use reprise_doc::Dim;
+    let doc = styled_document()?;
+    doc.set_page_template(
+        &PageTemplate::new("spatial", Dim::pt(200), Dim::pt(200))
+            .with_frame(FrameTemplate::new(
+                "short",
+                FrameRole::Flow("main".into()),
+                (Dim::pt(0), Dim::pt(0)),
+                (Dim::pt(100), Dim::pt(80)),
+            ))
+            .with_frame(FrameTemplate::new(
+                "tall",
+                FrameRole::Flow("main".into()),
+                (Dim::pt(100), Dim::pt(0)),
+                (Dim::pt(100), Dim::pt(120)),
+            )),
+    )?;
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &properties(&[("mode", json!("paged")), ("bottom", json!(0))]),
+        &[],
+    )?;
+    doc.append_block(BlockKind::Paragraph, "band", "a\na\na\na")?;
+    let b = doc.append_block(BlockKind::Paragraph, "band", "b")?;
+    let life = doc.mint_lifetime(b)?;
+    doc.activate_start(
+        b,
+        &life,
+        BreakKind::Section,
+        &properties(&[("start", json!("continuous"))]),
+    )?;
+    if oversized {
+        doc.set_overrides(
+            b,
+            &reprise_doc::Style {
+                line_height: Some(LengthExpr::Pt(Length::from_pt(150))),
+                ..Default::default()
+            },
+        )?;
+        let c = doc.append_block(BlockKind::Paragraph, "band", "c")?;
+        let life = doc.mint_lifetime(c)?;
+        doc.activate_start(
+            c,
+            &life,
+            BreakKind::Section,
+            &properties(&[("start", json!("continuous"))]),
+        )?;
+    }
+    doc.commit();
+    Ok(doc)
+}
 fn main() -> Result<()> {
     let target =
         std::path::PathBuf::from(std::env::args().nth(1).ok_or("output directory required")?);
@@ -157,6 +214,8 @@ fn main() -> Result<()> {
         ("bands", bands(false, false)?),
         ("vertical-bands", bands(true, false)?),
         ("notes-floats", bands(false, true)?),
+        ("spatial-bands", spatial(false)?),
+        ("spatial-overflow", spatial(true)?),
     ]
     .into_iter()
     .enumerate()

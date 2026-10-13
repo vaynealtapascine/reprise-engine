@@ -173,7 +173,12 @@ impl Cursor {
                     if let Some(checkpoint) = self.band_start.clone() {
                         let full = checkpoint.cursor.max_depth;
                         if full > Length::ZERO
-                            && fit(snapshot, &checkpoint, full, checkpoint.diagnostics)
+                            && fit(
+                                snapshot,
+                                &checkpoint,
+                                full,
+                                (checkpoint.diagnostics, checkpoint.blocks),
+                            )
                         {
                             self.balance = Some(Box::new(Balance {
                                 checkpoint,
@@ -260,7 +265,12 @@ impl Cursor {
                 balance.trials = balance.trials.saturating_add(1);
                 if trial.output.cursor.page == balance.checkpoint.cursor.page
                     && !trial.output.cursor.limit_hit
-                    && fit(&trial.output.snapshot, &balance.checkpoint, trial.depth, 0)
+                    && fit(
+                        &trial.output.snapshot,
+                        &balance.checkpoint,
+                        trial.depth,
+                        (0, 0),
+                    )
                 {
                     balance.hi = trial.depth.0;
                     balance.kept = Some(trial.output);
@@ -397,12 +407,9 @@ fn fit(
     snapshot: &LayoutSnapshot,
     checkpoint: &BandStart,
     depth: Length,
-    diagnostic_start: usize,
+    start: (usize, usize),
 ) -> bool {
-    let diagnostics = snapshot
-        .diagnostics
-        .get(diagnostic_start..)
-        .unwrap_or_default();
+    let diagnostics = snapshot.diagnostics.get(start.0..).unwrap_or_default();
     let frames = checkpoint
         .header
         .sections
@@ -415,9 +422,15 @@ fn fit(
             || d.code == codes::FRAME_OVERFLOW
             || d.code == reprise_compose::codes::OVERFLOW
             || d.code == codes::KEEP_UNSATISFIED
-    }) && snapshot.blocks.iter().flat_map(|b| &b.lines).all(|line| {
-        snapshot.frame(line.frame).is_some()
-            && (frames.is_none_or(|frames| !frames.contains(&line.frame))
-                || line.rect.origin.y + line.rect.height <= depth)
-    })
+    }) && snapshot
+        .blocks
+        .get(start.1..)
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|b| &b.lines)
+        .all(|line| {
+            snapshot.frame(line.frame).is_some()
+                && (frames.is_none_or(|frames| !frames.contains(&line.frame))
+                    || line.rect.origin.y + line.rect.height <= depth)
+        })
 }

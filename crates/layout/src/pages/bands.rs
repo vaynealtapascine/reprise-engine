@@ -54,7 +54,13 @@ impl PageFactory {
             if frame.is_main_flow() {
                 frame.x += dx;
                 frame.y += dy;
-                frame.depth = depth;
+                // Generated columns use the owner's remaining block extent.
+                // Authored spatial frames keep their own depths, clipped to it.
+                frame.depth = if section.columns.is_some() {
+                    depth
+                } else {
+                    frame.depth.min(depth)
+                };
                 frames.push(frame.layout(page));
             }
         }

@@ -102,3 +102,15 @@ outputs: bounded geometry/parity/counters, ordinary continuous bands, vertical
 continuous bands, and notes plus floats. The gate compares actual WASM display
 JSON bytes, diagnostics and State.sections with the native outputs, using
 budgets zero and one. The native generator passes; actual WASM check is pending.
+
+Before the first S5 workspace gate reached native tests, review found that
+continuous band append could expand authored main depths when no column keys
+were present. That gate was intentionally interrupted. Generated columns now
+use the owner's remaining depth; spatial frames retain their authored depths,
+clipped to the band's remaining room, and overflow uses their actual deepest
+frame. A regression covers ordinary and oversized text in that path, with unit
+budget equality. Recorded-reference fit checks now scan only suffix blocks
+since C, rather than repeatedly visiting completed prefix text. All 103 layout
+tests pass in 3.63 s and workspace/all-targets clippy passes. Native/WASM parity
+now includes two additional spatial-template cases. The restarted full gate
+will be recorded separately as s5-full-gate-2.log.

@@ -624,7 +624,13 @@ impl Flow<'_> {
                         self.section = next;
                         self.template = std::sync::Arc::new(template);
                         self.thread = self.template.main_thread();
-                        self.max_depth = owner.geometry.block_extent() - offset;
+                        self.max_depth = self
+                            .thread
+                            .iter()
+                            .filter_map(|i| self.template.frames.get(*i))
+                            .map(|f| f.depth)
+                            .max()
+                            .unwrap_or_default();
                         self.band = self
                             .snapshot
                             .sections
