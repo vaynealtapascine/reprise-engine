@@ -753,34 +753,26 @@ fn delta_packet_bytes_are_pinned() {
         .unwrap();
     let p = paragraph(&mut s, "parity");
     type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
-    let packet = s
-        .sync_export(&Payload::new(SyncRequest {
-            since: Some(Vec::new()),
-        }))
-        .unwrap()
-        .data;
-    let hex: String = packet
-        .content
-        .bytes
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    // Bare historical frames remain a native-core wire contract. Facade
+    // sessions now attach their durable package ID even to unmarked stores.
+    let unbound =
+        reprise_doc::Document::import(&s.export_updates().unwrap().data.content.bytes, 1).unwrap();
+    let packet = unbound.export_delta(&Vec::new()).unwrap();
+    let hex: String = packet.iter().map(|b| format!("{b:02x}")).collect();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sync_delta.hex");
     if std::env::var_os("REPRISE_RECORD_SYNC").is_some() {
         std::fs::write(&path, &hex).unwrap();
     }
     assert_eq!(hex, include_str!("sync_delta.hex").trim());
     // The same packet joins a fresh replica.
-    let mut fresh = Workspace::new()
-        .open(
-            &Payload::new(Open {
-                peer_id: "2".into(),
-            }),
-            &bytes,
-        )
-        .unwrap();
-    fresh.sync_import(&Payload::new(packet)).unwrap();
-    assert_eq!(blocks(&fresh), blocks(&s));
+    let fresh = reprise_doc::Document::new(2).unwrap();
+    fresh.import_packet(&packet).unwrap();
+    let actual: Vec<_> = fresh
+        .blocks()
+        .into_iter()
+        .map(|id| (id.to_string(), fresh.block(id).unwrap().text.to_string()))
+        .collect();
+    assert_eq!(actual, blocks(&s));
 }
 
 #[test]

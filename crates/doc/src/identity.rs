@@ -11,9 +11,35 @@ pub(crate) fn valid(id: &str) -> bool {
 }
 
 impl Document {
-    /// Reads the durable identity without materialising a root in old documents.
-    /// Missing identity is the legacy form; malformed identity is refused.
+    /// Reads identity from the store or attached package context, without
+    /// materialising a root in old documents. The two must agree when present.
     pub fn document_lineage(&self) -> Result<Option<String>, DocError> {
+        let stored = self.stored_document_lineage()?;
+        if let (Some(stored), Some(scope)) = (&stored, &self.sync_scope)
+            && stored != scope
+        {
+            return Err(DocError::Store(
+                "document lineage differs from package scope".into(),
+            ));
+        }
+        Ok(stored.or_else(|| self.sync_scope.clone()))
+    }
+
+    /// Attach a trusted package ID to sync, including unmarked legacy stores.
+    /// Does not author metadata, commit pending writes, or change revision.
+    /// A document's declared identity cannot subsequently be reassigned.
+    pub fn set_sync_scope(&mut self, id: &str) -> Result<(), DocError> {
+        if !valid(id) {
+            return Err(DocError::Store("invalid document scope".into()));
+        }
+        if self.document_lineage()?.is_some_and(|have| have != id) {
+            return Err(DocError::Store("document lineage is immutable".into()));
+        }
+        self.sync_scope = Some(id.to_owned());
+        Ok(())
+    }
+
+    fn stored_document_lineage(&self) -> Result<Option<String>, DocError> {
         if self.doc.get_by_str_path(ROOT).is_none() {
             return Ok(None);
         }
@@ -29,7 +55,10 @@ impl Document {
         if !valid(id) {
             return Err(DocError::Store("invalid document lineage".into()));
         }
-        match self.document_lineage()? {
+        if self.sync_scope.as_deref().is_some_and(|scope| scope != id) {
+            return Err(DocError::Store("document lineage is immutable".into()));
+        }
+        match self.stored_document_lineage()? {
             Some(have) if have != id => {
                 Err(DocError::Store("document lineage is immutable".into()))
             }

@@ -32,11 +32,17 @@
 - Fresh facade documents and copies store their lowercase 32-hex package ID in
   `document1.id`. Reopening checks package identity against this durable ID.
   Copies have a new ID and history. Legacy unmarked documents stay unmarked on
-  read; marker presence and value must match before legacy or framed sync merges.
-  Format-2 packets with a marker require sync feature bit 3,
+  read. Facade sessions attach the durable package ID as read-only sync context,
+  including historical unmarked copies. Format-2 packets from these sessions
+  require sync feature bit 3,
   `document-lineage1`, and prefix their JSON body with that ID. Older sync readers
   refuse this feature. The metadata does not affect rendering and is retained
   by old package readers as opaque Loro state; it needs no package rendering bit.
+  Legacy binary histories must carry the matching stored marker; an unmarked
+  history cannot prove its source ID and is refused by scoped sessions. Use
+  framed sync for historical packages. Raw unscoped native documents retain
+  legacy interoperability. `Document::set_sync_scope` attaches context without
+  changing stored bytes, revision or pending writes, and forks preserve it.
   Hosts must still authenticate room routing: lineage is an isolation check,
   not a signature against an attacker who forges the whole body.
 - Explicit session font declarations, imported font resources and restored

@@ -31,6 +31,7 @@ brief's explicit redesign clause; findings 8–10 are not claimed fixed.
 - `bda0d74 fix(engine): preflight refused edits and bind independent copies`
 - `dc307c8 docs(styles): specify durable identity migration and unresolved compatibility`
 - `a4da353 perf(doc): avoid sibling indexing during edit preflight`
+- `1e5ed21 fix(edit): preflight captured malformed style values`
 - The verification handoff commit records the final gate output; obtain the full
   list with `git log --oneline f13a4ee..HEAD`.
 
@@ -82,7 +83,11 @@ index computation, which was quadratic for a wide formatting tree.
 
 Copy isolation compares durable identity before merging either content or history.
 It does not require an ancestor list: any foreign lineage is refused. Old unmarked
-documents remain unmarked when read. Host-authenticated room routing is still
+documents remain unmarked when read, but facade sessions attach the existing
+durable package ID as immutable runtime sync context. This closes the historical
+unmarked-copy gap without authored migration. Framed sync carries this ID;
+unmarked legacy binary histories are refused because their source is unverifiable.
+Raw unscoped core documents retain legacy interoperability. Host-authenticated room routing is still
 needed against an attacker rewriting the entire payload; lineage is not a signature.
 
 Session faces have explicit local provenance, including restored pins/imported
@@ -100,7 +105,7 @@ decisions still required. Bit 18 remains reserved and unused.
 
 ## 5. Public API and diagnostics
 
-Additive native APIs: `Document::{document_lineage,bind_document_lineage,
+Additive native APIs: `Document::{document_lineage,bind_document_lineage,set_sync_scope,
 fork_for_edit,check_edit_preflight}`, `sync::packet_lineage`,
 `Features::DOCUMENT_LINEAGE`, and `FontStore::registered_ids`.
 New typed refusals are `DocError::{UncommittedEdit,EditPreflightDepth}` and

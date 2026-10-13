@@ -4,6 +4,125 @@ use reprise::*;
 const SOURCE: &str = "00112233445566778899aabbccddeeff";
 const COPY: &str = "ffeeddccbbaa99887766554433221100";
 
+fn unmarked_package(id: u8, peer: u64, text: &str) -> Vec<u8> {
+    let doc = reprise_doc::Document::new(peer).unwrap();
+    doc.define_style("", &reprise_doc::Style::default())
+        .unwrap();
+    doc.append_block(reprise_doc::BlockKind::Paragraph, "", text)
+        .unwrap();
+    doc.commit();
+    reprise_format::Package::new(
+        &doc,
+        reprise_format::DocumentId([id; 16]),
+        reprise_doc::PersistenceMode::History,
+    )
+    .unwrap()
+    .save()
+    .unwrap()
+}
+
+fn historical_copy_refusal(legacy: bool) {
+    let original = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "1".into(),
+            }),
+            &unmarked_package(1, 1, "source"),
+        )
+        .unwrap();
+    // Models a copy saved before durable metadata was introduced: its package
+    // identity and history are independent, but neither document has a marker.
+    let mut copy = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "2".into(),
+            }),
+            &unmarked_package(2, 2, "copy"),
+        )
+        .unwrap();
+    // Prime the query roots before capturing the history used for refusal checks.
+    copy.state().unwrap();
+    let before = (
+        copy.export_updates().unwrap().data,
+        copy.state().unwrap().data,
+    );
+    let id = before.1.document_id.clone();
+    if legacy {
+        let mut packet = original.export_updates().unwrap();
+        packet.data.document_id = id;
+        assert!(
+            copy.import_updates(&packet).is_err(),
+            "unbound history merged"
+        );
+    } else {
+        let mut packet = original
+            .sync_export(&Payload::new(SyncRequest { since: None }))
+            .unwrap();
+        packet.data.document_id = id;
+        assert!(
+            copy.sync_import(&packet).is_err(),
+            "foreign snapshot merged"
+        );
+    }
+    assert!(
+        before
+            == (
+                copy.export_updates().unwrap().data,
+                copy.state().unwrap().data
+            )
+    );
+}
+
+#[test]
+fn historical_unmarked_copy_refuses_rewritten_snapshot() {
+    historical_copy_refusal(false);
+}
+
+#[test]
+fn historical_unmarked_copy_refuses_unverifiable_legacy_history() {
+    historical_copy_refusal(true);
+}
+
+#[test]
+fn unmarked_packages_scope_frames_without_authoring_identity() {
+    let bytes = unmarked_package(1, 1, "source");
+    let original = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "1".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let mut peer = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "3".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let before = original.export_updates().unwrap().data;
+    let packet = original
+        .sync_export(&Payload::new(SyncRequest { since: None }))
+        .unwrap();
+    assert!(
+        packet
+            .data
+            .features
+            .iter()
+            .any(|f| f == "document-lineage1")
+    );
+    peer.sync_import(&packet).unwrap();
+    assert_eq!(before, original.export_updates().unwrap().data);
+    let persisted = reprise_doc::Document::import(&before.content.bytes, 7).unwrap();
+    assert_eq!(persisted.document_lineage().unwrap(), None);
+    assert_eq!(
+        original.state().unwrap().data.blocks,
+        peer.state().unwrap().data.blocks
+    );
+}
+
 #[test]
 fn rewritten_source_envelope_cannot_contaminate_reopened_or_transitive_copy() {
     let (bytes, mut original) = source();

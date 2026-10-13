@@ -323,6 +323,9 @@ pub struct Revision(pub Vec<(u64, i32)>);
 
 pub struct Document {
     doc: LoroDoc,
+    /// The trusted package identity, also for legacy stores without a marker.
+    /// This is context, not a Loro operation or an authored migration.
+    sync_scope: Option<String>,
     /// A lazily built replica that sync checks out to read text lengths at
     /// past versions (see `sync`). Checking out `doc` itself would clear
     /// its undo history.
@@ -352,6 +355,7 @@ impl Document {
     ) -> Document {
         Document {
             doc,
+            sync_scope: None,
             shadow: std::sync::Mutex::new(None),
             lineage_pending: std::sync::Mutex::new(Vec::new()),
             flows,
@@ -375,7 +379,9 @@ impl Document {
         self.commit();
         let doc = self.doc.fork();
         doc.set_peer_id(peer)?;
-        Ok(Document::wrap(doc))
+        let mut fork = Document::wrap(doc);
+        fork.sync_scope = self.sync_scope.clone();
+        Ok(fork)
     }
 
     /// An isolated, same-peer replica for exhaustive edit preflight. Never
@@ -387,7 +393,9 @@ impl Document {
         self.check_edit_preflight()?;
         let doc = self.doc.fork();
         doc.set_peer_id(self.doc.peer_id())?;
-        Ok(Document::wrap(doc))
+        let mut fork = Document::wrap(doc);
+        fork.sync_scope = self.sync_scope.clone();
+        Ok(fork)
     }
 
     /// Staging uses Loro's recursive snapshot codec. Bound physical tree

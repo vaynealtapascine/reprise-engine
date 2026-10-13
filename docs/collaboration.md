@@ -5,13 +5,17 @@
 Fresh facade documents store `document1.id` in their authored CRDT. Copies bind a
 fresh history to a fresh package ID, and reopen checks that the package's ID
 agrees with its stored lineage. Legacy documents without this root keep their
-current appearance and stored bytes on read.
+current appearance and stored bytes on read. Facade sessions attach their
+existing package ID as immutable runtime sync context; forks preserve it.
 
 Sync feature bit 3 (`document-lineage1`) adds a fixed 32-byte lowercase hex ID
 prefix inside the frame's body, before its JSON schema. The existing length
 field includes the prefix. Packet metadata mirrors the feature; the frame's ID
-is compared with durable receiver state before merge. Legacy snapshot imports
-compare the stored IDs before merging. Marker absence must also agree. Rewriting
+is compared with the receiver's stored or package-context ID before merge.
+Legacy binary imports require a matching stored ID; an unmarked binary history
+has no verifiable source and is refused by a scoped session. Historical packages
+can use current framed sync without authoring a marker. Raw unscoped native
+documents retain legacy interoperability. Rewriting
 only an outer host `document_id` therefore cannot cross-sync a copy, including
 after reopen or copying it again. Authentication remains the host's responsibility.
 

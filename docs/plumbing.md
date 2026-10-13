@@ -170,7 +170,10 @@ is `23 + 12 * (since.len + until.len)`; durable document binding adds a
 32-byte prefix under sync bit 3 (`document-lineage1`). Fresh facade documents
 and copies persist `document1.id`; framed bytes and legacy snapshot state
 must agree with the receiver's durable ID before merge. Reopening and copying
-a copy retain this isolation. Old unmarked documents remain unmarked on read.
+a copy retain this isolation. Historical unmarked packages attach their durable
+package ID as runtime sync context without authoring a marker. Their framed
+packets are scoped too; unmarked legacy binary histories cannot prove their
+source and are refused by facade sessions. Old packages use framed sync.
 
 ## 7. Facade review
 

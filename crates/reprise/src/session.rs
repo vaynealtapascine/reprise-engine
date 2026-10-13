@@ -128,7 +128,7 @@ impl Workspace {
             r.peer_id.clone(),
             Engine::new(reprise_font::FontStore::default()),
             Vec::new(),
-        ))
+        )?)
     }
     /// Imports a package as a new, independent document. See `docs/plumbing.md`.
     ///
@@ -275,7 +275,7 @@ impl Workspace {
             r.peer_id.clone(),
             engine,
             notes,
-        );
+        )?;
         session.copied_from = Some(source_id);
         self.adopt(session)
     }
@@ -322,7 +322,7 @@ impl Workspace {
             r.peer_id.clone(),
             engine,
             notes,
-        ))
+        )?)
     }
 }
 /// A single editable replica. Neither core nor CRDT handles cross the facade.
@@ -392,15 +392,16 @@ impl DocumentSession {
         self.poisoned.is_some()
     }
     fn new(
-        doc: Document,
+        mut doc: Document,
         package: reprise_format::Package,
         document_id: String,
         peer_id: String,
         engine: Engine,
         notes: Vec<reprise_diag::Note>,
-    ) -> Self {
+    ) -> Result<Self> {
+        doc.set_sync_scope(&document_id)?;
         let local_faces = engine.fonts.registered_ids().cloned().collect();
-        Self {
+        Ok(Self {
             editor: Box::new(reprise_edit::Editor::new(doc, engine.schemas.clone())),
             engine,
             package,
@@ -421,7 +422,7 @@ impl DocumentSession {
             local_faces,
             copied_from: None,
             style_cache: Default::default(),
-        }
+        })
     }
     /// Takes the workspace's font changes since last time, sharing its faces
     /// by handle. Invalidates layout only when something changed.
