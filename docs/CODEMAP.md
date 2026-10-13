@@ -5,6 +5,7 @@
 | Crate | Files | Responsibility |
 | --- | --- | --- |
 | doc | `src/identity.rs`, `src/lib.rs`, `src/style/store.rs`, `src/sync.rs`, `src/sync_tests.rs` | Durable document binding and immutable runtime package scope for unmarked stores, read-pure lookup guards, committed/bounded same-peer edit trials, versioned lineage prefix and total wire limits |
+| doc/edit/reprise | `doc/src/style_graph.rs`, `edit/src/paste.rs`, `edit/tests/style_graph_copy.rs`, `reprise/src/session.rs`, `reprise/tests/import_copy.rs` | Bounded raw authored style graph duplication, preserving aliases/tombstones/unused records and bypassing clipboard appearance materialisation |
 | edit | `src/{editor,error,plan,paste,replace}.rs`, `tests/refusal_atomicity.rs` | Isolated execution for implicit capacity effects, typed staging preconditions and command-indexed refusal; retained history/undo matrix |
 | font / reprise | `font/src/lib.rs`, `reprise/src/session.rs`, `session/collab.rs`, `reprise/tests/{import_copy,packet_bound,plumbing_edit,plumbing_marks,workspace_fonts}.rs` | Face provenance and scope precedence; durable copy isolation; transport, refusal and mark regressions |
 | layout | `src/flow.rs`, `src/flow/keeps.rs`, `src/{table_flow,notes,floats,codes}.rs`, `src/relations/alignment.rs` | Shared logical indent measure, cell spacing, unsupported auxiliary property diagnostics, missing-target explanations |

@@ -420,19 +420,21 @@ clipboard and HTML remain explicit appearance projections.
 ### Implementation checkpoint: copying the existing authored graph
 
 The current `styles` and `styles1` roots already encode the complete name-based
-graph. An opaque native `AuthoredStyleGraph` will capture both roots, including
+graph. The opaque native `AuthoredStyleGraph` captures both roots, including
 unused records, raw property values, forwarding records and tombstones. It is
 bounded before allocation and imported only into a fresh document with no style
 roots. Container-valued properties outside the documented nested style-map form
 are refused explicitly rather than silently flattened or discarded. This is an
 in-memory transfer type, not a new persistence or clipboard format.
 
-Whole-document duplication will install that graph into new history before
+Whole-document duplication installs that graph into new history before
 pasting content. A dedicated editor entry point for a whole-document fragment
-will preserve the already-installed graph: it validates and stages the same
+preserves the installed graph: it validates and stages the same
 content, range and relation operations as normal paste, but skips the appearance
 projection's style clash/materialisation phase. The entry point requires an
-empty content target. Partial clipboard paste keeps its existing projection.
+empty content/style target, and preflights graph installation and paste together.
+Partial clipboard paste keeps its existing projection. Capture is bounded at
+65536 keys/entries, 16 MiB of keys/values and literal value depth 64.
 
 This corrects inheritance after copying independently of durable identity.
 No new package bit, stored representation, DTO or snapshot is needed for that

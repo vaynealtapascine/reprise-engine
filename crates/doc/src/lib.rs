@@ -61,6 +61,7 @@ mod relation_tests;
 mod resolve;
 mod structure;
 mod style;
+mod style_graph;
 pub mod sync;
 #[cfg(test)]
 mod sync_tests;
@@ -95,6 +96,7 @@ pub use reprise_geom::{TextCombineUpright, TextOrientation};
 pub use reprise_text as text;
 pub use resolve::{Binding, Cause, Found, Gone, Outcome, ResolvedRelation, ResolvedTarget};
 pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
+pub use style_graph::AuthoredStyleGraph;
 pub mod emphasis;
 pub use emphasis::{Decoration, TextSlant};
 

@@ -1,8 +1,9 @@
 # Review fixes 1 handoff
 
 Worktree: `F:/reprise-wt/eng-fixes1`; branch: `ws/review-fixes-1`; base: `f13a4ee`.
-Part A is implemented. Part B stops at its committed design addendum under the
-brief's explicit redesign clause; findings 8–10 are not claimed fixed.
+Part A and Part B's authored-style-graph duplication (finding 9) are implemented.
+Durable style identity and built-in adoption (findings 8 and 10) stop at the
+committed design addendum under the brief's explicit redesign clause.
 
 ## 1. Summary by decision
 
@@ -25,6 +26,8 @@ brief's explicit redesign clause; findings 8–10 are not claimed fixed.
 - Decisions 05/07: the Part B addendum specifies durable style identity, whole
   authored graph duplication and required compatibility signaling. It records
   the unresolved legacy built-in ambiguity and concurrent migration problem.
+  Duplication now transfers the existing raw roots, preserving unused records,
+  parent aliases, tombstones and patched-versus-defined storage in new history.
 
 ## 2. Commits
 
@@ -32,6 +35,8 @@ brief's explicit redesign clause; findings 8–10 are not claimed fixed.
 - `dc307c8 docs(styles): specify durable identity migration and unresolved compatibility`
 - `a4da353 perf(doc): avoid sibling indexing during edit preflight`
 - `1e5ed21 fix(edit): preflight captured malformed style values`
+- `4cec4a5 fix(sync): scope historical packages without authored migration`
+- `2e24dc2 docs(styles): isolate authored graph duplication from migration`
 - The verification handoff commit records the final gate output; obtain the full
   list with `git log --oneline f13a4ee..HEAD`.
 
@@ -43,10 +48,10 @@ Paths below are relative to the worktree. No app files or `PROGRESS.md` changed.
 The brief identifies affected subsystems rather than a closed file allowlist.
 Supporting edits beyond its explicitly named files are listed in full here.
 
-- `crates/doc/src/{identity.rs,lib.rs,style/store.rs,sync.rs,sync_tests.rs}`:
+- `crates/doc/src/{identity.rs,lib.rs,style/store.rs,style_graph.rs,sync.rs,sync_tests.rs}`:
   durable binding, pure lookup guards, edit staging and packet boundaries.
 - `crates/edit/src/{editor.rs,error.rs,paste.rs,plan.rs,replace.rs}` and
-  `crates/edit/tests/refusal_atomicity.rs`: publication and refusal coverage.
+  `crates/edit/tests/{refusal_atomicity.rs,style_graph_copy.rs}`: publication and refusal coverage.
 - `crates/font/src/lib.rs`: additive registered-face iterator for provenance.
 - `crates/layout/src/{codes.rs,flow.rs,flow/keeps.rs,table_flow.rs,notes.rs,floats.rs,relations/alignment.rs}`:
   shared geometry and context/anchor diagnostics.
@@ -103,11 +108,21 @@ built-ins have the same stored representation, and eager materialization changes
 pinned CRDT IDs/revisions. The addendum names the migration policy and concurrency
 decisions still required. Bit 18 remains reserved and unused.
 
+The independent graph-copy correction transfers both current roots without
+resolving or rewriting their values. Capture is bounded at 65536 keys/entries,
+16 MiB of keys/values and literal depth 64; unsupported CRDT containers refuse
+explicitly instead of losing authored data. Graph installation and content paste
+are preflighted together against an empty target. Partial clipboard paste keeps
+its appearance projection; duplication skips its style materialisation phase.
+
 ## 5. Public API and diagnostics
 
 Additive native APIs: `Document::{document_lineage,bind_document_lineage,set_sync_scope,
 fork_for_edit,check_edit_preflight}`, `sync::packet_lineage`,
 `Features::DOCUMENT_LINEAGE`, and `FontStore::registered_ids`.
+Graph-copy additions: opaque `AuthoredStyleGraph`,
+`Document::{authored_style_graph,restore_authored_style_graph}`, and
+`Editor::paste_document_fragment`. These add no DTO or persistence format.
 New typed refusals are `DocError::{UncommittedEdit,EditPreflightDepth}` and
 `Reason::{UncommittedEdit,PreflightDepth}`. They use existing `edit.invalid-command`
 and `edit.limit` Error codes: a refused edit is omitted entirely.
@@ -152,15 +167,17 @@ None added; no license changes.
    precedence over the workspace refresh at the same FaceId.
 6. Proposed only: stable style IDs, graph remapping and required package bit 18.
    No Part B stored migration or feature activation was implemented.
+7. Whole-document style duplication preserves the authored graph and creates
+   fresh history. This corrects copy behavior without changing existing storage.
 
-The first five are documented in `contracts.md`; the sixth is the dedicated
+The first five and seventh are documented in `contracts.md`; the sixth is the dedicated
 `paragraph-styles.md` addendum. Integrators should review the staging restriction
 and metadata compatibility choice explicitly.
 
 ## 9. Known gaps and later consumers
 
 Handoff for PROGRESS: Part A findings 1–7 are implemented and regression-covered.
-Part B findings 8–10 remain open. Resolve legacy built-in adoption semantics,
+Part B finding 9 is implemented; findings 8 and 10 remain open. Resolve legacy built-in adoption semantics,
 concurrent first-patch identity and queued old-writer updates before implementing
 the addendum. A naive name-key rename or clipboard flattening fix is insufficient.
 
@@ -169,7 +186,8 @@ Lists, inline objects and sections should model all fallible writes or join
 Lists can later reference durable style IDs for levels; headings need an authored
 semantic role; table cells/headers/footers share the same inherited style graph.
 Partial clipboard/HTML remain explicit appearance projections, while whole-document
-copy must export/import the complete authored graph.
+copy now exports/imports the complete existing authored graph. The future
+identity migration must extend that opaque transfer to its additional roots.
 
 App seam: existing batch/paste/replace methods and `expected_revision` stay in use.
 Existing State revision/undo fields expose atomic outcomes. Existing mark-facts
@@ -191,13 +209,20 @@ corresponding production changes:
 | 5 | `workspace_refresh_preserves_session_font_descriptors`: unexpected `font.nearest` after workspace refresh |
 | 6 | `deleted_anchor_target_explains_missing_mark_and_query`: explanation was None instead of `relation.missing-target` |
 | 7 | `table_cell_uses_resolved_paragraph_indents`: first-line indent was 0pt instead of 15pt |
+| 9 | Empty and populated parent-alias copies resolved to 10pt instead of 40pt, or remained at 40pt after a 50pt parent update; referenced tombstone was revived |
 
 The later refusal matrix exercises malformed/stale batches across insertion,
 deletion, split, join, move and style definition, plus malformed paste/replacement
 and text/HTML replacement. Native tests cover late capacity, pending raw writes,
 read-root purity and bounded deep staging. Packet tests cover exact total cap,
-cap+1 and both maximum-length version vectors. Part B's acceptance cases remain
-specified in the addendum rather than implemented tests.
+cap+1 and both maximum-length version vectors. Historical unmarked-copy probes
+also failed before the runtime package-scope correction; afterward both refusals
+preserve bytes and state, and same-package framed sync works without a stored
+marker. Style-copy tests cover empty/populated aliases, later parent edits,
+referenced tombstones and built-in forwarding. Native graph tests cover raw
+unreadable values, pure capture, fresh peer history, bounds and malformed
+containers; editor tests check atomic refusal of bad fragments and occupied
+targets. Identity/built-in acceptance cases remain specified in the addendum.
 `rename-refusal-before.log` records the additional rename failure; its companion
 tests verify refusal preserves bytes/history/undo and a preceding repair succeeds
 as one undo step. This changes publication validation, not Part B style identity.

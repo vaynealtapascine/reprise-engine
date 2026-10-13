@@ -177,62 +177,19 @@ impl Workspace {
             .extend(opened.assets.restore_images(&mut engine.assets));
         let mut notes = opened.notes.clone();
         let old = opened.into_document()?;
+        let style_graph = old.authored_style_graph()?;
         // A duplicate keeps every annotation, comment anchors included.
         let fragment = old
             .copy_document_fragment(&source_id, &engine.schemas)
             .map_err(|e| Error::Invalid(e.to_string()))?;
-        // Every named style first, so unreferenced ones survive and the
-        // fragment's own styles are identical, not clashing. Each live style
-        // is written as its effective definition (nested and flat patches
-        // folded together); an untouched built-in is left to the engine so
-        // the copy needs no more format features than its source.
+        // Preserve authored properties, parent edges, forwarding records and
+        // tombstones, rather than copying clipboard appearance definitions.
         let fresh = Document::new(peer)?;
         fresh.bind_document_lineage(&r.document_id)?;
-        let (names, cut) = old.style_names();
-        if cut {
-            return Err(Error::Limit("named styles".into()));
-        }
-        for name in &names {
-            let Some(record) = old.style_record(name) else {
-                continue;
-            };
-            let builtin = record
-                .builtin
-                .then(|| reprise_doc::builtin_style(name))
-                .flatten();
-            let Some(base) = builtin else {
-                fresh.define_style(name, &record.style)?;
-                continue;
-            };
-            // A patched built-in stays a patch, so it keeps following the
-            // engine's definition for the properties it did not change.
-            let mut patch = reprise_doc::StylePatch::default();
-            for property in reprise_doc::STORED_KEYS {
-                match (record.style.stored(property), base.stored(property)) {
-                    (mine, theirs) if mine == theirs => {}
-                    (Some(raw), _) => patch.set.apply_stored(property, raw),
-                    (None, _) => {
-                        patch.clear.insert(property.to_string());
-                    }
-                }
-            }
-            if patch != reprise_doc::StylePatch::default() {
-                fresh.patch_named_style(name, &patch)?;
-            }
-        }
-        // A built-in the source deleted or renamed away stays gone.
-        for name in reprise_doc::BUILTIN_STYLES {
-            if old
-                .style_record(name)
-                .is_some_and(|r| r.status != reprise_doc::StyleStatus::Live)
-            {
-                fresh.delete_named_style(name)?;
-            }
-        }
         fresh.commit();
         let mut editor = reprise_edit::Editor::new(fresh, engine.schemas.clone());
         let pasted = editor
-            .paste(&fragment, None, &r.document_id)
+            .paste_document_fragment(&fragment, &r.document_id, &style_graph)
             .map_err(Error::from)?;
         notes.extend(pasted.notes);
         let doc = editor.into_document();

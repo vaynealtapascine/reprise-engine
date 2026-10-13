@@ -1095,6 +1095,20 @@ one-em box. Source byte offsets remain available for text edits and authored ran
 
 Additive; the design is `docs/paragraph-styles.md`.
 
+-   **Whole-document duplication.** `Document::authored_style_graph` captures
+    the existing `styles` and `styles1` roots, including unused definitions,
+    aliases, tombstones, raw values and patched-versus-defined state. It creates
+    no missing roots. The opaque graph retains at most 65536 keys/entries and
+    16 MiB of keys/values, with literal value depth at most 64. Unexpected CRDT
+    containers refuse with a store error rather than losing data.
+    `restore_authored_style_graph` refuses a target with either style root.
+    `Editor::paste_document_fragment` stages graph installation and whole-root
+    content paste in an empty target before live writes, preserving the installed
+    authored graph instead of materialising fragment appearance definitions.
+    `Workspace::import_copy` uses this path and starts fresh history. Partial
+    clipboard paste retains its existing projection and clash policy. This
+    adds no stored representation, DTO or package feature bit.
+
 -   **Properties.** `Property` gains `IndentStart`, `IndentEnd`, `IndentFirst`,
     `SpaceBefore` and `SpaceAfter` (held in `Style.values`, every stored form,
     `em`/`lh`/`%` of the block's inline size and expressions). `Style` gains

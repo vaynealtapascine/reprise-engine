@@ -562,3 +562,145 @@ fn a_copy_keeps_paragraph_styles() {
         assert_eq!(style_of(&b, i), style_of(&a, i));
     }
 }
+
+fn renamed_parent_copy(populated: bool) {
+    let mut source = session(SOURCE, "1");
+    tx(
+        &mut source,
+        vec![
+            Command::DefineStyle {
+                name: "Parent".into(),
+                parent: Some("".into()),
+                style: Style {
+                    size: Some("40pt".into()),
+                    ..Default::default()
+                },
+            },
+            Command::DefineStyle {
+                name: "Child".into(),
+                parent: Some("Parent".into()),
+                style: Style::default(),
+            },
+            Command::RenameStyle {
+                from: "Parent".into(),
+                to: "Renamed".into(),
+            },
+        ],
+    );
+    if populated {
+        let node = tx(&mut source, vec![block("child", 0)]).data.blocks[0].clone();
+        tx(
+            &mut source,
+            vec![Command::ApplyStyle {
+                node,
+                style: Some("Child".into()),
+            }],
+        );
+    }
+    let mut copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &source.save().unwrap().data.bytes,
+        )
+        .unwrap();
+    for document in [&mut source, &mut copy] {
+        if !populated {
+            let node = tx(document, vec![block("child", 0)]).data.blocks[0].clone();
+            tx(
+                document,
+                vec![Command::ApplyStyle {
+                    node,
+                    style: Some("Child".into()),
+                }],
+            );
+        }
+        let state = document.state().unwrap().data;
+        assert_eq!(
+            state.resolved[state.blocks[0].style.resolved as usize].size,
+            40 * 1024,
+            "copy detached an unused parent alias"
+        );
+        tx(
+            document,
+            vec![Command::UpdateStyle {
+                name: "Renamed".into(),
+                parent: None,
+                style: Style {
+                    size: Some("50pt".into()),
+                    ..Default::default()
+                },
+                clear: Vec::new(),
+            }],
+        );
+        let state = document.state().unwrap().data;
+        assert_eq!(
+            state.resolved[state.blocks[0].style.resolved as usize].size,
+            50 * 1024,
+            "copy materialised the alias as a detached definition"
+        );
+    }
+}
+
+#[test]
+fn empty_copy_retains_unused_parent_aliases() {
+    renamed_parent_copy(false);
+}
+
+#[test]
+fn populated_copy_retains_parent_aliases_after_later_edits() {
+    renamed_parent_copy(true);
+}
+
+#[test]
+fn copy_retains_referenced_tombstones_and_builtin_forwarding() {
+    let mut source = session(SOURCE, "1");
+    let node = tx(&mut source, vec![block("deleted quote", 0)]).data.blocks[0].clone();
+    tx(
+        &mut source,
+        vec![
+            Command::DefineStyle {
+                name: "Gone".into(),
+                parent: Some("".into()),
+                style: Style {
+                    size: Some("40pt".into()),
+                    ..Default::default()
+                },
+            },
+            Command::ApplyStyle {
+                node,
+                style: Some("Gone".into()),
+            },
+            Command::DeleteStyle {
+                name: "Gone".into(),
+            },
+            Command::RenameStyle {
+                from: "Subtitle".into(),
+                to: "Subheading".into(),
+            },
+        ],
+    );
+    let copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &source.save().unwrap().data.bytes,
+        )
+        .unwrap();
+    let native = |session: &DocumentSession| {
+        reprise_doc::Document::import(&session.export_updates().unwrap().data.content.bytes, 9)
+            .unwrap()
+    };
+    let (a, b) = (native(&source), native(&copy));
+    for name in ["Gone", "Subtitle", "Subheading"] {
+        assert_eq!(
+            a.style_record(name),
+            b.style_record(name),
+            "lost authored record {name}"
+        );
+    }
+}
