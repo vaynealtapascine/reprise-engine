@@ -699,3 +699,40 @@ fn non_monotone_trials_commit_the_retained_fit_without_claiming_a_minimum() {
     );
     assert_eq!(snapshot, complete_by_units(&engine, &doc));
 }
+
+#[test]
+fn suspended_trials_keep_owned_state_and_reject_stale_or_cancelled_publication() {
+    use crate::incremental::JobError;
+    let (engine, doc) = setup();
+    page(&doc, 200, 200, 10);
+    first(&doc, &[("columns.count", json!(2))]);
+    block(&doc, &vec!["a"; 12].join("\n"));
+    let b = block(&doc, "b");
+    continuous(&doc, b, &[("columns.count", json!(1))]);
+    let expected = engine.layout(&doc);
+    let mut session = LayoutSession::new(&engine);
+    let mut state = session.start(&doc, Viewport::Pages(0..1000)).suspend();
+    let mut complete = None;
+    for n in 0..10000 {
+        let mut job = session.resume(&doc, state).unwrap();
+        if n % 7 == 0 {
+            let before = job.partial().unwrap().snapshot().to_json();
+            assert_eq!(job.step(0).unwrap().used, 0);
+            assert_eq!(before, job.partial().unwrap().snapshot().to_json());
+        }
+        if job.step(1 + n % 3).unwrap().complete {
+            complete = job.complete().unwrap();
+            break;
+        }
+        state = job.suspend();
+    }
+    assert_eq!(complete.unwrap(), expected);
+    let state = session.start(&doc, Viewport::Pages(0..1000)).suspend();
+    doc.block(b).unwrap().text.insert(0, "changed ").unwrap();
+    assert!(matches!(session.resume(&doc, state), Err(JobError::Stale)));
+    let mut job = session.start(&doc, Viewport::Pages(0..1000));
+    job.step(1).unwrap();
+    job.cancel();
+    assert!(matches!(job.partial(), Err(JobError::Cancelled)));
+    assert!(matches!(job.complete(), Err(JobError::Cancelled)));
+}
