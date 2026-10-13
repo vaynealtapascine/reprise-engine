@@ -237,17 +237,31 @@ impl Document {
     /// (following renames), or for a deleted style just its parent, which is
     /// how it resolves, so pasted text keeps its appearance. A pasted
     /// document has no deleted style to report.
-    pub(crate) fn style_for_copy(&self, name: &str) -> Option<Style> {
-        let mut current = name.to_string();
+    pub(crate) fn style_for_copy_reference(
+        &self,
+        reference: &str,
+    ) -> Option<(Style, Option<String>)> {
+        let mut current = reference.to_owned();
         for _ in 0..=MAX_CHAIN {
-            let record = self.style_record(&current)?;
+            let Some((_, record)) = self.reference_record(&current) else {
+                return super::BUILTIN_STYLES
+                    .contains(&self.reference_label(&current).as_str())
+                    .then_some((Style::default(), None));
+            };
             match record.status {
-                StyleStatus::Live => return Some(record.style),
+                StyleStatus::Live => {
+                    let parent = record.style.parent.clone();
+                    return Some((self.public_style(record.style), parent));
+                }
                 StyleStatus::Deleted => {
-                    return Some(Style {
-                        parent: record.style.parent,
-                        ..Style::default()
-                    });
+                    let parent = record.style.parent;
+                    return Some((
+                        self.public_style(Style {
+                            parent: parent.clone(),
+                            ..Default::default()
+                        }),
+                        parent,
+                    ));
                 }
                 StyleStatus::Renamed(to) => current = to,
             }

@@ -353,3 +353,8 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `doc` | `src/style_identity.rs`, `src/style_identity_tests.rs`, `src/{style,style/store,style_graph,sync}.rs` | Immutable owners, versioned references, merge-safe labels, built-in pins, read-pure legacy interpretation and whole-graph transfer | 05, 07, 29, 37 |
 | `format` | `src/features.rs`, `src/container.rs`, `SPEC.md` | Required style-identity bit 18, pure feature detection and old-reader refusal | 34 |
 | `edit` | `src/plan.rs` | Trial all fallible style-identity writes before publishing an edit; ordinary typing avoids staging | 29 |
+
+`fixtures/tests/incremental_steps.rs` accepts test-only `REPRISE_TIMING_TRACE=1`
+to log construction and per-fixture executor timings under `--nocapture`.
+Style graph transfer retains scalar allocation floors in `styles2.clock/<peer>`
+so fresh copied history cannot reallocate existing or dangling owner tokens.

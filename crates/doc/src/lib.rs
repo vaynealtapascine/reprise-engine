@@ -584,7 +584,7 @@ impl Document {
             id,
             kind,
             style: get_str(&meta, "style").map(|reference| self.reference_label(&reference)),
-            overrides,
+            overrides: self.public_style(overrides),
             text,
         })
     }

@@ -17,6 +17,7 @@ pub struct AuthoredStyleGraph {
     flat: Option<BTreeMap<String, LoroValue>>,
     identities: Option<BTreeMap<String, LoroValue>>,
     legacy_builtins: bool,
+    clocks: BTreeMap<u64, i64>,
 }
 
 fn invalid() -> DocError {
@@ -134,11 +135,51 @@ impl Document {
             .style_graph_root(crate::style_identity::ROOT)?
             .map(|root| properties(&root, &mut budget))
             .transpose()?;
+        let mut clocks = BTreeMap::new();
+        if self.has_style_identities() {
+            for (peer, counter) in self.doc.oplog_vv().iter() {
+                if let Ok(floor) = self.style_owner_floor(*peer) {
+                    clocks.insert(
+                        *peer,
+                        floor.checked_add(i64::from(*counter)).ok_or_else(invalid)?,
+                    );
+                }
+            }
+            if let Some(properties) = &identities {
+                for (key, value) in properties {
+                    if let Some(peer) = key
+                        .strip_prefix("clock/")
+                        .and_then(|p| p.parse::<u64>().ok())
+                        && let LoroValue::String(value) = value
+                        && let Ok(floor) = value.parse::<i64>()
+                        && floor >= 0
+                    {
+                        clocks.entry(peer).or_insert(floor);
+                    }
+                }
+            }
+            for (peer, counter) in &clocks {
+                let key = format!("clock/{peer}");
+                if identities.as_ref().is_none_or(|m| !m.contains_key(&key)) {
+                    budget.key(&key)?;
+                }
+                budget.add_bytes(counter.to_string().len())?;
+            }
+        }
+        if self.legacy_builtin_context()
+            && identities
+                .as_ref()
+                .is_none_or(|m| !m.contains_key("legacy-builtins1"))
+        {
+            budget.key("legacy-builtins1")?;
+            budget.add_bytes(1)?;
+        }
         Ok(AuthoredStyleGraph {
             nested,
             flat,
             identities,
             legacy_builtins: self.legacy_builtin_context(),
+            clocks,
         })
     }
 
@@ -168,6 +209,11 @@ impl Document {
             for (key, value) in properties {
                 root.insert(key, value.clone())?;
             }
+        }
+        for (peer, counter) in &graph.clocks {
+            self.doc
+                .get_map(crate::style_identity::ROOT)
+                .insert(&format!("clock/{peer}"), counter.to_string())?;
         }
         if graph.legacy_builtins {
             self.doc

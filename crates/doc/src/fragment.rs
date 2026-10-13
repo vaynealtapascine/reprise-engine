@@ -307,20 +307,31 @@ impl Document {
             } else {
                 block.style.unwrap_or_default()
             };
-            for name in [Some(style.clone()), block.overrides.parent.clone()]
-                .into_iter()
-                .flatten()
+            let reference = self.style_reference(node).unwrap_or_default();
+            let override_parent = block.overrides.parent.clone();
+            for (name, reference) in [
+                Some((style.clone(), reference)),
+                override_parent.map(|name| (name.clone(), self.style_owner_reference(&name))),
+            ]
+            .into_iter()
+            .flatten()
             {
-                let mut next = Some(name);
+                let mut next = Some((name, reference));
                 for _ in 0..1024 {
-                    let Some(name) = next.take() else { break };
+                    let Some((name, reference)) = next.take() else {
+                        break;
+                    };
                     if fragment.styles.contains_key(&name) {
                         break;
                     }
-                    let Some(style) = self.style_for_copy(&name) else {
+                    let Some((style, parent_reference)) = self.style_for_copy_reference(&reference)
+                    else {
                         break;
                     };
-                    next = style.parent.clone();
+                    next = style
+                        .parent
+                        .clone()
+                        .map(|parent| (parent.clone(), parent_reference.unwrap_or(parent)));
                     fragment.styles.insert(name, style);
                     if fragment.styles.len() > 1024 {
                         return Err(FragmentError::Limit("styles"));

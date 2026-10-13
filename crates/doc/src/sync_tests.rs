@@ -561,3 +561,26 @@ fn identity_feature_transfers_empty_root_and_rejects_downgraded_references() {
         b.computed_style(node).unwrap()
     );
 }
+
+#[test]
+fn downgraded_flat_builtin_parent_is_refused_without_merging() {
+    let (a, b, _) = pair();
+    a.define_named_style(
+        "Child",
+        &Style {
+            parent: Some("Heading 1".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    a.commit();
+    let packet = a.export_delta(&b.version_vector()).unwrap();
+    let (mut header, body) = read_header(&packet).unwrap();
+    header.features.0 &= !Features::STYLE_IDENTITIES.0;
+    let before = b.try_export(crate::PersistenceMode::History).unwrap();
+    assert!(b.import_packet(&repack(&header, body)).is_err());
+    assert_eq!(
+        before,
+        b.try_export(crate::PersistenceMode::History).unwrap()
+    );
+}

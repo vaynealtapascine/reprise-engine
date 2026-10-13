@@ -1152,3 +1152,7 @@ the underlying resolution/copy reference. Public labels remain strings.
 history. Required package bit 18 and sync bit 4 declare the stored semantics in
 `docs/paragraph-styles.md`; all existing DTO shapes remain unchanged. Unmarked
 legacy unresolved names use their legacy fallback; builtin authoring is tagged.
+
+Copied style owners are protected from reallocation by bounded scalar per-peer
+allocation floors under `styles2.clock/<peer>`. Capture includes these added keys
+in its existing graph budget; unreadable clocks refuse new owner allocation.

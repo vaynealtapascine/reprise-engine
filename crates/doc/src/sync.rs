@@ -543,7 +543,7 @@ impl Document {
                 }
                 if header.features.0 & Features::STYLE_IDENTITIES.0 == 0 {
                     let identity_root = matches!(&op.container, ContainerID::Root { name, .. } if name.as_str() == crate::style_identity::ROOT);
-                    let identity_reference = matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, value: loro::LoroValue::String(value) }) if matches!(key.as_str(), "style" | "parent") && (value.starts_with("\u{1}style1:") || value.starts_with("\u{2}builtin1:")));
+                    let identity_reference = matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, value: loro::LoroValue::String(value) }) if (matches!(key.as_str(), "style" | "parent") || matches!(&op.container, ContainerID::Root { name, .. } if (name.as_str() == "styles1" && key.starts_with("parent/")) || (name.as_str() == "para1" && key.ends_with("/parent")))) && (value.starts_with("\u{1}style1:") || value.starts_with("\u{2}builtin1:")));
                     if identity_root || identity_reference {
                         return Err(invalid(
                             "style identity operations require style-identities1",

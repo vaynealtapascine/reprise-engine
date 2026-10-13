@@ -40,9 +40,22 @@ fn collision_label(owner: &str, label: &str) -> String {
 }
 
 fn encode(owner: &str) -> String {
-    let mut reference = ID_PREFIX.to_owned();
+    let mut reference = String::with_capacity(
+        ID_PREFIX
+            .len()
+            .saturating_add(owner.len().saturating_mul(2)),
+    );
+    reference.push_str(ID_PREFIX);
+    let digit = |n: u8| {
+        char::from(if n < 10 {
+            b'0'.saturating_add(n)
+        } else {
+            b'a'.saturating_add(n.saturating_sub(10))
+        })
+    };
     for byte in owner.bytes() {
-        reference.push_str(&format!("{byte:02x}"));
+        reference.push(digit(byte >> 4));
+        reference.push(digit(byte & 15));
     }
     reference
 }
@@ -156,26 +169,65 @@ impl Document {
         let Some(map) = self.identity_map().filter(|map| map.len() <= MAX_KEYS) else {
             return index;
         };
-        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut desired = BTreeMap::new();
         for key in map.keys() {
             if let Some(owner) = key.strip_prefix("label/") {
-                groups
-                    .entry(get_str(&map, &key).unwrap_or_else(|| owner.into()))
-                    .or_default()
-                    .push(owner.into());
+                desired.insert(
+                    owner.to_owned(),
+                    get_str(&map, &key).unwrap_or_else(|| owner.into()),
+                );
             }
         }
-        for (label, owners) in groups {
-            let collision = owners.len() > 1;
-            for owner in owners {
-                let label = if collision {
-                    collision_label(&owner, &label)
-                } else {
-                    label.clone()
-                };
-                index.selectors.insert(label.clone(), owner.clone());
-                index.labels.insert(owner, label);
+        // A concurrent first definition or untouched built-in may own the
+        // destination label without having any identity metadata of its own.
+        let targets: BTreeSet<_> = desired.values().cloned().collect();
+        for label in targets {
+            if self.raw_style_record(&label, true).is_some() {
+                desired.entry(label.clone()).or_insert(label);
             }
+        }
+        let mut groups: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (owner, label) in &desired {
+            groups
+                .entry(label.clone())
+                .or_default()
+                .insert(owner.clone());
+        }
+        index.labels = desired.clone();
+        let mut pending: BTreeSet<_> = groups
+            .iter()
+            .filter(|(_, owners)| owners.len() > 1)
+            .map(|(label, _)| label.clone())
+            .collect();
+        let mut suffixed = BTreeSet::new();
+        // Each owner is suffixed at most once: hostile authored labels can
+        // imitate a generated selector, but cannot trigger quadratic retries.
+        while let Some(label) = pending.pop_first() {
+            let owners = groups.get(&label).cloned().unwrap_or_default();
+            if owners.len() <= 1 {
+                continue;
+            }
+            for owner in owners {
+                if !suffixed.insert(owner.clone()) {
+                    continue;
+                }
+                let next = collision_label(
+                    &owner,
+                    desired.get(&owner).map(String::as_str).unwrap_or(&owner),
+                );
+                if let Some(group) = groups.get_mut(&label) {
+                    group.remove(&owner);
+                }
+                index.labels.insert(owner.clone(), next.clone());
+                let group = groups.entry(next.clone()).or_default();
+                group.insert(owner);
+                if group.len() > 1 {
+                    pending.insert(next);
+                }
+            }
+        }
+        for (owner, label) in &index.labels {
+            index.selectors.insert(label.clone(), owner.clone());
         }
         index
     }
@@ -233,6 +285,24 @@ impl Document {
             .unwrap_or_else(|| name.to_owned())
     }
 
+    pub(crate) fn style_owner_reference(&self, name: &str) -> String {
+        encode(&self.style_owner(name))
+    }
+
+    pub(crate) fn style_owner_floor(&self, peer: u64) -> Result<i64, DocError> {
+        let Some(map) = self.identity_map() else {
+            return Ok(0);
+        };
+        let key = format!("clock/{peer}");
+        if map.get(&key).is_none() {
+            return Ok(0);
+        }
+        get_str(&map, &key)
+            .and_then(|s| s.parse::<i64>().ok())
+            .filter(|n| *n >= 0)
+            .ok_or_else(|| DocError::Store("unreadable style allocation clock".into()))
+    }
+
     /// An opaque, document-scoped owner token, stable across rename and undo.
     /// Copies retain local tokens in their independent document namespace.
     pub fn style_identity(&self, name: &str) -> Option<String> {
@@ -244,6 +314,13 @@ impl Document {
     /// Plain legacy strings bind to their original owner, not a reused alias.
     pub fn style_reference(&self, node: NodeId) -> Option<String> {
         let raw = get_str(&self.meta_of(node).ok()?, "style")?;
+        if !self.has_style_identities()
+            && !crate::BUILTIN_STYLES.contains(&raw.as_str())
+            && !raw.starts_with(ID_PREFIX)
+            && !raw.starts_with(BUILTIN_PREFIX)
+        {
+            return Some(raw);
+        }
         if !raw.starts_with(ID_PREFIX)
             && !raw.starts_with(BUILTIN_PREFIX)
             && self.legacy_builtin_context()
@@ -285,7 +362,7 @@ impl Document {
             self.author_style_identities()?;
             return Ok(format!("{BUILTIN_PREFIX}{owner}"));
         }
-        if self.has_style_identities() && (owner != name || self.owner_label(&owner) != name) {
+        if self.has_style_identities() {
             return Ok(encode(&owner));
         }
         Ok(name.to_owned())
@@ -336,7 +413,11 @@ impl Document {
         }
         let peer = self.doc.peer_id();
         let counter = i64::from(self.doc.oplog_vv().get(&peer).copied().unwrap_or_default())
-            .saturating_add(i64::try_from(self.doc.get_pending_txn_len()).unwrap_or(i64::MAX));
+            .checked_add(i64::try_from(self.doc.get_pending_txn_len()).unwrap_or(i64::MAX))
+            .and_then(|n| n.checked_add(self.style_owner_floor(peer).ok()?))
+            .ok_or_else(|| {
+                DocError::Store("style allocation clock exhausted or unreadable".into())
+            })?;
         let fresh = format!("\u{3}{peer}:{counter}");
         self.check_identity_keys(&[
             format!("label/{owner}"),
@@ -408,8 +489,12 @@ impl Document {
             record.style.parent = Some(
                 if record.builtin && crate::builtin_style(parent).is_some() {
                     format!("{BUILTIN_PREFIX}{parent}")
-                } else {
+                } else if self.has_style_identities()
+                    || crate::BUILTIN_STYLES.contains(&parent.as_str())
+                {
                     encode(parent)
+                } else {
+                    parent.clone()
                 },
             );
         }

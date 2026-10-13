@@ -291,3 +291,7 @@ prefixes specified in `docs/paragraph-styles.md`. Readers without bit 18 refuse
 before decoding document semantics. Reads do not create the root or set this bit.
 Unmarked historical unresolved names retain legacy fallback; explicitly defined
 styles and old marked paragraph-style interpretation remain authoritative.
+
+`styles2.clock/<peer>` stores a nonnegative scalar style-allocation floor. Whole
+copy transfer advances it by the source's operation high-water counter; future
+allocations add their local counter to the floor. It is not a sync causal vector.

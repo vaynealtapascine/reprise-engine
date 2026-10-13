@@ -387,3 +387,177 @@ fn builtin_rename_preflights_all_metadata_keys_before_writing() {
     assert!(doc.rename_named_style("Heading 1", "Title").is_err());
     assert_eq!(before, doc.try_export(PersistenceMode::History).unwrap());
 }
+
+#[test]
+fn collisions_with_an_existing_unrenamed_style_keep_both_selectors() {
+    let doc = Document::new(1).unwrap();
+    doc.define_named_style(
+        "A",
+        &Style {
+            weight: Some(400),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.define_named_style(
+        "B",
+        &Style {
+            weight: Some(700),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let b = doc.append_block(BlockKind::Paragraph, "B", "B").unwrap();
+    doc.rename_named_style("A", "B").unwrap();
+    doc.commit();
+    let labels: Vec<_> = doc
+        .style_names()
+        .0
+        .into_iter()
+        .filter(|n| n.starts_with("B [style "))
+        .collect();
+    assert_eq!(labels.len(), 2);
+    assert_eq!(doc.computed_style(b).unwrap().weight, Some(700));
+}
+
+#[test]
+fn hostile_label_matching_a_generated_selector_cannot_hide_an_owner() {
+    let doc = Document::new(1).unwrap();
+    for name in ["A", "B", "C"] {
+        doc.define_named_style(name, &Style::default()).unwrap();
+    }
+    doc.rename_named_style("A", "Same").unwrap();
+    doc.rename_named_style("B", "Same").unwrap();
+    doc.commit();
+    let generated = doc.current_style_name("A");
+    doc.doc
+        .get_map("styles2")
+        .insert("label/C", generated)
+        .unwrap();
+    doc.commit();
+    let names = doc.style_names().0;
+    let owners: std::collections::BTreeSet<_> = names
+        .iter()
+        .filter(|n| n.starts_with("Same"))
+        .filter_map(|n| doc.style_identity(n))
+        .collect();
+    assert_eq!(owners.len(), 3);
+}
+
+#[test]
+fn clipboard_projection_keeps_an_unmarked_missing_builtin_at_legacy_size() {
+    let doc = Document::new(1).unwrap();
+    let node = doc.append_block(BlockKind::Paragraph, "", "old").unwrap();
+    doc.meta_of(node)
+        .unwrap()
+        .insert("style", "Heading 1")
+        .unwrap();
+    doc.commit();
+    let fragment = doc
+        .copy_all_fragment(
+            "00000000000000000000000000000001",
+            &crate::SchemaRegistry::builtin(),
+        )
+        .unwrap();
+    let target = Document::new(2).unwrap();
+    target
+        .define_named_style("Heading 1", fragment.styles.get("Heading 1").unwrap())
+        .unwrap();
+    let pasted = target
+        .append_block(BlockKind::Paragraph, "Heading 1", "old")
+        .unwrap();
+    assert_eq!(
+        target.computed_style(pasted).unwrap().size,
+        doc.computed_style(node).unwrap().size
+    );
+}
+
+#[test]
+fn direct_override_parents_are_public_labels_and_follow_owner_rename() {
+    let doc = Document::new(1).unwrap();
+    doc.define_named_style("A", &Style::default()).unwrap();
+    let node = doc.append_block(BlockKind::Paragraph, "", "x").unwrap();
+    doc.set_overrides(
+        node,
+        &Style {
+            parent: Some("A".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.rename_named_style("A", "B").unwrap();
+    assert_eq!(
+        doc.block(node).unwrap().overrides.parent.as_deref(),
+        Some("B")
+    );
+    let fragment = doc
+        .copy_document_fragment(
+            "00000000000000000000000000000001",
+            &crate::SchemaRegistry::builtin(),
+        )
+        .unwrap();
+    assert_eq!(
+        fragment.blocks.first().unwrap().overrides.parent.as_deref(),
+        Some("B")
+    );
+}
+
+#[test]
+fn copied_owner_tokens_cannot_be_reallocated_when_fresh_history_catches_up() {
+    let source = Document::new(1).unwrap();
+    source
+        .define_named_style(
+            "A",
+            &Style {
+                weight: Some(400),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    source
+        .append_block(BlockKind::Paragraph, "", &"padding".repeat(40))
+        .unwrap();
+    source.commit();
+    source.rename_named_style("A", "B").unwrap();
+    source
+        .define_named_style(
+            "A",
+            &Style {
+                weight: Some(500),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    source.commit();
+    let owner = source.style_owner("A");
+    let counter: i32 = owner.rsplit(':').next().unwrap().parse().unwrap();
+    let copy = Document::new(1).unwrap();
+    copy.restore_authored_style_graph(&source.authored_style_graph().unwrap())
+        .unwrap();
+    let old = copy
+        .append_block(BlockKind::Paragraph, "A", "copied owner")
+        .unwrap();
+    copy.rename_named_style("A", "C").unwrap();
+    copy.commit();
+    while copy.doc.oplog_vv().get(&1).copied().unwrap_or_default() < counter {
+        copy.doc
+            .get_map("padding")
+            .insert(
+                "counter",
+                copy.doc.oplog_vv().get(&1).copied().unwrap_or_default(),
+            )
+            .unwrap();
+        copy.commit();
+    }
+    copy.define_named_style(
+        "A",
+        &Style {
+            weight: Some(700),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    copy.commit();
+    assert_eq!(copy.computed_style(old).unwrap().weight, Some(500));
+    assert_ne!(copy.style_identity("A"), copy.style_identity("C"));
+}
