@@ -742,3 +742,36 @@ fn a_page_of_can_point_into_a_note_and_out_of_one() {
     let mut session = LayoutSession::new(&engine);
     assert_eq!(session.layout(&doc).unwrap(), snapshot);
 }
+
+/// Building objects must take time linear in their number. Adding them to a
+/// paragraph one at a time rescans every earlier record on each edit: the 200
+/// fields of `inline_storm` took twelve seconds in a debug build, and every
+/// test that builds all the hostile fixtures paid that twice. `inline::extend`
+/// inserts a run in one step. The bound is far above what this takes (about a
+/// second) and far below what the quadratic version takes at this size
+/// (minutes), so only a complexity regression can reach it.
+#[test]
+fn building_many_objects_takes_linear_time() {
+    use reprise_doc::{Document, InlineObject};
+    let started = std::time::Instant::now();
+    let doc = Document::new(1).unwrap();
+    let parts: Vec<Part<'_>> = (0..2_000)
+        .flat_map(|_| {
+            [
+                Part::Object(InlineObject::field("page-number")),
+                Part::Text(" "),
+            ]
+        })
+        .collect();
+    let paragraph = inline::paragraph(&doc, parts).unwrap();
+    doc.commit();
+    assert_eq!(doc.inline_objects(paragraph).unwrap().len(), 2_000);
+    reprise_fixtures::hostile::inline_storm().unwrap();
+    reprise_fixtures::hostile::inline_storm_readable().unwrap();
+    let took = started.elapsed();
+    eprintln!("built 2,000 objects and both storm fixtures in {took:?}");
+    assert!(
+        took < std::time::Duration::from_secs(30),
+        "building objects is no longer linear: {took:?}"
+    );
+}

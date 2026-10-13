@@ -93,18 +93,24 @@ pub fn paragraph(doc: &Document, parts: Vec<Part<'_>>) -> Result<NodeId, DocErro
     Ok(p)
 }
 
-/// Adds `parts` at the end of `p`.
+/// Adds `parts` at the end of `p` in one insertion. Every edit of a paragraph
+/// reads the records of all its objects, so adding them one by one costs
+/// time quadratic in their number (twelve seconds for the 200 fields of
+/// `inline_storm` in a debug build, in every test that builds all fixtures).
 pub fn extend(doc: &Document, p: NodeId, parts: Vec<Part<'_>>) -> Result<(), DocError> {
+    let mut text = String::new();
+    let mut objects = Vec::new();
     for part in parts {
-        let end = doc.block(p)?.text.len();
         match part {
-            Part::Text(text) => doc.block(p)?.text.insert(end, text)?,
+            Part::Text(run) => text.push_str(run),
             Part::Object(object) => {
-                doc.insert_inline(p, end, &object)?;
+                text.push(reprise_doc::text::OBJECT);
+                objects.push(object);
             }
         }
     }
-    Ok(())
+    let end = doc.block(p)?.text.len();
+    doc.insert_with_inline(p, end, &text, &objects)
 }
 
 /// A 120 pt wide column; a 36 pt tall image on a line of 12 pt text.

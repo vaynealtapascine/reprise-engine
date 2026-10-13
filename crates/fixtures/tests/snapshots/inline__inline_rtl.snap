@@ -160,7 +160,7 @@ expression: snapshot.to_json()
           ],
           "atoms": [
             {
-              "id": "5@1/35@1",
+              "id": "5@1/10@1",
               "at": 26,
               "kind": "field",
               "rect": {
@@ -182,7 +182,7 @@ expression: snapshot.to_json()
               "level": 0
             },
             {
-              "id": "5@1/14@1",
+              "id": "5@1/9@1",
               "at": 9,
               "kind": "image",
               "rect": {
