@@ -54,3 +54,16 @@ retain full source provenance and project occupied boxes into each current main
 frame, including scratch trial depths; no main-entry provenance check is relaxed.
 The body prefix remains in the ordinary snapshot during search; scratch headers
 clone geometry and identity, not completed text. Integration and tests are pending.
+
+## S4 completed validation
+
+The corrected bounded full gate (`s4-bounded-full-gate-2.log`, on G:) passed
+all static checks, native/WASM parity, smoke/worker smoke and all native
+workspace unit/integration tests and snapshots. Layout: 85 tests. Fixture
+incremental timings were 187.50 s, 25.12 s fuzz, and 44.98 s steps, comparable
+to the orchestrator's main baselines. The outer gate exited 124 after rustdoc
+stalled. A bounded workspace doc-test retry with the compiler wrapper disabled
+and one build job completed all targets successfully (`s4-doc-isolation.log`).
+The combined native suite and doc retry validate S4; the outer gate itself did
+not exit zero. S5 must end with a complete zero-exit full gate. No existing
+snapshot was changed.
