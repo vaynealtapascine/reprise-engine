@@ -393,3 +393,14 @@ The formerly standalone deferred probes are promoted into normal Cargo tests.
 Lists may use document-scoped style identities for their levels. Headings should
 eventually expose an authored semantic role rather than deriving it from a mutable
 label. Table cells and future headers/footers share the inherited graph.
+
+### Allocation clocks when copying into fresh history
+
+A duplicate retains local owner tokens but resets operation history. To prevent
+its new allocations from colliding with copied tokens, `AuthoredStyleGraph` also
+transfers per-peer allocation floors into `styles2` keys `clock/<peer>`.
+Capture adds the source's operation high-water counter to its retained floor;
+new allocations add their local counter to that floor. These are scalar authored
+allocation metadata, never a source causal vector or imported operations.
+Transitive copies advance the floor again. Capture budgets include added keys;
+invalid clock metadata is retained and refuses allocation rather than guessing.
