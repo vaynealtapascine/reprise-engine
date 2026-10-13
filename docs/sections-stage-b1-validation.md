@@ -45,3 +45,12 @@ section fixture with hostile column bounds and unknown lifetime keys. This
 registration deviation is temporary until S9; all previously registered fixtures
 remain unchanged. Its two additional goldens show ordinary one-page body layout.
 The orchestrator approved the separate fixtures on 2026-10-14. The retained fixture passes its bounded dedicated test; hand review confirms a 420x300 pt page, ordinary 220x228 pt main frame at (36,36), two complete paragraph lines, no section metadata, no diagnostics and unchanged content-only rendering.
+
+## S5 draft checkpoint
+
+Unregistered draft modules preserve work while the corrected S4 gate runs.
+They are not compiled by S4. The proposed physical note/float source frames
+retain full source provenance and project occupied boxes into each current main
+frame, including scratch trial depths; no main-entry provenance check is relaxed.
+The body prefix remains in the ordinary snapshot during search; scratch headers
+clone geometry and identity, not completed text. Integration and tests are pending.
