@@ -334,6 +334,8 @@ pub struct Document {
     /// Compatibility context inferred from legacy paragraph-style storage.
     legacy_builtins: bool,
     style_identities: std::sync::Mutex<style_identity::IdentityCache>,
+    style_root: std::sync::Mutex<style_identity::RootCache>,
+    style_root_absent: std::sync::atomic::AtomicBool,
     /// A lazily built replica that sync checks out to read text lengths at
     /// past versions (see `sync`). Checking out `doc` itself would clear
     /// its undo history.
@@ -366,6 +368,8 @@ impl Document {
             sync_scope: None,
             legacy_builtins: false,
             style_identities: Default::default(),
+            style_root: Default::default(),
+            style_root_absent: Default::default(),
             shadow: std::sync::Mutex::new(None),
             lineage_pending: std::sync::Mutex::new(Vec::new()),
             flows,
@@ -470,11 +474,21 @@ impl Document {
         other.commit();
         // Only what this replica lacks: both documents are this process's own,
         // so the binary update encoding is trusted here (see `sync`).
+        let adopt_legacy = !self.has_style_identities()
+            && !other.has_style_identities()
+            && other.legacy_builtin_context();
+        if adopt_legacy {
+            self.check_legacy_context_adoption(&other.version_vector())?;
+        }
         let updates = other
             .doc
             .export(loro::ExportMode::updates(&self.doc.oplog_vv()))
             .map_err(|e| DocError::Export(e.to_string()))?;
         self.doc.import(&updates)?;
+        self.refresh_style_identity_root();
+        if adopt_legacy {
+            self.adopt_legacy_context()?;
+        }
         if other.has_style_identities() {
             self.retain_style_identities();
         }

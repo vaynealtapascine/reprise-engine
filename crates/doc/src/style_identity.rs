@@ -13,6 +13,13 @@ const BUILTIN_PREFIX: &str = "\u{2}builtin1:";
 const MAX_KEYS: usize = 65536;
 
 #[derive(Default)]
+pub(crate) struct RootCache {
+    frontiers: Option<loro::Frontiers>,
+    root: Option<ValueOrContainer>,
+    initialized: bool,
+}
+
+#[derive(Default)]
 pub(crate) struct IdentityCache {
     frontiers: Option<loro::Frontiers>,
     index: Option<Arc<IdentityIndex>>,
@@ -87,8 +94,31 @@ fn decode(reference: &str) -> Option<String> {
 }
 
 impl Document {
+    fn identity_root(&self) -> Option<ValueOrContainer> {
+        use std::sync::atomic::Ordering;
+        if self.style_root_absent.load(Ordering::Relaxed) {
+            return None;
+        }
+        let pending = self.doc.get_pending_txn_len() != 0;
+        let frontiers = self.doc.state_frontiers();
+        let mut cache = self.style_root.lock().unwrap_or_else(|e| e.into_inner());
+        if !pending && cache.initialized && cache.frontiers.as_ref() == Some(&frontiers) {
+            return cache.root.clone();
+        }
+        let root = self.doc.get_by_str_path(ROOT);
+        if root.is_none() {
+            self.style_root_absent.store(true, Ordering::Relaxed);
+        }
+        if !pending {
+            cache.frontiers = Some(frontiers);
+            cache.root = root.clone();
+            cache.initialized = true;
+        }
+        root
+    }
+
     fn identity_map(&self) -> Option<LoroMap> {
-        match self.doc.get_by_str_path(ROOT) {
+        match self.identity_root() {
             Some(ValueOrContainer::Container(Container::Map(map))) => Some(map),
             _ => None,
         }
@@ -97,7 +127,7 @@ impl Document {
     /// Whether authored identity/built-in-v1 semantics have been retained.
     /// Reads never create this root, including after undo.
     pub fn has_style_identities(&self) -> bool {
-        self.has_root(ROOT)
+        self.identity_root().is_some()
     }
 
     pub(crate) fn identity_listing_cut(&self) -> bool {
@@ -125,8 +155,56 @@ impl Document {
         Ok(())
     }
 
+    pub(crate) fn refresh_style_identity_root(&self) {
+        let mut cache = self.style_root.lock().unwrap_or_else(|e| e.into_inner());
+        cache.initialized = false;
+        self.style_root_absent
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub(crate) fn retain_style_identities(&self) {
-        self.doc.get_map(ROOT);
+        let mut cache = self.style_root.lock().unwrap_or_else(|e| e.into_inner());
+        cache.initialized = false;
+        self.style_root_absent
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        if self.doc.get_by_str_path(ROOT).is_none() {
+            self.doc.get_map(ROOT);
+        }
+    }
+
+    pub(crate) fn check_legacy_context_adoption(
+        &self,
+        incoming: &[(u64, i32)],
+    ) -> Result<(), DocError> {
+        let mut counters: BTreeMap<u64, i32> = self.version_vector().into_iter().collect();
+        for &(peer, counter) in incoming {
+            counters
+                .entry(peer)
+                .and_modify(|n| *n = (*n).max(counter))
+                .or_insert(counter);
+        }
+        if counters
+            .len()
+            .saturating_add(usize::from(!counters.contains_key(&self.peer())))
+            > crate::sync::MAX_VECTOR_ENTRIES
+            || counters.values().fold(1_u64, |sum, n| {
+                sum.saturating_add(u64::try_from(*n).unwrap_or(u64::MAX))
+            }) > crate::persist::MAX_PERSIST_OPS
+        {
+            return Err(DocError::Store(
+                "legacy context adoption exceeds history/vector limit".into(),
+            ));
+        }
+        self.check_identity_keys(&["legacy-builtins1".into()])
+    }
+
+    pub(crate) fn adopt_legacy_context(&self) -> Result<(), DocError> {
+        self.retain_style_identities();
+        self.doc
+            .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
+        self.doc.get_map(ROOT).insert("legacy-builtins1", "1")?;
+        self.doc.commit();
+        Ok(())
     }
 
     pub(crate) fn legacy_builtin_context(&self) -> bool {
@@ -259,6 +337,9 @@ impl Document {
     }
 
     pub(crate) fn owner_label(&self, owner: &str) -> String {
+        if self.identity_map().is_none_or(|map| map.len() == 0) {
+            return owner.to_owned();
+        }
         self.identity_index()
             .labels
             .get(owner)

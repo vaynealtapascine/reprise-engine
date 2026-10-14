@@ -584,3 +584,47 @@ fn downgraded_flat_builtin_parent_is_refused_without_merging() {
         b.try_export(crate::PersistenceMode::History).unwrap()
     );
 }
+
+#[test]
+fn historical_builtin_context_survives_join_even_with_empty_legacy_root() {
+    for empty in [false, true] {
+        let raw = Document::new(1).unwrap();
+        let node = raw.append_block(BlockKind::Paragraph, "", "old").unwrap();
+        raw.meta_of(node)
+            .unwrap()
+            .insert("style", "Heading 1")
+            .unwrap();
+        let legacy = raw.doc.get_map("styles1");
+        if !empty {
+            legacy.insert("weight/Unused", "400").unwrap();
+        }
+        raw.commit();
+        let source =
+            Document::import(&raw.try_export(crate::PersistenceMode::History).unwrap(), 3).unwrap();
+        let before = source.try_export(crate::PersistenceMode::History).unwrap();
+        let packet = source.export_snapshot_packet().unwrap();
+        assert_eq!(
+            before,
+            source.try_export(crate::PersistenceMode::History).unwrap()
+        );
+        let receiver = Document::new(2).unwrap();
+        let mut undo = receiver.undo_stack();
+        receiver.import_packet(&packet).unwrap();
+        assert_eq!(
+            receiver.computed_style(node).unwrap().size,
+            source.computed_style(node).unwrap().size
+        );
+        let reopened = Document::import(
+            &receiver
+                .try_export(crate::PersistenceMode::History)
+                .unwrap(),
+            4,
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.computed_style(node).unwrap().size,
+            source.computed_style(node).unwrap().size
+        );
+        assert!(!undo.undo().unwrap());
+    }
+}

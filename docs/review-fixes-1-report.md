@@ -1,9 +1,9 @@
 # Review fixes 1 handoff
 
 Worktree: `F:/reprise-wt/eng-fixes1`; branch: `ws/review-fixes-1`; base: `f13a4ee`.
-Part A and Part B's authored-style-graph duplication (finding 9) are implemented.
-Durable style identity and built-in adoption (findings 8 and 10) stop at the
-committed design addendum under the brief's explicit redesign clause.
+All Part A and Part B findings are implemented. The resumed orchestrator brief
+selected completing the identity/compatibility migration, superseding the earlier
+redesign stop. Design was committed before implementation.
 
 ## 1. Summary by decision
 
@@ -25,9 +25,10 @@ committed design addendum under the brief's explicit redesign clause.
   notes and floats. Unsupported context properties produce a warning.
 - Decisions 05/07: the Part B addendum specifies durable style identity, whole
   authored graph duplication and required compatibility signaling. It records
-  the unresolved legacy built-in ambiguity and concurrent migration problem.
-  Duplication now transfers the existing raw roots, preserving unused records,
-  parent aliases, tombstones and patched-versus-defined storage in new history.
+  the selected legacy fallback policy and immutable owners. Rename changes only
+  labels/selectors; concurrent property patches keep their original owner. Built-in
+  references are tagged, and unaware package/sync readers refuse. Duplication
+  transfers raw roots, aliases, tombstones and built-in bases in fresh history.
 
 ## 2. Commits
 
@@ -38,6 +39,9 @@ committed design addendum under the brief's explicit redesign clause.
 - `4cec4a5 fix(sync): scope historical packages without authored migration`
 - `2e24dc2 docs(styles): isolate authored graph duplication from migration`
 - `99ce2d2 fix(styles): duplicate the complete authored graph in fresh history`
+- `f49eb9d test(styles): retain deferred migration acceptance probes`
+- `4648aad docs(styles): select stable owners and versioned reference migration`
+- `15e4b1a fix(styles): retain immutable owners and signal built-in semantics`
 - The verification handoff commit records the final gate output; obtain the full
   list with `git log --oneline f13a4ee..HEAD`.
 
@@ -49,7 +53,7 @@ Paths below are relative to the worktree. No app files or `PROGRESS.md` changed.
 The brief identifies affected subsystems rather than a closed file allowlist.
 Supporting edits beyond its explicitly named files are listed in full here.
 
-- `crates/doc/src/{identity.rs,lib.rs,style/store.rs,style_graph.rs,sync.rs,sync_tests.rs}`:
+- `crates/doc/src/{identity.rs,style_identity.rs,style_identity_tests.rs,lib.rs,style/store.rs,style_graph.rs,sync.rs,sync_tests.rs}`:
   durable binding, pure lookup guards, edit staging and packet boundaries.
 - `crates/edit/src/{editor.rs,error.rs,paste.rs,plan.rs,replace.rs}` and
   `crates/edit/tests/{refusal_atomicity.rs,style_graph_copy.rs}`: publication and refusal coverage.
@@ -62,11 +66,14 @@ Supporting edits beyond its explicitly named files are listed in full here.
   `crates/reprise/tests/{collab.rs,hostile_peer.rs,import_copy.rs,packet_bound.rs,plumbing_edit.rs,plumbing_marks.rs,workspace_fonts.rs,sync_lineage_delta.hex}`.
 - `crates/reprise-wasm/src/lib.rs`, `crates/reprise-wasm/ts/{smoke.cjs,reprise_wasm.d.ts}`.
 - `docs/{CODEMAP.md,contracts.md,collaboration.md,plumbing.md,paragraph-styles.md,review-fixes-1-report.md}`.
-- `docs/style-migration-probes.rs`: standalone expected-failing tests for deferred
-  findings 8/10, deliberately outside the passing workspace gate.
+- Supporting `doc/src/{changes,edit,flow,formatting,fragment,lifecycle,marks,persist,style,table}.rs`,
+  `layout/src/incremental.rs`, `format/src/{container,features}.rs`, and `format/SPEC.md`
+  propagate stable references and compatibility flags.
+- `docs/style-migration-probes.rs` was removed after promoting its acceptance
+  coverage into ordinary Cargo tests.
 
-No dependencies, DTO shapes, API version, package feature mask or PacketBound
-literal changed. Generated WASM declarations change only the cap documentation.
+No dependencies, DTO shapes, API version or PacketBound literal changed.
+The required package mask now includes the brief-authorized bit 18. Generated WASM declarations change only the cap documentation.
 The delegated WASM probe kept `.r3-repro/` artifacts in this worktree and added
 that exact ignore rule to the shared Git metadata's `.git/info/exclude`; this is
 the only reported metadata edit outside the source worktree.
@@ -84,7 +91,7 @@ Loro's fork implicitly commits pending raw writes. Composite staging therefore
 refuses an uncommitted native store rather than publishing those writes during a
 failed edit. Native callers mutating `Editor::document()` directly must commit
 first; facade sessions already maintain that boundary. Staging checks physical
-content/range/relation tree ancestry, including tombstones, at depth 64 before
+ancestry of every root tree, including tombstones, at depth 64 before
 Loro's recursive codec; deeper trees produce `edit.limit`. Ordinary model-only
 editing retains its previous ancestry bound. The final parent scan avoids sibling
 index computation, which was quadratic for a wide formatting tree.
@@ -106,12 +113,17 @@ Cells support spacing collapse and shared indents. Notes/floats honor indents bu
 warn about unsupported spacing/keeps. Auxiliary properties are bounded and
 diagnosed instead of silently borrowing body pagination policy.
 
-Part B needs a coordinated migration: legacy undefined built-in names and intended
-built-ins have the same stored representation, and eager materialization changes
-pinned CRDT IDs/revisions. The addendum names the migration policy and concurrency
-decisions still required. Bit 18 remains reserved and unused.
+Legacy unmarked built-in names cannot distinguish old intent from a writer that
+omitted its opt-in. The selected policy retains legacy fallback, while existing
+marked paragraph-style documents retain their built-in interpretation. Current
+authoring tags references and declares bit 18 through retained `styles2` root
+presence, without an extra CRDT operation or changes to pinned node IDs/revisions.
+Old marked adoption pins `legacy-builtins1`; a renamed/patched built-in pins its
+version-1 base. Rename never relocates property keys, so queued legacy property
+patches still merge. Labels resolve through a derived per-revision index. Reused
+names allocate a fresh peer/counter owner; old block and parent edges retain theirs.
 
-The independent graph-copy correction transfers both current roots without
+The independent graph-copy correction transfers all three style roots and legacy interpretation without
 resolving or rewriting their values. Capture is bounded at 65536 keys/entries,
 16 MiB of keys/values and literal depth 64; unsupported CRDT containers refuse
 explicitly instead of losing authored data. Graph installation and content paste
@@ -123,9 +135,11 @@ its appearance projection; duplication skips its style materialisation phase.
 Additive native APIs: `Document::{document_lineage,bind_document_lineage,set_sync_scope,
 fork_for_edit,check_edit_preflight}`, `sync::packet_lineage`,
 `Features::DOCUMENT_LINEAGE`, and `FontStore::registered_ids`.
+Style additions: `Document::{style_identity,style_reference,has_style_identities}`,
+`Features::STYLE_IDENTITIES`, and `REQUIRED_STYLE_IDENTITIES` (bit 18).
 Graph-copy additions: opaque `AuthoredStyleGraph`,
 `Document::{authored_style_graph,restore_authored_style_graph}`, and
-`Editor::paste_document_fragment`. These add no DTO or persistence format.
+`Editor::paste_document_fragment`. These add no DTO; their new stored semantics are declared separately below.
 New typed refusals are `DocError::{UncommittedEdit,EditPreflightDepth}` and
 `Reason::{UncommittedEdit,PreflightDepth}`. They use existing `edit.invalid-command`
 and `edit.limit` Error codes: a refused edit is omitted entirely.
@@ -168,32 +182,34 @@ None added; no license changes.
    for isolated preflight, with typed refusal and no publication, as detailed above.
 5. Font precedence: explicit session declarations/imported/restored faces take
    precedence over the workspace refresh at the same FaceId.
-6. Proposed only: stable style IDs, graph remapping and required package bit 18.
-   No Part B stored migration or feature activation was implemented.
-7. Whole-document style duplication preserves the authored graph and creates
+6. Stable style owners: existing nested/flat keys remain owners; `styles2` adds
+   `alias/<name>`, `label/<owner>`, `base/<owner>` and `legacy-builtins1`. New block
+   and parent references use reserved versioned control prefixes. Name reuse
+   allocates fresh owners; labels use deterministic disambiguation.
+7. Required package bit 18 and required sync bit 4 (`style-identities1`) declare
+   those semantics, including an empty root retained after undo. Unknown readers
+   refuse. Tagged-reference/root sync operations without the flag refuse before
+   merging. Reads do not add the root/bit. Unmarked legacy names retain fallback.
+8. Whole-document style duplication preserves the authored graph and creates
    fresh history. This corrects copy behavior without changing existing storage.
-8. Historical facade package context scopes frames without authored migration;
+9. Historical facade package context scopes frames without authored migration;
    unverifiable unmarked legacy binary imports are refused. Historical packages
    must use current framed sync. Raw unscoped native documents remain compatible.
 
-The first five, seventh and eighth are documented in `contracts.md`; the sixth is the dedicated
-`paragraph-styles.md` addendum. Integrators should review the staging restriction
-and metadata compatibility choice explicitly.
+These brief-authorized changes are documented in `contracts.md`, the style
+addendum, collaboration protocol and format SPEC. No additional contract proposal.
 
 ## 9. Known gaps and later consumers
 
-Handoff for PROGRESS: Part A findings 1–7 are implemented and regression-covered.
-Part B finding 9 is implemented; findings 8 and 10 remain open. Resolve legacy built-in adoption semantics,
-concurrent first-patch identity and queued old-writer updates before implementing
-the addendum. A naive name-key rename or clipboard flattening fix is insufficient.
+Handoff for PROGRESS: all ten findings are implemented and regression-covered.
+No deferred acceptance tests remain. App findings remain outside this workstream.
 
 Lists, inline objects and sections should model all fallible writes or join
 `Plan::needs_trial` before publication. The CODEMAP documents this extension point.
 Lists can later reference durable style IDs for levels; headings need an authored
 semantic role; table cells/headers/footers share the same inherited style graph.
 Partial clipboard/HTML remain explicit appearance projections, while whole-document
-copy now exports/imports the complete existing authored graph. The future
-identity migration must extend that opaque transfer to its additional roots.
+copy now exports/imports the complete existing authored graph. The transfer includes identity metadata and its compatibility interpretation.
 
 App seam: existing batch/paste/replace methods and `expected_revision` stay in use.
 Existing State revision/undo fields expose atomic outcomes. Existing mark-facts
@@ -215,6 +231,8 @@ corresponding production changes:
 | 5 | `workspace_refresh_preserves_session_font_descriptors`: unexpected `font.nearest` after workspace refresh |
 | 6 | `deleted_anchor_target_explains_missing_mark_and_query`: explanation was None instead of `relation.missing-target` |
 | 7 | `table_cell_uses_resolved_paragraph_indents`: first-line indent was 0pt instead of 15pt |
+| 8 | Standalone pre-migration probe lost the concurrent blue property after rename |
+| 10 | Standalone probes showed no required built-in signal and a legacy unresolved heading rendering at 20pt instead of 10pt; prebuilt Node package also saved builtin use with required flags 0 |
 | 9 | Empty and populated parent-alias copies resolved to 10pt instead of 40pt, or remained at 40pt after a 50pt parent update; referenced tombstone was revived |
 
 The later refusal matrix exercises malformed/stale batches across insertion,
@@ -228,13 +246,13 @@ marker. Style-copy tests cover empty/populated aliases, later parent edits,
 referenced tombstones and built-in forwarding. Native graph tests cover raw
 unreadable values, pure capture, fresh peer history, bounds and malformed
 containers; editor tests check atomic refusal of bad fragments and occupied
-targets. Identity/built-in acceptance cases remain specified in the addendum.
-The standalone `docs/style-migration-probes.rs` was compiled against the current
-native library and run separately: all three pending-migration acceptance tests
-failed as expected (lost blue color; no built-in required signal; 20pt versus
-10pt legacy heading). `style-migration-probes.log` records these failures.
-They are explicitly outside the passing workspace gate, and findings 8/10
-remain unfixed; no ignored acceptance tests were added to Cargo suites.
+targets. Identity/built-in acceptance cases are now in normal Cargo tests, including both
+delivery orders, first patches, deletion, competing renames, label collisions,
+undo/redo, name reuse, pinned base clearing, graph copying, old marked/unmarked
+reads, metadata limits and downgraded packets. `style-migration-probes.log` and
+`builtin-bit-before-wasm.log` retain the before-fix failures. Thirteen initial
+identity regressions pass in 1.61s; the document unit suite passed 258 tests before
+the last cache/boundary additions (the full gate below validates the final code).
 `rename-refusal-before.log` records the additional rename failure; its companion
 tests verify refusal preserves bytes/history/undo and a preceding repair succeeds
 as one undo step. This changes publication validation, not Part B style identity.
@@ -245,5 +263,6 @@ formatting history is still expensive; that timing is not an isolated benchmark
 of preflight. Ordinary model-only typing avoids staging. Further capacity-model
 optimization must retain the byte/history/undo refusal guarantees.
 
-Final gate results and verbatim tails will be appended after all running checks
-finish. Logs are under `G:/reprise-target/eng-fixes1/`.
+Final bounded gate output and performance comparisons are appended below once
+all checks finish. Every cargo test and gate invocation is wrapped in GNU timeout;
+logs are under `G:/reprise-target/eng-fixes1/`.

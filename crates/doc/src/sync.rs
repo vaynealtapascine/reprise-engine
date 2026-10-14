@@ -66,9 +66,11 @@ impl Features {
     pub const DOCUMENT_LINEAGE: Features = Features(1 << 3);
     /// Durable style owners and versioned built-in references.
     pub const STYLE_IDENTITIES: Features = Features(1 << 4);
+    /// Historical paragraph-v1 builtin context, including an empty schema root.
+    pub const LEGACY_BUILTINS: Features = Features(1 << 5);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3) | (1 << 4));
+    pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5));
 
     const NAMES: [(Features, &'static str); 5] = [
         (Features::DELTA_JSON, "delta-json"),
@@ -76,6 +78,7 @@ impl Features {
         (Features::SNAPSHOT_JSON, "snapshot-json"),
         (Features::DOCUMENT_LINEAGE, "document-lineage1"),
         (Features::STYLE_IDENTITIES, "style-identities1"),
+        (Features::LEGACY_BUILTINS, "legacy-builtins1"),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -290,6 +293,11 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         return Err(SyncError::Format(format));
     }
     let features = Features(u64::from_le_bytes(r.array()?));
+    if features.0 & Features::STYLE_IDENTITIES.0 != 0
+        && features.0 & Features::LEGACY_BUILTINS.0 != 0
+    {
+        return Err(invalid("conflicting style context declarations"));
+    }
     let unknown = features.0 & !Features::SUPPORTED.0;
     if unknown != 0 {
         return Err(SyncError::Feature(unknown));
@@ -304,7 +312,12 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         PacketKind::Delta => Features::DELTA_JSON,
         PacketKind::Snapshot => Features::SNAPSHOT_JSON,
     };
-    if features.0 & !(Features::DOCUMENT_LINEAGE.0 | Features::STYLE_IDENTITIES.0) != needed.0 {
+    if features.0
+        & !(Features::DOCUMENT_LINEAGE.0
+            | Features::STYLE_IDENTITIES.0
+            | Features::LEGACY_BUILTINS.0)
+        != needed.0
+    {
         return Err(invalid("packet features don't match its kind"));
     }
     let since = r.vector()?;
@@ -436,6 +449,8 @@ impl Document {
                     }
                     | if self.has_style_identities() {
                         Features::STYLE_IDENTITIES.0
+                    } else if self.legacy_builtin_context() {
+                        Features::LEGACY_BUILTINS.0
                     } else {
                         0
                     },
@@ -455,7 +470,9 @@ impl Document {
         header.features = Features(
             Features::SNAPSHOT_JSON.0
                 | (header.features.0
-                    & (Features::DOCUMENT_LINEAGE.0 | Features::STYLE_IDENTITIES.0)),
+                    & (Features::DOCUMENT_LINEAGE.0
+                        | Features::STYLE_IDENTITIES.0
+                        | Features::LEGACY_BUILTINS.0)),
         );
         write_packet(&header, body)
     }
@@ -481,15 +498,27 @@ impl Document {
         let json: JsonSchema =
             serde_json::from_slice(body).map_err(|e| SyncError::Invalid(e.to_string()))?;
         self.preflight_delta(header, &json)?;
-        let (status, report) = self.tracked(|| self.doc.import_json_updates(json));
+        let adopt_legacy =
+            header.features.0 & Features::LEGACY_BUILTINS.0 != 0 && !self.has_style_identities();
+        if adopt_legacy {
+            self.check_legacy_context_adoption(&header.until)
+                .map_err(|e| SyncError::Store(e.to_string()))?;
+        }
+        let (status, mut report) = self.tracked(|| self.doc.import_json_updates(json));
         let status = status.map_err(|e| SyncError::Store(e.to_string()))?;
         if status.pending.is_some() {
             return Err(SyncError::Missing {
                 have: self.version_vector(),
             });
         }
+        self.refresh_style_identity_root();
         if header.features.0 & Features::STYLE_IDENTITIES.0 != 0 {
             self.retain_style_identities();
+        }
+        if adopt_legacy {
+            self.adopt_legacy_context()
+                .map_err(|e| SyncError::Store(e.to_string()))?;
+            report.styles = true;
         }
         Ok(report)
     }

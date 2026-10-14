@@ -205,10 +205,14 @@ impl Document {
             }
         }
         if let Some(properties) = &graph.identities {
+            self.retain_style_identities();
             let root = self.doc.get_map(crate::style_identity::ROOT);
             for (key, value) in properties {
                 root.insert(key, value.clone())?;
             }
+        }
+        if !graph.clocks.is_empty() || graph.legacy_builtins {
+            self.retain_style_identities();
         }
         for (peer, counter) in &graph.clocks {
             self.doc
