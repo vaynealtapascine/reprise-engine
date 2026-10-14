@@ -33,6 +33,8 @@ redesign stop. Design was committed before implementation.
 ## 2. Commits
 
 ```text
+e98c700 fix(identity): retain durable binding without shifting content IDs
+f6e0805 docs(identity): preserve content counters during durable binding
 86d9830 test(edit): retain redo after list and inline matrix setup
 2421b8c style(doc): use the identity map emptiness predicate
 66a0e06 fix(edit): preflight list and inline writes without read mutations
@@ -54,7 +56,7 @@ bda0d74 fix(engine): preflight refused edits and bind independent copies
 ```
 
 Every commit has the requested GPT-6.1-Sol coauthor trailer. Nothing was pushed.
-The final report commit follows this recorded checkpoint.
+The final verification/report commit follows this recorded checkpoint.
 
 ## 3. Files touched
 
@@ -77,11 +79,15 @@ Supporting edits beyond its explicitly named files are listed in full here.
 - `docs/{CODEMAP.md,contracts.md,collaboration.md,plumbing.md,paragraph-styles.md,review-fixes-1-report.md}`.
 - Supporting `doc/src/{changes,edit,flow,formatting,fragment,lifecycle,marks,persist,style,table}.rs`,
   `layout/src/incremental.rs`, `format/src/{container,features}.rs`, and `format/SPEC.md`
-  propagate stable references and compatibility flags.
+  propagate stable references and compatibility flags. Additional supporting
+files are `doc/src/{identity,hostile,lists}.rs` and
+`reprise/tests/legacy_open_concurrent.rs`, for counter-free lineage, legacy
+fixture encoding, read-only list queries and framed historical convergence.
 - `docs/style-migration-probes.rs` was removed after promoting its acceptance
   coverage into ordinary Cargo tests.
 
-No dependencies, DTO shapes, API version or PacketBound literal changed.
+This fix stream adds no dependencies or DTO shapes and changes neither API
+version nor PacketBound. The requested main merge supplies list/inline DTOs.
 The required package mask now includes the brief-authorized bit 18. Generated WASM declarations are rebuilt after integrating the list/inline DTOs from main.
 The delegated WASM probe kept `.r3-repro/` artifacts in this worktree and added
 that exact ignore rule to the shared Git metadata's `.git/info/exclude`; this is
@@ -222,11 +228,14 @@ addendum, collaboration protocol and format SPEC. No additional contract proposa
 
 Handoff for PROGRESS: all ten findings are implemented and regression-covered.
 No deferred acceptance tests remain. App findings remain outside this workstream.
+The requested main merge integrates list bit 14 and inline bit 15; it is not a
+new contract proposed by this fix stream.
 
 Lists and inline objects now model or trial fallible writes. Sections should join
 `Plan::needs_trial` before publication. The CODEMAP documents this extension point.
-Lists can later reference durable style IDs for levels; headings need an authored
-semantic role; table cells/headers/footers share the same inherited style graph.
+Lists can later reference durable style IDs for levels; the integrated bit-14
+work already supplies heading roles. Table cells/headers/footers share the same
+inherited style graph.
 Partial clipboard/HTML remain explicit appearance projections, while whole-document
 copy now exports/imports the complete existing authored graph. The transfer includes identity metadata and its compatibility interpretation.
 
@@ -270,7 +279,7 @@ delivery orders, first patches, deletion, competing renames, label collisions,
 undo/redo, name reuse, pinned base clearing, graph copying, old marked/unmarked
 reads, metadata limits and downgraded packets. `style-migration-probes.log` and
 `builtin-bit-before-wasm.log` retain the before-fix failures. Eighteen identity regressions passed before the last join changes; the document unit suite passed 258 tests before
-the last cache/boundary additions (the full gate below validates the final code).
+the last cache/boundary additions (the final full gate passed all 306 document unit tests).
 `rename-refusal-before.log` records the additional rename failure; its companion
 tests verify refusal preserves bytes/history/undo and a preceding repair succeeds
 as one undo step. This changes publication validation, not Part B style identity.
@@ -281,8 +290,7 @@ formatting history is still expensive; that timing is not an isolated benchmark
 of preflight. Ordinary model-only typing avoids staging. Further capacity-model
 optimization must retain the byte/history/undo refusal guarantees.
 
-Final bounded gate output and performance comparisons are appended below once
-all checks finish. Every cargo test and gate invocation is wrapped in GNU timeout;
+Final bounded gate output and performance comparisons are recorded below. Every cargo test and gate invocation is wrapped in GNU timeout;
 logs are under `G:/reprise-target/eng-fixes1/`.
 
 Resumed integration evidence: `list-inline-refusal-before.log` records a new
@@ -293,7 +301,8 @@ matrix passes in 0.42s. `legacy-join-before.log` records historical Heading 1
 changing from 20pt to 10pt after joining. `legacy-join-after.log` passes snapshot,
 native merge, empty/populated legacy roots, save/reopen and undo isolation in
 0.04s. Expanded seeded command properties pass all 25 tests in 67.84s;
-`semantic-facade.log` validates malformed/stale list and inline batches.
+`semantic-facade.log` validates malformed/stale list and inline batches; the
+full run also passes with redo explicitly seeded before the matrix.
 
 ## Exact paths relative to integrated main
 
@@ -303,9 +312,11 @@ crates/doc/src/edit.rs
 crates/doc/src/flow.rs
 crates/doc/src/formatting.rs
 crates/doc/src/fragment.rs
+crates/doc/src/hostile.rs
 crates/doc/src/identity.rs
 crates/doc/src/lib.rs
 crates/doc/src/lifecycle.rs
+crates/doc/src/lists.rs
 crates/doc/src/marks.rs
 crates/doc/src/persist.rs
 crates/doc/src/style.rs
@@ -344,6 +355,7 @@ crates/layout/src/notes.rs
 crates/layout/src/relations/alignment.rs
 crates/layout/src/table_flow.rs
 crates/reprise-wasm/src/lib.rs
+crates/reprise-wasm/ts/reprise_wasm.d.ts
 crates/reprise-wasm/ts/smoke.cjs
 crates/reprise/src/lib.rs
 crates/reprise/src/session.rs
@@ -351,6 +363,7 @@ crates/reprise/src/session/collab.rs
 crates/reprise/tests/collab.rs
 crates/reprise/tests/hostile_peer.rs
 crates/reprise/tests/import_copy.rs
+crates/reprise/tests/legacy_open_concurrent.rs
 crates/reprise/tests/packet_bound.rs
 crates/reprise/tests/plumbing_edit.rs
 crates/reprise/tests/plumbing_marks.rs
@@ -376,3 +389,101 @@ operation or advances content counters. The original `sync_delta.hex` stays fixe
 Copy refusal also exposed list registry reads materialising an empty root;
 those reads are now pure. Historical-open convergence uses framed transport,
 as the already documented unmarked legacy policy requires.
+
+## Final gate results
+
+The warm full run passed 1,343 tests, zero failures; the one existing ignored
+test, `export_geometry_previews`, writes optional inspection artifacts. No new
+ignored or deferred tests were added. All 119 hostile tests passed, including
+the 108-fixture count; all 10 paragraph-style fixture tests passed.
+
+Every cargo test and gate run was bounded. The compile-heavy attempt spent
+41m21s rebuilding and hit its 3600-second limit during incremental tests, with
+no assertion failures. Its log is `compile-heavy-timeout-tests.log`. The complete
+warm rerun used the same `timeout 3600 cargo test --workspace --no-fail-fast`,
+needed 8.82s of preparation and passed.
+
+| Debug binary | This branch | Supplied main reference | Ratio |
+| --- | ---: | ---: | ---: |
+| `incremental_steps` | 55.38s | about 40s | 1.38x |
+| `incremental.rs` | 297.32s | about 235s | 1.27x |
+| `incremental_fuzz.rs` | 25.77s | about 52s | 0.50x |
+
+These are observed run times, not an isolated attribution of every difference.
+The earlier runs before root-cache work measured 68.06s/389.34s for the first
+two binaries. Root absence/root handles now avoid repeated metadata lookup
+work; ordinary typing still avoids full staging. The final refusal suite passes
+all 10 tests in 255.63s (its crowded histories exercise expensive actual staging),
+and the expanded transaction properties pass 25 tests in 54.16s.
+
+The required wasm32 crate check, `generate_types`, debug WASM build with a 1 MiB
+stack, wasm-bindgen **0.2.129** for web and Node, strict TypeScript, worker build,
+`smoke.cjs` and `worker-smoke.cjs` all passed. The generated WASM declaration
+diff only corrects the cap comment from packet body to complete wire bytes.
+
+GNU timeout initially selected npm's POSIX `tsc` shim, whose Unix helper tools
+were absent from that launch environment. The check failed before TypeScript
+compilation. The remaining gate resumed with Node invoking the already installed
+TypeScript compiler by its absolute JS path; strict checking and worker emission
+then passed. This required no dependency installation or source fix. The failed
+launcher log is retained as `tsc-launcher-before.log`.
+
+Final status and all logs are in `G:/reprise-target/eng-fixes1/`. The status log
+preserves the first launcher failure and records its successful resumed checks.
+The original snapshots in all crates and original `sync_delta.hex` remain
+unchanged against integrated main `4131ec8`.
+
+`cargo fmt --all` — exit 0.
+
+The log is empty (formatter produced no output).
+
+`cargo clippy --workspace --all-targets -- -D warnings` — exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.55s
+```
+
+`timeout 3600 cargo test --workspace --no-fail-fast` — exit 0.
+
+```text
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests reprise_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+```
+
+`cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm` — exit 0.
+
+```text
+    Checking reprise-layout v0.0.0 (F:\reprise-wt\eng-fixes1\crates\layout)
+    Checking reprise-format v0.0.0 (F:\reprise-wt\eng-fixes1\crates\format)
+    Checking reprise-edit v0.0.0 (F:\reprise-wt\eng-fixes1\crates\edit)
+    Checking reprise-fixtures v0.0.0 (F:\reprise-wt\eng-fixes1\crates\fixtures)
+    Checking reprise-clipboard v0.0.0 (F:\reprise-wt\eng-fixes1\crates\clipboard)
+    Checking reprise v0.1.0 (F:\reprise-wt\eng-fixes1\crates\reprise)
+    Checking reprise-wasm v0.1.0 (F:\reprise-wt\eng-fixes1\crates\reprise-wasm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 02s
+```
+
+final-smoke.log:
+
+```text
+WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, host fonts, synthetic glyph outlines and ink bounds, authored marks, bytes, and hostile objects passed
+paragraph style WASM smoke passed
+plumbing WASM smoke passed
+page setup WASM smoke passed
+roles/lists WASM smoke passed
+annotations WASM smoke passed
+inline objects WASM smoke passed
+```
+
+final-worker-smoke.log:
+
+```text
+roles/lists worker smoke passed
+Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed
+```
