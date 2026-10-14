@@ -32,25 +32,29 @@ redesign stop. Design was committed before implementation.
 
 ## 2. Commits
 
-- `bda0d74 fix(engine): preflight refused edits and bind independent copies`
-- `dc307c8 docs(styles): specify durable identity migration and unresolved compatibility`
-- `a4da353 perf(doc): avoid sibling indexing during edit preflight`
-- `1e5ed21 fix(edit): preflight captured malformed style values`
-- `4cec4a5 fix(sync): scope historical packages without authored migration`
-- `2e24dc2 docs(styles): isolate authored graph duplication from migration`
-- `99ce2d2 fix(styles): duplicate the complete authored graph in fresh history`
-- `f49eb9d test(styles): retain deferred migration acceptance probes`
-- `4648aad docs(styles): select stable owners and versioned reference migration`
-- `15e4b1a fix(styles): retain immutable owners and signal built-in semantics`
-- `e82e792 docs(styles): guard owner allocation after fresh-history copying`
-- `af2660c fix(styles): preserve selectors and allocation across copied history`
-- `e24d4a5 docs(styles): retain historical context across replica joins`
-- `3f134a8 fix(styles): checkpoint bounded root cache and historical joins`
-- `e328162 merge(engine): integrate lists and inline before refusal coverage`
-- The verification handoff commit records the final gate output; obtain the full
-  list with `git log --oneline f13a4ee..HEAD`.
+```text
+86d9830 test(edit): retain redo after list and inline matrix setup
+2421b8c style(doc): use the identity map emptiness predicate
+66a0e06 fix(edit): preflight list and inline writes without read mutations
+e328162 merge(engine): integrate lists and inline before refusal coverage
+3f134a8 fix(styles): checkpoint bounded root cache and historical joins
+e24d4a5 docs(styles): retain historical context across replica joins
+af2660c fix(styles): preserve selectors and allocation across copied history
+e82e792 docs(styles): guard owner allocation after fresh-history copying
+15e4b1a fix(styles): retain immutable owners and signal built-in semantics
+4648aad docs(styles): select stable owners and versioned reference migration
+f49eb9d test(styles): retain deferred migration acceptance probes
+99ce2d2 fix(styles): duplicate the complete authored graph in fresh history
+2e24dc2 docs(styles): isolate authored graph duplication from migration
+4cec4a5 fix(sync): scope historical packages without authored migration
+1e5ed21 fix(edit): preflight captured malformed style values
+a4da353 perf(doc): avoid sibling indexing during edit preflight
+dc307c8 docs(styles): specify durable identity migration and unresolved compatibility
+bda0d74 fix(engine): preflight refused edits and bind independent copies
+```
 
 Every commit has the requested GPT-6.1-Sol coauthor trailer. Nothing was pushed.
+The final report commit follows this recorded checkpoint.
 
 ## 3. Files touched
 
@@ -173,7 +177,7 @@ None added; no license changes.
 ## 8. Contract and stored-form changes, separately
 
 1. Durable metadata: fresh facade documents/copies author lowercase 32-hex
-   `document1.id`. Package ID agreement is checked on reopen. Reads do not add it.
+   an empty `document1:<32-hex-ID>` root (the earlier `document1.id` form remains readable). Package ID agreement is checked on reopen. Reads do not add it.
    The root is opaque preserved Loro metadata, with no rendering semantics, so no
    package rendering bit was allocated.
 2. Sync format-2 extension: required sync bit 3, `document-lineage1`, prefixes the
@@ -290,3 +294,85 @@ changing from 20pt to 10pt after joining. `legacy-join-after.log` passes snapsho
 native merge, empty/populated legacy roots, save/reopen and undo isolation in
 0.04s. Expanded seeded command properties pass all 25 tests in 67.84s;
 `semantic-facade.log` validates malformed/stale list and inline batches.
+
+## Exact paths relative to integrated main
+
+```text
+crates/doc/src/changes.rs
+crates/doc/src/edit.rs
+crates/doc/src/flow.rs
+crates/doc/src/formatting.rs
+crates/doc/src/fragment.rs
+crates/doc/src/identity.rs
+crates/doc/src/lib.rs
+crates/doc/src/lifecycle.rs
+crates/doc/src/marks.rs
+crates/doc/src/persist.rs
+crates/doc/src/style.rs
+crates/doc/src/style/store.rs
+crates/doc/src/style_graph.rs
+crates/doc/src/style_identity.rs
+crates/doc/src/style_identity_tests.rs
+crates/doc/src/sync.rs
+crates/doc/src/sync_tests.rs
+crates/doc/src/table.rs
+crates/edit/src/editor.rs
+crates/edit/src/error.rs
+crates/edit/src/paste.rs
+crates/edit/src/plan.rs
+crates/edit/src/replace.rs
+crates/edit/tests/refusal_atomicity.rs
+crates/edit/tests/style_graph_copy.rs
+crates/edit/tests/transactions.rs
+crates/fixtures/src/hostile.rs
+crates/fixtures/tests/hostile.rs
+crates/fixtures/tests/incremental_steps.rs
+crates/fixtures/tests/paragraph_styles.rs
+crates/fixtures/tests/regions_geometry.rs
+crates/fixtures/tests/snapshots/hostile__content_foreign_copy_snapshot.snap
+crates/fixtures/tests/snapshots/hostile__foreign_copy_snapshot.snap
+crates/font/src/lib.rs
+crates/format/SPEC.md
+crates/format/src/container.rs
+crates/format/src/features.rs
+crates/layout/src/codes.rs
+crates/layout/src/floats.rs
+crates/layout/src/flow.rs
+crates/layout/src/flow/keeps.rs
+crates/layout/src/incremental.rs
+crates/layout/src/notes.rs
+crates/layout/src/relations/alignment.rs
+crates/layout/src/table_flow.rs
+crates/reprise-wasm/src/lib.rs
+crates/reprise-wasm/ts/smoke.cjs
+crates/reprise/src/lib.rs
+crates/reprise/src/session.rs
+crates/reprise/src/session/collab.rs
+crates/reprise/tests/collab.rs
+crates/reprise/tests/hostile_peer.rs
+crates/reprise/tests/import_copy.rs
+crates/reprise/tests/packet_bound.rs
+crates/reprise/tests/plumbing_edit.rs
+crates/reprise/tests/plumbing_marks.rs
+crates/reprise/tests/sync_lineage_delta.hex
+crates/reprise/tests/workspace_fonts.rs
+docs/CODEMAP.md
+docs/collaboration.md
+docs/contracts.md
+docs/paragraph-styles.md
+docs/plumbing.md
+docs/review-fixes-1-report.md
+```
+
+The merged outline regressions failed with each node counter shifted by one;
+`roles_lists__outline_before_layout` changed 4@1 to 5@1 and 31@1 to 32@1,
+and `outline_after_layout` shifted 4/938/1872 to 5/939/1873. Production binding
+now retains an empty named root without an author operation, so both original
+snapshots pass without updates. The foreign-copy fixture intentionally retains
+the earlier field encoding through a hostile-store helper, preserving its own
+pinned IDs and checking compatibility. Only the branch-added
+`sync_lineage_delta.hex` changes: its new binding no longer emits an ID-field
+operation or advances content counters. The original `sync_delta.hex` stays fixed.
+Copy refusal also exposed list registry reads materialising an empty root;
+those reads are now pure. Historical-open convergence uses framed transport,
+as the already documented unmarked legacy policy requires.

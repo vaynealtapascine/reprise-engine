@@ -168,7 +168,7 @@ Review correction: this is the complete wire-byte cap, not a body-only cap.
 Every framed and legacy import/export enforces it. The exact base frame cost
 is `23 + 12 * (since.len + until.len)`; durable document binding adds a
 32-byte prefix under sync bit 3 (`document-lineage1`). Fresh facade documents
-and copies persist `document1.id`; framed bytes and legacy snapshot state
+and copies persist an empty `document1:<32-hex-ID>` root (the earlier `document1.id` form remains readable); framed bytes and legacy snapshot state
 must agree with the receiver's durable ID before merge. Reopening and copying
 a copy retain this isolation. Historical unmarked packages attach their durable
 package ID as runtime sync context without authoring a marker. Their framed

@@ -387,3 +387,10 @@ and `reprise/tests/plumbing_edit.rs` cover their capacity, malformed-input and
 revision refusals. `doc/src/style_identity.rs` caches root absence and root
 handles by committed frontiers; imports invalidate the cache without creating
 a root. `sync.rs` bit 5 carries historical built-in context across joins.
+
+`doc/src/identity.rs` retains named empty roots for counter-free binding and
+reads the earlier lineage field form; its tests cover History/Shallow and
+conflicting declarations. `doc/src/hostile.rs::legacy_document_lineage` keeps
+the foreign-copy fixture's existing operation IDs. `doc/src/lists.rs` registry
+queries stay read-only, and `reprise/tests/legacy_open_concurrent.rs` exercises
+the documented framed transport for unmarked historical packages.

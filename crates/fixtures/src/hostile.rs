@@ -3269,11 +3269,11 @@ pub fn annotation_storm() -> Result<Fixture, DocError> {
 pub fn foreign_copy_snapshot() -> Result<Fixture, DocError> {
     let source = Document::new(OTHER_PEER)?;
     define_styles(&source)?;
-    source.bind_document_lineage("00000000000000000000000000000001")?;
+    reprise_doc::hostile::legacy_document_lineage(&source, "00000000000000000000000000000001")?;
     source.append_block(BlockKind::Paragraph, "body", "foreign SOURCE")?;
     source.commit();
     let doc = document()?;
-    doc.bind_document_lineage("00000000000000000000000000000002")?;
+    reprise_doc::hostile::legacy_document_lineage(&doc, "00000000000000000000000000000002")?;
     doc.append_block(BlockKind::Paragraph, "body", "COPY")?;
     doc.commit();
     let before = doc.try_export(reprise_doc::PersistenceMode::History)?;

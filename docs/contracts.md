@@ -30,7 +30,7 @@
   typed byte-buffer lengths before copying. Package, asset, font and awareness
   bounds are separate, unchanged limits.
 - Fresh facade documents and copies store their lowercase 32-hex package ID in
-  `document1.id`. Reopening checks package identity against this durable ID.
+  an empty `document1:<32-hex-ID>` root (the earlier `document1.id` form remains readable). Reopening checks package identity against this durable ID.
   Copies have a new ID and history. Legacy unmarked documents stay unmarked on
   read. Facade sessions attach the durable package ID as read-only sync context,
   including historical unmarked copies. Format-2 packets from these sessions

@@ -2,7 +2,7 @@
 
 ## Durable document binding and the total packet bound
 
-Fresh facade documents store `document1.id` in their authored CRDT. Copies bind a
+Fresh facade documents store an empty `document1:<32-hex-ID>` root (the earlier `document1.id` form remains readable) in their authored CRDT. Copies bind a
 fresh history to a fresh package ID, and reopen checks that the package's ID
 agrees with its stored lineage. Legacy documents without this root keep their
 current appearance and stored bytes on read. Facade sessions attach their
