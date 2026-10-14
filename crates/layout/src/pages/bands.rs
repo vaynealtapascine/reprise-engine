@@ -21,8 +21,11 @@ impl PageFactory {
         let d = section.geometry.dimensions;
         let o = owner.geometry.dimensions;
         let mode = owner.geometry.writing_mode;
+        // What the page's running regions took from the body: bands start
+        // below the header and stop above the footer.
+        let (reserve_top, reserve_bottom) = snapshot.sections.as_ref()?.pages.get(page)?.reserve;
         let (dx, dy) = match mode {
-            WritingMode::HorizontalTb => (Length::ZERO, o.top + offset - d.top),
+            WritingMode::HorizontalTb => (Length::ZERO, o.top + reserve_top + offset - d.top),
             WritingMode::VerticalRl => (
                 o.width - o.right - offset - (d.width - d.right),
                 Length::ZERO,
@@ -33,7 +36,7 @@ impl PageFactory {
         };
         let body = match mode {
             WritingMode::HorizontalTb => Rect::new(
-                Point::new(d.left, o.top + offset),
+                Point::new(d.left, o.top + reserve_top + offset),
                 section.geometry.inline_extent(),
                 depth,
             ),
@@ -49,7 +52,6 @@ impl PageFactory {
             ),
         };
         let mut template = (*section.template).clone();
-        let mut frames = Vec::new();
         for frame in &mut template.frames {
             if frame.is_main_flow() {
                 frame.x += dx;
@@ -61,9 +63,26 @@ impl PageFactory {
                 } else {
                     frame.depth.min(depth)
                 };
-                frames.push(frame.layout(page));
             }
         }
+        if reserve_top > Length::ZERO || reserve_bottom > Length::ZERO {
+            // Vertical text runs its inline axis down the page: the regions
+            // shorten and shift the columns, not the bands.
+            if let Some(cut) = crate::running::attach::cut(
+                &template,
+                owner.template.height,
+                o.top + reserve_top,
+                owner.template.height - o.bottom - reserve_bottom,
+            ) {
+                template = cut;
+            }
+        }
+        let frames: Vec<_> = template
+            .frames
+            .iter()
+            .filter(|f| f.is_main_flow())
+            .map(|f| f.layout(page))
+            .collect();
         if frames.is_empty() {
             return None;
         }

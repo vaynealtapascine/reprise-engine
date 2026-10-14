@@ -133,7 +133,7 @@ fn a_story_on_one_frame_exhausts_without_creating_pages() {
     }
     assert!(
         cursor
-            .finish(&engine, &template, &mut snapshot, &plan)
+            .finish(&engine, &doc, &template, &mut snapshot, &plan)
             .is_empty()
     );
     assert_eq!(snapshot.pages, pages);
@@ -168,7 +168,7 @@ fn a_story_on_one_frame_exhausts_without_creating_pages() {
         nodes[0],
         None,
     );
-    cursor.finish(&engine, &template, &mut snapshot, &plan);
+    cursor.finish(&engine, &doc, &template, &mut snapshot, &plan);
     assert!(
         snapshot.blocks.is_empty(),
         "an exhausted source cannot start again"

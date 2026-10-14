@@ -117,11 +117,13 @@ impl Flow<'_> {
         if !p.started {
             p.started = true;
             if let Some(evaluation) = self.evaluation.filter(|_| {
-                !self.section_table.as_ref().is_some_and(|s| {
-                    s.sections
-                        .get(self.section.saturating_add(1))
-                        .is_some_and(|s| s.start == crate::sections::Start::Continuous)
-                })
+                // A running region is memoised as a whole, by what it read.
+                self.source.single_index().is_none()
+                    && !self.section_table.as_ref().is_some_and(|s| {
+                        s.sections
+                            .get(self.section.saturating_add(1))
+                            .is_some_and(|s| s.start == crate::sections::Start::Continuous)
+                    })
             }) {
                 let ahead = self.keep_lookahead(doc, p.node);
                 let key = FlowKey::new(self, doc, p.node, ahead);

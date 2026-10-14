@@ -185,11 +185,22 @@ impl LayoutSnapshot {
         let mut addresses = BTreeMap::<crate::LineRef, Vec<PdfReadingRun>>::new();
         let mut copies = Vec::new();
         let mut groups = vec![0usize; self.pages.len()];
-        for (frame_index, frame) in self.frames.iter().enumerate() {
+        let running = self.running_frames();
+        let order: Vec<usize> = (0..self.pages.len())
+            .flat_map(|page| self.paint_order(page))
+            .collect();
+        for frame_index in order {
+            let Some(frame) = self.frames.get(frame_index) else {
+                continue;
+            };
             let Some(group) = groups.get_mut(frame.page) else {
                 continue;
             };
             let mut child = 0usize;
+            let own = running
+                .get(&frame_index)
+                .into_iter()
+                .flat_map(|i| i.blocks.iter());
             for block in &self.blocks {
                 for (line_index, line) in block
                     .lines
@@ -273,12 +284,15 @@ impl LayoutSnapshot {
                     }
                 }
             }
-            // Repeated header copies follow the authored items of the group.
+            // Repeated header copies follow the authored items of the group; a
+            // running region's blocks are all of its own group. Both are
+            // derived copies, not content.
             for block in self
                 .repeated_headers
                 .iter()
                 .filter(|h| h.frame == frame_index)
                 .flat_map(|h| h.blocks.iter())
+                .chain(own)
             {
                 for line in block.lines.iter().filter(|l| l.frame == frame_index) {
                     child = child.saturating_add(background_items(block, line));
@@ -333,6 +347,36 @@ impl LayoutSnapshot {
         }
         (addresses, copies)
     }
+    /// The running regions' instances by their frame.
+    fn running_frames(&self) -> std::collections::BTreeMap<usize, &crate::RunningInstance> {
+        self.sections
+            .iter()
+            .flat_map(|s| s.running.iter())
+            .map(|r| (r.frame, r))
+            .collect()
+    }
+
+    /// The frames of `page` in the order they are drawn: regions that paint
+    /// below the body (a background), then the body's frames in the snapshot's
+    /// order, then regions that paint above it (headers and footers). A page
+    /// with no regions is its frames in the snapshot's order.
+    pub(crate) fn paint_order(&self, page: usize) -> Vec<usize> {
+        let layer = |index: usize| match self.frames.get(index).map(|f| &f.role) {
+            Some(reprise_doc::FrameRole::Flow(name)) => crate::running::slot_of_role(name)
+                .and_then(|slot| crate::running::SLOTS.get(usize::from(slot.0)))
+                .map_or(1u8, |spec| match spec.paint {
+                    crate::running::Paint::Below => 0,
+                    crate::running::Paint::Above => 2,
+                }),
+            _ => 1,
+        };
+        let mut order: Vec<usize> = (0..self.frames.len())
+            .filter(|&i| self.frames[i].page == page)
+            .collect();
+        order.sort_by_key(|&i| layer(i));
+        order
+    }
+
     /// The display list of one page; empty if there is no such page.
     pub fn to_display_list(&self, page: usize, options: DisplayOptions) -> DisplayList {
         let Some(size) = self.pages.get(page) else {
@@ -343,22 +387,28 @@ impl LayoutSnapshot {
             };
         };
         let mut items = Vec::new();
-        for (index, frame) in self.frames.iter().enumerate() {
-            if frame.page != page {
+        let running = self.running_frames();
+        for index in self.paint_order(page) {
+            let Some(frame) = self.frames.get(index) else {
                 continue;
-            }
+            };
             let mut children = Vec::new();
             if options.debug && options.boxes {
                 children.push(debug_path(Path::rect(r(frame.rect)), FRAME));
             }
             // Repeated table headers are drawn after the authored blocks, so the
-            // indices of authored items in this group do not move.
+            // indices of authored items in this group do not move. A running
+            // region's blocks are in its own frame's group only.
             let copies = self
                 .repeated_headers
                 .iter()
                 .filter(|h| h.frame == index)
                 .flat_map(|h| h.blocks.iter());
-            for block in self.blocks.iter().chain(copies) {
+            let own = running
+                .get(&index)
+                .into_iter()
+                .flat_map(|i| i.blocks.iter());
+            for block in self.blocks.iter().chain(copies).chain(own) {
                 let lines: Vec<&LineLayout> =
                     block.lines.iter().filter(|l| l.frame == index).collect();
                 if options.debug
@@ -452,7 +502,11 @@ impl LayoutSnapshot {
             }
             items.push(Item::Group {
                 transform: *frame.to_page.matrix(),
-                clip: None,
+                // A running region is drawn clipped to its frame: an oversized
+                // first line is cut, not spilled over the body.
+                clip: running
+                    .contains_key(&index)
+                    .then(|| Path::rect(r(frame.rect))),
                 items: children,
             });
         }

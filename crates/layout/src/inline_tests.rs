@@ -38,6 +38,7 @@ fn a_field_prefers_the_value_for_its_own_placement() {
         pages: 3,
         instance: FieldInstance::Single,
         values: Some(&values),
+        ..FieldEnv::UNPLACED
     };
     assert_eq!(env.text(id(1), &page_number), "9");
     assert_eq!(
@@ -206,6 +207,7 @@ fn size_atoms_carries_the_placement_into_each_box() {
             pages: 2,
             instance: FieldInstance::of_page(page),
             values: Some(&values),
+            ..FieldEnv::UNPLACED
         };
         let mut notes = Vec::new();
         let sized = size_atoms(

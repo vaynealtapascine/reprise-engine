@@ -221,7 +221,7 @@ impl Cursor {
             let before = (self.page, self.band, self.section);
             let checkpoint = self.band_start.take();
             let nodes = std::mem::take(&mut self.band_nodes);
-            let mut flow = self.restore(engine, template, snapshot, plan, evaluation);
+            let mut flow = self.restore(engine, doc, template, snapshot, plan, evaluation);
             flow.transition(doc, node);
             let mut cursor = flow.cursor();
             cursor.queued_node = Some(node);

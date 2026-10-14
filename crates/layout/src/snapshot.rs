@@ -59,6 +59,11 @@ pub struct SectionsLayout {
     pub pages: Vec<PageDescriptor>,
     pub running: Vec<RunningInstance>,
     pub rules: Vec<ColumnRule>,
+    /// What running regions reported while their pages were made, in page
+    /// order. Layout adds it to `diagnostics` once, de-duplicated, when flow
+    /// ends. Derived; not serialised.
+    #[serde(skip)]
+    pub(crate) notes: Vec<Diagnostic>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -76,6 +81,10 @@ pub struct PageDescriptor {
     pub counter: i64,
     pub label: String,
     pub bands: Vec<Band>,
+    /// The extra top and bottom margin the running regions took from this
+    /// page's body, beyond the authored margins. Derived; not serialised.
+    #[serde(skip)]
+    pub(crate) reserve: (Length, Length),
 }
 fn section_token<S: serde::Serializer>(
     value: &reprise_doc::sections::SectionId,

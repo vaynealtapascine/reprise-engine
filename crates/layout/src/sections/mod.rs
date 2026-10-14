@@ -41,6 +41,9 @@ pub(crate) struct Section {
     pub format: String,
     pub filler_running: bool,
     pub mode: String,
+    /// `region.first` and `region.even`: the section's variant switches.
+    pub region_first: bool,
+    pub region_even: bool,
 }
 impl Section {
     pub fn id(&self) -> SectionId {
@@ -83,6 +86,8 @@ pub(crate) struct Table {
     pub enabled: bool,
     pub has_continuous: bool,
     pub float_spaces: FloatSpaces,
+    /// Every section's effective running-region bindings.
+    pub running: crate::running::Bindings,
     pub diagnostics: Vec<Diagnostic>,
     diagnostic_order: BTreeMap<SectionId, usize>,
 }
@@ -126,6 +131,7 @@ impl Table {
             .map(|t| (t.name, t.template))
             .collect();
         let mode_record = doc.geometry_mode_record();
+        let running = crate::running::Bindings::resolve(&views);
         let mut bases: BTreeMap<String, Result<Base, String>> = BTreeMap::new();
         let mut diagnostics = Vec::new();
         let mut sections = Vec::with_capacity(views.len());
@@ -400,6 +406,30 @@ impl Table {
                     }
                 }
             }
+            let mut switch = |key: &str| match view.own.get(key) {
+                None => false,
+                Some(Value::Bool(on)) => *on,
+                Some(_) => {
+                    notes.warn(key, "section.property", "not a boolean; the switch is off");
+                    false
+                }
+            };
+            let region_first = switch("region.first");
+            let region_even = switch("region.even");
+            for spec in crate::running::SLOTS {
+                let key = format!("region.{}.writing-mode", spec.name);
+                if view
+                    .own
+                    .get(&key)
+                    .is_some_and(|v| v.as_str() != Some("horizontal-tb"))
+                {
+                    notes.warn(
+                        &key,
+                        "section.region-writing-mode",
+                        "running text is laid out horizontal-tb",
+                    );
+                }
+            }
             diagnostics.extend(notes.finish());
             sections.push(Section {
                 view,
@@ -412,6 +442,8 @@ impl Table {
                 format: format.clone(),
                 filler_running,
                 mode,
+                region_first,
+                region_even,
             });
         }
         let starts: BTreeMap<_, _> = doc
@@ -487,6 +519,7 @@ impl Table {
             enabled,
             has_continuous,
             float_spaces,
+            running,
             diagnostics,
             diagnostic_order,
         })

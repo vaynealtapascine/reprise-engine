@@ -29,6 +29,7 @@ impl Notes {
         evaluation: Option<&crate::incremental::Evaluation>,
         sections: &crate::sections::Table,
         fields: &crate::inline::FieldValues,
+        running: Option<&crate::running::attach::Ctx<'_>>,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(anchor_line) = scratch.line(anchor).cloned() else {
@@ -157,6 +158,7 @@ impl Notes {
                         crate::PageKind::NoteContinuation,
                         scratch,
                         page,
+                        running,
                     )
                 })
             } else {
@@ -273,12 +275,12 @@ impl Notes {
                 &Subject::Node(owner),
                 &mut out.diagnostics,
                 evaluation,
-                &crate::inline::FieldEnv {
+                &crate::inline::FieldEnv::at(
                     page,
-                    pages: page.saturating_add(1),
-                    instance: crate::FieldInstance::Single,
-                    values: Some(fields),
-                },
+                    page.saturating_add(1),
+                    crate::FieldInstance::Single,
+                    Some(fields),
+                ),
             );
             if !composed.lines.is_empty() {
                 if overflow {

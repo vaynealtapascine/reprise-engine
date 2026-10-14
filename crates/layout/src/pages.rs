@@ -22,8 +22,10 @@ pub(crate) enum FrameAddr {
         role: String,
         ordinal: usize,
     },
-    #[allow(dead_code)] // Running slot frames are connected in S6a.
-    Running { page: usize, slot: String },
+    Running {
+        page: usize,
+        slot: String,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Provenance {
@@ -93,7 +95,26 @@ impl Catalog {
                         .map(|column| (b, column, band))
                 })
             });
-            let address = if frame.role == FrameRole::Flow(MAIN_FLOW.into()) {
+            let running = match &frame.role {
+                FrameRole::Flow(name) => crate::running::slot_of_role(name),
+                _ => None,
+            }
+            .and_then(|slot| {
+                snapshot
+                    .sections
+                    .as_ref()?
+                    .running
+                    .iter()
+                    .rev()
+                    .find(|r| r.frame == index)
+                    .map(|r| (slot, r.story))
+            });
+            let address = if let Some((slot, _)) = &running {
+                FrameAddr::Running {
+                    page,
+                    slot: slot.token().into(),
+                }
+            } else if frame.role == FrameRole::Flow(MAIN_FLOW.into()) {
                 let column = self.mains.entry(page).or_default();
                 let address = FrameAddr::Main {
                     page,
@@ -138,7 +159,7 @@ impl Catalog {
                 rect: frame.rect,
                 to_page: frame.to_page,
                 writing_mode: frame.writing_mode,
-                running: None,
+                running: running.map(|(slot, story)| (slot.token().to_owned(), story)),
             };
             self.by_address.insert(address.clone(), index);
             self.by_index.push(FrameRef {
@@ -181,15 +202,19 @@ impl PageFactory {
         );
         true
     }
+    /// Makes the next page of `section`, with its running regions when the
+    /// section table has any. The template the page's body frames came from is
+    /// returned: the section's own, or its copy with room made for the regions.
     pub fn push_section(
         engine: &Engine,
         sections: &crate::sections::Table,
         section: &crate::sections::Section,
         kind: crate::PageKind,
         snapshot: &mut LayoutSnapshot,
-    ) -> bool {
+        running: Option<&crate::running::attach::Ctx<'_>>,
+    ) -> Option<std::sync::Arc<ResolvedTemplate>> {
         if snapshot.pages.len() >= engine.flow.max_pages.max(1) as usize {
-            return false;
+            return None;
         }
         let page = snapshot.pages.len();
         let first_content = section.restart.is_some()
@@ -198,6 +223,18 @@ impl PageFactory {
                     .iter()
                     .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
             });
+        let regions = running.and_then(|ctx| {
+            let index = *sections.by_id.get(&section.id())?;
+            let first_owned = crate::running::attach::first_owned(snapshot, section.id(), kind);
+            crate::running::attach::prepare(ctx, sections, index, section, page, kind, first_owned)
+        });
+        let template = regions
+            .as_ref()
+            .and_then(|r| r.template.clone())
+            .unwrap_or_else(|| section.template.clone());
+        let reserve = regions
+            .as_ref()
+            .map_or_else(Default::default, |r| r.reserve);
         let previous = snapshot
             .sections
             .as_ref()
@@ -231,12 +268,7 @@ impl PageFactory {
         let frames: Vec<_> = if kind == crate::PageKind::Filler {
             Vec::new()
         } else {
-            section
-                .template
-                .frames
-                .iter()
-                .map(|f| f.layout(page))
-                .collect()
+            template.frames.iter().map(|f| f.layout(page)).collect()
         };
         let body: Vec<_> = frames
             .iter()
@@ -252,6 +284,14 @@ impl PageFactory {
             },
             frames,
         );
+        let mut body_rect = section.geometry.body_rect();
+        let mut block_extent = section.geometry.block_extent();
+        let taken = reserve.0 + reserve.1;
+        body_rect.origin.y = body_rect.origin.y + reserve.0;
+        body_rect.height = (body_rect.height - taken).max(reprise_geom::Length::ZERO);
+        if section.geometry.writing_mode == WritingMode::HorizontalTb {
+            block_extent = (block_extent - taken).max(reprise_geom::Length::ZERO);
+        }
         let metadata = snapshot
             .sections
             .get_or_insert_with(crate::SectionsLayout::default);
@@ -265,22 +305,33 @@ impl PageFactory {
                     section: section.id(),
                     life: section.life().into(),
                     frames: body,
-                    body: section.geometry.body_rect(),
+                    body: body_rect,
                     offset: reprise_geom::Length::ZERO,
-                    depth: section.geometry.block_extent(),
+                    depth: block_extent,
                     balanced: false,
                 }]
             } else {
                 Vec::new()
             },
+            reserve,
         });
         if kind == crate::PageKind::Content {
+            let top = section.geometry.dimensions.top + reserve.0;
+            let bottom = section.template.height - section.geometry.dimensions.bottom - reserve.1;
+            let horizontal = section.geometry.writing_mode == WritingMode::HorizontalTb;
             metadata
                 .rules
-                .extend(section.rules.iter().copied().map(|rect| crate::ColumnRule {
-                    page,
-                    band: 0,
-                    rect,
+                .extend(section.rules.iter().copied().map(|mut rect| {
+                    if horizontal {
+                        let end = (rect.origin.y + rect.height).min(bottom);
+                        rect.origin.y = rect.origin.y.max(top);
+                        rect.height = (end - rect.origin.y).max(reprise_geom::Length::ZERO);
+                    }
+                    crate::ColumnRule {
+                        page,
+                        band: 0,
+                        rect,
+                    }
                 }));
         }
         if kind != crate::PageKind::Filler {
@@ -290,7 +341,10 @@ impl PageFactory {
                 Self::append_region(snapshot, frame);
             }
         }
-        true
+        if let Some(regions) = regions {
+            regions.install(snapshot, page);
+        }
+        Some(template)
     }
     pub fn ensure_section(
         engine: &Engine,
@@ -299,6 +353,7 @@ impl PageFactory {
         kind: crate::PageKind,
         snapshot: &mut LayoutSnapshot,
         page: usize,
+        running: Option<&crate::running::attach::Ctx<'_>>,
     ) -> bool {
         if page >= engine.flow.max_pages.max(1) as usize {
             return false;
@@ -307,7 +362,7 @@ impl PageFactory {
             return false;
         };
         while snapshot.pages.len() <= page {
-            if !Self::push_section(engine, sections, section, kind, snapshot) {
+            if Self::push_section(engine, sections, section, kind, snapshot, running).is_none() {
                 return false;
             }
         }
@@ -363,6 +418,7 @@ impl PageFactory {
             current.pages.extend(metadata.pages);
             current.running.extend(metadata.running);
             current.rules.extend(metadata.rules);
+            current.notes.extend(metadata.notes);
         }
     }
     pub fn index(snapshot: &LayoutSnapshot, page: usize, ordinal: usize) -> Option<usize> {

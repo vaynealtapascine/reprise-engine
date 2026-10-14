@@ -37,6 +37,7 @@ impl Floats {
         evaluation: Option<&crate::incremental::Evaluation>,
         sections: &crate::sections::Table,
         fields: &crate::inline::FieldValues,
+        running: Option<&crate::running::attach::Ctx<'_>>,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(line) = scratch.line(anchor).cloned() else {
@@ -159,12 +160,12 @@ impl Floats {
                     &Subject::Node(owner),
                     &mut candidate_diagnostics,
                     evaluation,
-                    &crate::inline::FieldEnv {
+                    &crate::inline::FieldEnv::at(
                         page,
-                        pages: page.saturating_add(1),
-                        instance: crate::FieldInstance::Single,
-                        values: Some(fields),
-                    },
+                        page.saturating_add(1),
+                        crate::FieldInstance::Single,
+                        Some(fields),
+                    ),
                 );
                 let height = composed.block_end;
                 let free = self.next.get(&index).copied().unwrap_or_default();
@@ -191,6 +192,7 @@ impl Floats {
                             crate::PageKind::Content,
                             scratch,
                             page,
+                            running,
                         )
                     } else {
                         ensure_page(engine, template, scratch, page)

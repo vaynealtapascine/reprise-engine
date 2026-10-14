@@ -34,6 +34,7 @@ pub mod reading;
 mod region;
 mod regions;
 mod relations;
+mod running;
 mod sections;
 mod shaping;
 mod snapshot;
@@ -55,6 +56,7 @@ use serde::{Deserialize, Serialize};
 
 pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
 pub use inline::{AtomLayout, AtomPaint, AtomRole, FieldInstance};
+pub use running::{Artifact, SlotId};
 pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
     Band, BlockLayout, ColumnRule, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot,

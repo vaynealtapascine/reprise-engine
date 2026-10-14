@@ -179,7 +179,7 @@ pub struct StepWork {
     pub prefetched: usize,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Inputs {
+pub(crate) struct Inputs {
     kind: BlockKind,
     image: Option<String>,
     text: String,
@@ -193,7 +193,7 @@ struct Inputs {
     semantics: crate::list_marker::Semantics,
 }
 impl Inputs {
-    fn read(doc: &Document, node: NodeId) -> Option<Self> {
+    pub(crate) fn read(doc: &Document, node: NodeId) -> Option<Self> {
         let block = doc.block(node).ok()?;
         // The reference resolver's own walk, including the next missing or
         // cyclic name, so diagnostic changes cannot hide in reuse.
@@ -347,6 +347,9 @@ pub(crate) struct FlowKey {
     plan: Plan,
     /// The blocks keep-with-next lookahead may read, with their inputs.
     lookahead: Vec<(NodeId, Option<Inputs>, bool)>,
+    /// What the pages this transition may make would show in their running
+    /// regions: the section's effective bindings and the stories' inputs.
+    running: Option<crate::running::compose::RunningKey>,
 }
 impl FlowKey {
     /// `ahead` is what [`flow::Flow::keep_lookahead`] says the paragraph's
@@ -373,6 +376,7 @@ impl FlowKey {
             position: flow.position_key(),
             template: (*flow.template).clone(),
             plan: flow.plan().clone(),
+            running: flow.running_key(doc),
         }
     }
 }
@@ -536,13 +540,26 @@ struct Cache {
 pub(crate) struct Evaluation {
     cache: RefCell<Cache>,
     workers: Arc<dyn Workers>,
+    /// The running regions' memo, made on first use (it owns an `Evaluation`
+    /// of its own for story preparation, which would otherwise recurse).
+    running: RefCell<Option<Rc<crate::running::compose::Shared>>>,
 }
 impl Default for Evaluation {
     fn default() -> Self {
         Self {
             cache: RefCell::default(),
             workers: Arc::new(Serial),
+            running: RefCell::new(None),
         }
+    }
+}
+impl Evaluation {
+    /// The memo of running-region compositions, kept across jobs.
+    pub(crate) fn running(&self) -> Rc<crate::running::compose::Shared> {
+        self.running
+            .borrow_mut()
+            .get_or_insert_with(Default::default)
+            .clone()
     }
 }
 /// A preparation memo miss, between its start and end bookkeeping.
@@ -560,8 +577,11 @@ pub(crate) enum PrepareStart {
 }
 impl Evaluation {
     /// Drops every memo and counter, keeping the workers.
-    fn clear(&self) {
+    pub(crate) fn clear(&self) {
         *self.cache.borrow_mut() = Cache::default();
+        if let Some(running) = self.running.borrow().as_ref() {
+            running.clear();
+        }
     }
     pub(crate) fn workers(&self) -> Arc<dyn Workers> {
         self.workers.clone()
@@ -910,10 +930,10 @@ impl Evaluation {
         template: &ResolvedTemplate,
         snapshot: &LayoutSnapshot,
         sections: &crate::sections::Table,
-        fields: &crate::inline::FieldValues,
+        previous: &Plan,
     ) -> Plan {
         let mut key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
-        key.fields = fields.clone();
+        key.fields = previous.fields.clone();
         if let Some(plan) = self
             .cache
             .borrow()
@@ -928,6 +948,7 @@ impl Evaluation {
             let mut cache = self.cache.borrow_mut();
             cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
         }
+        let running = self.running();
         let plan = crate::regions::allocate_with_sections(
             engine,
             doc,
@@ -935,7 +956,8 @@ impl Evaluation {
             snapshot,
             Some(self),
             sections,
-            fields,
+            previous,
+            &running,
         );
         let mut cache = self.cache.borrow_mut();
         if cache.regions.len() >= 16 {
@@ -1207,6 +1229,7 @@ impl<'engine> LayoutSession<'engine> {
             self.evaluation.clear();
         }
         self.document = Some(doc);
+        self.evaluation.running().begin_job();
         {
             let mut cache = self.evaluation.cache.borrow_mut();
             cache.counters = WorkCounters::default();
@@ -1293,6 +1316,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             &mut snapshot,
             &plan,
             sections.clone(),
+            session.evaluation.running(),
         );
         let active = crate::regions::active(engine, doc);
         Self {
@@ -1400,6 +1424,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         if let Some(cursor) = self.cursor.take() {
                             self.pending = cursor.finish(
                                 engine,
+                                self.doc,
                                 &self.template,
                                 &mut self.snapshot,
                                 &self.plan,
@@ -1419,7 +1444,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &self.template,
                         &self.snapshot,
                         &self.sections,
-                        &self.plan.fields,
+                        &self.plan,
                     );
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
@@ -1434,6 +1459,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             &mut self.snapshot,
                             &self.plan,
                             self.sections.clone(),
+                            self.session.evaluation.running(),
                         ));
                         self.next_node = 0;
                         self.pass = Pass::Flow;

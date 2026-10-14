@@ -174,6 +174,7 @@ pub(crate) fn run(
 ) -> LayoutSnapshot {
     let sections = crate::sections::Table::resolve(engine, doc, template);
     base.diagnostics.extend(sections.diagnostics.clone());
+    let running = std::rc::Rc::new(crate::running::compose::Shared::default());
     let active = active(engine, doc);
     let mut plan = Plan::default();
     let mut history: Vec<Plan> = Vec::new();
@@ -186,6 +187,7 @@ pub(crate) fn run(
             &mut snapshot,
             &plan,
             sections.clone(),
+            running.clone(),
         );
         if !active {
             crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
@@ -193,13 +195,7 @@ pub(crate) fn run(
             return snapshot;
         }
         let next = allocate_with_sections(
-            engine,
-            doc,
-            template,
-            &snapshot,
-            None,
-            &sections,
-            &plan.fields,
+            engine, doc, template, &snapshot, None, &sections, &plan, &running,
         );
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
@@ -286,7 +282,20 @@ pub(crate) fn allocate(
     fields: &crate::inline::FieldValues,
 ) -> Plan {
     let sections = crate::sections::Table::resolve(engine, doc, template);
-    allocate_with_sections(engine, doc, template, flowed, evaluation, &sections, fields)
+    let previous = Plan {
+        fields: fields.clone(),
+        ..Plan::default()
+    };
+    allocate_with_sections(
+        engine,
+        doc,
+        template,
+        flowed,
+        evaluation,
+        &sections,
+        &previous,
+        &crate::running::compose::Shared::default(),
+    )
 }
 
 pub(crate) fn allocate_with_sections(
@@ -296,8 +305,16 @@ pub(crate) fn allocate_with_sections(
     flowed: &LayoutSnapshot,
     evaluation: Option<&crate::incremental::Evaluation>,
     sections: &crate::sections::Table,
-    fields: &crate::inline::FieldValues,
+    previous: &Plan,
+    running: &crate::running::compose::Shared,
 ) -> Plan {
+    let fields = &previous.fields;
+    let ctx = (sections.enabled && sections.running.any()).then_some(crate::running::attach::Ctx {
+        engine,
+        doc,
+        plan: previous,
+        shared: running,
+    });
     let mut scratch = flowed.clone();
     let mut out = Plan::default();
     let mut relations: Vec<_> = doc
@@ -395,6 +412,7 @@ pub(crate) fn allocate_with_sections(
                     evaluation,
                     sections,
                     fields,
+                    ctx.as_ref(),
                 );
             } else {
                 notes.place(
@@ -409,6 +427,7 @@ pub(crate) fn allocate_with_sections(
                     evaluation,
                     sections,
                     fields,
+                    ctx.as_ref(),
                 );
             }
             progressed = true;

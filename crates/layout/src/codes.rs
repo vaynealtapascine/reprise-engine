@@ -25,6 +25,16 @@ pub const FIELD_UNSETTLED: Code = Code::new("layout.field-unsettled");
 /// A field couldn't be resolved, such as a `page-of` whose target is gone.
 pub const FIELD_TARGET: Code = Code::new("layout.field-target");
 
+/// A running region names a story that is not a live, root-level one; the
+/// region is empty (Warning: the output differs from what was asked).
+pub const RUNNING_MISSING: Code = Code::new("layout.running-missing");
+/// A running region's story did not fit its frame, or was longer than the read
+/// caps, and the rest was omitted (Error: content was left out).
+pub const RUNNING_CLIPPED: Code = Code::new("layout.running-clipped");
+/// A story holds a float, footnote or relation-placed block, which a running
+/// region does not lay out (Error: content was left out).
+pub const STORY_UNSUPPORTED: Code = Code::new("layout.story-unsupported");
+
 /// A block couldn't be read from the document.
 pub const MALFORMED_BLOCK: Code = Code::new("layout.malformed-block");
 /// A block's style couldn't be resolved.
