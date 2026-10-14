@@ -34,6 +34,9 @@ pub const REQUIRED_PARAGRAPH_STYLES: u64 = 1 << 13;
 /// Older readers must refuse paragraph roles, list membership and list
 /// definitions, retained history included (see `docs/roles-and-lists.md`).
 pub const REQUIRED_BLOCK_SEMANTICS: u64 = 1 << 14;
+/// Older readers must refuse inline object records, live or retired, since
+/// they would drop the objects and their U+FFFC characters (`docs/inline.md`).
+pub const REQUIRED_INLINE_OBJECTS: u64 = 1 << 15;
 /// Older readers must refuse annotations (links, comment anchors), which they
 /// would otherwise show as bare ranges and copy without their data. Bits 14
 /// and 15 belong to lists and inline objects (fixed at integration).
@@ -48,6 +51,7 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_PAGE_SETUP
     | REQUIRED_PARAGRAPH_STYLES
     | REQUIRED_BLOCK_SEMANTICS
+    | REQUIRED_INLINE_OBJECTS
     | REQUIRED_ANNOTATIONS
     | REQUIRED_SECTIONS;
 /// Optional bits this version sets and clears itself.
@@ -74,6 +78,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     }
     if document.has_block_semantics() {
         flags.required |= REQUIRED_BLOCK_SEMANTICS;
+    }
+    if document.has_inline_objects() {
+        flags.required |= REQUIRED_INLINE_OBJECTS;
     }
     if document.has_marks() {
         flags.required |= REQUIRED_MARKS;

@@ -233,6 +233,7 @@ impl Flow<'_> {
                 &Subject::Node(next),
                 &mut scratch,
                 None,
+                &self.fields(),
             );
             let lines = rows(&composed.lines).len();
             if lines == 0 {

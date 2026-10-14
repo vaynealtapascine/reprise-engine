@@ -6,11 +6,14 @@ use std::ops::Range;
 use reprise_diag::Note;
 use reprise_doc::annotation::{AnnotationData, LinkTarget, validate_url};
 use reprise_doc::fragment::FragmentRange;
+use reprise_doc::text::OBJECT;
 use reprise_doc::{
-    BlockKind, Document, LengthExpr, NodeId, RangeId, SchemaRegistry, Style, TableColumns,
+    BlockKind, Document, InlineObject, LengthExpr, NodeId, RangeId, SchemaRegistry, Style,
+    TableColumns,
 };
 use reprise_geom::Length;
 
+use crate::inline::{ASSET_ATTR, FIELD_ATTR, JSON_ATTR};
 use crate::{ClipboardError, NativeFragment, codes};
 
 #[derive(Clone, Copy, Debug)]
@@ -84,7 +87,11 @@ pub fn import_plain(text: &str) -> Result<Import, ClipboardError> {
     if text.len() > ImportLimits::default().bytes {
         return Err(ClipboardError::Limit("plain text bytes"));
     }
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    // A raw U+FFFC is never an object: objects come only from records (`docs/inline.md`).
+    let text = text
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace(OBJECT, "");
     let doc = Document::new(1).map_err(store)?;
     for (i, part) in text.split("\n\n").enumerate() {
         if i >= ImportLimits::default().blocks {
@@ -434,6 +441,11 @@ struct Reader {
     /// An `li` was opened: its first paragraph is an item at this level,
     /// restarting at `value` when given.
     item: Option<(u8, Option<i64>)>,
+    /// Inline objects of the open paragraph, in the order of their U+FFFC.
+    objects: Vec<InlineObject>,
+    /// The stack depth of an element whose content is an object's resolved
+    /// text while it is open. That text is skipped: the object supplies it.
+    resolved: Option<usize>,
     /// The anchor open in the input, if its address was accepted.
     link: Option<OpenLink>,
     /// Linked stretches of the block being read.
@@ -664,13 +676,30 @@ impl Reader {
             }
             open.start = 0;
         }
+        // Objects need their paragraph's flow, so a paragraph with objects starts empty.
+        let objects = std::mem::take(&mut self.objects);
+        let staged = if objects.is_empty() {
+            self.text.as_str()
+        } else {
+            ""
+        };
         let node = if let Some(cell) = self.cell {
             self.doc
-                .append_cell_block(cell, BlockKind::Paragraph, "", &self.text)
+                .append_cell_block(cell, BlockKind::Paragraph, "", staged)
         } else {
-            self.doc.append_block(BlockKind::Paragraph, "", &self.text)
+            self.doc.append_block(BlockKind::Paragraph, "", staged)
         }
         .map_err(store)?;
+        if !objects.is_empty() {
+            self.doc
+                .insert_with_inline(node, 0, &self.text, &objects)
+                .map_err(store)?;
+            if self.doc.inline_objects(node).map_err(store)?.len() != objects.len() {
+                return Err(ClipboardError::Invalid(
+                    "inline objects could not be placed".into(),
+                ));
+            }
+        }
         if let Some(id) = self.pending_id.take() {
             self.ids.entry(id).or_insert(node);
         }
@@ -716,10 +745,31 @@ impl Reader {
         self.text.clear();
         Ok(())
     }
+    /// Writes an object's U+FFFC. `resolved` is the stack depth of its element
+    /// when that element's content is the object's text, which is then skipped.
+    fn object(
+        &mut self,
+        object: InlineObject,
+        resolved: Option<usize>,
+    ) -> Result<(), ClipboardError> {
+        let start = self.text.len();
+        self.text.push(OBJECT);
+        self.objects.push(object);
+        self.record_style(start)?;
+        self.resolved = resolved;
+        Ok(())
+    }
     fn text(&mut self, raw: &str) -> Result<(), ClipboardError> {
+        if self.resolved.is_some() {
+            return Ok(());
+        }
         let start = self.text.len();
         // HTML whitespace collapses. A single pending space survives token seams.
         for c in entities(raw).chars() {
+            // A raw U+FFFC, even an entity for one, is never an object.
+            if c == OBJECT {
+                continue;
+            }
             if c.is_ascii_whitespace() && !self.preserve_space {
                 if !self.text.is_empty() && !self.text.ends_with([' ', '\n']) {
                     self.text.push(' ');
@@ -842,12 +892,24 @@ impl Reader {
         }
     }
 
+    /// `stack_len` is the open-element depth after this tag; `void` says the
+    /// tag opens nothing.
     fn tag(
         &mut self,
         name: &str,
         closing: bool,
         attrs: &BTreeMap<String, String>,
+        stack_len: usize,
+        void: bool,
     ) -> Result<(), ClipboardError> {
+        if let Some(depth) = self.resolved {
+            // Inside a resolved field, the content is the object's text. Once its
+            // element closes, this tag is processed as usual.
+            if stack_len >= depth {
+                return Ok(());
+            }
+            self.resolved = None;
+        }
         let cell = matches!(name, "td" | "th");
         let block = matches!(
             name,
@@ -856,7 +918,12 @@ impl Reader {
         let known = |k: &String| {
             k == "dir"
                 || k == "style"
-                || (name == "span" && k == "lang")
+                || (name == "span" && (k == "lang" || k == FIELD_ATTR || k == JSON_ATTR))
+                || (name == "img"
+                    && matches!(
+                        k.as_str(),
+                        "alt" | ASSET_ATTR | JSON_ATTR | "width" | "height"
+                    ))
                 || (cell && (k == "colspan" || k == "rowspan"))
                 || (name == "ol" && (k == "start" || k == "type"))
                 || ((name == "ol" || name == "ul") && k == "data-reprise-level")
@@ -875,7 +942,22 @@ impl Reader {
                 false,
             );
         }
+        let object = if closing {
+            None
+        } else {
+            crate::inline::from_html(name, attrs)
+        };
+        if let Some(object) = object {
+            return self.object(object, (!void).then_some(stack_len));
+        }
         match (name, closing) {
+            ("img", false) => once(
+                &mut self.notes,
+                codes::HTML_DROPPED,
+                "images without a valid Reprise asset omitted",
+                true,
+            ),
+            ("img", true) => {}
             ("a", false) => self.open_link(attrs),
             ("a", true) => self.close_link(),
             ("br", false) => {
@@ -1121,6 +1203,8 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         lists: Vec::new(),
         list: None,
         item: None,
+        objects: Vec::new(),
+        resolved: None,
         link: None,
         pending_links: Vec::new(),
         pending_id: None,
@@ -1278,7 +1362,7 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
             let style = crate::text_css::inline(&attrs, &parent, &mut reader.notes)?;
             reader.inline.push((stack.len(), style));
         }
-        reader.tag(&name, closing, &attrs)?;
+        reader.tag(&name, closing, &attrs, stack.len(), void)?;
     }
     if !stack.is_empty() {
         once(

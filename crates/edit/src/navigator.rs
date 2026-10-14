@@ -237,6 +237,23 @@ impl<'a> Navigator<'a> {
         })
     }
 
+    /// A live inline atom's page box, for image resizing and selection handles.
+    /// `offset` must point at the marker, never inside its three UTF-8 bytes.
+    pub fn atom_rect(&self, node: NodeId, offset: usize) -> Option<crate::SelectionRect> {
+        let block = self.block(node)?;
+        for (index, line) in block.lines.iter().enumerate() {
+            if let Some(atom) = line.atoms.iter().find(|a| a.at == offset) {
+                let frame = self.snapshot.frame(line.frame)?;
+                return Some(crate::SelectionRect {
+                    page: frame.page,
+                    rect: frame.to_page.bounds(&atom.rect),
+                    line: LineRef { node, line: index },
+                });
+            }
+        }
+        None
+    }
+
     /// Every place a caret can be drawn in `node`, as normalized carets in
     /// logical order. Upstream carets appear only where they differ from the
     /// downstream one: the ends of soft-wrapped lines and bidi boundaries.

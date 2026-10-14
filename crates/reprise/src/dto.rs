@@ -181,6 +181,11 @@ pub struct Block {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub list: Option<ListItem>,
+    /// The live inline objects of this paragraph in text order, present only
+    /// when there are some (`docs/inline.md`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<InlineEntry>>", optional)]
+    pub inline: Vec<InlineEntry>,
 }
 /// Character formatting over `start..end`, UTF-8 byte offsets into the block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -537,6 +542,20 @@ pub enum Command {
     /// Removes an annotation. Undo brings it back with the same ID.
     RemoveAnnotation {
         id: String,
+    },
+    /// Inserts an inline object at byte `at` of a flow paragraph. The object
+    /// keeps its identity through undo and redo (`docs/inline.md`).
+    InsertInline {
+        node: String,
+        at: u32,
+        object: InlineObject,
+    },
+    /// Changes the live inline object whose U+FFFC is at byte `at` of `node`.
+    /// `null` values in `patch.params` remove parameters.
+    UpdateInline {
+        node: String,
+        at: u32,
+        patch: InlinePatch,
     },
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1823,4 +1842,52 @@ pub struct SectionStart {
     pub life: String,
     #[ts(type = "Record<string, unknown>")]
     pub own: serde_json::Value,
+}
+/// Where an inline object sits relative to the line's baseline (default
+/// `baseline`; `docs/inline.md`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum InlineAlign {
+    #[default]
+    Baseline,
+    Middle,
+    TextTop,
+    TextBottom,
+}
+/// An inline object as stored: a kind (`image`, `field`, or any other name a
+/// later engine knows), an alignment and string parameters. Unknown kinds
+/// round-trip unchanged.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct InlineObject {
+    pub kind: String,
+    pub align: InlineAlign,
+    pub params: std::collections::BTreeMap<String, String>,
+}
+/// A change to an inline object's parameters. A parameter mapped to `null`
+/// is removed; `align` absent keeps the current alignment.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+pub struct InlinePatch {
+    #[ts(optional = nullable)]
+    pub align: Option<InlineAlign>,
+    pub params: std::collections::BTreeMap<String, Option<String>>,
+}
+/// One live inline object of a paragraph, as `Block.inline` lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct InlineEntry {
+    /// `host/char`: stable through undo, redo and collaboration, new for a copy.
+    pub id: String,
+    /// Byte offset of the object's U+FFFC in the paragraph's text.
+    pub at: u32,
+    pub object: InlineObject,
+}
+/// A persistent position for a `page-of` field's `target` parameter: the
+/// paragraph `node` at byte `at`. See `DocumentSession::field_target`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct FieldTarget {
+    pub node: String,
+    pub at: u32,
 }

@@ -428,6 +428,7 @@ pub(crate) fn write(
         if let Some(raw) = &block.image {
             doc.stage_fragment_image(new, raw).map_err(store)?;
         }
+        doc.stage_inline_copies(new, &block.inline).map_err(store)?;
         result.ids.nodes.insert(block.id, new);
         result.applied.blocks.push(new);
     }
@@ -631,6 +632,25 @@ pub(crate) fn write(
             b.text.len().saturating_add(shift),
         ))
     });
+    let target_nodes = result
+        .ids
+        .nodes
+        .iter()
+        .map(|(&old, &new)| {
+            (
+                old,
+                (
+                    new,
+                    if join_first && Some(old) == first {
+                        prefix.len()
+                    } else {
+                        0
+                    },
+                ),
+            )
+        })
+        .collect();
+    doc.remap_inline_targets(&target_nodes).map_err(store)?;
     Ok(result)
 }
 
@@ -820,11 +840,8 @@ fn write_into_flow(
             continue;
         };
         if !block.text.is_empty() {
-            doc.block(target)
-                .map_err(store)?
-                .text
-                .insert(at, &block.text)
-                .map_err(|e| store(e.into()))?;
+            doc.insert_with_inline(target, at, &block.text, &block.inline)
+                .map_err(store)?;
             result.applied.effects.push(Effect::Text {
                 node: target,
                 at,
@@ -861,6 +878,7 @@ fn write_into_flow(
         if let Some(raw) = &block.image {
             doc.stage_fragment_image(new, raw).map_err(store)?;
         }
+        doc.stage_inline_copies(new, &block.inline).map_err(store)?;
         result.ids.nodes.insert(block.id, new);
         result.applied.blocks.push(new);
     }
@@ -963,6 +981,13 @@ fn write_into_flow(
                 b.text.len().saturating_add(shift),
             ))
         });
+    let target_nodes = result
+        .ids
+        .nodes
+        .iter()
+        .map(|(&old, &new)| (old, (new, joined.get(&old).copied().unwrap_or(0))))
+        .collect();
+    doc.remap_inline_targets(&target_nodes).map_err(store)?;
     Ok(result)
 }
 

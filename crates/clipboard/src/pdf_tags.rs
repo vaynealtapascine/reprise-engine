@@ -642,6 +642,27 @@ impl Builder<'_> {
         let mut used = vec![false; anchors.len()];
         let mut overlapped = false;
         for run in &block.runs {
+            let atom = self.layout.line(run.line).and_then(|line| {
+                line.atoms.iter().find(|a| {
+                    run.bytes.as_ref().is_some_and(|bytes| {
+                        bytes.start == a.at
+                            && bytes.end
+                                == a.at.saturating_add(reprise_doc::text::OBJECT.len_utf8())
+                    })
+                })
+            });
+            if let Some(atom) = atom {
+                let content = Child::Content(Content::whole(run.run.clone()));
+                if let reprise_layout::AtomPaint::Image { alt, .. } = &atom.paint {
+                    out.push(Child::Node(Node::new(
+                        Role::Figure { alt: alt.clone() },
+                        vec![content],
+                    )));
+                } else {
+                    out.push(content);
+                }
+                continue;
+            }
             let Some(bytes) = run.bytes.clone() else {
                 out.push(Child::Content(Content::whole(run.run.clone())));
                 continue;

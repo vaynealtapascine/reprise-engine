@@ -5,7 +5,7 @@ import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
   DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, FontSettings, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied,
   OutlineEntry, ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face,
-  Annotation, AnnotationList, AnnotationsAt, AnnotationsIn, AnnotationKind, AnnotationGeometry, PageLinks } from "./types.js";
+  Annotation, AnnotationList, AnnotationsAt, AnnotationsIn, AnnotationKind, AnnotationGeometry, PageLinks, FieldTarget, PageRect } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
@@ -33,6 +33,8 @@ type Request = Payload<{ id: string } & (
   | { kind: "annotations-of-kind"; request: Payload<AnnotationKind> }
   | { kind: "annotation-geometry"; request: Payload<string> }
   | { kind: "page-links"; page: number }
+  | { kind: "atom-rect"; request: Payload<FieldTarget> }
+  | { kind: "field-target"; request: Payload<FieldTarget> }
   | { kind: "save" }
   | { kind: "sync-export"; request?: Payload<SyncRequest> }
   | { kind: "sync-info" }
@@ -61,6 +63,8 @@ export type Response = Payload<{ id: string } & (
   | { kind: "annotations"; list: Payload<AnnotationList> }
   | { kind: "annotation-geometry"; geometry: Payload<AnnotationGeometry | null> }
   | { kind: "page-links"; links: Payload<PageLinks> }
+  | { kind: "atom-rect"; rect: Payload<PageRect> }
+  | { kind: "field-target"; target: Payload<string> }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
   | { kind: "sync-packet"; packet: Payload<SyncPacket> }
@@ -156,6 +160,8 @@ scope.onmessage = (event: MessageEvent<Request>) => {
         case "annotations-of-kind": post({ id, kind: "annotations", list: current().annotations_of_kind(data.request) }); break;
         case "annotation-geometry": post({ id, kind: "annotation-geometry", geometry: current().annotation_geometry(data.request) }); break;
         case "page-links": post({ id, kind: "page-links", links: current().page_links(data.page) }); break;
+        case "atom-rect": post({ id, kind: "atom-rect", rect: current().atom_rect(data.request) }); break;
+        case "field-target": post({ id, kind: "field-target", target: current().field_target(data.request) }); break;
         case "save": { release(); const content = current().save(); post({ id, kind: "saved", content }, [content.data.bytes.buffer]); break; }
         case "sync-export": {
           if (data.request) {

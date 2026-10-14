@@ -28,6 +28,7 @@ impl Notes {
         anchor: LineRef,
         evaluation: Option<&crate::incremental::Evaluation>,
         sections: &crate::sections::Table,
+        fields: &crate::inline::FieldValues,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(anchor_line) = scratch.line(anchor).cloned() else {
@@ -272,6 +273,12 @@ impl Notes {
                 &Subject::Node(owner),
                 &mut out.diagnostics,
                 evaluation,
+                &crate::inline::FieldEnv {
+                    page,
+                    pages: page.saturating_add(1),
+                    instance: crate::FieldInstance::Single,
+                    values: Some(fields),
+                },
             );
             if !composed.lines.is_empty() {
                 if overflow {
@@ -338,6 +345,10 @@ impl Notes {
                     if line.frame == index {
                         line.rect.origin.y += by;
                         line.baseline += by;
+                        for atom in &mut line.atoms {
+                            atom.rect.origin.y += by;
+                            atom.baseline += by;
+                        }
                     }
                 }
                 block.sync_image();

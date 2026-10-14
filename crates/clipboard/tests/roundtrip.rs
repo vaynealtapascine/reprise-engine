@@ -20,6 +20,12 @@ fn equal_geometry(
         let pasted = b.blocks.iter().find(|b| b.node == *new).unwrap();
         let mut normal = pasted.clone();
         normal.node = block.node;
+        // A pasted object is a new object: it gets a new identity.
+        for (new, old) in normal.lines.iter_mut().zip(&block.lines) {
+            for (new, old) in new.atoms.iter_mut().zip(&old.atoms) {
+                new.id = old.id;
+            }
+        }
         assert_eq!(*block, normal, "{name}: text/glyph/line/style geometry");
     }
 }
@@ -28,7 +34,8 @@ fn equal_geometry(
 fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
     for fixture in reprise_fixtures::hostile::all().unwrap() {
         let before = fixture.engine.layout(&fixture.doc);
-        if fixture.name == "collab_hostile_peer" {
+        // A block or an object a hostile peer left unreadable is refused whole.
+        if fixture.name == "collab_hostile_peer" || fixture.name == "inline_storm" {
             let error = copy_all(
                 &fixture.doc,
                 "source",
@@ -89,6 +96,7 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
             assert_eq!(new.parent, old.parent.map(|p| pasted.ids.nodes[&p]));
             assert_eq!(old.kind, new.kind);
             assert_eq!(old.text, new.text);
+            assert_eq!(old.inline, new.inline, "{}: inline objects", fixture.name);
             assert_eq!(old.style, new.style);
             assert_eq!(old.overrides, new.overrides);
             assert_eq!(old.table, new.table);

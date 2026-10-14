@@ -3,6 +3,7 @@
 //! Each frame becomes a group whose transform is the frame's transform to its
 //! page, so its lines and glyphs are drawn in frame space.
 
+use crate::inline_display::{atom_item, text_runs};
 use reprise_compose::BreakReason;
 use reprise_diag::Severity;
 use reprise_display::{Color, DisplayList, Glyph, GlyphRun, Item, Layer, Path, Stroke};
@@ -230,7 +231,7 @@ impl LayoutSnapshot {
                         });
                         child = child.saturating_add(1);
                     }
-                    for run in &line.runs {
+                    for run in text_runs(line).iter() {
                         let mut path = vec![*group, child];
                         if glyph_transform(frame.writing_mode, run.upright).is_some() {
                             path.push(0);
@@ -247,6 +248,28 @@ impl LayoutSnapshot {
                         child = child.saturating_add(
                             1 + decoration_paths(run, line, frame.writing_mode).len(),
                         );
+                    }
+                    for atom in &line.atoms {
+                        let Some(item) = atom_item(atom, frame.writing_mode) else {
+                            continue;
+                        };
+                        let mut path = vec![*group, child];
+                        if matches!(item, Item::Group { .. }) {
+                            path.push(0);
+                        }
+                        addresses.entry(at).or_default().push(PdfReadingRun {
+                            run: reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path,
+                            },
+                            line: at,
+                            bytes: Some(
+                                atom.at
+                                    ..atom.at.saturating_add(reprise_doc::text::OBJECT.len_utf8()),
+                            ),
+                            label: false,
+                        });
+                        child = child.saturating_add(1);
                     }
                 }
             }
@@ -277,7 +300,7 @@ impl LayoutSnapshot {
                         });
                         child = child.saturating_add(1);
                     }
-                    for run in &line.runs {
+                    for run in text_runs(line).iter() {
                         let mut path = vec![*group, child];
                         if glyph_transform(frame.writing_mode, run.upright).is_some() {
                             path.push(0);
@@ -289,6 +312,20 @@ impl LayoutSnapshot {
                         child = child.saturating_add(
                             1 + decoration_paths(run, line, frame.writing_mode).len(),
                         );
+                    }
+                    for atom in &line.atoms {
+                        let Some(item) = atom_item(atom, frame.writing_mode) else {
+                            continue;
+                        };
+                        let mut path = vec![*group, child];
+                        if matches!(item, Item::Group { .. }) {
+                            path.push(0);
+                        }
+                        copies.push(reprise_display::pdf::ReadingRun {
+                            page: frame.page,
+                            path,
+                        });
+                        child = child.saturating_add(1);
                     }
                 }
             }
@@ -372,7 +409,8 @@ impl LayoutSnapshot {
                         .marker
                         .iter()
                         .flat_map(|m| m.runs.iter().map(move |r| (r, m.text.as_str())));
-                    let text = line.runs.iter().map(|r| (r, block.text.as_str()));
+                    let runs = text_runs(line);
+                    let text = runs.iter().map(|r| (r, block.text.as_str()));
                     for (run, source) in marker.chain(text) {
                         let mut glyphs = glyph_run(run, line, source);
                         if let Some(transform) = glyph_transform(frame.writing_mode, run.upright) {
@@ -405,6 +443,11 @@ impl LayoutSnapshot {
                         }
                         children.extend(decoration_paths(run, line, frame.writing_mode));
                     }
+                    children.extend(
+                        line.atoms
+                            .iter()
+                            .filter_map(|atom| atom_item(atom, frame.writing_mode)),
+                    );
                 }
             }
             items.push(Item::Group {
@@ -527,7 +570,7 @@ impl LayoutSnapshot {
     }
 }
 
-fn glyph_transform(mode: WritingMode, upright: bool) -> Option<Matrix> {
+pub(crate) fn glyph_transform(mode: WritingMode, upright: bool) -> Option<Matrix> {
     match (mode, upright) {
         (WritingMode::VerticalRl, true) => Some(Matrix::rotate_quarter(3)),
         (WritingMode::VerticalLr, true) => Some(Matrix::transpose()),
@@ -562,7 +605,7 @@ fn line_overlays(out: &mut Vec<Item>, line: &LineLayout, options: DisplayOptions
         ));
     }
     if options.run_boundaries {
-        for run in &line.runs {
+        for run in text_runs(line).iter() {
             out.push(debug_path(
                 Path::rect(Rect::new(
                     Point::new(run.x, top),
@@ -632,7 +675,7 @@ fn diagnostic_overlay(
     if bytes.start > bytes.end || text.get(bytes.clone()).is_none() {
         return;
     }
-    for run in &line.runs {
+    for run in text_runs(line).iter() {
         let display = glyph_run(run, line, text);
         for (glyph, shaped) in display.glyphs.iter().zip(&run.glyphs) {
             let start = run.range.start.saturating_add(glyph.text.start as usize);
@@ -744,7 +787,11 @@ fn glyph_run(run: &PositionedRun, line: &LineLayout, text: &str) -> GlyphRun {
                 text: g.cluster.saturating_sub(start)..end_of(g.cluster).saturating_sub(start),
             };
             x += g.advance;
-            (g.id != reprise_compose::INVISIBLE_GLYPH).then_some(glyph)
+            (!matches!(
+                g.id,
+                reprise_compose::INVISIBLE_GLYPH | reprise_compose::ATOM_GLYPH
+            ))
+            .then_some(glyph)
         })
         .collect();
     GlyphRun {

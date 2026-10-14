@@ -33,6 +33,7 @@ pub fn start_layout(&mut self, request: &Payload<LayoutOptions>) -> Result<Layou
 pub fn move_cursor(&self, request: &Payload<Move>) -> Result<Payload<Cursor>>
 pub fn caret_rect(&self, request: &Payload<Caret>) -> Result<Payload<PageRect>>
 pub fn hit_test(&self, request: &Payload<HitTest>) -> Result<Payload<Hit>>
+pub fn atom_rect(&self, request: &Payload<FieldTarget>) -> Result<Payload<PageRect>>
 pub fn selection_rects(&self, request: &Payload<Selection>) -> Result<Payload<Vec<PageRect>>>
 pub fn copy(&self, request: &Payload<Selection>) -> Result<Payload<Bytes>>
 pub fn copy_as(&self, request: &Payload<CopyAs>) -> Result<Payload<Exported>>
@@ -43,6 +44,7 @@ pub fn replace_text(&mut self, request: &Payload<ReplaceText>) -> Result<Payload
 pub fn batch(&mut self, request: &Payload<Batch>) -> Result<Payload<BatchReport>>
 pub fn paste(&mut self, request: &Payload<Paste>, bytes: &[u8]) -> Result<Payload<Applied>>
 pub fn import_text(&mut self, request: &Payload<TextImport>) -> Result<Payload<Applied>>
+pub fn field_target(&self, request: &Payload<FieldTarget>) -> Result<Payload<String>>
 pub fn save(&mut self) -> Result<Payload<Bytes>>
 pub fn export(&self, request: &Payload<ExportFormat>) -> Result<Payload<Exported>>
 pub fn marks(&self, page: u32) -> Result<Payload<MarksPage>>

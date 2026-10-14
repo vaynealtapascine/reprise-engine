@@ -46,6 +46,9 @@ pub mod hostile;
 #[cfg(test)]
 mod hostile_tests;
 pub mod image;
+pub mod inline;
+#[cfg(test)]
+mod inline_tests;
 pub mod invariants;
 mod lifecycle;
 pub mod lists;
@@ -83,6 +86,10 @@ pub use flow::MAX_FLOW_DEPTH;
 pub use function::FunctionRegistry;
 pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
+};
+pub use inline::{
+    InlineAlign, InlineAudit, InlineEntry, InlineId, InlineImage, InlineObject, InlinePatch,
+    InlineSize,
 };
 pub use page::{
     Basis, Dim, FrameRole, FrameTemplate, FrameTransform, MAIN_FLOW, Medium, PageTemplate,
@@ -346,6 +353,8 @@ pub struct Document {
     list_cache: std::sync::Mutex<lists::ListCache>,
     /// Annotations, per revision (see `annotation`).
     annotations: std::sync::Mutex<annotation::AnnotationCache>,
+    /// The `inline1` record map once it is known to exist (see `inline`).
+    inline_root: std::sync::Mutex<Option<loro::LoroMap>>,
     /// Which editing step this replica's next commits belong to (see
     /// [`UndoStack`]).
     pub(crate) steps: std::sync::Arc<edit::StepLog>,
@@ -369,6 +378,7 @@ impl Document {
             formats: Default::default(),
             list_cache: Default::default(),
             annotations: Default::default(),
+            inline_root: Default::default(),
             steps: Default::default(),
         }
     }

@@ -263,6 +263,24 @@ pub enum Command {
     RemoveAnnotation {
         id: reprise_doc::RangeId,
     },
+
+    // Inline objects (`docs/inline.md`).
+    /// Puts an inline object at byte `at` of a flow paragraph. It is staged
+    /// and then shown in its step, so it keeps its identity through undo and
+    /// redo.
+    InsertInline {
+        node: NodeId,
+        at: usize,
+        object: reprise_doc::InlineObject,
+    },
+    /// Changes the parameters of the object whose U+FFFC is at byte `at` of
+    /// `node`, as the transaction leaves the text at that point. Positions
+    /// are the ones the earlier commands in the transaction leave.
+    UpdateInline {
+        node: NodeId,
+        at: usize,
+        patch: reprise_doc::InlinePatch,
+    },
 }
 
 /// A list a command names: one that exists, or the `n`th made by this

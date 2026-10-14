@@ -346,6 +346,7 @@ impl Flow<'_> {
             &subject,
             &mut composition_notes,
             self.evaluation,
+            &self.fields(),
         );
         if composed.lines.is_empty() {
             self.snapshot.diagnostics.extend(composition_notes);
@@ -409,6 +410,7 @@ impl Flow<'_> {
                             &subject,
                             &mut Vec::new(),
                             None,
+                            &self.fields(),
                         );
                         let there = rows(&trial.lines).len();
                         if trial.rest.is_none() && there > 0 && there < style.widows() {
@@ -429,6 +431,7 @@ impl Flow<'_> {
                                         &subject,
                                         &mut notes,
                                         self.evaluation,
+                                        &self.fields(),
                                     );
                                     if shorter.rest.is_some() && rows(&shorter.lines).len() == keep
                                     {

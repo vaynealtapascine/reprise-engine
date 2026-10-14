@@ -42,6 +42,11 @@ pub struct FragmentBlock {
     /// Its list membership, naming a definition in [`Fragment::lists`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub list: Option<FragmentItem>,
+    /// The inline objects of `text`'s U+FFFC characters, one each, in order
+    /// (see `docs/inline.md`). Pasting gives them new identity. Older engines
+    /// refuse a fragment that has them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline: Vec<crate::inline::InlineObject>,
 }
 
 /// A copied block's list membership.
@@ -195,6 +200,14 @@ impl Fragment {
                 return Err(FragmentError::Invalid(
                     "reserved flow marker in authored text".into(),
                 ));
+            }
+            if block.text.matches(crate::text::OBJECT).count() != block.inline.len() {
+                return Err(FragmentError::Invalid(
+                    "inline objects don't match their markers".into(),
+                ));
+            }
+            for object in &block.inline {
+                object.validate().map_err(FragmentError::Invalid)?;
             }
             let depth = match block.parent {
                 Some(p) => nodes.get(&p).map(|(_, d)| d + 1).ok_or_else(|| {
@@ -403,6 +416,7 @@ impl Document {
                     .map(|r| r.role)
                     .filter(|r| *r != crate::Role::Body),
                 list: self.copy_list_item(node, &mut fragment.lists)?,
+                inline: self.inline_slice(node, bytes.clone()).map_err(bad)?,
             });
             cuts.insert(node, bytes);
             if cut.is_none() {
@@ -412,6 +426,34 @@ impl Document {
                         .rev()
                         .map(|n| (n, None, Some(node), depth + 1)),
                 );
+            }
+        }
+        // Convert internal persistent targets to portable source labels/bytes.
+        // A paste remaps these after every destination paragraph is activated.
+        for block in &mut fragment.blocks {
+            for object in &mut block.inline {
+                if object.kind != crate::inline::FIELD || object.param("field") != Some("page-of") {
+                    continue;
+                }
+                if let Some((node, at)) = object
+                    .param("target")
+                    .and_then(|raw| self.resolve_field_target(raw))
+                    && let Some(cut) = cuts.get(&node)
+                    // Inside the copy; its end belongs to it only when the copy
+                    // runs to the end of the paragraph. A target at the cut
+                    // end of a partial copy is the next character, which stays.
+                    && cut.start <= at
+                    && (at < cut.end
+                        || (at == cut.end
+                            && self
+                                .block(node)
+                                .is_ok_and(|b| b.text.len() == cut.end)))
+                {
+                    object.params.insert(
+                        "target".into(),
+                        format!("copy:{node} {}", at.saturating_sub(cut.start)),
+                    );
+                }
             }
         }
         let tree = self.tree("ranges");

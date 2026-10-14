@@ -62,15 +62,22 @@ impl NativeFragment {
         &mut self,
         store: &reprise_display::AssetStore,
     ) -> Result<(), ClipboardError> {
+        // Block images and the images of inline objects both carry an asset hash.
         let hashes: BTreeSet<_> = self
             .fragment
             .blocks
             .iter()
-            .filter_map(|b| b.image.as_deref())
-            .filter_map(|raw| {
-                reprise_doc::image::ImageData::parse(raw)
-                    .ok()
-                    .map(|i| i.asset)
+            .flat_map(|b| {
+                let block = b
+                    .image
+                    .as_deref()
+                    .and_then(|raw| reprise_doc::image::ImageData::parse(raw).ok())
+                    .map(|i| i.asset);
+                let inline = b
+                    .inline
+                    .iter()
+                    .filter_map(|o| o.as_image().ok().map(|i| i.asset));
+                block.into_iter().chain(inline)
             })
             .collect();
         let mut candidate = self.clone();

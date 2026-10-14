@@ -347,9 +347,9 @@ fn itemize_inner(
                     .min(r.end);
                 let cluster = text.get(range.start..cluster_end).unwrap_or("");
                 let covers = |face: &reprise_font::Face| {
-                    cluster
-                        .chars()
-                        .all(|c| c.is_control() || ignorable.contains(c) || face.covers(c))
+                    cluster.chars().all(|c| {
+                        c == '\u{FFFC}' || c.is_control() || ignorable.contains(c) || face.covers(c)
+                    })
                 };
                 chosen = candidates
                     .iter()

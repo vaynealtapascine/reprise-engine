@@ -59,6 +59,8 @@ pub enum Reason {
     CrossDomain { first: NodeId, second: NodeId },
     #[error("invalid section edit: {0}")]
     Section(String),
+    #[error("invalid inline object: {0}")]
+    Inline(String),
     #[error(transparent)]
     PageSetup(reprise_doc::page_setup::PageSetupError),
     #[error("alignment relation limit exceeded")]

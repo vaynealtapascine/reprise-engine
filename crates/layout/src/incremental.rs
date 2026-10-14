@@ -185,9 +185,10 @@ struct Inputs {
     text: String,
     overrides: Style,
     formatting: reprise_doc::formatting::TextFormats,
-    /// Every name the style chain visits, with its record: exactly what
-    /// resolution reads, built-ins, deletions and renames included.
+    /// Every name the style chain visits, including built-ins and renames.
     styles: Vec<(String, Option<reprise_doc::StyleRecord>)>,
+    /// Inline parameters change geometry without changing the text.
+    inline: Vec<(reprise_doc::InlineId, reprise_doc::InlineObject)>,
     /// List geometry and role/list notes: a renumbered item re-lays out.
     semantics: crate::list_marker::Semantics,
 }
@@ -215,6 +216,12 @@ impl Inputs {
             overrides: block.overrides,
             formatting: doc.text_formats(node).ok()?,
             styles,
+            inline: doc
+                .inline_objects(node)
+                .ok()?
+                .into_iter()
+                .map(|e| (e.id, e.object))
+                .collect(),
             semantics: crate::list_marker::semantics(doc, node),
         })
     }
@@ -254,6 +261,7 @@ impl Inputs {
             || self.overrides != old.overrides
             || self.image != old.image
             || self.formatting != old.formatting
+            || self.inline != old.inline
             || self.semantics != old.semantics
         {
             out.insert(Dependency::Node(node));
@@ -416,6 +424,8 @@ struct PassKey {
     owners: Vec<(NodeId, Option<Inputs>)>,
     template: ResolvedTemplate,
     applied: BTreeSet<RelationId>,
+    /// The field texts a region pass composes its notes and floats with.
+    fields: crate::inline::FieldValues,
 }
 impl PassKey {
     fn changes(&self, old: Option<&Self>) -> BTreeSet<Dependency> {
@@ -497,6 +507,7 @@ impl PassKey {
             owners,
             template: template.clone(),
             applied: applied.clone(),
+            fields: Default::default(),
         }
     }
 }
@@ -899,8 +910,10 @@ impl Evaluation {
         template: &ResolvedTemplate,
         snapshot: &LayoutSnapshot,
         sections: &crate::sections::Table,
+        fields: &crate::inline::FieldValues,
     ) -> Plan {
-        let key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
+        let mut key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
+        key.fields = fields.clone();
         if let Some(plan) = self
             .cache
             .borrow()
@@ -922,6 +935,7 @@ impl Evaluation {
             snapshot,
             Some(self),
             sections,
+            fields,
         );
         let mut cache = self.cache.borrow_mut();
         if cache.regions.len() >= 16 {
@@ -1263,6 +1277,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             diagnostics: Vec::new(),
         };
         let template = crate::template::resolve(engine, doc, &mut base.diagnostics);
+        crate::inline::audit(doc, &mut base.diagnostics);
         base.template = TemplateUsed {
             name: template.name.clone(),
             source: template.source,
@@ -1404,6 +1419,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &self.template,
                         &self.snapshot,
                         &self.sections,
+                        &self.plan.fields,
                     );
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
@@ -1434,6 +1450,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             outcome,
                         );
                         self.plan.applied = applied;
+                        crate::inline::field_notes(self.doc, &mut self.snapshot);
                         self.pass = Pass::Relations;
                     }
                 }

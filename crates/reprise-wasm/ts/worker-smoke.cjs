@@ -149,6 +149,20 @@ function send(data) {
   assert.equal(geometry.kind, "annotation-geometry"); assert.ok(geometry.geometry.data.rects.length >= 1);
   const links = await send({ kind: "page-links", page: 0 });
   assert.equal(links.kind, "page-links"); assert.deepEqual(links.links.data.links.map(x => x.id), [linkId]);
+  // Inline objects: commands through the edit kind, rectangles and targets through their own.
+  const objectTarget = await send({ kind: "field-target", request: p({ node: linkedNode, at: 0 }) });
+  assert.equal(objectTarget.kind, "field-target"); assert.ok(objectTarget.target.data.startsWith(linkedNode));
+  const withObject = await send({ kind: "edit", request: p({ commands: [
+    { kind: "insert-inline", node: linkedNode, at: 19, object: { kind: "field", align: "baseline", params: { field: "page-number" } } }] }) });
+  assert.equal(withObject.kind, "edited"); assert.equal(withObject.state.data.blocks[0].inline.length, 1);
+  const objectJob = await send({ kind: "start", request: p({ width: 420 * 1024, height: 300 * 1024, max_pages: 100, viewport_start: 0, viewport_end: 1 }) });
+  for (let i = 0; i < 1000; i++) {
+    const step = await send({ kind: "step", job: objectJob.job, budget: 1000 });
+    if (step.progress.data.complete) break;
+  }
+  const atom = await send({ kind: "atom-rect", request: p({ node: linkedNode, at: 19 }) });
+  assert.equal(atom.kind, "atom-rect"); assert.equal(atom.rect.data.page, 0); assert.ok(atom.rect.data.rect.width > 0);
+  assert.equal((await send({ kind: "atom-rect", request: p({ node: linkedNode, at: 3 }) })).kind, "error");
   assert.equal((await send({ kind: "close" })).kind, "ack");
   console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

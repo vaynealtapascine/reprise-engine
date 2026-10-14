@@ -1,0 +1,245 @@
+---
+source: crates/fixtures/tests/inline.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      32
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "inline",
+    "source": "document"
+  },
+  "pages": [
+    {
+      "width": 102400,
+      "height": 204800
+    }
+  ],
+  "frames": [
+    {
+      "name": "body",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 0,
+        "ty": 0
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 102400,
+        "height": 204800
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "5@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 10240,
+        "line_height": 12288,
+        "explain": {
+          "family": "default",
+          "line-height": "style body",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 7
+          },
+          "preview": "Before",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 102400,
+            "height": 12288
+          },
+          "baseline": 9733,
+          "width": 30105,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 7
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 32491
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 7,
+            "end": 11
+          },
+          "preview": "￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 12288
+            },
+            "width": 102400,
+            "height": 12795
+          },
+          "baseline": 22528,
+          "width": 102400,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 7,
+                "end": 11
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 104786
+            }
+          ],
+          "atoms": [
+            {
+              "id": "5@1/9@1",
+              "at": 7,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 12288
+                },
+                "width": 102400,
+                "height": 10240
+              },
+              "baseline": 22528,
+              "paint": "image",
+              "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+              "alt": "too wide",
+              "placeholder": false
+            }
+          ]
+        },
+        {
+          "frame": 0,
+          "text": {
+            "start": 11,
+            "end": 16
+          },
+          "preview": "after",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 25083
+            },
+            "width": 102400,
+            "height": 12288
+          },
+          "baseline": 34816,
+          "width": 21361,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 11,
+                "end": 16
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 10240,
+              "level": 0,
+              "x": 0,
+              "width": 21361
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "layout.image-size",
+      "subject": {
+        "kind": "node",
+        "id": "5@1"
+      },
+      "message": "inline image scaled to the frame's inline extent",
+      "bytes": {
+        "start": 7,
+        "end": 10
+      }
+    }
+  ]
+}

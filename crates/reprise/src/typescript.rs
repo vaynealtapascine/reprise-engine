@@ -456,6 +456,17 @@ export ",
     text.push_str("export ");
     text.push_str(&BatchReport::decl(&cfg));
     text.push('\n');
+    for decl in [
+        InlineAlign::decl(&cfg),
+        InlineObject::decl(&cfg),
+        InlinePatch::decl(&cfg),
+        InlineEntry::decl(&cfg),
+        FieldTarget::decl(&cfg),
+    ] {
+        text.push_str("export ");
+        text.push_str(&decl);
+        text.push('\n');
+    }
     text.push_str(&format!(
         "export type PacketBound = {}\n",
         crate::MAX_PACKET_BYTES

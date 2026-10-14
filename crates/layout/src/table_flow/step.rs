@@ -37,6 +37,7 @@ impl GroupStep {
         groups: &[Group],
         widths: &[Length],
         repeat: &mut Repeat,
+        instance: crate::FieldInstance,
     ) -> bool {
         if self.finished {
             return true;
@@ -80,6 +81,7 @@ impl GroupStep {
             frame.rect.width,
             top,
             depth,
+            instance,
         );
         if copy.is_some() && !fragment.placed && !fragment.done {
             copy = None;
@@ -94,6 +96,7 @@ impl GroupStep {
                 frame.rect.width,
                 top,
                 depth,
+                instance,
             );
         }
         if !fragment.done
@@ -116,6 +119,7 @@ impl GroupStep {
                 frame.rect.width,
                 head,
                 flow.fresh_depth(),
+                instance,
             );
             if fresh.done {
                 if !flow.advance() {

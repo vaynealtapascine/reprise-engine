@@ -129,8 +129,16 @@ fn every_executor_steps_identically_on_every_fixture() {
         let seed = 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1);
         let full = engine.layout(doc);
         let mut reference = None;
+        // Progress for `--nocapture`: a run that stalls names its fixture.
+        eprintln!("[{}/{}] {name}", i + 1, cases.len());
         for (label, workers) in executors() {
+            let started = std::time::Instant::now();
             let (steps, complete) = trace(engine, doc, workers, seed);
+            eprintln!(
+                "    {label}: {} steps in {:?}",
+                steps.len(),
+                started.elapsed()
+            );
             assert_eq!(complete, full, "{name} on {label}");
             match &reference {
                 None => reference = Some(steps),

@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use reprise_diag::Code;
+use reprise_doc::text::OBJECT;
 use reprise_doc::{Document, NodeId, SchemaRegistry, TableRole};
 use reprise_font::FontStore;
 use reprise_layout::LayoutSnapshot;
@@ -217,16 +218,18 @@ impl Exporter for PlainText {
                 {
                     append(&mut out, separator(doc, previous, block.node))?;
                 }
-                let text = doc
+                let source = doc
                     .block(block.node)
                     .map_err(|e| ClipboardError::Invalid(e.to_string()))?
                     .text
                     .to_string();
+                let placed = crate::inline::placed(doc, block.node, Some(layout))?;
+                let text = crate::inline::plain(&source, &placed)?;
                 // Reading order is block precedence with lines in source order. Export
                 // the whole authored block, including a tail omitted by a page limit.
                 append(&mut out, &item_prefix(doc, block.node))?;
                 append(&mut out, &text)?;
-                unplaced |= block.lines.last().is_none_or(|l| l.text.end < text.len());
+                unplaced |= block.lines.last().is_none_or(|l| l.text.end < source.len());
                 previous = Some(block.node);
             }
         }
@@ -244,7 +247,8 @@ impl Exporter for PlainText {
             let block = doc
                 .block(node)
                 .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
-            let text = block.text.to_string();
+            let placed = crate::inline::placed(doc, node, layout)?;
+            let text = crate::inline::plain(&block.text.to_string(), &placed)?;
             if let Some(previous) = previous
                 && previous != node
             {
@@ -436,6 +440,7 @@ fn paragraph(
     let formats = doc
         .text_formats(node)
         .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+    let placed = crate::inline::placed(doc, node, layout)?;
     let stretches = links.stretches(node, &text);
     // The link open around the segments being written: its stretch index.
     let mut open: Option<usize> = None;
@@ -476,7 +481,7 @@ fn paragraph(
                 bytes,
                 style: run_style.clone(),
             };
-            html_run(&run, &text, &style, out)?;
+            html_run(&run, &text, &style, &placed, out)?;
         }
     }
     if open.is_some() {
@@ -490,6 +495,7 @@ fn html_run(
     run: &reprise_doc::formatting::FormatRun,
     text: &str,
     style: &reprise_doc::ComputedStyle,
+    placed: &[crate::inline::Placed],
     out: &mut String,
 ) -> Result<(), ClipboardError> {
     {
@@ -539,11 +545,16 @@ fn html_run(
                 .unwrap_or_default();
             append(out, &format!("<span{lang} style=\"{}\">", escape(&css)))?;
         }
-        append(
-            out,
-            &escape(text.get(run.bytes.clone()).unwrap_or_default())
-                .replace(['\n', '\u{2028}'], "<br>"),
-        )?;
+        // Objects sit inside the run's span, so a field takes the run's styling.
+        let mut cursor = run.bytes.start;
+        for object in crate::inline::within(placed, run.bytes.clone()) {
+            let before = text.get(cursor..object.at).unwrap_or_default();
+            append(out, &escape(before).replace(['\n', '\u{2028}'], "<br>"))?;
+            append(out, &crate::inline::html(object)?)?;
+            cursor = object.at.saturating_add(OBJECT.len_utf8());
+        }
+        let rest = text.get(cursor..run.bytes.end).unwrap_or_default();
+        append(out, &escape(rest).replace(['\n', '\u{2028}'], "<br>"))?;
         if span {
             append(out, "</span>")?;
         }
@@ -717,7 +728,7 @@ impl Exporter for Html {
                 "computed family, size, line height and paragraph alignment retained; custom tab stops/leaders and per-line alignment are omitted (tab characters retained); character formatting (family, size, language, OpenType features, weight, slant, decorations, RGBA colour) as inline spans; symbolic values and named inheritance omitted",
                 "logical Unicode plus paragraph dir retained",
                 "CSS family names retained; pinned identities and font bytes omitted",
-                "assets have no HTML representation",
+                "image bytes have no HTML representation; block and inline images keep their asset hash and alt text",
                 "IDs, ranges, undo and collaboration history omitted",
             ],
         );
@@ -791,7 +802,7 @@ impl Exporter for Native {
                 "named styles, inheritance, unparsed values and direct overrides retained",
                 "Unicode text and controls retained",
                 "available used font bytes and pinned identities bundled; missing resources reported",
-                "host may attach assets by content hash; no authored image usage graph yet",
+                "host may attach block and inline image assets by content hash; no authored image usage graph yet",
                 "live authored structure retained; new IDs allocated on paste; tombstones and undo/history omitted",
             ],
         );

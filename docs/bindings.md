@@ -674,3 +674,43 @@ The display list itself is unchanged.
 The reference worker adds request kinds `annotation`, `annotations-at`,
 `annotations-in`, `annotations-of-kind`, `annotation-geometry` and `page-links`
 (responses `annotation`, `annotations`, `annotation-geometry`, `page-links`).
+
+## Inline objects and fields (`docs/inline.md`)
+
+Commands (in `apply` and `batch`; both respect `expected_revision` and name the
+refused command's index):
+
+-   `insert-inline { node, at, object }`: puts an object at byte `at` of a flow
+    paragraph (`at` is where the earlier commands of the transaction leave the
+    text). `object` is `{ kind, align, params }`: `kind` is `image` or `field`
+    (any other name is kept and not drawn), `align` is `baseline` (default),
+    `middle`, `text-top` or `text-bottom`, and every parameter is a string. An
+    `image` needs `asset` (the 64-hex SHA-256 from `register_asset`) and may have
+    `width`, `height` (`pt:<1/1024 pt>`, `em:<thousandths>` or
+    `pct:<thousandths of the frame's inline extent>`) and `alt`. A `field` needs
+    `field`: `page-number`, `page-count`, `page-of` (with `target` from
+    `field_target`) or `text` (with `text`). It keeps its identity through undo
+    and redo.
+-   `update-inline { node, at, patch }`: `at` is the byte of the object's
+    U+FFFC; `patch` is `{ align?, params }` and a `null` parameter removes it.
+
+Refusals are errors with `edit.invalid-command`: a name or value that is not
+valid, more than 64 parameters, a value over 16 KiB, an offset inside a
+character, a paragraph that is not a flow paragraph, or no object at `at`. A
+U+FFFC in `insert-text` is refused the same way (it is the marker, not text).
+
+`State.blocks[].inline` lists the live objects of a paragraph in text order
+(`{ id, at, object }`, with `id` as `host/char`, new for a copy), and is left
+out when there are none. `field_target({ node, at })` returns the persistent
+position string for a `page-of`. `atom_rect({ node, at })` (a complete layout
+is required; `bindings.invalid` when `at` is not the start of a placed object)
+returns `{ page, rect }` for selection handles. `copy`, `copy_as`, `paste` and
+`import_copy` carry objects with new identities; HTML and plain-text projections
+carry the alt text or the resolved field text.
+
+Problems appear in `diagnostics` and `diagnostics_for` as `layout.inline-*`,
+`layout.field-*`, `layout.image-*` with the object's three bytes as
+`start`/`end`.
+
+The reference worker adds request kinds `atom-rect` and `field-target`
+(responses `atom-rect` with `rect`, `field-target` with `target`).

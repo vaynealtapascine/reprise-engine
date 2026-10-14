@@ -475,6 +475,14 @@ impl Editor {
                 .remove_annotation(*id)
                 .map_err(|e| reprise_doc::DocError::Store(e.to_string()))?,
             Step::AddAnnotation { .. } => return Err(missing()),
+            Step::InsertInline { node, at, object } => {
+                let id = self.doc.stage_inline(*node, *at, object)?;
+                self.doc.activate_inline(id)?;
+            }
+            Step::UpdateInline { node, at, patch } => {
+                let id = self.doc.inline_at(*node, *at).ok_or_else(missing)?;
+                self.doc.update_inline(id, patch)?;
+            }
         }
         Ok(())
     }
