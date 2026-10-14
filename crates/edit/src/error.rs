@@ -58,6 +58,8 @@ pub enum Reason {
     UncommittedEdit,
     #[error("isolated edit preflight supports physical tree depth up to {max}")]
     PreflightDepth { max: usize },
+    #[error("invalid inline object: {0}")]
+    Inline(String),
     #[error(transparent)]
     PageSetup(reprise_doc::page_setup::PageSetupError),
     #[error("alignment relation limit exceeded")]
@@ -109,6 +111,18 @@ pub enum Reason {
     StyleLimit { max: usize },
     #[error("the selection no longer resolves to any block")]
     SelectionGone,
+    #[error("no live list {0:?}")]
+    NoSuchList(crate::ListRef),
+    #[error("the list definition is invalid: {0}")]
+    InvalidList(String),
+    #[error("{0} is not a text block, so it can't be a list item")]
+    NotText(NodeId),
+    #[error("{0} is not a list item")]
+    NotAListItem(NodeId),
+    #[error("list levels are 0 to 8, not {0}")]
+    BadLevel(u8),
+    #[error("heading levels are 1 to 6")]
+    BadRole,
 }
 
 impl From<reprise_doc::annotation::AnnotationError> for Reason {

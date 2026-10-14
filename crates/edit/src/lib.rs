@@ -35,7 +35,7 @@ pub use caret::{
     Affinity, BlockRange, Caret, CaretRect, Cursor, GraphemeCell, Hit, Movement, Selection,
     SelectionRect,
 };
-pub use command::{Command, Effect};
+pub use command::{Command, Effect, ListRef};
 pub use editor::{Applied, Bias, Editor, Transaction};
 pub use error::{EditError, Reason};
 pub use navigator::Navigator;

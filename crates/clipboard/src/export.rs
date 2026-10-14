@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use reprise_diag::Code;
+use reprise_doc::text::OBJECT;
 use reprise_doc::{Document, NodeId, SchemaRegistry, TableRole};
 use reprise_font::FontStore;
 use reprise_layout::LayoutSnapshot;
@@ -184,7 +185,7 @@ fn separator(doc: &Document, previous: NodeId, next: NodeId) -> &'static str {
         _ => "\n\n",
     }
 }
-fn append(out: &mut String, text: &str) -> Result<(), ClipboardError> {
+pub(crate) fn append(out: &mut String, text: &str) -> Result<(), ClipboardError> {
     if out.len().saturating_add(text.len()) > reprise_doc::fragment::MAX_FRAGMENT_BYTES {
         return Err(ClipboardError::Limit("export bytes"));
     }
@@ -217,15 +218,18 @@ impl Exporter for PlainText {
                 {
                     append(&mut out, separator(doc, previous, block.node))?;
                 }
-                let text = doc
+                let source = doc
                     .block(block.node)
                     .map_err(|e| ClipboardError::Invalid(e.to_string()))?
                     .text
                     .to_string();
+                let placed = crate::inline::placed(doc, block.node, Some(layout))?;
+                let text = crate::inline::plain(&source, &placed)?;
                 // Reading order is block precedence with lines in source order. Export
                 // the whole authored block, including a tail omitted by a page limit.
+                append(&mut out, &item_prefix(doc, block.node))?;
                 append(&mut out, &text)?;
-                unplaced |= block.lines.last().is_none_or(|l| l.text.end < text.len());
+                unplaced |= block.lines.last().is_none_or(|l| l.text.end < source.len());
                 previous = Some(block.node);
             }
         }
@@ -243,12 +247,14 @@ impl Exporter for PlainText {
             let block = doc
                 .block(node)
                 .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
-            let text = block.text.to_string();
+            let placed = crate::inline::placed(doc, node, layout)?;
+            let text = crate::inline::plain(&block.text.to_string(), &placed)?;
             if let Some(previous) = previous
                 && previous != node
             {
                 append(&mut out, separator(doc, previous, node))?;
             }
+            append(&mut out, &item_prefix(doc, node))?;
             append(&mut out, &text)?;
             previous = Some(node);
             unplaced |= layout.is_some();
@@ -300,6 +306,18 @@ impl Exporter for PlainText {
             bytes: out.into_bytes(),
             losses,
         })
+    }
+}
+
+/// A list item's marker in plain text: four spaces per level, the marker and
+/// a space. Empty for other blocks.
+fn item_prefix(doc: &Document, node: NodeId) -> String {
+    match doc.list_item(node) {
+        Some(item) if !item.marker.is_empty() => {
+            format!("{}{} ", "    ".repeat(usize::from(item.level)), item.marker)
+        }
+        Some(item) => "    ".repeat(usize::from(item.level)),
+        None => String::new(),
     }
 }
 
@@ -385,10 +403,12 @@ fn paragraph(
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace(['\n', '\r', '\u{c}'], " ");
+    let (tag, class) = crate::semantic_html::element(doc.role(node).unwrap_or_default());
     append(
         out,
         &format!(
-            "<p{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            "<{tag}{}{} dir=\"{}\" style=\"font-family: &quot;{}&quot;; font-size: {}pt; line-height: {}pt; white-space: pre-wrap{}\">",
+            class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default(),
             if links.is_target(node) {
                 format!(" id=\"{}\"", crate::links::target_id(node))
             } else {
@@ -420,6 +440,7 @@ fn paragraph(
     let formats = doc
         .text_formats(node)
         .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+    let placed = crate::inline::placed(doc, node, layout)?;
     let stretches = links.stretches(node, &text);
     // The link open around the segments being written: its stretch index.
     let mut open: Option<usize> = None;
@@ -460,13 +481,13 @@ fn paragraph(
                 bytes,
                 style: run_style.clone(),
             };
-            html_run(&run, &text, &style, out)?;
+            html_run(&run, &text, &style, &placed, out)?;
         }
     }
     if open.is_some() {
         append(out, "</a>")?;
     }
-    append(out, "</p>")
+    append(out, &format!("</{tag}>"))
 }
 
 /// One formatted stretch of a paragraph, as a span when it has formatting.
@@ -474,6 +495,7 @@ fn html_run(
     run: &reprise_doc::formatting::FormatRun,
     text: &str,
     style: &reprise_doc::ComputedStyle,
+    placed: &[crate::inline::Placed],
     out: &mut String,
 ) -> Result<(), ClipboardError> {
     {
@@ -523,11 +545,16 @@ fn html_run(
                 .unwrap_or_default();
             append(out, &format!("<span{lang} style=\"{}\">", escape(&css)))?;
         }
-        append(
-            out,
-            &escape(text.get(run.bytes.clone()).unwrap_or_default())
-                .replace(['\n', '\u{2028}'], "<br>"),
-        )?;
+        // Objects sit inside the run's span, so a field takes the run's styling.
+        let mut cursor = run.bytes.start;
+        for object in crate::inline::within(placed, run.bytes.clone()) {
+            let before = text.get(cursor..object.at).unwrap_or_default();
+            append(out, &escape(before).replace(['\n', '\u{2028}'], "<br>"))?;
+            append(out, &crate::inline::html(object)?)?;
+            cursor = object.at.saturating_add(OBJECT.len_utf8());
+        }
+        let rest = text.get(cursor..run.bytes.end).unwrap_or_default();
+        append(out, &escape(rest).replace(['\n', '\u{2028}'], "<br>"))?;
         if span {
             append(out, "</span>")?;
         }
@@ -551,6 +578,23 @@ fn css_string(value: &str) -> String {
     out.push('"');
     out
 }
+/// Opens or closes `ol`/`ul` before a block; tables close every list.
+fn list_boundary(
+    doc: &Document,
+    node: NodeId,
+    lists: &mut crate::semantic_html::ListWriter,
+    out: &mut String,
+) -> Result<(), ClipboardError> {
+    if doc
+        .table_role(node)
+        .map_err(|e| ClipboardError::Invalid(e.to_string()))?
+        .is_some()
+    {
+        return lists.close(out);
+    }
+    lists.before(doc, node, out)
+}
+
 fn html_node(
     doc: &Document,
     node: NodeId,
@@ -610,9 +654,12 @@ fn html_node(
     } else {
         paragraph(doc, node, layout, links, out)?;
     }
+    let mut lists = crate::semantic_html::ListWriter::default();
     for child in doc.children(Some(node)) {
+        list_boundary(doc, child, &mut lists, out)?;
         html_node(doc, child, layout, links, out, depth + 1, grid)?;
     }
+    lists.close(out)?;
     if let Some(close) = close {
         append(out, close)?;
     }
@@ -650,9 +697,12 @@ impl Exporter for Html {
         }
         let mut out = String::from("<!doctype html><html><body>");
         let links = crate::links::LinkIndex::new(doc);
+        let mut lists = crate::semantic_html::ListWriter::default();
         for node in roots {
+            list_boundary(doc, node, &mut lists, &mut out)?;
             html_node(doc, node, layout, &links, &mut out, 0, None)?;
         }
+        lists.close(&mut out)?;
         append(&mut out, "</body></html>")?;
         let presence = links.presence();
         use Disposition::*;
@@ -678,7 +728,7 @@ impl Exporter for Html {
                 "computed family, size, line height and paragraph alignment retained; custom tab stops/leaders and per-line alignment are omitted (tab characters retained); character formatting (family, size, language, OpenType features, weight, slant, decorations, RGBA colour) as inline spans; symbolic values and named inheritance omitted",
                 "logical Unicode plus paragraph dir retained",
                 "CSS family names retained; pinned identities and font bytes omitted",
-                "assets have no HTML representation",
+                "image bytes have no HTML representation; block and inline images keep their asset hash and alt text",
                 "IDs, ranges, undo and collaboration history omitted",
             ],
         );
@@ -752,7 +802,7 @@ impl Exporter for Native {
                 "named styles, inheritance, unparsed values and direct overrides retained",
                 "Unicode text and controls retained",
                 "available used font bytes and pinned identities bundled; missing resources reported",
-                "host may attach assets by content hash; no authored image usage graph yet",
+                "host may attach block and inline image assets by content hash; no authored image usage graph yet",
                 "live authored structure retained; new IDs allocated on paste; tombstones and undo/history omitted",
             ],
         );

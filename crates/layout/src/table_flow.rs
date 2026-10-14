@@ -133,13 +133,16 @@ fn span_sum(widths: &[Length], column: usize, span: usize) -> Length {
 }
 
 impl Flow<'_> {
-    /// Places every group of a table, in order.
+    /// Places every group of a table, in order. `instance` is the placement the
+    /// cells' fields resolve for: whoever composes the table says which copy of
+    /// the content it is (the flow's own, for body tables).
     pub(crate) fn place_groups(
         &mut self,
         doc: &Document,
         table: NodeId,
         mut groups: Vec<Group>,
         widths: &[Length],
+        instance: crate::FieldInstance,
     ) {
         let split = groups.iter().take_while(|g| g.header).count();
         let bodies = groups.split_off(split);
@@ -155,10 +158,20 @@ impl Flow<'_> {
                 &headers,
                 widths,
                 &mut repeat,
+                instance,
             );
         }
         for group in bodies {
-            self.place_group(doc, table, group, usize::MAX, &headers, widths, &mut repeat);
+            self.place_group(
+                doc,
+                table,
+                group,
+                usize::MAX,
+                &headers,
+                widths,
+                &mut repeat,
+                instance,
+            );
         }
     }
 
@@ -172,6 +185,7 @@ impl Flow<'_> {
         groups: &[Group],
         widths: &[Length],
         repeat: &mut Repeat,
+        instance: crate::FieldInstance,
     ) {
         let group = &owned;
         let spacing = self.engine.flow.paragraph_spacing;
@@ -220,6 +234,7 @@ impl Flow<'_> {
                 frame.rect.width,
                 top,
                 depth,
+                instance,
             );
             if copy.is_some() && !fragment.placed && !fragment.done {
                 // The copy would leave the body no room: the body wins.
@@ -235,6 +250,7 @@ impl Flow<'_> {
                     frame.rect.width,
                     top,
                     depth,
+                    instance,
                 );
             }
             if !fragment.done
@@ -257,6 +273,7 @@ impl Flow<'_> {
                     frame.rect.width,
                     head,
                     self.fresh_depth(),
+                    instance,
                 );
                 if fresh.done {
                     // Keep the group together: start it on a fresh frame.
@@ -397,6 +414,13 @@ impl Flow<'_> {
         let mut y = top;
         let mut bottom = top;
         let mut blocks = Vec::new();
+        // The copy is this page's own placement of the header cells: a field
+        // in it resolves for this page, not for the page of the authored row.
+        let instance = crate::FieldInstance::of_page(
+            self.snapshot
+                .frame(frame_index)
+                .map_or(self.fields().page, |f| f.page),
+        );
         for group in groups.iter().take(repeat.groups) {
             let (_, fragment) = self.compose_fragment(
                 doc,
@@ -407,6 +431,7 @@ impl Flow<'_> {
                 frame_width,
                 y,
                 depth,
+                instance,
             );
             if !fragment.done {
                 return None;
@@ -456,6 +481,7 @@ impl Flow<'_> {
         frame_width: Length,
         top: Length,
         depth: Length,
+        instance: crate::FieldInstance,
     ) -> (State, Fragment) {
         let spacing = self.engine.flow.paragraph_spacing;
         let full_depth = self
@@ -506,6 +532,7 @@ impl Flow<'_> {
                     full_depth,
                     spacing,
                     &mut fragment.diagnostics,
+                    instance,
                 );
                 if let Some(c) = next.cursors.get_mut(i) {
                     *c = out.cursor;
@@ -564,6 +591,7 @@ impl Flow<'_> {
         full_depth: Length,
         spacing: Length,
         diagnostics: &mut Vec<Diagnostic>,
+        instance: crate::FieldInstance,
     ) -> CellOut {
         let width = span_sum(widths, cell.column, cell.colspan);
         let x: Length = widths.iter().take(cell.column).copied().sum();
@@ -645,6 +673,7 @@ impl Flow<'_> {
                 &subject,
                 diagnostics,
                 self.evaluation,
+                &self.fields().placed_as(instance),
             );
             if composed.lines.is_empty() {
                 break;
@@ -659,6 +688,9 @@ impl Flow<'_> {
             }
             for line in &mut composed.lines {
                 line.rect.origin.x += x;
+                for atom in &mut line.atoms {
+                    atom.rect.origin.x += x;
+                }
                 for run in &mut line.runs {
                     run.x += x;
                 }

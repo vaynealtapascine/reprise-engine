@@ -1,5 +1,7 @@
 use crate::*;
+mod semantics;
 use reprise_geom::Length;
+pub(crate) use semantics::{list_definition_out, list_item_out, role_out};
 pub(crate) fn peer(s: &str) -> Result<u64> {
     if s.len() > 20 {
         return Err(Error::InvalidId(s.into()));
@@ -438,6 +440,16 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             node: id(node)?,
             name: name.clone().unwrap_or_default(),
         },
+        Command::InsertInline { node, at, object } => C::InsertInline {
+            node: id(node)?,
+            at: *at as usize,
+            object: inline_object(object),
+        },
+        Command::UpdateInline { node, at, patch } => C::UpdateInline {
+            node: id(node)?,
+            at: *at as usize,
+            patch: inline_patch(patch),
+        },
         Command::FormatText {
             node,
             start,
@@ -463,6 +475,7 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             data: annotation_data(annotation)?,
         },
         Command::RemoveAnnotation { id: s } => C::RemoveAnnotation { id: range_id(s)? },
+        other => return semantics::command(other),
     })
 }
 
@@ -706,6 +719,7 @@ pub(crate) fn applied(a: reprise_edit::Applied, notes: Vec<reprise_diag::Note>) 
     Applied {
         blocks: a.blocks.iter().map(ToString::to_string).collect(),
         relations: a.relations.iter().map(ToString::to_string).collect(),
+        lists: a.lists.iter().map(ToString::to_string).collect(),
         annotations: a.annotations.iter().map(ToString::to_string).collect(),
         effects: a
             .effects
@@ -1143,5 +1157,45 @@ pub(crate) fn font_settings(r: &FontSettings) -> reprise_font::FontSettings {
             .collect(),
         fallbacks: r.fallbacks.clone(),
         synthetic_oblique: r.synthetic_oblique,
+    }
+}
+pub(crate) fn inline_align(a: InlineAlign) -> reprise_doc::InlineAlign {
+    match a {
+        InlineAlign::Baseline => reprise_doc::InlineAlign::Baseline,
+        InlineAlign::Middle => reprise_doc::InlineAlign::Middle,
+        InlineAlign::TextTop => reprise_doc::InlineAlign::TextTop,
+        InlineAlign::TextBottom => reprise_doc::InlineAlign::TextBottom,
+    }
+}
+fn inline_align_out(a: reprise_doc::InlineAlign) -> InlineAlign {
+    match a {
+        reprise_doc::InlineAlign::Baseline => InlineAlign::Baseline,
+        reprise_doc::InlineAlign::Middle => InlineAlign::Middle,
+        reprise_doc::InlineAlign::TextTop => InlineAlign::TextTop,
+        reprise_doc::InlineAlign::TextBottom => InlineAlign::TextBottom,
+    }
+}
+pub(crate) fn inline_object(o: &InlineObject) -> reprise_doc::InlineObject {
+    reprise_doc::InlineObject {
+        kind: o.kind.clone(),
+        align: inline_align(o.align),
+        params: o.params.clone(),
+    }
+}
+pub(crate) fn inline_patch(p: &InlinePatch) -> reprise_doc::InlinePatch {
+    reprise_doc::InlinePatch {
+        align: p.align.map(inline_align),
+        params: p.params.clone(),
+    }
+}
+pub(crate) fn inline_entry(e: reprise_doc::InlineEntry) -> InlineEntry {
+    InlineEntry {
+        id: e.id.to_string(),
+        at: u32::try_from(e.at).unwrap_or(u32::MAX),
+        object: InlineObject {
+            kind: e.object.kind,
+            align: inline_align_out(e.object.align),
+            params: e.object.params,
+        },
     }
 }

@@ -441,6 +441,7 @@ impl DocumentSession {
             .map(|n| (n, 0u32))
             .collect();
         let mut blocks = Vec::new();
+        let numbering = self.doc().list_numbering();
         // A peer can write a node whose envelope doesn't read (collaboration
         // invariant I2): leave it out, keep its children, and say so.
         let mut malformed = Vec::new();
@@ -484,6 +485,8 @@ impl DocumentSession {
                     reprise_doc::BlockKind::Image => BlockKind::Image,
                 },
                 text: block.text.to_string(),
+                role: cv::role_out(self.doc().role(node).unwrap_or_default()),
+                list: numbering.items.get(&node).map(cv::list_item_out),
                 // Unreadable formatting is reported by layout diagnostics.
                 formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
                 style: {
@@ -524,6 +527,15 @@ impl DocumentSession {
                         resolved: index,
                     }
                 },
+                // Records that cannot be read are reported by layout diagnostics,
+                // so an unreadable object is left out here, not failed on.
+                inline: self
+                    .doc()
+                    .inline_objects(node)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(cv::inline_entry)
+                    .collect(),
             });
         }
         let page = self.engine.page_setup(self.doc());
@@ -610,7 +622,39 @@ impl DocumentSession {
                 })
             })
             .collect();
+        // A peer can create any number of definitions; a cut listing must not
+        // make the whole state unreadable. Items still show their markers.
+        let mut raw_lists = self.doc().lists();
+        if raw_lists.len() > reprise_doc::fragment::MAX_FRAGMENT_LISTS {
+            raw_lists.truncate(reprise_doc::fragment::MAX_FRAGMENT_LISTS);
+            diagnostics.push(Diagnostic {
+                code: "bindings.limit".into(),
+                severity: Severity::Warning,
+                message: format!(
+                    "more than {} list definitions; the listing is cut short",
+                    reprise_doc::fragment::MAX_FRAGMENT_LISTS
+                ),
+                subject: None,
+                start: None,
+                end: None,
+            });
+        }
+        let lists = raw_lists
+            .into_iter()
+            .map(|(id, read)| {
+                let (definition, error) = match read {
+                    Ok(d) => (Some(cv::list_definition_out(d)), None),
+                    Err(e) => (None, Some(e)),
+                };
+                NamedList {
+                    id: id.to_string(),
+                    definition,
+                    error,
+                }
+            })
+            .collect();
         Ok(Payload::new(State {
+            lists,
             annotations,
             styles,
             resolved: table,
@@ -662,9 +706,30 @@ impl DocumentSession {
         }
         let mut bytes = 0usize;
         for command in commands {
-            if let Command::InsertText { text, .. } | Command::InsertBlock { text, .. } = command {
-                bytes = bytes.saturating_add(text.len());
-            }
+            let added = match command {
+                Command::InsertText { text, .. } | Command::InsertBlock { text, .. } => text.len(),
+                // Inline parameters count too, each entry's name and value (and one
+                // byte, so empty names still cost something).
+                Command::InsertInline { object, .. } => {
+                    object
+                        .params
+                        .iter()
+                        .fold(object.kind.len(), |n, (name, value)| {
+                            n.saturating_add(name.len())
+                                .saturating_add(value.len())
+                                .saturating_add(1)
+                        })
+                }
+                Command::UpdateInline { patch, .. } => {
+                    patch.params.iter().fold(0usize, |n, (name, value)| {
+                        n.saturating_add(name.len())
+                            .saturating_add(value.as_ref().map_or(0, String::len))
+                            .saturating_add(1)
+                    })
+                }
+                _ => 0,
+            };
+            bytes = bytes.saturating_add(added);
         }
         if bytes > reprise_edit::MAX_TRANSACTION_BYTES {
             return Err(Error::Limit("transaction text".into()));
@@ -944,6 +1009,19 @@ impl DocumentSession {
             anchor: self.checked_caret(&r.anchor)?,
             focus: self.checked_caret(&r.focus)?,
         })
+    }
+    /// Page geometry of the atom at a UTF-8 marker offset, from current layout.
+    pub fn atom_rect(&self, request: &Payload<FieldTarget>) -> Result<Payload<PageRect>> {
+        let r = validate(request)?;
+        let node = cv::id(&r.node)?;
+        let atom = self
+            .navigator()?
+            .atom_rect(node, r.at as usize)
+            .ok_or_else(|| Error::Invalid("no placed inline object at that offset".into()))?;
+        Ok(Payload::new(PageRect {
+            page: u32::try_from(atom.page).unwrap_or(u32::MAX),
+            rect: cv::rect(atom.rect),
+        }))
     }
     pub fn selection_rects(&self, request: &Payload<Selection>) -> Result<Payload<Vec<PageRect>>> {
         let selection = self.selection(validate(request)?)?;
@@ -1231,6 +1309,18 @@ impl DocumentSession {
             reprise_clipboard::import_plain(&r.text)?
         };
         self.paste_fragment(imported.fragment, r.at.as_ref())
+    }
+    /// The persistent `target` for a `page-of` field: the paragraph `node` at
+    /// byte `at`, which follows later splits, joins and edits. Store the
+    /// returned string as the `target` parameter of a field object, such as
+    /// `InlineObject { kind: "field", params: { field: "page-of", target } }`
+    /// in an `InsertInline` or `UpdateInline` command. Errors when `node` is
+    /// unknown or `at` is not a character boundary of its text.
+    pub fn field_target(&self, request: &Payload<FieldTarget>) -> Result<Payload<String>> {
+        let r = validate(request)?;
+        let node = cv::id(&r.node)?;
+        let target = self.doc().field_target(node, r.at as usize)?;
+        Ok(Payload::new(target))
     }
     pub fn save(&mut self) -> Result<Payload<Bytes>> {
         self.sync_fonts()?;
@@ -1548,6 +1638,33 @@ impl DocumentSession {
         })?;
         Ok(Payload::new(Bytes { bytes }))
     }
+    /// Semantic heading order without requiring layout; page is zero-based and
+    /// absent if no current layout places the heading.
+    pub fn outline(&self) -> Result<Payload<Vec<OutlineEntry>>> {
+        let layout = self.current().ok();
+        let entries = self.doc().outline();
+        if entries.len() > 100_000 {
+            return Err(Error::Limit("outline headings".into()));
+        }
+        Ok(Payload::new(
+            entries
+                .into_iter()
+                .map(|e| {
+                    let page = layout
+                        .and_then(|l| l.block(e.node))
+                        .and_then(|b| b.lines.first())
+                        .and_then(|line| layout.and_then(|l| l.frames.get(line.frame)))
+                        .and_then(|f| u32::try_from(f.page).ok());
+                    OutlineEntry {
+                        node: e.node.to_string(),
+                        level: e.level,
+                        text: e.text,
+                        page,
+                    }
+                })
+                .collect(),
+        ))
+    }
     pub fn reading_order(&self) -> Result<Payload<Vec<ReadingStep>>> {
         let layout = self.current()?;
         let steps = layout
@@ -1563,6 +1680,10 @@ impl DocumentSession {
                     page: u32::try_from(s.page).unwrap_or(u32::MAX),
                     start: u32::try_from(line.text.start).unwrap_or(u32::MAX),
                     end: u32::try_from(line.text.end).unwrap_or(u32::MAX),
+                    role: cv::role_out(self.doc().role(s.line.node).unwrap_or_default()),
+                    marker: (s.line.line == 0)
+                        .then(|| self.doc().list_item(s.line.node).map(|i| i.marker))
+                        .flatten(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;

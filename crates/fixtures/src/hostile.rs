@@ -155,8 +155,13 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         font_host_oblique()?,
         paragraph_style_storm()?,
         plumbing_mark_facts()?,
+        list_semantics_storm()?,
         annotation_storm()?,
         foreign_copy_snapshot()?,
+        inline_bidi()?,
+        inline_storm()?,
+        inline_storm_readable()?,
+        inline_fields_with_oscillating_regions()?,
     ])
 }
 
@@ -3068,6 +3073,81 @@ pub fn plumbing_mark_facts() -> Result<Fixture, DocError> {
     ))
 }
 
+/// Numbering under hostile authored state: enormous counters and indents,
+/// inherited cycles, dangling definitions, and concurrent item levels.
+pub fn list_semantics_storm() -> Result<Fixture, DocError> {
+    use reprise_doc::{LevelDef, ListDefinition, NumberFormat, Role};
+    let doc = document()?;
+    let first = doc.append_block(BlockKind::Paragraph, "body", "Numbered heading")?;
+    doc.set_role(first, Role::Heading(2))?;
+    let def = ListDefinition {
+        base: None,
+        levels: [(
+            0,
+            LevelDef {
+                format: Some(NumberFormat::UpperRoman),
+                start: Some(i64::MAX),
+                indent: Some(Length::MAX),
+                hanging: Some(Length::MAX),
+                ..Default::default()
+            },
+        )]
+        .into(),
+    };
+    let list = doc.create_list(&def)?;
+    doc.set_list_item(first, list, 0)?;
+    let next = doc.append_block(BlockKind::Paragraph, "body", "Deep item still reads")?;
+    doc.set_list_item(next, list, 8)?;
+    let body = doc.append_block(BlockKind::Paragraph, "body", "Intervening body")?;
+    let last = doc.append_block(BlockKind::Paragraph, "body", "Saturated counter")?;
+    doc.set_list_item(last, list, 0)?;
+    let base = doc.create_list(&ListDefinition::default())?;
+    let child = doc.create_list(&ListDefinition {
+        base: Some(base),
+        ..Default::default()
+    })?;
+    doc.update_list(
+        base,
+        &ListDefinition {
+            base: Some(child),
+            ..Default::default()
+        },
+    )?;
+    let cycle = doc.append_block(BlockKind::Paragraph, "body", "A cycle cuts inheritance")?;
+    doc.set_list_item(cycle, child, 0)?;
+    let gone = doc.create_list(&ListDefinition::bulleted())?;
+    let plain = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "A missing definition reads as body",
+    )?;
+    doc.set_list_item(plain, gone, 0)?;
+    doc.delete_list(gone)?;
+    doc.commit();
+    let peer = doc.fork(OTHER_PEER)?;
+    doc.set_list_level(next, 7)?;
+    peer.set_role(body, Role::Verse)?;
+    peer.set_list_level(last, 1)?;
+    doc.commit();
+    peer.commit();
+    doc.merge(&peer)?;
+    peer.merge(&doc)?;
+    let mut fixture = Fixture::new(
+        "list_semantics_storm",
+        doc,
+        &[
+            "list.counter-range",
+            "list.definition-cycle",
+            "list.definition-missing",
+            "layout.list-indent",
+            // The absurd indent is cut to leave one em, so words overflow it.
+            "compose.overflow",
+        ],
+    );
+    fixture.replica = Some(peer);
+    Ok(fixture)
+}
+
 /// Hundreds of overlapping and nested links and comment anchors over text with
 /// combining marks, ligatures, Hebrew and a ZWJ emoji. A split lands inside
 /// many of them, a deletion orphans some comments and hides some links, a
@@ -3208,4 +3288,240 @@ pub fn foreign_copy_snapshot() -> Result<Fixture, DocError> {
         ));
     }
     Ok(Fixture::new("foreign_copy_snapshot", doc, &[]))
+}
+
+// ---- Inline objects and fields (`docs/inline.md`) ----
+
+/// Images and page numbers at the edges and between runs of mixed-direction
+/// paragraphs: at a line's start and end, adjacent to each other, between
+/// Hebrew and English, and wrapped by a long tail. Caret, selection and
+/// movement tests walk every line of every hostile fixture, so these
+/// atoms are walked in both directions too.
+pub fn inline_bidi() -> Result<Fixture, DocError> {
+    use crate::inline::{Part, RED, image, page_number, paragraph};
+    let mut engine = engine();
+    let asset = engine
+        .assets
+        .insert(RED)
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    let doc = document()?;
+    let he = "\u{5e9}\u{5dc}\u{5d5}\u{5dd}";
+    let ar = "\u{627}\u{644}\u{639}\u{631}\u{628}\u{64a}\u{629}";
+    paragraph(
+        &doc,
+        vec![
+            Part::Object(image(&asset, 18, 12, "line start")),
+            Part::Text("English "),
+            Part::Text(he),
+            Part::Object(image(&asset, 24, 9, "between")),
+            Part::Text(he),
+            Part::Text(" 123 "),
+            Part::Object(page_number()),
+            Part::Object(page_number()),
+            Part::Text(" "),
+            Part::Text(ar),
+            Part::Object(image(&asset, 14, 30, "tall")),
+            Part::Text(" with a long tail of English words that wraps onto several lines "),
+            Part::Text(he),
+            Part::Text(" 456 "),
+            Part::Object(image(&asset, 30, 14, "wide")),
+            Part::Text(" and the end "),
+            Part::Object(page_number()),
+        ],
+    )?;
+    // Right to left from the first strong character, with objects at both ends.
+    paragraph(
+        &doc,
+        vec![
+            Part::Object(page_number()),
+            Part::Text(he),
+            Part::Text(" "),
+            Part::Text(ar),
+            Part::Object(image(&asset, 12, 12, "end")),
+        ],
+    )?;
+    doc.commit();
+    Ok(Fixture {
+        engine,
+        ..Fixture::new("inline_bidi", doc, &[])
+    })
+}
+
+/// Every way an object can be wrong or extreme: an unknown kind and field
+/// function, an image whose asset is missing or is not a hash, zero, negative
+/// and `i32::MAX` sizes, a page-of with a garbage target, a marker with no
+/// record, a record with no marker and a record from a future version. One peer
+/// resizes an image while another deletes it. Everything is reported and
+/// nothing is lost or looped.
+pub fn inline_storm() -> Result<Fixture, DocError> {
+    inline_storm_with(true, "inline_storm")
+}
+
+/// [`inline_storm`] without the record whose asset is not a hash. A copy of
+/// text with an unreadable object is refused whole (like an unreadable block),
+/// so this one is what the clipboard and paste tests copy and paste.
+pub fn inline_storm_readable() -> Result<Fixture, DocError> {
+    inline_storm_with(false, "inline_storm_readable")
+}
+
+fn inline_storm_with(unreadable: bool, name: &'static str) -> Result<Fixture, DocError> {
+    use crate::inline::{Part, RED, image, paragraph};
+    use reprise_doc::hostile::{corrupt_inline_record, insert_object_marker, write_inline_record};
+    use reprise_doc::{InlineObject, InlinePatch};
+    let mut engine = engine();
+    let asset = engine
+        .assets
+        .insert(RED)
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    let missing = "ab".repeat(32);
+    let doc = document()?;
+    let equation = InlineObject {
+        kind: "equation".into(),
+        ..Default::default()
+    }
+    .with("src", "x^2 + y^2");
+    let max = i32::MAX.to_string();
+    let p = paragraph(
+        &doc,
+        vec![
+            Part::Text("Storm: "),
+            Part::Object(image(&asset, 10, 10, "ok")),
+            Part::Object(image(&missing, 10, 10, "missing")),
+            Part::Object(equation),
+            Part::Object(image(&asset, 0, 0, "zero")),
+            Part::Object(
+                InlineObject::image(&asset, "huge")
+                    .with("width", format!("pt:{max}"))
+                    .with("height", format!("pt:{max}")),
+            ),
+            Part::Object(
+                InlineObject::image(&asset, "negative")
+                    .with("width", "pt:-102400")
+                    .with("height", "pt:-102400"),
+            ),
+            Part::Object(InlineObject::field("nope")),
+            Part::Object(InlineObject::field("page-of").with("target", "garbage")),
+            Part::Object(InlineObject::field("text").with("text", "literal")),
+            Part::Object(image(&asset, 8, 8, "notahash")),
+            Part::Object(image(&asset, 8, 8, "future")),
+            Part::Text(" and then a tail of words that wraps the paragraph past its first line."),
+        ],
+    )?;
+    doc.commit();
+    // Page after page of fields.
+    paragraph(
+        &doc,
+        (0..200)
+            .flat_map(|i| {
+                [
+                    Part::Object(InlineObject::field(if i % 2 == 0 {
+                        "page-number"
+                    } else {
+                        "page-count"
+                    })),
+                    Part::Text(" "),
+                ]
+            })
+            .collect(),
+    )?;
+    doc.commit();
+    let by_alt = |alt: &str| {
+        doc.inline_objects(p)
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .find(|e| e.object.param("alt") == Some(alt))
+            })
+            .map_err(|e| DocError::Store(e.to_string()))
+    };
+    if unreadable {
+        let notahash = by_alt("notahash")?.ok_or(DocError::Store("no notahash".into()))?;
+        corrupt_inline_record(&doc, notahash.id, "p:asset", "not-a-hash")
+            .map_err(|e| DocError::Store(e.to_string()))?;
+    }
+    let future = by_alt("future")?.ok_or(DocError::Store("no future".into()))?;
+    corrupt_inline_record(&doc, future.id, "v", "2").map_err(|e| DocError::Store(e.to_string()))?;
+    insert_object_marker(&doc, p, 0)?;
+    write_inline_record(&doc, "1@1/9999@77", "image", &[])
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    let ok = by_alt("ok")?.ok_or(DocError::Store("no ok".into()))?;
+    // A resize against a deletion, merged both ways.
+    let since = doc.version_vector();
+    let replica = doc.fork(OTHER_PEER)?;
+    doc.update_inline(
+        ok.id,
+        &InlinePatch {
+            params: [("width".to_string(), Some(crate::inline::pt(400)))].into(),
+            ..Default::default()
+        },
+    )?;
+    doc.commit();
+    replica
+        .block(p)?
+        .text
+        .delete(ok.at..ok.at + reprise_doc::text::OBJECT.len_utf8())?;
+    replica.commit();
+    let sync = |e: reprise_doc::sync::SyncError| DocError::Store(e.to_string());
+    let mine = doc.export_delta(&since).map_err(sync)?;
+    let theirs = replica.export_delta(&since).map_err(sync)?;
+    doc.import_packet(&theirs).map_err(sync)?;
+    replica.import_packet(&mine).map_err(sync)?;
+    doc.commit();
+    replica.commit();
+    Ok(Fixture {
+        engine,
+        replica: Some(replica),
+        ..Fixture::new(
+            name,
+            doc,
+            &[
+                "layout.inline-kind",
+                "layout.image-missing",
+                "layout.image-size",
+                "layout.inline-orphan-marker",
+                "layout.field-target",
+            ],
+        )
+    })
+}
+
+/// A float that keeps moving its own anchor (`float_moves_its_anchor`) in a
+/// paragraph that also holds page numbers and a page-of: region feedback
+/// oscillates while the field texts settle, so the loop is bounded, reports the
+/// region cycle and nothing about fields.
+pub fn inline_fields_with_oscillating_regions() -> Result<Fixture, DocError> {
+    use crate::inline::{Part, paragraph};
+    use reprise_doc::InlineObject;
+    let doc = region_document()?;
+    let body = paragraph(
+        &doc,
+        vec![
+            Part::Text("Anchor text. Page "),
+            Part::Object(InlineObject::field("page-number")),
+            Part::Text(" of "),
+            Part::Object(InlineObject::field("page-count")),
+        ],
+    )?;
+    let owner = doc.append_block(BlockKind::Annotation, "note", "float")?;
+    let range = doc.add_range(body, 1..2, RangePolicy::FIXED)?;
+    doc.add_relation(
+        &SchemaRegistry::builtin(),
+        &Relation::new(reprise_doc::relation::builtin::FLOAT)
+            .owned_by(owner)
+            .target("anchor", Target::Range(range))
+            .param(
+                "width",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::from_pt(100))),
+            )
+            .param(
+                "margin",
+                reprise_doc::Param::Length(LengthExpr::Pt(Length::ZERO)),
+            ),
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "inline_fields_with_oscillating_regions",
+        doc,
+        &["layout.region-cycle"],
+    ))
 }

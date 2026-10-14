@@ -132,7 +132,7 @@ impl Document {
                     .collect();
                 if matches!(
                     root.as_deref(),
-                    Some(crate::flow::BREAKS | crate::marks::PATCHES)
+                    Some(crate::flow::BREAKS | crate::marks::PATCHES | crate::inline::INLINE)
                 ) && diff.path.len() <= 1
                     && let Diff::Map(m) = &diff.diff
                 {
@@ -224,6 +224,26 @@ impl Document {
                                 flow.paras
                                     .iter()
                                     .filter(|p| p.region.start.1 <= u + 1 && u <= p.region.end.1)
+                                    .map(|p| p.id),
+                            );
+                        }
+                    }
+                }
+                Some(crate::inline::INLINE) => {
+                    // An object appeared, went or changed: the paragraph whose
+                    // region holds its character.
+                    for key in &event.keys {
+                        let Some(id) = crate::inline::InlineId::parse(key) else {
+                            continue;
+                        };
+                        let Some(flow) = self.flow(id.host) else {
+                            continue;
+                        };
+                        if let Some(m) = flow.objects.iter().find(|m| m.id == Some(id.mark)) {
+                            report.blocks.extend(
+                                flow.paras
+                                    .iter()
+                                    .filter(|p| p.region.start.1 <= m.u && m.u <= p.region.end.1)
                                     .map(|p| p.id),
                             );
                         }

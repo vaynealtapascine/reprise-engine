@@ -16,6 +16,9 @@ use crate::{ComposeRequest, Composer, Composition, codes};
 pub const MAX_TAB_WORK: usize = 1_000_000;
 /// Internal advance-only cell; display consumes its advance without painting.
 pub const INVISIBLE_GLYPH: u32 = u32::MAX;
+/// An inline object's advance cell (see `docs/inline.md`): composers measure
+/// it like a glyph; display paints the object instead.
+pub const ATOM_GLYPH: u32 = u32::MAX - 1;
 
 pub fn hide_controls(text: &str, runs: &mut [ShapedRun]) {
     for run in runs {
@@ -51,6 +54,19 @@ pub fn compose_marks(
     tabs: &TabStops,
     composer: &dyn Composer,
 ) -> Composition {
+    compose_marks_with(request, tabs, composer, None)
+}
+
+/// [`compose_marks`] for a paragraph with inline objects. When an object
+/// needs more room than the strut, lines are set first-fit with per-line
+/// heights (see [`crate::LineExtents`]); otherwise this is `compose_marks`.
+pub fn compose_marks_with(
+    request: &ComposeRequest<'_>,
+    tabs: &TabStops,
+    composer: &dyn Composer,
+    extents: Option<&crate::LineExtents>,
+) -> Composition {
+    let extents = extents.filter(|e| e.varies());
     let mut shaped: ShapedText = request.shaped.clone();
     hide_controls(request.text, &mut shaped.runs);
     let clean = Clean {
@@ -62,14 +78,17 @@ pub fn compose_marks(
         reshape: &clean,
         ..*request
     };
-    let mut out = if request.text.contains('\t') {
+    let mut out = if request.text.contains('\t') || extents.is_some() {
         let mut para = Para::new(&request);
-        para.tabs = Some(tabs.clone());
-        para.tab_positions = request
-            .text
-            .char_indices()
-            .filter_map(|(at, c)| (c == '\t').then_some(at))
-            .collect();
+        if request.text.contains('\t') {
+            para.tabs = Some(tabs.clone());
+            para.tab_positions = request
+                .text
+                .char_indices()
+                .filter_map(|(at, c)| (c == '\t').then_some(at))
+                .collect();
+        }
+        para.extents = extents.cloned();
         let mut out = Composition::default();
         let mut walk = Walk::new(request.block_start);
         first_fit(&para, &mut walk, para.start, &mut out, FirstFit::default());
@@ -320,5 +339,93 @@ mod tests {
         assert!(out.lines.is_empty());
         assert_eq!(out.rest, Some(0));
         assert!(out.notes.iter().any(|n| n.code == codes::TAB_LIMIT));
+    }
+
+    fn extents_request<'a>(
+        text: &'a Shaped,
+        shaped: &'a ShapedText,
+        shaper: &'a reprise_shape::Shaper<'a>,
+        breaks: &'a [crate::Break],
+        geometry: &'a dyn crate::GeometryProvider,
+    ) -> ComposeRequest<'a> {
+        ComposeRequest {
+            text: &text.text,
+            shaped,
+            reshape: shaper,
+            breaks,
+            line_height: Length::from_pt(12),
+            geometry,
+            start: 0,
+            block_start: Length::ZERO,
+        }
+    }
+
+    /// Records the line heights geometry is asked about.
+    struct Asked(std::cell::RefCell<Vec<Length>>);
+    impl crate::GeometryProvider for Asked {
+        fn available(&self, query: &crate::LineQuery<'_>) -> crate::Available {
+            self.0.borrow_mut().push(query.line_height);
+            crate::Available::Room(vec![crate::Interval::new(
+                Length::ZERO,
+                Length::from_pt(20),
+            )])
+        }
+    }
+
+    #[test]
+    fn a_tall_object_grows_only_its_own_line() {
+        let text = Shaped::new("aaa bbb ccc");
+        let shaper = text.shaper();
+        let shaped = shaper.shape();
+        let breaks = break_opportunities(&text.text);
+        let asked = Asked(Default::default());
+        let request = extents_request(&text, &shaped, &shaper, &breaks, &asked);
+        let pt = Length::from_pt;
+        let extents = crate::LineExtents {
+            strut_top: pt(9),
+            strut_bottom: pt(3),
+            objects: vec![(5, pt(30), pt(1))],
+        };
+        let tabs = TabStops::default();
+        let out = compose_marks_with(&request, &tabs, &Greedy, Some(&extents));
+        let heights: Vec<_> = out.lines.iter().map(|l| l.height).collect();
+        assert_eq!(heights, [pt(12), pt(33), pt(12)]);
+        let tops: Vec<_> = out.lines.iter().map(|l| l.block_offset).collect();
+        assert_eq!(tops, [pt(0), pt(12), pt(45)]);
+        assert_eq!(out.block_end, pt(57));
+        // The second line was asked about again at the height it needs.
+        assert_eq!(*asked.0.borrow(), [pt(12), pt(12), pt(33), pt(12)]);
+        // Objects that fit the strut change nothing.
+        let fits = crate::LineExtents {
+            objects: vec![(5, pt(9), pt(3))],
+            ..extents
+        };
+        assert!(!fits.varies());
+        let plain = compose_marks_with(&request, &tabs, &Greedy, Some(&fits));
+        assert_eq!(plain, Greedy.compose(&request));
+    }
+
+    #[test]
+    fn extreme_object_extents_saturate_and_terminate() {
+        let text = Shaped::new("a b c d");
+        let shaper = text.shaper();
+        let shaped = shaper.shape();
+        let breaks = break_opportunities(&text.text);
+        for (a, d) in [
+            (Length::MAX, Length::MAX),
+            (Length::MIN, Length::MIN),
+            (Length::ZERO, Length::MAX),
+        ] {
+            let geometry = Measure(Length::from_pt(5));
+            let request = extents_request(&text, &shaped, &shaper, &breaks, &geometry);
+            let extents = crate::LineExtents {
+                strut_top: Length::from_pt(9),
+                strut_bottom: Length::from_pt(3),
+                objects: (0..7).map(|at| (at, a, d)).collect(),
+            };
+            let out = compose_marks_with(&request, &TabStops::default(), &Greedy, Some(&extents));
+            assert_eq!(text.joined(&out), text.text);
+            assert!(out.lines.iter().all(|l| l.height >= Length::from_pt(12)));
+        }
     }
 }

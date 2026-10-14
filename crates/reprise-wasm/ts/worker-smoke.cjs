@@ -110,6 +110,19 @@ function send(data) {
   const copied = await send({ kind: "import-copy", request: p({ document_id: "30112233445566778899aabbccddeeff", peer_id: "54" }), bytes: saved.content.data.bytes });
   assert.equal(copied.kind, "state"); assert.equal(copied.state.data.document_id, "30112233445566778899aabbccddeeff");
   assert.equal(copied.state.data.blocks[0].text, ">> hello there");
+  const copiedNode = copied.state.data.blocks[0].id;
+  const semantic = await send({ kind: "batch", request: p({ commands: [
+    { kind: "set-role", node: copiedNode, role: "heading-3" },
+    { kind: "create-list", definition: { levels: [{ level: 0, format: "decimal", start: "4" }] } },
+    { kind: "set-list-item", node: copiedNode, list: { kind: "new", index: 0 }, level: 0 }
+  ], expected_revision: copied.state.data.revision, selection: null }) });
+  assert.equal(semantic.kind, "batched");
+  assert.equal(semantic.state.data.blocks[0].list.marker, "4.");
+  assert.equal(semantic.state.data.blocks[0].role, "heading-3");
+  const outline = await send({ kind: "outline" });
+  assert.equal(outline.kind, "outline"); assert.equal(outline.headings.data[0].level, 3);
+  assert.equal(outline.headings.data[0].page, null);
+  console.log("roles/lists worker smoke passed");
   // Annotations: commands through the edit kind, queries through their own.
   await send({ kind: "create", request: p({ document_id: "40112233445566778899aabbccddeeff", peer_id: "55" }) });
   const linked = await send({ kind: "edit", request: p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "read the manual now", style: plain }] }) });
@@ -136,6 +149,20 @@ function send(data) {
   assert.equal(geometry.kind, "annotation-geometry"); assert.ok(geometry.geometry.data.rects.length >= 1);
   const links = await send({ kind: "page-links", page: 0 });
   assert.equal(links.kind, "page-links"); assert.deepEqual(links.links.data.links.map(x => x.id), [linkId]);
+  // Inline objects: commands through the edit kind, rectangles and targets through their own.
+  const objectTarget = await send({ kind: "field-target", request: p({ node: linkedNode, at: 0 }) });
+  assert.equal(objectTarget.kind, "field-target"); assert.ok(objectTarget.target.data.startsWith(linkedNode));
+  const withObject = await send({ kind: "edit", request: p({ commands: [
+    { kind: "insert-inline", node: linkedNode, at: 19, object: { kind: "field", align: "baseline", params: { field: "page-number" } } }] }) });
+  assert.equal(withObject.kind, "edited"); assert.equal(withObject.state.data.blocks[0].inline.length, 1);
+  const objectJob = await send({ kind: "start", request: p({ width: 420 * 1024, height: 300 * 1024, max_pages: 100, viewport_start: 0, viewport_end: 1 }) });
+  for (let i = 0; i < 1000; i++) {
+    const step = await send({ kind: "step", job: objectJob.job, budget: 1000 });
+    if (step.progress.data.complete) break;
+  }
+  const atom = await send({ kind: "atom-rect", request: p({ node: linkedNode, at: 19 }) });
+  assert.equal(atom.kind, "atom-rect"); assert.equal(atom.rect.data.page, 0); assert.ok(atom.rect.data.rect.width > 0);
+  assert.equal((await send({ kind: "atom-rect", request: p({ node: linkedNode, at: 3 }) })).kind, "error");
   assert.equal((await send({ kind: "close" })).kind, "ack");
   console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

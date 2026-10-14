@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 103);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 108);
 }
 
 hostile_tests!(
@@ -1010,6 +1010,7 @@ macro_rules! region_hostile_tests {
 region_hostile_tests!(
     float_wider_than_frame,
     float_moves_its_anchor,
+    inline_fields_with_oscillating_regions,
     note_taller_than_page,
     notes_nested_three_deep,
     note_on_last_line,
@@ -1170,5 +1171,10 @@ hostile_tests!(
 hostile_tests!(font_host_oblique);
 hostile_tests!(paragraph_style_storm);
 hostile_tests!(plumbing_mark_facts);
+
+hostile_tests!(list_semantics_storm);
 hostile_tests!(annotation_storm);
 hostile_tests!(foreign_copy_snapshot);
+hostile_tests!(inline_bidi);
+hostile_tests!(inline_storm);
+hostile_tests!(inline_storm_readable);

@@ -45,8 +45,14 @@ pub mod hostile;
 mod hostile_tests;
 mod identity;
 pub mod image;
+pub mod inline;
+#[cfg(test)]
+mod inline_tests;
 pub mod invariants;
 mod lifecycle;
+pub mod lists;
+#[cfg(test)]
+mod lists_tests;
 pub mod marks;
 mod page;
 pub mod page_setup;
@@ -59,6 +65,7 @@ pub mod relation;
 #[cfg(test)]
 mod relation_tests;
 mod resolve;
+pub mod roles;
 mod structure;
 mod style;
 mod style_graph;
@@ -82,6 +89,10 @@ pub use function::FunctionRegistry;
 pub use history::{
     DocumentAt, HistoryCache, MAX_SNAPSHOT_TEXT, SnapshotContent, SnapshotState, VersionError,
 };
+pub use inline::{
+    InlineAlign, InlineAudit, InlineEntry, InlineId, InlineImage, InlineObject, InlinePatch,
+    InlineSize,
+};
 pub use page::{
     Basis, Dim, FrameRole, FrameTemplate, FrameTransform, MAIN_FLOW, Medium, PageTemplate,
     Rotation, Spiral, StoredTemplate, TemplateChoice, WritingMode,
@@ -103,6 +114,8 @@ pub use style_graph::AuthoredStyleGraph;
 pub mod emphasis;
 pub use emphasis::{Decoration, TextSlant};
 
+pub use lists::{LevelDef, ListDefinition, ListItem, ListNumbering, Membership, NumberFormat};
+pub use roles::{OutlineEntry, Role, StoredRole};
 pub use style::{
     Authored, BUILTIN_STYLES, Computed, ComputedStyle, LengthExpr, MAX_LINE_KEEP, MAX_STYLE_NAME,
     MAX_STYLES, PARAGRAPH_KEYS, Property, STORED_KEYS, Specified, StageExplanation, Style,
@@ -160,7 +173,9 @@ tree_ids!(
     /// A persistent range's identity.
     RangeId,
     /// A relation's identity.
-    RelationId
+    RelationId,
+    /// A list definition's identity (see `docs/roles-and-lists.md`).
+    ListId
 );
 
 /// A block's identity: a content-tree node, or a paragraph that starts at a
@@ -309,6 +324,8 @@ pub enum DocError {
     Store(String),
     #[error("index {index} is past the end of {len} children")]
     BadIndex { index: usize, len: usize },
+    #[error("invalid list: {0}")]
+    List(String),
 }
 
 impl From<loro::LoroError> for DocError {
@@ -347,8 +364,12 @@ pub struct Document {
     lineage: std::sync::Mutex<transfers::LineageCache>,
     /// Formatting records by flow host, per revision (see `formatting`).
     formats: std::sync::Mutex<formatting::FormatCache>,
+    /// List numbering, per revision (see `lists`).
+    list_cache: std::sync::Mutex<lists::ListCache>,
     /// Annotations, per revision (see `annotation`).
     annotations: std::sync::Mutex<annotation::AnnotationCache>,
+    /// The `inline1` record map once it is known to exist (see `inline`).
+    inline_root: std::sync::Mutex<Option<loro::LoroMap>>,
     /// Which editing step this replica's next commits belong to (see
     /// [`UndoStack`]).
     pub(crate) steps: std::sync::Arc<edit::StepLog>,
@@ -375,7 +396,9 @@ impl Document {
             flows,
             lineage: Default::default(),
             formats: Default::default(),
+            list_cache: Default::default(),
             annotations: Default::default(),
+            inline_root: Default::default(),
             steps: Default::default(),
         }
     }

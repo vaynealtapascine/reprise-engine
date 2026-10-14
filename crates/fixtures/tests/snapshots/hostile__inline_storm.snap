@@ -1,0 +1,5429 @@
+---
+source: crates/fixtures/tests/hostile.rs
+expression: snapshot.to_json()
+---
+{
+  "revision": [
+    [
+      1,
+      2010
+    ],
+    [
+      2,
+      0
+    ]
+  ],
+  "adapter": {
+    "name": "harfrust",
+    "version": "0.13.3",
+    "platform_independent": true
+  },
+  "composer": "greedy",
+  "medium": {
+    "width": 430080,
+    "height": 307200
+  },
+  "settings": {
+    "max_pages": 1000,
+    "paragraph_spacing": 8192,
+    "annotation_spacing": 4096
+  },
+  "template": {
+    "name": "default",
+    "source": "builtin"
+  },
+  "pages": [
+    {
+      "width": 430080,
+      "height": 307200
+    },
+    {
+      "width": 430080,
+      "height": 307200
+    },
+    {
+      "width": 430080,
+      "height": 307200
+    }
+  ],
+  "frames": [
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 0,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 1,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 1,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    },
+    {
+      "name": "main",
+      "role": {
+        "flow": "main"
+      },
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 36864,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 225280,
+        "height": 233472
+      }
+    },
+    {
+      "name": "margin",
+      "role": "margin",
+      "page": 2,
+      "to_page": {
+        "xx": 65536,
+        "yx": 0,
+        "xy": 0,
+        "yy": 65536,
+        "tx": 280576,
+        "ty": 36864
+      },
+      "rect": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 112640,
+        "height": 233472
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "node": "6@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 0,
+          "text": {
+            "start": 0,
+            "end": 16
+          },
+          "preview": "Storm: ￼￼￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 46658,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 16
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 46658
+            }
+          ],
+          "atoms": [
+            {
+              "id": "6@1/11@1",
+              "at": 7,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 36418,
+                  "y": 467
+                },
+                "width": 10240,
+                "height": 10240
+              },
+              "baseline": 10707,
+              "paint": "image",
+              "asset": "abababababababababababababababababababababababababababababababab",
+              "alt": "missing",
+              "placeholder": true
+            },
+            {
+              "id": "6@1/12@1",
+              "at": 10,
+              "kind": "equation",
+              "rect": {
+                "origin": {
+                  "x": 46658,
+                  "y": 10707
+                },
+                "width": 0,
+                "height": 0
+              },
+              "baseline": 10707,
+              "paint": "none"
+            },
+            {
+              "id": "6@1/13@1",
+              "at": 13,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 46658,
+                  "y": 10707
+                },
+                "width": 0,
+                "height": 0
+              },
+              "baseline": 10707,
+              "paint": "image",
+              "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+              "alt": "zero",
+              "placeholder": false
+            }
+          ]
+        },
+        {
+          "frame": 2,
+          "text": {
+            "start": 16,
+            "end": 25
+          },
+          "preview": "￼￼￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 229053
+          },
+          "baseline": 225280,
+          "width": 225280,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 16,
+                "end": 25
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 225280
+            }
+          ],
+          "atoms": [
+            {
+              "id": "6@1/14@1",
+              "at": 16,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 0
+                },
+                "width": 225280,
+                "height": 225280
+              },
+              "baseline": 225280,
+              "paint": "image",
+              "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+              "alt": "huge",
+              "placeholder": false
+            },
+            {
+              "id": "6@1/15@1",
+              "at": 19,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 225280,
+                  "y": 225280
+                },
+                "width": 0,
+                "height": 0
+              },
+              "baseline": 225280,
+              "paint": "image",
+              "asset": "49e1dad481e94dfab7c9573a9a81d56aa2ca629fe15a3f7a910aa4f47601c00d",
+              "alt": "negative",
+              "placeholder": false
+            },
+            {
+              "id": "6@1/16@1",
+              "at": 22,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 225280,
+                  "y": 213610
+                },
+                "width": 0,
+                "height": 15443
+              },
+              "baseline": 225280,
+              "paint": "none"
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 25,
+            "end": 71
+          },
+          "preview": "￼￼￼ and then a tail of words that wraps",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 0
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 10707,
+          "width": 209969,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 25,
+                "end": 71
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 212594
+            }
+          ],
+          "atoms": [
+            {
+              "id": "6@1/17@1",
+              "at": 25,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": -963
+                },
+                "width": 4686,
+                "height": 15443
+              },
+              "baseline": 10707,
+              "paint": "text",
+              "text": "?",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "6@1/18@1",
+              "at": 28,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 4686,
+                  "y": -963
+                },
+                "width": 29851,
+                "height": 15443
+              },
+              "baseline": 10707,
+              "paint": "text",
+              "text": "literal",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "6@1/19@1",
+              "at": 31,
+              "kind": "image",
+              "rect": {
+                "origin": {
+                  "x": 34537,
+                  "y": 10707
+                },
+                "width": 0,
+                "height": 0
+              },
+              "baseline": 10707,
+              "paint": "none"
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 71,
+            "end": 105
+          },
+          "preview": "the paragraph past its first line.",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 13517
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 24224,
+          "width": 156261,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 71,
+                "end": 105
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 156261
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "node": "199@1",
+      "kind": "paragraph",
+      "style": {
+        "family": "Source Serif Pro",
+        "size": 11264,
+        "line_height": 13517,
+        "explain": {
+          "family": "default",
+          "line-height": "default",
+          "size": "style body"
+        }
+      },
+      "lines": [
+        {
+          "frame": 4,
+          "text": {
+            "start": 0,
+            "end": 108
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 35226
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 45933,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 0,
+                "end": 108
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/203@1",
+              "at": 0,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/204@1",
+              "at": 4,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/205@1",
+              "at": 8,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/206@1",
+              "at": 12,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/207@1",
+              "at": 16,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/208@1",
+              "at": 20,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/209@1",
+              "at": 24,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/210@1",
+              "at": 28,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/211@1",
+              "at": 32,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/212@1",
+              "at": 36,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/213@1",
+              "at": 40,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/214@1",
+              "at": 44,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/215@1",
+              "at": 48,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/216@1",
+              "at": 52,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/217@1",
+              "at": 56,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/218@1",
+              "at": 60,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/219@1",
+              "at": 64,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/220@1",
+              "at": 68,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/221@1",
+              "at": 72,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/222@1",
+              "at": 76,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/223@1",
+              "at": 80,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/224@1",
+              "at": 84,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/225@1",
+              "at": 88,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/226@1",
+              "at": 92,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/227@1",
+              "at": 96,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/228@1",
+              "at": 100,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/229@1",
+              "at": 104,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 34263
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 45933,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 108,
+            "end": 216
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 48743
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 59450,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 108,
+                "end": 216
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/230@1",
+              "at": 108,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/231@1",
+              "at": 112,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/232@1",
+              "at": 116,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/233@1",
+              "at": 120,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/234@1",
+              "at": 124,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/235@1",
+              "at": 128,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/236@1",
+              "at": 132,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/237@1",
+              "at": 136,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/238@1",
+              "at": 140,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/239@1",
+              "at": 144,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/240@1",
+              "at": 148,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/241@1",
+              "at": 152,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/242@1",
+              "at": 156,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/243@1",
+              "at": 160,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/244@1",
+              "at": 164,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/245@1",
+              "at": 168,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/246@1",
+              "at": 172,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/247@1",
+              "at": 176,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/248@1",
+              "at": 180,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/249@1",
+              "at": 184,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/250@1",
+              "at": 188,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/251@1",
+              "at": 192,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/252@1",
+              "at": 196,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/253@1",
+              "at": 200,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/254@1",
+              "at": 204,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/255@1",
+              "at": 208,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/256@1",
+              "at": 212,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 47780
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 59450,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 216,
+            "end": 324
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 62260
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 72967,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 216,
+                "end": 324
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/257@1",
+              "at": 216,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/258@1",
+              "at": 220,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/259@1",
+              "at": 224,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/260@1",
+              "at": 228,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/261@1",
+              "at": 232,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/262@1",
+              "at": 236,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/263@1",
+              "at": 240,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/264@1",
+              "at": 244,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/265@1",
+              "at": 248,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/266@1",
+              "at": 252,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/267@1",
+              "at": 256,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/268@1",
+              "at": 260,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/269@1",
+              "at": 264,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/270@1",
+              "at": 268,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/271@1",
+              "at": 272,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/272@1",
+              "at": 276,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/273@1",
+              "at": 280,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/274@1",
+              "at": 284,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/275@1",
+              "at": 288,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/276@1",
+              "at": 292,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/277@1",
+              "at": 296,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/278@1",
+              "at": 300,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/279@1",
+              "at": 304,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/280@1",
+              "at": 308,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/281@1",
+              "at": 312,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/282@1",
+              "at": 316,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/283@1",
+              "at": 320,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 61297
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 72967,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 324,
+            "end": 432
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 75777
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 86484,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 324,
+                "end": 432
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/284@1",
+              "at": 324,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/285@1",
+              "at": 328,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/286@1",
+              "at": 332,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/287@1",
+              "at": 336,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/288@1",
+              "at": 340,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/289@1",
+              "at": 344,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/290@1",
+              "at": 348,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/291@1",
+              "at": 352,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/292@1",
+              "at": 356,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/293@1",
+              "at": 360,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/294@1",
+              "at": 364,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/295@1",
+              "at": 368,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/296@1",
+              "at": 372,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/297@1",
+              "at": 376,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/298@1",
+              "at": 380,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/299@1",
+              "at": 384,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/300@1",
+              "at": 388,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/301@1",
+              "at": 392,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/302@1",
+              "at": 396,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/303@1",
+              "at": 400,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/304@1",
+              "at": 404,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/305@1",
+              "at": 408,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/306@1",
+              "at": 412,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/307@1",
+              "at": 416,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/308@1",
+              "at": 420,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/309@1",
+              "at": 424,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/310@1",
+              "at": 428,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 74814
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 86484,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 432,
+            "end": 540
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 89294
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 100001,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 432,
+                "end": 540
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/311@1",
+              "at": 432,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/312@1",
+              "at": 436,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/313@1",
+              "at": 440,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/314@1",
+              "at": 444,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/315@1",
+              "at": 448,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/316@1",
+              "at": 452,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/317@1",
+              "at": 456,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/318@1",
+              "at": 460,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/319@1",
+              "at": 464,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/320@1",
+              "at": 468,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/321@1",
+              "at": 472,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/322@1",
+              "at": 476,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/323@1",
+              "at": 480,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/324@1",
+              "at": 484,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/325@1",
+              "at": 488,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/326@1",
+              "at": 492,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/327@1",
+              "at": 496,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/328@1",
+              "at": 500,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/329@1",
+              "at": 504,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/330@1",
+              "at": 508,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/331@1",
+              "at": 512,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/332@1",
+              "at": 516,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/333@1",
+              "at": 520,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/334@1",
+              "at": 524,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/335@1",
+              "at": 528,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/336@1",
+              "at": 532,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/337@1",
+              "at": 536,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 88331
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 100001,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 540,
+            "end": 648
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 102811
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 113518,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 540,
+                "end": 648
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/338@1",
+              "at": 540,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/339@1",
+              "at": 544,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/340@1",
+              "at": 548,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/341@1",
+              "at": 552,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/342@1",
+              "at": 556,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/343@1",
+              "at": 560,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/344@1",
+              "at": 564,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/345@1",
+              "at": 568,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/346@1",
+              "at": 572,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/347@1",
+              "at": 576,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/348@1",
+              "at": 580,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/349@1",
+              "at": 584,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/350@1",
+              "at": 588,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/351@1",
+              "at": 592,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/352@1",
+              "at": 596,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/353@1",
+              "at": 600,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/354@1",
+              "at": 604,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/355@1",
+              "at": 608,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/356@1",
+              "at": 612,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/357@1",
+              "at": 616,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/358@1",
+              "at": 620,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/359@1",
+              "at": 624,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/360@1",
+              "at": 628,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/361@1",
+              "at": 632,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/362@1",
+              "at": 636,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/363@1",
+              "at": 640,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/364@1",
+              "at": 644,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 101848
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 113518,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 648,
+            "end": 756
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 116328
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 127035,
+          "width": 220314,
+          "explanation": {
+            "reason": "opportunity",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 648,
+                "end": 756
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 222939
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/365@1",
+              "at": 648,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/366@1",
+              "at": 652,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/367@1",
+              "at": 656,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/368@1",
+              "at": 660,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/369@1",
+              "at": 664,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/370@1",
+              "at": 668,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/371@1",
+              "at": 672,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/372@1",
+              "at": 676,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/373@1",
+              "at": 680,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/374@1",
+              "at": 684,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/375@1",
+              "at": 688,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/376@1",
+              "at": 692,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 90827,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/377@1",
+              "at": 696,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 99084,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/378@1",
+              "at": 700,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 107341,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/379@1",
+              "at": 704,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 115598,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/380@1",
+              "at": 708,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 123855,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/381@1",
+              "at": 712,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 132112,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/382@1",
+              "at": 716,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 140369,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/383@1",
+              "at": 720,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 148626,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/384@1",
+              "at": 724,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 156883,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/385@1",
+              "at": 728,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 165140,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/386@1",
+              "at": 732,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 173397,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/387@1",
+              "at": 736,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 181654,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/388@1",
+              "at": 740,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 189911,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/389@1",
+              "at": 744,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 198168,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/390@1",
+              "at": 748,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 206425,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/391@1",
+              "at": 752,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 214682,
+                  "y": 115365
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 127035,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        },
+        {
+          "frame": 4,
+          "text": {
+            "start": 756,
+            "end": 800
+          },
+          "preview": "￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼ ￼",
+          "rect": {
+            "origin": {
+              "x": 0,
+              "y": 129845
+            },
+            "width": 225280,
+            "height": 13517
+          },
+          "baseline": 140552,
+          "width": 88202,
+          "explanation": {
+            "reason": "end",
+            "score": null,
+            "adjustment": {
+              "word_spacing": 0,
+              "letter_spacing": 0
+            },
+            "reshaped": false
+          },
+          "runs": [
+            {
+              "range": {
+                "start": 756,
+                "end": 800
+              },
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0,
+              "x": 0,
+              "width": 90827
+            }
+          ],
+          "atoms": [
+            {
+              "id": "199@1/392@1",
+              "at": 756,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 0,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/393@1",
+              "at": 760,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 8257,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/394@1",
+              "at": 764,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 16514,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/395@1",
+              "at": 768,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 24771,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/396@1",
+              "at": 772,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 33028,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/397@1",
+              "at": 776,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 41285,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/398@1",
+              "at": 780,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 49542,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/399@1",
+              "at": 784,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 57799,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/400@1",
+              "at": 788,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 66056,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/401@1",
+              "at": 792,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 74313,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            },
+            {
+              "id": "199@1/402@1",
+              "at": 796,
+              "kind": "field",
+              "rect": {
+                "origin": {
+                  "x": 82570,
+                  "y": 128882
+                },
+                "width": 5632,
+                "height": 15443
+              },
+              "baseline": 140552,
+              "paint": "text",
+              "text": "3",
+              "face": {
+                "family": "Source Serif Pro",
+                "hash": "199c8adc83479480d9aa5d942afe8f52"
+              },
+              "size": 11264,
+              "level": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "layout.inline-orphan-marker",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "2 object marker(s) without a readable record hidden",
+      "bytes": null
+    },
+    {
+      "severity": "info",
+      "code": "layout.inline-orphan-record",
+      "subject": {
+        "kind": "document"
+      },
+      "message": "1 inline object record(s) without a marker ignored",
+      "bytes": null
+    },
+    {
+      "severity": "warning",
+      "code": "layout.image-missing",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "inline image asset missing; drawing a placeholder",
+      "bytes": {
+        "start": 7,
+        "end": 10
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.inline-kind",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "unknown inline object kind \"equation\" kept and not drawn",
+      "bytes": {
+        "start": 10,
+        "end": 13
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.image-size",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "inline image scaled to the frame's inline extent",
+      "bytes": {
+        "start": 16,
+        "end": 19
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.image-size",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "negative inline image size clamped to zero",
+      "bytes": {
+        "start": 19,
+        "end": 22
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.inline-kind",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "image asset is not a SHA-256",
+      "bytes": {
+        "start": 31,
+        "end": 34
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.inline-kind",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "unknown field function \"nope\" kept and not drawn",
+      "bytes": {
+        "start": 22,
+        "end": 25
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "layout.field-target",
+      "subject": {
+        "kind": "node",
+        "id": "6@1"
+      },
+      "message": "page-of target is unreadable or gone",
+      "bytes": {
+        "start": 25,
+        "end": 28
+      }
+    }
+  ]
+}

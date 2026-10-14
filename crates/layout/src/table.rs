@@ -100,7 +100,8 @@ impl Flow<'_> {
         };
         while !self.table_rows(doc, &mut build, usize::MAX, usize::MAX) {}
         let (groups, widths) = self.table_columns(build);
-        self.place_groups(doc, node, groups, &widths);
+        let instance = self.fields().instance;
+        self.place_groups(doc, node, groups, &widths, instance);
     }
 
     /// Validates the grid and fixes the cells' resolution context.

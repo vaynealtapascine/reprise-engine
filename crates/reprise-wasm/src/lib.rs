@@ -11,6 +11,10 @@ const TYPES: &str = include_str!("../ts/types.d.ts");
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "Payload<FieldTarget>")]
+    pub type FieldTargetPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Array<OutlineEntry>>")]
+    pub type OutlinePayload;
     #[wasm_bindgen(typescript_type = "Payload<ImportCopy>")]
     pub type ImportCopyPayload;
     #[wasm_bindgen(typescript_type = "Payload<Batch>")]
@@ -583,6 +587,12 @@ impl WasmDocument {
     pub fn hit_test(&self, request: &HitTestPayload) -> Result<HitPayload, JsValue> {
         Ok(encode(self.inner.hit_test(&decode(request.as_ref())?))?.unchecked_into())
     }
+    pub fn atom_rect(&self, request: &FieldTargetPayload) -> Result<PageRectPayload, JsValue> {
+        Ok(encode(self.inner.atom_rect(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn field_target(&self, request: &FieldTargetPayload) -> Result<StringPayload, JsValue> {
+        Ok(encode(self.inner.field_target(&decode(request.as_ref())?))?.unchecked_into())
+    }
     pub fn selection_rects(
         &self,
         request: &SelectionPayload,
@@ -600,6 +610,9 @@ impl WasmDocument {
     }
     pub fn export(&self, request: &ExportFormatPayload) -> Result<ExportedPayload, JsValue> {
         Ok(encode(self.inner.export(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn outline(&self) -> Result<OutlinePayload, JsValue> {
+        Ok(encode(self.inner.outline())?.unchecked_into())
     }
     pub fn reading_order(&self) -> Result<ListReadingStepPayload, JsValue> {
         Ok(encode(self.inner.reading_order())?.unchecked_into())

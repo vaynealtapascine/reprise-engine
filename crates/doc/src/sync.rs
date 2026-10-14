@@ -72,7 +72,7 @@ impl Features {
     /// remain a legacy persistence API, not a safe network packet format.
     pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5));
 
-    const NAMES: [(Features, &'static str); 5] = [
+    const NAMES: [(Features, &'static str); 6] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),

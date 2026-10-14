@@ -6,11 +6,14 @@ use std::ops::Range;
 use reprise_diag::Note;
 use reprise_doc::annotation::{AnnotationData, LinkTarget, validate_url};
 use reprise_doc::fragment::FragmentRange;
+use reprise_doc::text::OBJECT;
 use reprise_doc::{
-    BlockKind, Document, LengthExpr, NodeId, RangeId, SchemaRegistry, Style, TableColumns,
+    BlockKind, Document, InlineObject, LengthExpr, NodeId, RangeId, SchemaRegistry, Style,
+    TableColumns,
 };
 use reprise_geom::Length;
 
+use crate::inline::{ASSET_ATTR, FIELD_ATTR, JSON_ATTR};
 use crate::{ClipboardError, NativeFragment, codes};
 
 #[derive(Clone, Copy, Debug)]
@@ -84,7 +87,11 @@ pub fn import_plain(text: &str) -> Result<Import, ClipboardError> {
     if text.len() > ImportLimits::default().bytes {
         return Err(ClipboardError::Limit("plain text bytes"));
     }
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    // A raw U+FFFC is never an object: objects come only from records (`docs/inline.md`).
+    let text = text
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace(OBJECT, "");
     let doc = Document::new(1).map_err(store)?;
     for (i, part) in text.split("\n\n").enumerate() {
         if i >= ImportLimits::default().blocks {
@@ -425,6 +432,20 @@ struct Reader {
     row_th: bool,
     row_td: bool,
     in_head: bool,
+    /// The role of the paragraph being read (see `semantic_html`).
+    role: reprise_doc::Role,
+    /// Open `ol`/`ul` elements, outermost first.
+    lists: Vec<HtmlList>,
+    /// The definition the outermost open list's items use.
+    list: Option<reprise_doc::ListId>,
+    /// An `li` was opened: its first paragraph is an item at this level,
+    /// restarting at `value` when given.
+    item: Option<(u8, Option<i64>)>,
+    /// Inline objects of the open paragraph, in the order of their U+FFFC.
+    objects: Vec<InlineObject>,
+    /// The stack depth of an element whose content is an object's resolved
+    /// text while it is open. That text is skipped: the object supplies it.
+    resolved: Option<usize>,
     /// The anchor open in the input, if its address was accepted.
     link: Option<OpenLink>,
     /// Linked stretches of the block being read.
@@ -452,6 +473,17 @@ struct OpenLink {
     /// Where its text starts in the open block.
     start: usize,
 }
+
+/// One open `ol`/`ul`.
+struct HtmlList {
+    level: u8,
+    start: Option<i64>,
+    /// No `li` has been read in it yet.
+    fresh: bool,
+}
+
+/// Deeper `ol`/`ul` nesting than list levels is read at the deepest level.
+const MAX_HTML_LIST_DEPTH: usize = 64;
 
 /// Largest spans an import accepts: the table-wide column limit, and a
 /// bounded number of claimed grid positions so spans cannot multiply input.
@@ -491,7 +523,89 @@ fn span_attribute(
     }
 }
 
+const LIST_LEVELS: usize = reprise_doc::lists::LEVELS;
+
 impl Reader {
+    /// Opens an `ol`/`ul`: the outermost one makes a list definition; each
+    /// level records its format and start in it.
+    fn open_list(
+        &mut self,
+        ordered: bool,
+        attrs: &BTreeMap<String, String>,
+    ) -> Result<(), ClipboardError> {
+        if self.lists.len() >= MAX_HTML_LIST_DEPTH {
+            return Err(ClipboardError::Limit("HTML list depth"));
+        }
+        let css_type = attrs.get("style").and_then(|s| {
+            s.split(';').find_map(|d| {
+                d.split_once(':').and_then(|(k, v)| {
+                    k.trim()
+                        .eq_ignore_ascii_case("list-style-type")
+                        .then(|| v.trim().to_string())
+                })
+            })
+        });
+        let format = crate::semantic_html::format_of(
+            ordered,
+            attrs.get("type").map(String::as_str),
+            css_type.as_deref(),
+        );
+        let start = attrs
+            .get("start")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .filter(|_| ordered);
+        let level = attrs
+            .get("data-reprise-level")
+            .and_then(|v| v.parse::<u8>().ok())
+            .filter(|&v| v < LIST_LEVELS as u8)
+            .unwrap_or(self.lists.len().min(LIST_LEVELS - 1) as u8);
+        if self.lists.len() >= LIST_LEVELS {
+            once(
+                &mut self.notes,
+                codes::HTML_APPROXIMATED,
+                "lists nested deeper than nine levels were read at the ninth",
+                false,
+            );
+        }
+        self.lists.push(HtmlList {
+            level,
+            start,
+            fresh: true,
+        });
+        let level_def = reprise_doc::LevelDef {
+            format: Some(format),
+            start,
+            ..Default::default()
+        };
+        match self.list {
+            None => {
+                let mut def = reprise_doc::ListDefinition::default();
+                def.levels.insert(level, level_def);
+                self.list = Some(self.doc.create_list(&def).map_err(store)?);
+            }
+            Some(list) => {
+                let mut def = self.doc.list_definition(list).map_err(store)?;
+                // The first list seen at a level sets it; later siblings that
+                // differ start a new item run with an explicit restart.
+                let existing = def.levels.get(&level).cloned();
+                match existing {
+                    None => {
+                        def.levels.insert(level, level_def);
+                        self.doc.update_list(list, &def).map_err(store)?;
+                    }
+                    Some(old) if old.format != level_def.format => once(
+                        &mut self.notes,
+                        codes::HTML_APPROXIMATED,
+                        "sibling lists with different markers at one level share the first's",
+                        false,
+                    ),
+                    Some(_) => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Marks the open row as a header row when it holds only `th` cells or sits
     /// in `thead`. A row mixing `th` and `td` stays a body row, approximated.
     fn finish_row(&mut self) -> Result<(), ClipboardError> {
@@ -562,13 +676,30 @@ impl Reader {
             }
             open.start = 0;
         }
+        // Objects need their paragraph's flow, so a paragraph with objects starts empty.
+        let objects = std::mem::take(&mut self.objects);
+        let staged = if objects.is_empty() {
+            self.text.as_str()
+        } else {
+            ""
+        };
         let node = if let Some(cell) = self.cell {
             self.doc
-                .append_cell_block(cell, BlockKind::Paragraph, "", &self.text)
+                .append_cell_block(cell, BlockKind::Paragraph, "", staged)
         } else {
-            self.doc.append_block(BlockKind::Paragraph, "", &self.text)
+            self.doc.append_block(BlockKind::Paragraph, "", staged)
         }
         .map_err(store)?;
+        if !objects.is_empty() {
+            self.doc
+                .insert_with_inline(node, 0, &self.text, &objects)
+                .map_err(store)?;
+            if self.doc.inline_objects(node).map_err(store)?.len() != objects.len() {
+                return Err(ClipboardError::Invalid(
+                    "inline objects could not be placed".into(),
+                ));
+            }
+        }
         if let Some(id) = self.pending_id.take() {
             self.ids.entry(id).or_insert(node);
         }
@@ -585,6 +716,15 @@ impl Reader {
             }
         }
         self.doc.set_overrides(node, &self.style).map_err(store)?;
+        if self.role != reprise_doc::Role::Body {
+            self.doc.set_role(node, self.role).map_err(store)?;
+        }
+        if let (Some((level, value)), Some(list)) = (self.item.take(), self.list) {
+            self.doc.set_list_item(node, list, level).map_err(store)?;
+            if value.is_some() {
+                self.doc.set_list_restart(node, value).map_err(store)?;
+            }
+        }
         for run in self.formats.drain(..) {
             if run.style == reprise_doc::formatting::TextStyle::default() {
                 continue;
@@ -605,10 +745,31 @@ impl Reader {
         self.text.clear();
         Ok(())
     }
+    /// Writes an object's U+FFFC. `resolved` is the stack depth of its element
+    /// when that element's content is the object's text, which is then skipped.
+    fn object(
+        &mut self,
+        object: InlineObject,
+        resolved: Option<usize>,
+    ) -> Result<(), ClipboardError> {
+        let start = self.text.len();
+        self.text.push(OBJECT);
+        self.objects.push(object);
+        self.record_style(start)?;
+        self.resolved = resolved;
+        Ok(())
+    }
     fn text(&mut self, raw: &str) -> Result<(), ClipboardError> {
+        if self.resolved.is_some() {
+            return Ok(());
+        }
         let start = self.text.len();
         // HTML whitespace collapses. A single pending space survives token seams.
         for c in entities(raw).chars() {
+            // A raw U+FFFC, even an entity for one, is never an object.
+            if c == OBJECT {
+                continue;
+            }
             if c.is_ascii_whitespace() && !self.preserve_space {
                 if !self.text.is_empty() && !self.text.ends_with([' ', '\n']) {
                     self.text.push(' ');
@@ -731,19 +892,45 @@ impl Reader {
         }
     }
 
+    /// `stack_len` is the open-element depth after this tag; `void` says the
+    /// tag opens nothing.
     fn tag(
         &mut self,
         name: &str,
         closing: bool,
         attrs: &BTreeMap<String, String>,
+        stack_len: usize,
+        void: bool,
     ) -> Result<(), ClipboardError> {
+        if let Some(depth) = self.resolved {
+            // Inside a resolved field, the content is the object's text. Once its
+            // element closes, this tag is processed as usual.
+            if stack_len >= depth {
+                return Ok(());
+            }
+            self.resolved = None;
+        }
         let cell = matches!(name, "td" | "th");
-        let block = matches!(name, "p" | "div" | "li" | "h1" | "h2" | "h3" | "blockquote");
+        let block = matches!(
+            name,
+            "p" | "div" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre"
+        );
         let known = |k: &String| {
             k == "dir"
                 || k == "style"
-                || (name == "span" && k == "lang")
+                || (name == "span" && (k == "lang" || k == FIELD_ATTR || k == JSON_ATTR))
+                || (name == "img"
+                    && matches!(
+                        k.as_str(),
+                        "alt" | ASSET_ATTR | JSON_ATTR | "width" | "height"
+                    ))
                 || (cell && (k == "colspan" || k == "rowspan"))
+                || (name == "ol" && (k == "start" || k == "type"))
+                || ((name == "ol" || name == "ul") && k == "data-reprise-level")
+                || (name == "li" && k == "value")
+                || (k == "class"
+                    && crate::semantic_html::role_of(name, attrs.get("class").map(String::as_str))
+                        .is_some())
                 || (block && k == "id")
                 || (name == "a" && matches!(k.as_str(), "href" | "rel" | "target" | "id" | "name"))
         };
@@ -755,7 +942,22 @@ impl Reader {
                 false,
             );
         }
+        let object = if closing {
+            None
+        } else {
+            crate::inline::from_html(name, attrs)
+        };
+        if let Some(object) = object {
+            return self.object(object, (!void).then_some(stack_len));
+        }
         match (name, closing) {
+            ("img", false) => once(
+                &mut self.notes,
+                codes::HTML_DROPPED,
+                "images without a valid Reprise asset omitted",
+                true,
+            ),
+            ("img", true) => {}
             ("a", false) => self.open_link(attrs),
             ("a", true) => self.close_link(),
             ("br", false) => {
@@ -764,19 +966,54 @@ impl Reader {
                 self.record_style(start)?;
             }
             ("span" | "b" | "strong" | "i" | "em" | "u" | "s", _) => {}
-            ("p" | "div" | "li" | "h1" | "h2" | "h3" | "blockquote", false) => {
+            ("ol" | "ul", false) => {
+                self.flush(false)?;
+                self.open_list(name == "ol", attrs)?;
+            }
+            ("ol" | "ul", true) => {
+                self.flush(false)?;
+                self.lists.pop();
+                if self.lists.is_empty() {
+                    self.list = None;
+                }
+                self.item = None;
+            }
+            (
+                "p" | "div" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre",
+                false,
+            ) => {
                 self.flush(false)?;
                 if let Some(id) = attrs.get("id") {
                     self.pending_id = Some(id.clone());
                 }
+                if name == "li" {
+                    let level = self.lists.last().map_or(0, |l| usize::from(l.level));
+                    // An explicit value, or the list's start on its first item.
+                    let start = self.lists.last_mut().and_then(|l| {
+                        let first = std::mem::replace(&mut l.fresh, false);
+                        l.start.filter(|_| first)
+                    });
+                    let value = attrs
+                        .get("value")
+                        .and_then(|v| v.trim().parse::<i64>().ok())
+                        .or(start);
+                    self.item = Some((level as u8, value));
+                }
+                if let Some(role) =
+                    crate::semantic_html::role_of(name, attrs.get("class").map(String::as_str))
+                {
+                    self.role = role;
+                }
                 self.style = css(attrs, &mut self.notes)?;
-                self.preserve_space = attrs.get("style").is_some_and(|s| {
-                    s.split(';').any(|d| {
-                        d.split_once(':').is_some_and(|(k, v)| {
-                            k.trim().eq_ignore_ascii_case("white-space") && v.trim() == "pre-wrap"
+                self.preserve_space = name == "pre"
+                    || attrs.get("style").is_some_and(|s| {
+                        s.split(';').any(|d| {
+                            d.split_once(':').is_some_and(|(k, v)| {
+                                k.trim().eq_ignore_ascii_case("white-space")
+                                    && v.trim() == "pre-wrap"
+                            })
                         })
-                    })
-                });
+                    });
                 self.direction = match attrs.get("dir").map(String::as_str) {
                     Some("rtl") => Some(1),
                     Some("ltr") => Some(0),
@@ -788,12 +1025,22 @@ impl Reader {
                 self.style = Style::default();
                 self.preserve_space = false;
                 self.direction = None;
+                self.role = reprise_doc::Role::Body;
             }
-            ("div" | "li" | "h1" | "h2" | "h3" | "blockquote", true) => {
-                self.flush(false)?;
+            (
+                "div" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "pre",
+                true,
+            ) => {
+                // An emptied item keeps its marker, as in a browser.
+                let item = name == "li" && self.item.is_some();
+                self.flush(item || self.role != reprise_doc::Role::Body)?;
                 self.style = Style::default();
                 self.preserve_space = false;
                 self.direction = None;
+                self.role = reprise_doc::Role::Body;
+                if name == "li" {
+                    self.item = None;
+                }
             }
             ("table", false) => {
                 self.flush(false)?;
@@ -952,6 +1199,12 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         row_th: false,
         row_td: false,
         in_head: false,
+        role: reprise_doc::Role::Body,
+        lists: Vec::new(),
+        list: None,
+        item: None,
+        objects: Vec::new(),
+        resolved: None,
         link: None,
         pending_links: Vec::new(),
         pending_id: None,
@@ -1109,7 +1362,7 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
             let style = crate::text_css::inline(&attrs, &parent, &mut reader.notes)?;
             reader.inline.push((stack.len(), style));
         }
-        reader.tag(&name, closing, &attrs)?;
+        reader.tag(&name, closing, &attrs, stack.len(), void)?;
     }
     if !stack.is_empty() {
         once(

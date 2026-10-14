@@ -358,6 +358,38 @@ console.log("paragraph style WASM smoke passed");
 paperTarget.free(); paperOpen.free(); paperPeer.free(); paper.free(); ws.free();
 console.log("page setup WASM smoke passed");
 
+{
+  const w = new wasm.Workspace();
+  const s = w.create(p({ document_id: "40112233445566778899aabbccddeeff", peer_id: "71" }));
+  const ids = s.apply(p({ commands: [
+    { kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "List heading", style: {} },
+    { kind: "insert-block", parent: null, index: 1, block_kind: "paragraph", text: "second", style: {} }
+  ] })).data.blocks;
+  const revision = s.state().data.revision;
+  const commands = [
+    { kind: "set-role", node: ids[0], role: "heading-2" },
+    { kind: "apply-style", node: ids[0], style: "Heading 2" },
+    { kind: "create-list", definition: { base: null, levels: [{ level: 0, format: "decimal-leading-zero", start: "7" }] } },
+    ...ids.map(node => ({ kind: "set-list-item", node, list: { kind: "new", index: 0 }, level: 0 }))
+  ];
+  const result = s.batch(p({ commands, expected_revision: revision, selection: null }));
+  assert.equal(result.data.applied.lists.length, 1);
+  assert.deepEqual(s.state().data.blocks.map(b => b.list.marker), ["07.", "08."]);
+  assert.equal(s.outline().data[0].page, null);
+  assert.equal(s.outline().data[0].level, 2);
+  assert.throws(() => s.batch(p({ commands, expected_revision: revision, selection: null })), e => e.data.code === "bindings.stale");
+  s.undo(); assert.equal(s.outline().data.length, 0); s.redo();
+  finish(s);
+  assert.equal(s.outline().data[0].page, 0);
+  assert.equal(s.reading_order().data[0].marker, "07.");
+  assert.equal(s.reading_order().data[0].start, 0);
+  const copy = w.import_copy(p({ document_id: "50112233445566778899aabbccddeeff", peer_id: "72" }), s.save().data.bytes);
+  assert.equal(copy.state().data.blocks[1].list.marker, "08.");
+  assert.notEqual(copy.state().data.lists[0].id, s.state().data.lists[0].id);
+  copy.free(); s.free(); w.free();
+  console.log("roles/lists WASM smoke passed");
+}
+
 // Annotations: links and comment anchors (docs/annotations.md).
 {
   const wa = new wasm.Workspace();
@@ -416,4 +448,54 @@ console.log("page setup WASM smoke passed");
   assert.throws(() => a.page_links(99), e => e.data.code === "bindings.invalid");
   copy.free(); reopened.free(); a.free(); wa.free();
   console.log("annotations WASM smoke passed");
+}
+
+// Inline objects and fields (docs/inline.md).
+{
+  const wi = new wasm.Workspace();
+  const plain = { families: null, size: null, line_height: null };
+  const i = wi.create(p({ document_id: "b0112233445566778899aabbccddeeff", peer_id: "130" }));
+  const hash = i.register_asset(p({ id: "red", kind: "image" }), new Uint8Array(fs.readFileSync(path.join(__dirname, "../../../fixtures/images/red-1x1.png")))).data;
+  const para = i.apply(p({ commands: [{ kind: "insert-block", parent: null, index: 0, block_kind: "paragraph", text: "see  for page ", style: plain }] })).data.blocks[0];
+  const picture = { kind: "image", align: "baseline", params: { asset: hash, alt: "a cat", width: "pt:" + 24 * 1024, height: "pt:" + 12 * 1024 } };
+  // A bad object is refused whole and names the command.
+  assert.throws(() => i.apply(p({ commands: [{ kind: "insert-inline", node: para, at: 4, object: { kind: "image", align: "baseline", params: { asset: "nope" } } }] })), e => e.data.code === "edit.invalid-command" && e.data.command === 0);
+  const target = i.field_target(p({ node: para, at: 0 })).data;
+  const end = Buffer.byteLength("see  for page ");
+  i.apply(p({ commands: [
+    { kind: "insert-inline", node: para, at: 4, object: picture },
+    { kind: "insert-inline", node: para, at: end + 3, object: { kind: "field", align: "baseline", params: { field: "page-number" } } },
+  ] }));
+  const block = i.state().data.blocks[0];
+  assert.equal(block.inline.length, 2);
+  assert.deepEqual(block.inline.map(e => e.at), [4, end + 3]);
+  assert.equal(block.inline[0].object.params.alt, "a cat");
+  assert.throws(() => i.atom_rect(p({ node: para, at: 4 })), e => e.data.code === "bindings.layout-required" || e.data.code === "bindings.invalid");
+  finish(i);
+  const rect = i.atom_rect(p({ node: para, at: 4 })).data;
+  assert.equal(rect.page, 0);
+  assert.ok(rect.rect.width > 0 && rect.rect.height > 0);
+  assert.throws(() => i.atom_rect(p({ node: para, at: 5 })), e => e.data.code === "bindings.invalid");
+  assert.ok(i.display_json(0).data.includes('"type":"image"'));
+  assert.deepEqual(i.diagnostics().data.filter(note => note.severity !== "info"), []);
+  // A resize keeps the object's identity; undo takes it back.
+  const id = block.inline[0].id;
+  i.apply(p({ commands: [{ kind: "update-inline", node: para, at: 4, patch: { align: null, params: { width: "pt:" + 48 * 1024 } } }] }));
+  assert.equal(i.state().data.blocks[0].inline[0].id, id);
+  assert.equal(i.state().data.blocks[0].inline[0].object.params.width, "pt:" + 48 * 1024);
+  i.undo(); assert.equal(i.state().data.blocks[0].inline[0].object.params.width, "pt:" + 24 * 1024);
+  // A page-of with a real target, a copy of the document, and the package round trip.
+  i.apply(p({ commands: [{ kind: "insert-inline", node: para, at: 0, object: { kind: "field", align: "baseline", params: { field: "page-of", target } } }] }));
+  finish(i);
+  assert.deepEqual(i.diagnostics().data.filter(note => note.severity !== "info"), []);
+  const bytes = i.save().data.bytes;
+  const again = wi.open(p({ peer_id: "131" }), bytes); finish(again);
+  assert.equal(again.display_json(0).data, i.display_json(0).data);
+  const copy = wi.import_copy(p({ document_id: "b1112233445566778899aabbccddeeff", peer_id: "132" }), bytes);
+  assert.equal(copy.state().data.blocks[0].inline.length, 3);
+  assert.ok(copy.state().data.blocks[0].inline.every(e => !i.state().data.blocks[0].inline.some(o => o.id === e.id)));
+  const html = i.copy_as(p({ selection: { anchor: { node: para, offset: 0, affinity: "downstream" }, focus: { node: para, offset: Buffer.byteLength(i.state().data.blocks[0].text), affinity: "upstream" } }, format: "html" })).data;
+  assert.ok(Buffer.from(html.content.bytes).toString("utf8").includes("<img "));
+  copy.free(); again.free(); i.free(); wi.free();
+  console.log("inline objects WASM smoke passed");
 }

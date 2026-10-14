@@ -185,7 +185,7 @@ impl Document {
         }
         if counters
             .len()
-            .saturating_add(usize::from(!counters.contains_key(&self.peer())))
+            .saturating_add(usize::from(!counters.contains_key(&self.doc.peer_id())))
             > crate::sync::MAX_VECTOR_ENTRIES
             || counters.values().fold(1_u64, |sum, n| {
                 sum.saturating_add(u64::try_from(*n).unwrap_or(u64::MAX))
