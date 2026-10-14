@@ -337,7 +337,7 @@ impl Document {
     }
 
     pub(crate) fn owner_label(&self, owner: &str) -> String {
-        if self.identity_map().is_none_or(|map| map.len() == 0) {
+        if self.identity_map().is_none_or(|map| map.is_empty()) {
             return owner.to_owned();
         }
         self.identity_index()
