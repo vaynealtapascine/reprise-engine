@@ -397,18 +397,6 @@ fn a_style_batch_is_one_step_and_all_or_nothing() {
 fn refusal_matrix_preserves_history_and_existing_undo_redo() {
     let mut s = session("1");
     let nodes = tx(&mut s, vec![block("AB", 0), block("CD", 1)]).data.blocks;
-    tx(
-        &mut s,
-        vec![Command::InsertText {
-            node: nodes[0].clone(),
-            at: 2,
-            text: "!".into(),
-        }],
-    );
-    s.undo().unwrap();
-    // Prime read-only query roots before capturing persistence bytes; the
-    // assertion measures the refused edit, rather than a first state query.
-    s.state().unwrap();
     let list = tx(
         &mut s,
         vec![Command::CreateList {
@@ -437,6 +425,19 @@ fn refusal_matrix_preserves_history_and_existing_undo_redo() {
             },
         ],
     );
+    tx(
+        &mut s,
+        vec![Command::InsertText {
+            node: nodes[1].clone(),
+            at: 2,
+            text: "!".into(),
+        }],
+    );
+    s.undo().unwrap();
+    // Prime read-only query roots before capturing persistence bytes; the
+    // assertion measures the refused edit, rather than a first state query.
+    s.state().unwrap();
+    assert!(s.state().unwrap().data.can_redo);
     let prefixes = vec![
         Command::CreateList {
             definition: ListDefinition::default(),
