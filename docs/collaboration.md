@@ -475,3 +475,15 @@ identity metadata. Successful import retains even an empty root, so the receiver
 saves required package bit 18 after undo too. Root/reference operations lacking
 the flag refuse before import. Legacy property-key patches remain admissible:
 rename never relocates their immutable owner, so queued edits merge with it.
+
+### Historical built-in context (required sync bit 5)
+
+`legacy-builtins1` declares the paragraph-v1 interpretation of built-in names in
+a historical document that has no `styles2` root, including an empty `styles1`
+root. It is mutually exclusive with `style-identities1`. Export is read-only.
+A receiver without stable identities preflights room for one local operation
+and its actor before importing, then pins `styles2.legacy-builtins1 = "1"` in
+a staging commit excluded from user undo. This changes the receiver revision
+and declares package bit 18; its change report marks styles dirty. A receiver
+that already has stable identities keeps its own interpretation. Native merge
+applies the same adoption policy.

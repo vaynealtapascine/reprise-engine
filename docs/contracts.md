@@ -1157,3 +1157,11 @@ legacy unresolved names use their legacy fallback; builtin authoring is tagged.
 Copied style owners are protected from reallocation by bounded scalar per-peer
 allocation floors under `styles2.clock/<peer>`. Capture includes these added keys
 in its existing graph budget; unreadable clocks refuse new owner allocation.
+
+Required sync feature `legacy-builtins1` (bit 5) preserves known historical
+paragraph-v1 built-in interpretation without changing a source during export.
+A receiver lacking stable identities adopts the context with one preflighted,
+staged `styles2.legacy-builtins1` operation, excluded from user undo; its
+revision changes and subsequent packages declare required bit 18. Existing
+identity-aware receivers retain their own context. It cannot be combined with
+required sync feature `style-identities1` (bit 4).

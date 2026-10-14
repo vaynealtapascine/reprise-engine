@@ -380,3 +380,10 @@ so fresh copied history cannot reallocate existing or dangling owner tokens.
 | `fixtures` | `src/inline.rs`, `tests/inline.rs`, `tests/inline_lists.rs`, `tests/snapshots/inline__*.snap` | Scenarios: tall image, wrapping, over-wide image, page numbers over pages, forward `page-of`, RTL, vertical, repeated header; 50,000 objects; resize against full layout; list items with objects (marker and objects on one line, reading order, incremental parity in all writing modes) | 22, 26, 27 |
 | `fixtures` | `src/hostile.rs` (`inline_bidi`, `inline_storm`, `inline_storm_readable`, `inline_fields_with_oscillating_regions`), `tests/hostile.rs` | Atoms at run edges in mixed-direction text (walked by every navigation test); every malformed or extreme object, a resize racing a deletion; fields beside an oscillating float | 37, 38, 39 |
 | docs | `docs/inline.md` | Design note: the building block, metrics, per-line metrics, kinds, fields and placements, editing, export, facade, App seam | 09, 22, 26, 30, 33 |
+
+List and inline writes participate in `edit/src/plan.rs::Plan::needs_trial`.
+`edit/tests/refusal_atomicity.rs`, the seeded `transactions.rs` property tests,
+and `reprise/tests/plumbing_edit.rs` cover their capacity, malformed-input and
+revision refusals. `doc/src/style_identity.rs` caches root absence and root
+handles by committed frontiers; imports invalidate the cache without creating
+a root. `sync.rs` bit 5 carries historical built-in context across joins.

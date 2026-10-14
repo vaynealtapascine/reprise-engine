@@ -246,7 +246,7 @@ impl Plan {
         }) {
             return Ok(true);
         }
-        if self.paste.is_some() {
+        if !self.lists.is_empty() || self.paste.is_some() {
             return Ok(true);
         }
         let explicit = self
@@ -257,7 +257,15 @@ impl Plan {
             let node = match step {
                 // Alias allocation and imported property validation can refuse.
                 // Exercise preceding repairs and the resulting metadata state.
-                Step::RenameStyle { .. } => return Ok(true),
+                Step::RenameStyle { .. }
+                | Step::ActivateList { .. }
+                | Step::UpdateList { .. }
+                | Step::DeleteList { .. }
+                | Step::SetListItem { .. }
+                | Step::RemoveListItem { .. }
+                | Step::SetListRestart { .. }
+                | Step::InsertInline { .. }
+                | Step::UpdateInline { .. } => return Ok(true),
                 Step::SetAlignment {
                     alignment: reprise_doc::marks::Alignment::Justify,
                     ..

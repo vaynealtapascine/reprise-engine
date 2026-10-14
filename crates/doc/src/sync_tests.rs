@@ -587,7 +587,7 @@ fn downgraded_flat_builtin_parent_is_refused_without_merging() {
 
 #[test]
 fn historical_builtin_context_survives_join_even_with_empty_legacy_root() {
-    for empty in [false, true] {
+    for (empty, native) in [(false, false), (true, false), (false, true), (true, true)] {
         let raw = Document::new(1).unwrap();
         let node = raw.append_block(BlockKind::Paragraph, "", "old").unwrap();
         raw.meta_of(node)
@@ -609,7 +609,15 @@ fn historical_builtin_context_survives_join_even_with_empty_legacy_root() {
         );
         let receiver = Document::new(2).unwrap();
         let mut undo = receiver.undo_stack();
-        receiver.import_packet(&packet).unwrap();
+        let old_revision = receiver.revision();
+        if native {
+            receiver.merge(&source).unwrap();
+        } else {
+            let report = receiver.import_packet(&packet).unwrap();
+            assert!(report.styles);
+        }
+        assert_ne!(receiver.revision(), old_revision);
+        assert!(receiver.has_style_identities());
         assert_eq!(
             receiver.computed_style(node).unwrap().size,
             source.computed_style(node).unwrap().size

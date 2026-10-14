@@ -409,7 +409,89 @@ fn refusal_matrix_preserves_history_and_existing_undo_redo() {
     // Prime read-only query roots before capturing persistence bytes; the
     // assertion measures the refused edit, rather than a first state query.
     s.state().unwrap();
+    let list = tx(
+        &mut s,
+        vec![Command::CreateList {
+            definition: ListDefinition::default(),
+        }],
+    )
+    .data
+    .lists[0]
+        .clone();
+    tx(
+        &mut s,
+        vec![
+            Command::SetListItem {
+                node: nodes[0].clone(),
+                list: ListRef::Existing { id: list.clone() },
+                level: 0,
+            },
+            Command::InsertInline {
+                node: nodes[0].clone(),
+                at: 1,
+                object: InlineObject {
+                    kind: "field".into(),
+                    align: InlineAlign::Baseline,
+                    params: [("field".into(), "page-number".into())].into(),
+                },
+            },
+        ],
+    );
     let prefixes = vec![
+        Command::CreateList {
+            definition: ListDefinition::default(),
+        },
+        Command::UpdateList {
+            list: list.clone(),
+            definition: ListDefinition::default(),
+        },
+        Command::DeleteList {
+            list: ListRef::Existing { id: list.clone() },
+        },
+        Command::SetListItem {
+            node: nodes[1].clone(),
+            list: ListRef::Existing { id: list.clone() },
+            level: 1,
+        },
+        Command::RemoveListItem {
+            node: nodes[0].clone(),
+        },
+        Command::SetListLevel {
+            node: nodes[0].clone(),
+            level: 2,
+        },
+        Command::IndentListItem {
+            node: nodes[0].clone(),
+            by: 1,
+        },
+        Command::RestartList {
+            node: nodes[0].clone(),
+            value: Some("8".into()),
+        },
+        Command::ContinueList {
+            node: nodes[0].clone(),
+        },
+        Command::Enter {
+            node: nodes[0].clone(),
+            at: 1,
+        },
+        Command::BackspaceAtStart {
+            node: nodes[0].clone(),
+        },
+        Command::InsertInline {
+            node: nodes[0].clone(),
+            at: 0,
+            object: InlineObject {
+                kind: "field".into(),
+                align: InlineAlign::Baseline,
+                params: [("field".into(), "page-number".into())].into(),
+            },
+        },
+        Command::UpdateInline {
+            node: nodes[0].clone(),
+            at: 1,
+            patch: InlinePatch::default(),
+        },
         block("new", 2),
         Command::DeleteText {
             node: nodes[0].clone(),

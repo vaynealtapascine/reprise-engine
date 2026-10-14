@@ -333,3 +333,136 @@ fn deep_unrelated_trees_refuse_staging_without_entering_the_recursive_codec() {
     assert_eq!(error.note().code.as_str(), "edit.limit");
     assert!(frozen(&e) == before);
 }
+
+fn semantic_commands(a: NodeId, b: NodeId, list: reprise_doc::ListId) -> Vec<Command> {
+    use reprise_doc::{InlineObject, InlinePatch, ListDefinition};
+    use reprise_edit::ListRef;
+    vec![
+        Command::CreateList {
+            definition: ListDefinition::numbered(),
+        },
+        Command::UpdateList {
+            list,
+            definition: ListDefinition::bulleted(),
+        },
+        Command::DeleteList {
+            list: ListRef::Existing(list),
+        },
+        Command::SetListItem {
+            node: b,
+            list: ListRef::Existing(list),
+            level: 1,
+        },
+        Command::RemoveListItem { node: a },
+        Command::SetListLevel { node: a, level: 2 },
+        Command::IndentListItem { node: a, by: 1 },
+        Command::RestartList {
+            node: a,
+            value: Some(8),
+        },
+        Command::ContinueList { node: a },
+        Command::Enter { node: a, at: 1 },
+        Command::BackspaceAtStart { node: a },
+        Command::InsertInline {
+            node: a,
+            at: 0,
+            object: InlineObject::field("page"),
+        },
+        Command::UpdateInline {
+            node: a,
+            at: 1,
+            patch: InlinePatch::default(),
+        },
+    ]
+}
+
+#[test]
+fn list_and_inline_refusal_matrix_preserves_history_and_both_undo_stacks() {
+    for cause in 0..2 {
+        let doc = Document::new(1).unwrap();
+        let a = doc.append_block(BlockKind::Paragraph, "", "AB").unwrap();
+        let b = doc.append_block(BlockKind::Paragraph, "", "CD").unwrap();
+        let list = doc
+            .create_list(&reprise_doc::ListDefinition::numbered())
+            .unwrap();
+        doc.set_list_item(a, list, 0).unwrap();
+        doc.insert_inline(a, 1, &reprise_doc::InlineObject::field("page"))
+            .unwrap();
+        doc.commit();
+        let mut e = Editor::new(doc, reprise_fixtures::engine().schemas.clone());
+        e.apply_command(Command::InsertText {
+            node: b,
+            at: 2,
+            text: "!".into(),
+        })
+        .unwrap();
+        e.undo().unwrap();
+        for prefix in semantic_commands(a, b, list) {
+            let suffix = if cause == 0 {
+                Command::InsertText {
+                    node: b,
+                    at: usize::MAX,
+                    text: "bad".into(),
+                }
+            } else {
+                Command::InsertText {
+                    node: b,
+                    at: 0,
+                    text: "x".repeat(reprise_edit::MAX_INSERT_BYTES + 1),
+                }
+            };
+            let before = frozen(&e);
+            let tx = Transaction::from(vec![prefix, suffix]);
+            assert!(e.apply(&tx).is_err(), "{tx:?}");
+            let after = frozen(&e);
+            assert!(
+                after == before,
+                "refusal changed state for {tx:?}: bytes={} revision={} undo={} redo={}, lengths={}/{}",
+                before.0 == after.0,
+                before.1 == after.1,
+                before.2 == after.2,
+                before.3 == after.3,
+                before.0.len(),
+                after.0.len()
+            );
+        }
+    }
+}
+
+#[test]
+fn new_staging_commands_refuse_pending_raw_edits_before_committing_them() {
+    for inline in [false, true] {
+        let doc = Document::new(1).unwrap();
+        let a = doc.append_block(BlockKind::Paragraph, "", "AB").unwrap();
+        doc.commit();
+        let mut e = Editor::new(doc, reprise_fixtures::engine().schemas.clone());
+        e.document().block(a).unwrap().text.insert(2, "!").unwrap();
+        let before = (e.document().revision(), e.undo_count(), e.redo_count());
+        let command = if inline {
+            Command::InsertInline {
+                node: a,
+                at: 0,
+                object: reprise_doc::InlineObject::field("page"),
+            }
+        } else {
+            Command::CreateList {
+                definition: reprise_doc::ListDefinition::numbered(),
+            }
+        };
+        let error = e
+            .apply(&Transaction::from(vec![
+                Command::DeleteText {
+                    node: a,
+                    range: 1..2,
+                },
+                command,
+            ]))
+            .unwrap_err();
+        assert_eq!(error.reason, reprise_edit::Reason::UncommittedEdit);
+        assert_eq!(
+            before,
+            (e.document().revision(), e.undo_count(), e.redo_count())
+        );
+        assert_eq!(e.document().block(a).unwrap().text.to_string(), "AB!");
+    }
+}

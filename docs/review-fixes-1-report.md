@@ -1,6 +1,6 @@
 # Review fixes 1 handoff
 
-Worktree: `F:/reprise-wt/eng-fixes1`; branch: `ws/review-fixes-1`; base: `f13a4ee`.
+Worktree: `F:/reprise-wt/eng-fixes1`; branch: `ws/review-fixes-1`; base: `f13a4ee`; integrated engine main: `4131ec8`.
 All Part A and Part B findings are implemented. The resumed orchestrator brief
 selected completing the identity/compatibility migration, superseding the earlier
 redesign stop. Design was committed before implementation.
@@ -42,6 +42,11 @@ redesign stop. Design was committed before implementation.
 - `f49eb9d test(styles): retain deferred migration acceptance probes`
 - `4648aad docs(styles): select stable owners and versioned reference migration`
 - `15e4b1a fix(styles): retain immutable owners and signal built-in semantics`
+- `e82e792 docs(styles): guard owner allocation after fresh-history copying`
+- `af2660c fix(styles): preserve selectors and allocation across copied history`
+- `e24d4a5 docs(styles): retain historical context across replica joins`
+- `3f134a8 fix(styles): checkpoint bounded root cache and historical joins`
+- `e328162 merge(engine): integrate lists and inline before refusal coverage`
 - The verification handoff commit records the final gate output; obtain the full
   list with `git log --oneline f13a4ee..HEAD`.
 
@@ -56,11 +61,11 @@ Supporting edits beyond its explicitly named files are listed in full here.
 - `crates/doc/src/{identity.rs,style_identity.rs,style_identity_tests.rs,lib.rs,style/store.rs,style_graph.rs,sync.rs,sync_tests.rs}`:
   durable binding, pure lookup guards, edit staging and packet boundaries.
 - `crates/edit/src/{editor.rs,error.rs,paste.rs,plan.rs,replace.rs}` and
-  `crates/edit/tests/{refusal_atomicity.rs,style_graph_copy.rs}`: publication and refusal coverage.
+  `crates/edit/tests/{refusal_atomicity.rs,style_graph_copy.rs,transactions.rs}`: publication and refusal coverage.
 - `crates/font/src/lib.rs`: additive registered-face iterator for provenance.
 - `crates/layout/src/{codes.rs,flow.rs,flow/keeps.rs,table_flow.rs,notes.rs,floats.rs,relations/alignment.rs}`:
   shared geometry and context/anchor diagnostics.
-- `crates/fixtures/src/hostile.rs`, `crates/fixtures/tests/{hostile.rs,paragraph_styles.rs,regions_geometry.rs}`,
+- `crates/fixtures/src/hostile.rs`, `crates/fixtures/tests/{hostile.rs,paragraph_styles.rs,regions_geometry.rs,incremental_steps.rs}`,
   and the two new foreign-copy snapshots listed below.
 - `crates/reprise/src/{lib.rs,session.rs,session/collab.rs}`;
   `crates/reprise/tests/{collab.rs,hostile_peer.rs,import_copy.rs,packet_bound.rs,plumbing_edit.rs,plumbing_marks.rs,workspace_fonts.rs,sync_lineage_delta.hex}`.
@@ -73,7 +78,7 @@ Supporting edits beyond its explicitly named files are listed in full here.
   coverage into ordinary Cargo tests.
 
 No dependencies, DTO shapes, API version or PacketBound literal changed.
-The required package mask now includes the brief-authorized bit 18. Generated WASM declarations change only the cap documentation.
+The required package mask now includes the brief-authorized bit 18. Generated WASM declarations are rebuilt after integrating the list/inline DTOs from main.
 The delegated WASM probe kept `.r3-repro/` artifacts in this worktree and added
 that exact ignore rule to the shared Git metadata's `.git/info/exclude`; this is
 the only reported metadata edit outside the source worktree.
@@ -136,7 +141,7 @@ Additive native APIs: `Document::{document_lineage,bind_document_lineage,set_syn
 fork_for_edit,check_edit_preflight}`, `sync::packet_lineage`,
 `Features::DOCUMENT_LINEAGE`, and `FontStore::registered_ids`.
 Style additions: `Document::{style_identity,style_reference,has_style_identities}`,
-`Features::STYLE_IDENTITIES`, and `REQUIRED_STYLE_IDENTITIES` (bit 18).
+`Features::{STYLE_IDENTITIES,LEGACY_BUILTINS}`, and `REQUIRED_STYLE_IDENTITIES` (bit 18).
 Graph-copy additions: opaque `AuthoredStyleGraph`,
 `Document::{authored_style_graph,restore_authored_style_graph}`, and
 `Editor::paste_document_fragment`. These add no DTO; their new stored semantics are declared separately below.
@@ -156,7 +161,7 @@ Two new fixture goldens were recorded and read:
 - `hostile__foreign_copy_snapshot.snap`: complete geometry/report for a receiver
   that refuses another durable document's snapshot; original receiver text remains.
 - `hostile__content_foreign_copy_snapshot.snap`: content-only display for the same
-  refused merge. Fixture count increases from 102 to 103.
+  refused merge. This branch adds one fixture; after the requested main integration the count is 108.
 
 `sync_lineage_delta.hex` is a separate new wire golden for the scoped feature;
 native and WASM tests pin it without rewriting the unmarked legacy golden.
@@ -183,7 +188,7 @@ None added; no license changes.
 5. Font precedence: explicit session declarations/imported/restored faces take
    precedence over the workspace refresh at the same FaceId.
 6. Stable style owners: existing nested/flat keys remain owners; `styles2` adds
-   `alias/<name>`, `label/<owner>`, `base/<owner>` and `legacy-builtins1`. New block
+   `alias/<name>`, `label/<owner>`, `base/<owner>`, `clock/<peer>` and `legacy-builtins1`. New block
    and parent references use reserved versioned control prefixes. Name reuse
    allocates fresh owners; labels use deterministic disambiguation.
 7. Required package bit 18 and required sync bit 4 (`style-identities1`) declare
@@ -196,6 +201,16 @@ None added; no license changes.
    unverifiable unmarked legacy binary imports are refused. Historical packages
    must use current framed sync. Raw unscoped native documents remain compatible.
 
+10. Fresh-copy owner allocation retains scalar per-peer allocation floors in
+    `styles2.clock/<peer>` without importing source operations or version vectors.
+11. Required sync bit 5 (`legacy-builtins1`) preserves historical paragraph-v1
+    built-in context, including empty legacy roots. Source export remains pure.
+    Receiver adoption adds one preflighted staging operation outside user undo,
+    changes its revision, marks styles dirty, and makes package bit 18 required.
+12. Integrated list and inline writes enter isolated preflight. Flow validation
+    no longer materializes `breaks1` while reading an inline paragraph; existing
+    root handles are cached to avoid repeated map scans.
+
 These brief-authorized changes are documented in `contracts.md`, the style
 addendum, collaboration protocol and format SPEC. No additional contract proposal.
 
@@ -204,7 +219,7 @@ addendum, collaboration protocol and format SPEC. No additional contract proposa
 Handoff for PROGRESS: all ten findings are implemented and regression-covered.
 No deferred acceptance tests remain. App findings remain outside this workstream.
 
-Lists, inline objects and sections should model all fallible writes or join
+Lists and inline objects now model or trial fallible writes. Sections should join
 `Plan::needs_trial` before publication. The CODEMAP documents this extension point.
 Lists can later reference durable style IDs for levels; headings need an authored
 semantic role; table cells/headers/footers share the same inherited style graph.
@@ -250,14 +265,13 @@ targets. Identity/built-in acceptance cases are now in normal Cargo tests, inclu
 delivery orders, first patches, deletion, competing renames, label collisions,
 undo/redo, name reuse, pinned base clearing, graph copying, old marked/unmarked
 reads, metadata limits and downgraded packets. `style-migration-probes.log` and
-`builtin-bit-before-wasm.log` retain the before-fix failures. Thirteen initial
-identity regressions pass in 1.61s; the document unit suite passed 258 tests before
+`builtin-bit-before-wasm.log` retain the before-fix failures. Eighteen identity regressions passed before the last join changes; the document unit suite passed 258 tests before
 the last cache/boundary additions (the full gate below validates the final code).
 `rename-refusal-before.log` records the additional rename failure; its companion
 tests verify refusal preserves bytes/history/undo and a preceding repair succeeds
 as one undo step. This changes publication validation, not Part B style identity.
 
-The six crowded native refusal tests passed in 333.45s on this machine, including
+An earlier crowded native refusal suite passed in 333.45s on this machine, including
 fixture preparation and persistence comparisons. Exhaustive staging of a large
 formatting history is still expensive; that timing is not an isolated benchmark
 of preflight. Ordinary model-only typing avoids staging. Further capacity-model
@@ -266,3 +280,13 @@ optimization must retain the byte/history/undo refusal guarantees.
 Final bounded gate output and performance comparisons are appended below once
 all checks finish. Every cargo test and gate invocation is wrapped in GNU timeout;
 logs are under `G:/reprise-target/eng-fixes1/`.
+
+Resumed integration evidence: `list-inline-refusal-before.log` records a new
+staging command publishing pending raw edits; `semantic-matrix-isolated.log`
+records read-only validation adding an empty break root (history bytes changed,
+revision/undo unchanged). Both are now corrected; the native list/inline refusal
+matrix passes in 0.42s. `legacy-join-before.log` records historical Heading 1
+changing from 20pt to 10pt after joining. `legacy-join-after.log` passes snapshot,
+native merge, empty/populated legacy roots, save/reopen and undo isolation in
+0.04s. Expanded seeded command properties pass all 25 tests in 67.84s;
+`semantic-facade.log` validates malformed/stale list and inline batches.

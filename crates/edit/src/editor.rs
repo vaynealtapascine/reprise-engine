@@ -266,10 +266,13 @@ impl Editor {
                             })?,
                     ),
                     Step::AddRelation { new } => {
-                        self.step(step, &mut blocks, &relations, &lists).map_err(store)?;
+                        self.step(step, &mut blocks, &relations, &lists)
+                            .map_err(store)?;
                         made_relations.extend(relations.get(*new).copied());
                     }
-                    _ => self.step(step, &mut blocks, &relations, &lists).map_err(store)?,
+                    _ => self
+                        .step(step, &mut blocks, &relations, &lists)
+                        .map_err(store)?,
                 }
                 Ok(())
             })()
