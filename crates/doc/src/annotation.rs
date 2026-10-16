@@ -591,10 +591,18 @@ impl Document {
         anchor: &crate::text::Anchor,
     ) -> Option<(NodeId, usize, bool)> {
         use crate::text::Resolved;
-        let host = hosts.entry(node.node).or_insert_with(|| HostContext {
-            flow: self.flow(node.node),
-            text: self.host_text(node.node).map(crate::text::Text::from_loro),
-            live: self.live(&self.tree("content"), node.node),
+        let host = hosts.entry(node.node).or_insert_with(|| {
+            let flow = self.flow(node.node);
+            let intervals = flow.as_ref().map_or_else(Vec::new, |f| {
+                f.paras.iter().enumerate()
+                    .filter(|(_, p)| f.is_live(p.id))
+                    .map(|(i, p)| (p.region.end.1, i)).collect()
+            });
+            HostContext {
+                flow, intervals,
+                text: self.host_text(node.node).map(crate::text::Text::from_loro),
+                live: self.live(&self.tree("content"), node.node),
+            }
         });
         let (Some(flow), Some(text)) = (&host.flow, &host.text) else {
             let (node, r) = self.locate(node, anchor)?;
@@ -605,9 +613,11 @@ impl Document {
         }
         let resolved = text.resolve_shared(anchor).ok()?;
         let u = resolved.offset();
-        let para = flow
-            .live()
-            .find(|p| p.region.start.1 <= u && u <= p.region.end.1)?;
+        // Lower bound on inclusive ends preserves the first paragraph at a
+        // shared boundary, including zero-length/hidden paragraph regions.
+        let i = interval_at(&host.intervals, u, &mut || {})?;
+        let para = flow.paras.get(i)?;
+        if u < para.region.start.1 { return None; }
         let byte = |u: usize| {
             text.loro().convert_pos(
                 u,
@@ -675,14 +685,10 @@ impl Document {
                 });
             }
         } else if let Some(flow) = hosts.get(&start_node.node).and_then(|h| h.flow.clone()) {
-            let mut inside = false;
-            for para in flow.live() {
-                if para.id == start_node {
-                    inside = true;
-                }
-                if !inside {
-                    continue;
-                }
+            let Some(first) = flow.index_of(start_node) else {
+                return empty(Some(start_node), start);
+            };
+            for para in flow.paras.iter().skip(first) {
                 if pieces.len() >= MAX_PIECES {
                     *limited = true;
                     break;
@@ -1047,6 +1053,31 @@ impl Document {
 /// One host's text and flow, read once per index build.
 pub(crate) struct HostContext {
     flow: Option<Arc<crate::flow::HostFlow>>,
+    /// Inclusive scalar end and paragraph index, in flow order.
+    intervals: Vec<(usize, usize)>,
     text: Option<crate::text::Text>,
     live: bool,
+}
+
+/// Ordered endpoint lookup. `charge` makes the comparison bound testable without
+/// depending on scheduler, build mode or fixture-construction time.
+fn interval_at(intervals: &[(usize, usize)], u: usize, charge: &mut impl FnMut()) -> Option<usize> {
+    let at = intervals.partition_point(|(end, _)| { charge(); *end < u });
+    intervals.get(at).map(|(_, i)| *i)
+}
+
+#[cfg(test)]
+#[test]
+fn interval_lookup_scales_logarithmically_and_keeps_boundary_order() {
+    for paragraphs in [1usize, 100, 1000, 4096] {
+        let intervals: Vec<_> = (0..paragraphs).map(|i| (i * 2 + 2, i)).collect();
+        let mut work = 0usize;
+        for _ in 0..500 {
+            assert_eq!(interval_at(&intervals, paragraphs * 2 - 1, &mut || work += 1), Some(paragraphs - 1));
+        }
+        assert!(work <= 500 * (paragraphs.ilog2() as usize + 2));
+    }
+    let intervals = [(2, 0), (2, 1), (4, 2)];
+    assert_eq!(interval_at(&intervals, 2, &mut || {}), Some(0));
+    assert_eq!(interval_at(&intervals, 3, &mut || {}), Some(2));
 }

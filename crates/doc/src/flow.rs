@@ -72,6 +72,10 @@ pub(crate) struct Para {
 }
 
 impl HostFlow {
+    pub(crate) fn index_of(&self, id: NodeId) -> Option<usize> {
+        self.index.get(&id).copied()
+    }
+
     pub(crate) fn para(&self, id: NodeId) -> Option<&Para> {
         self.index.get(&id).map(|&i| &self.paras[i])
     }
