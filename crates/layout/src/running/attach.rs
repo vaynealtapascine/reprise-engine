@@ -280,11 +280,7 @@ fn length(v: i64) -> Length {
 /// Composes the regions of `spec` again, for a transition that read them. The
 /// outer `None` means the page's owner is no longer what it was, so the read
 /// cannot hold.
-pub(crate) fn outcome_of(
-    ctx: &Ctx<'_>,
-    table: &Table,
-    spec: &PageSpec,
-) -> Option<Option<Outcome>> {
+pub(crate) fn outcome_of(ctx: &Ctx<'_>, table: &Table, spec: &PageSpec) -> Option<Option<Outcome>> {
     let section = table.get(spec.section)?;
     if section.life() != spec.life {
         return None;

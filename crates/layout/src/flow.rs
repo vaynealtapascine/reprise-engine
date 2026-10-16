@@ -1619,8 +1619,7 @@ impl Flow<'_> {
         let Some(table) = self.section_table.clone() else {
             return;
         };
-        let Some(ctx) = running_ctx(&self.running, &table, self.engine, self.doc, self.plan)
-        else {
+        let Some(ctx) = running_ctx(&self.running, &table, self.engine, self.doc, self.plan) else {
             return;
         };
         for page in from..self.snapshot.pages.len() {

@@ -1228,7 +1228,8 @@ impl<'engine> LayoutSession<'engine> {
     }
     pub fn counters(&self) -> WorkCounters {
         let mut counters = self.evaluation.cache.borrow().counters.clone();
-        (counters.running_compositions, counters.running_reused) = self.evaluation.running().counts();
+        (counters.running_compositions, counters.running_reused) =
+            self.evaluation.running().counts();
         counters
     }
     /// Lends the session an executor for pure preparation tasks (see

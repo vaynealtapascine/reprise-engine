@@ -222,7 +222,15 @@ impl PageFactory {
             let index = *sections.by_id.get(&section.id())?;
             crate::running::attach::prepare(ctx, sections, index, section, page, kind, first_owned)
         });
-        Self::push_prepared(engine, sections, section, kind, snapshot, first_owned, regions)
+        Self::push_prepared(
+            engine,
+            sections,
+            section,
+            kind,
+            snapshot,
+            first_owned,
+            regions,
+        )
     }
     /// As [`Self::push_section`], with the page's regions already composed
     /// (the flow records what they came to for its memo).
