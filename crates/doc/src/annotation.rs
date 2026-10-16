@@ -594,12 +594,16 @@ impl Document {
         let host = hosts.entry(node.node).or_insert_with(|| {
             let flow = self.flow(node.node);
             let intervals = flow.as_ref().map_or_else(Vec::new, |f| {
-                f.paras.iter().enumerate()
+                f.paras
+                    .iter()
+                    .enumerate()
                     .filter(|(_, p)| f.is_live(p.id))
-                    .map(|(i, p)| (p.region.end.1, i)).collect()
+                    .map(|(i, p)| (p.region.end.1, i))
+                    .collect()
             });
             HostContext {
-                flow, intervals,
+                flow,
+                intervals,
                 text: self.host_text(node.node).map(crate::text::Text::from_loro),
                 live: self.live(&self.tree("content"), node.node),
             }
@@ -617,7 +621,9 @@ impl Document {
         // shared boundary, including zero-length/hidden paragraph regions.
         let i = interval_at(&host.intervals, u, &mut || {})?;
         let para = flow.paras.get(i)?;
-        if u < para.region.start.1 { return None; }
+        if u < para.region.start.1 {
+            return None;
+        }
         let byte = |u: usize| {
             text.loro().convert_pos(
                 u,
@@ -665,12 +671,18 @@ impl Document {
         };
         let (Some((start_node, start, live_start)), Some((end_node, end, live_end))) = (
             self.locate_indexed(hosts, node, &start),
-            self.locate_indexed(hosts, node, &end),
+            self.locate_indexed(
+                hosts,
+                get_str(meta, "end-node1")
+                    .and_then(|s| NodeId::parse(&s))
+                    .unwrap_or(node),
+                &end,
+            ),
         ) else {
             return empty(self.is_live(node).then_some(node), 0);
         };
-        let crossed =
-            self.flow_cmp(start_node, end_node).is_gt() || (start_node == end_node && start > end);
+        let crossed = self.range_node_cmp(start_node, end_node).is_gt()
+            || (start_node == end_node && start > end);
         let (end_node, end) = if crossed {
             (start_node, start)
         } else {
@@ -683,6 +695,35 @@ impl Document {
                     node: start_node,
                     bytes: start..end,
                 });
+            }
+        } else if start_node.node != end_node.node {
+            let order = self.document_order();
+            let mut inside = false;
+            for node in order {
+                if node == start_node {
+                    inside = true;
+                }
+                if !inside {
+                    continue;
+                }
+                if pieces.len() >= MAX_PIECES {
+                    *limited = true;
+                    break;
+                }
+                if let Ok(block) = self.block(node) {
+                    let a = if node == start_node { start } else { 0 };
+                    let b = if node == end_node {
+                        end
+                    } else {
+                        block.text.len()
+                    };
+                    if a < b {
+                        pieces.push(Piece { node, bytes: a..b });
+                    }
+                }
+                if node == end_node {
+                    break;
+                }
             }
         } else if let Some(flow) = hosts.get(&start_node.node).and_then(|h| h.flow.clone()) {
             let Some(first) = flow.index_of(start_node) else {
@@ -1062,7 +1103,10 @@ pub(crate) struct HostContext {
 /// Ordered endpoint lookup. `charge` makes the comparison bound testable without
 /// depending on scheduler, build mode or fixture-construction time.
 fn interval_at(intervals: &[(usize, usize)], u: usize, charge: &mut impl FnMut()) -> Option<usize> {
-    let at = intervals.partition_point(|(end, _)| { charge(); *end < u });
+    let at = intervals.partition_point(|(end, _)| {
+        charge();
+        *end < u
+    });
     intervals.get(at).map(|(_, i)| *i)
 }
 
@@ -1073,7 +1117,10 @@ fn interval_lookup_scales_logarithmically_and_keeps_boundary_order() {
         let intervals: Vec<_> = (0..paragraphs).map(|i| (i * 2 + 2, i)).collect();
         let mut work = 0usize;
         for _ in 0..500 {
-            assert_eq!(interval_at(&intervals, paragraphs * 2 - 1, &mut || work += 1), Some(paragraphs - 1));
+            assert_eq!(
+                interval_at(&intervals, paragraphs * 2 - 1, &mut || work += 1),
+                Some(paragraphs - 1)
+            );
         }
         assert!(work <= 500 * (paragraphs.ilog2() as usize + 2));
     }

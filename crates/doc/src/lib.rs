@@ -752,12 +752,18 @@ impl Document {
         };
         // Both ends follow their characters, into whichever paragraph of
         // the flow they are in now (see `docs/flow.md`).
-        let (Some((node, s)), Some((end_node, e))) =
-            (self.locate(node, &start), self.locate(node, &end))
-        else {
+        let (Some((node, s)), Some((end_node, e))) = (
+            self.locate(node, &start),
+            self.locate(
+                get_str(&meta, "end-node1")
+                    .and_then(|s| NodeId::parse(&s))
+                    .unwrap_or(node),
+                &end,
+            ),
+        ) else {
             return RangeState::Missing { node: Some(node) };
         };
-        let end = match self.flow_cmp(node, end_node) {
+        let end = match self.range_node_cmp(node, end_node) {
             std::cmp::Ordering::Equal => e.offset().max(s.offset()),
             // The end is in a later paragraph: this paragraph's part.
             std::cmp::Ordering::Less => self.block(node).map_or(s.offset(), |b| b.text.len()),
@@ -765,7 +771,7 @@ impl Document {
             std::cmp::Ordering::Greater => s.offset(),
         };
         let bytes = s.offset()..end;
-        if bytes.is_empty() && !keep_empty && self.flow_cmp(node, end_node).is_ge() {
+        if bytes.is_empty() && !keep_empty && self.range_node_cmp(node, end_node).is_ge() {
             return RangeState::Missing { node: Some(node) };
         }
         if matches!((s, e), (Resolved::Live(_), Resolved::Live(_))) {
@@ -773,6 +779,17 @@ impl Document {
         } else {
             RangeState::Rebound { node, bytes }
         }
+    }
+
+    pub(crate) fn range_node_cmp(&self, a: NodeId, b: NodeId) -> std::cmp::Ordering {
+        if a.node == b.node {
+            return self.flow_cmp(a, b);
+        }
+        let order = self.document_order();
+        order
+            .iter()
+            .position(|n| *n == a)
+            .cmp(&order.iter().position(|n| *n == b))
     }
 
     /// Both endpoints of a persistent range, including ranges that now cross
@@ -786,8 +803,13 @@ impl Document {
         let node = NodeId::parse(&get_str(&meta, "node")?)?;
         let anchor = |key| ranges::stored_anchor(meta.get(key)).and_then(|b| Anchor::decode(&b));
         let (start_node, start) = self.locate(node, &anchor("start")?)?;
-        let (end_node, end) = self.locate(node, &anchor("end")?)?;
-        let crossed = self.flow_cmp(start_node, end_node).is_gt()
+        let (end_node, end) = self.locate(
+            get_str(&meta, "end-node1")
+                .and_then(|s| NodeId::parse(&s))
+                .unwrap_or(node),
+            &anchor("end")?,
+        )?;
+        let crossed = self.range_node_cmp(start_node, end_node).is_gt()
             || (start_node == end_node && start.offset() > end.offset());
         Some(RangeExtent {
             start: (start_node, start.offset()),

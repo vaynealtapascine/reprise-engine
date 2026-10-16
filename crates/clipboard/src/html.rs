@@ -62,6 +62,7 @@ fn fragment(
             break;
         };
         fragment.ranges.push(FragmentRange {
+            end: None,
             id,
             node,
             bytes,
