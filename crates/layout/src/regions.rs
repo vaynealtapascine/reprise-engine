@@ -5,7 +5,7 @@ use crate::template::ResolvedTemplate;
 use crate::{BlockLayout, Diagnostic, Engine, LayoutSnapshot, LineRef, Resolution, Subject, codes};
 use reprise_diag::Severity;
 use reprise_doc::relation::builtin;
-use reprise_doc::{BlockKind, Document, NodeId, Relation, RelationId, ResolutionContext};
+use reprise_doc::{BlockKind, Document, Domain, NodeId, Relation, RelationId, ResolutionContext};
 use reprise_geom::{FrameSpace, Length, Rect};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -328,6 +328,23 @@ pub(crate) fn allocate_with_sections(
                 .map(|r| (id, r))
         })
         .collect();
+    // This allocation places the body's regions. A live owner outside the body
+    // domain (any story, bound or not) is not the body's to place, and must
+    // neither crowd out the body's relations nor register as one of its owners.
+    relations.retain(|(id, r)| {
+        let outside = r
+            .owner
+            .is_some_and(|o| doc.block(o).is_ok() && doc.domain_of(o) != Some(Domain::Body));
+        if outside {
+            out.diagnostics.push(Diagnostic::new(
+                Severity::Error,
+                codes::RELATION_OWNER,
+                Subject::Relation(*id),
+                "region owner must be a body annotation or image; this one belongs to a story",
+            ));
+        }
+        !outside
+    });
     if relations.len() > MAX_REGION_RELATIONS {
         out.diagnostics.push(Diagnostic::new(
             Severity::Error,

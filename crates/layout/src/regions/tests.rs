@@ -529,3 +529,140 @@ fn stale_placements_are_omitted_and_do_not_suppress_owner_diagnostics() {
     assert_eq!(blocks[0].lines[0].frame, 1);
     assert_eq!(plan.applied_for(&shifted), BTreeSet::from([relation]));
 }
+
+/// A story whose only block is an annotation; returns the story and that block.
+fn story_annotation(doc: &Document, text: &str) -> (NodeId, NodeId) {
+    let story = doc
+        .create_story(&[reprise_doc::NewBlock::new(BlockKind::Annotation, "s", text)])
+        .unwrap();
+    let owner = doc.top(reprise_doc::Domain::Story(story))[0];
+    (story, owner)
+}
+
+fn region(
+    doc: &Document,
+    engine: &Engine,
+    schema: reprise_doc::relation::SchemaId,
+    owner: NodeId,
+    anchor: NodeId,
+) {
+    let r = relation(doc, owner, anchor);
+    let float = schema == builtin::FLOAT;
+    let mut r = Relation::new(schema)
+        .owned_by(owner)
+        .target("anchor", r.first("anchor").unwrap().clone());
+    if float {
+        r = r.param("width", Param::Length(LengthExpr::Pt(Length::from_pt(100))));
+    }
+    doc.add_relation(&engine.schemas, &r).unwrap();
+}
+
+/// Nothing a story owns may be placed by the body's region allocation, enter
+/// its reading order, or change how the body composed.
+fn assert_body_isolated(
+    engine: &Engine,
+    doc: &Document,
+    body: NodeId,
+    story: NodeId,
+    owner: NodeId,
+    expected: &LayoutSnapshot,
+) {
+    let s = engine.layout(doc);
+    assert!(s.block(owner).is_none(), "story block placed in the body");
+    assert!(
+        s.blocks
+            .iter()
+            .all(|b| doc.domain_of(b.node) == Some(reprise_doc::Domain::Body)),
+        "{:?}",
+        s.blocks.iter().map(|b| b.node).collect::<Vec<_>>()
+    );
+    assert!(
+        s.reading_order(doc)
+            .iter()
+            .all(|st| doc.domain_of(st.line.node) == Some(reprise_doc::Domain::Body)),
+        "story line in reading order"
+    );
+    assert!(s.relations.iter().all(|r| !r.applied));
+    assert_eq!(
+        s.diagnostics_with(codes::RELATION_OWNER.as_str()).count(),
+        1,
+        "{:?}",
+        s.diagnostics
+    );
+    assert_eq!(s.block(body), expected.block(body), "the body is unchanged");
+    assert_eq!(s.pages.len(), expected.pages.len());
+    let _ = story;
+}
+
+#[test]
+fn an_unbound_stories_note_or_float_never_enters_body_layout() {
+    for schema in [builtin::NOTE, builtin::FLOAT] {
+        let (engine, doc) = setup(Length::from_pt(60));
+        let body = doc.append_block(BlockKind::Paragraph, "s", "body").unwrap();
+        let expected = engine.layout(&doc);
+        let (story, owner) = story_annotation(&doc, "SECRET STORY");
+        region(&doc, &engine, schema, owner, body);
+        assert_body_isolated(&engine, &doc, body, story, owner, &expected);
+    }
+}
+
+#[test]
+fn a_bound_stories_note_or_float_never_enters_body_layout() {
+    for schema in [builtin::NOTE, builtin::FLOAT] {
+        let (engine, doc) = setup(Length::from_pt(60));
+        let body = doc.append_block(BlockKind::Paragraph, "s", "body").unwrap();
+        let (story, owner) = story_annotation(&doc, "SECRET STORY");
+        let header = doc
+            .create_story(&[reprise_doc::NewBlock::new(
+                BlockKind::Paragraph,
+                "s",
+                "head",
+            )])
+            .unwrap();
+        // Both the annotation's story and a header story are bound.
+        doc.write_section_properties(
+            reprise_doc::sections::SectionId::First,
+            "0",
+            &[
+                (
+                    "region.header.default".to_owned(),
+                    serde_json::json!(story.to_string()),
+                ),
+                (
+                    "region.footer.default".to_owned(),
+                    serde_json::json!(header.to_string()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            &[],
+        )
+        .unwrap();
+        let expected = engine.layout(&doc);
+        region(&doc, &engine, schema, owner, body);
+        assert_body_isolated(&engine, &doc, body, story, owner, &expected);
+    }
+}
+
+#[test]
+fn story_relations_do_not_consume_the_body_relation_limit() {
+    let (engine, doc) = setup(Length::from_pt(60));
+    let body = doc.append_block(BlockKind::Paragraph, "s", "body").unwrap();
+    // One story owner keeps the graph small; only the count matters, and the
+    // body's own note is added last, so a global limit would cut it first.
+    let (_, owner) = story_annotation(&doc, "x");
+    for _ in 0..=MAX_REGION_RELATIONS {
+        region(&doc, &engine, builtin::NOTE, owner, body);
+    }
+    let note = doc
+        .append_block(BlockKind::Annotation, "s", "real note")
+        .unwrap();
+    doc.add_relation(&engine.schemas, &relation(&doc, note, body))
+        .unwrap();
+    let s = engine.layout(&doc);
+    assert!(
+        s.block(note).is_some(),
+        "the body's own note was crowded out"
+    );
+    assert_eq!(s.diagnostics_with(codes::REGION_LIMIT.as_str()).count(), 0);
+}
