@@ -499,3 +499,18 @@ console.log("page setup WASM smoke passed");
   copy.free(); again.free(); i.free(); wi.free();
   console.log("inline objects WASM smoke passed");
 }
+
+// Pass the native deep_metadata test's output folder as the third argument.
+// This runs in the same debug WASM module built with a 1 MiB stack.
+if (process.argv[3]) {
+  const deepWorkspace = new wasm.Workspace();
+  for (const depth of [1024, 4096]) {
+    const bytes = new Uint8Array(fs.readFileSync(path.join(process.argv[3], `deep-${depth}.reprise`)));
+    const deep = deepWorkspace.open(p({ peer_id: "500" }), bytes);
+    assert.ok(deep.state().data.blocks.length > 0);
+    assert.ok(deep.save().data.bytes.length > 0);
+    deep.free();
+  }
+  deepWorkspace.free();
+  console.log("deep metadata 1024/4096 WASM smoke passed");
+}

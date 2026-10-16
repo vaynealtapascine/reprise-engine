@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 108);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 110);
 }
 
 hostile_tests!(
@@ -1178,3 +1178,5 @@ hostile_tests!(foreign_copy_snapshot);
 hostile_tests!(inline_bidi);
 hostile_tests!(inline_storm);
 hostile_tests!(inline_storm_readable);
+
+hostile_tests!(metadata_depth_1024, metadata_depth_4096);
