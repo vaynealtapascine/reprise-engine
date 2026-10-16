@@ -29,7 +29,7 @@ bytes; session faces survive a workspace refresh; missing-anchor explanations re
 
 **Docs sync (branch `docs/sync-1`).** Reference docs were checked against the code at
 4d99028; see the commits for what changed. Package feature bit **17 is reserved for
-sections** (`crates/format/SPEC.md` has the registry). Four of the audit's claims
+sections** (`crates/format/SPEC.md` has the registry). Some of the audit's claims
 (`doc-drift-f13a4ee`) were false and are not tracked here.
 
 **Known follow-ups, by workstream:**
