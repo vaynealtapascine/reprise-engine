@@ -27,15 +27,19 @@ exists when it is resolved. The app therefore pastes first and deletes second
     conservative bound on the text that stays around the selection. It writes
     nothing. A refusal here leaves the selection untouched, so a bad clipboard
     can never erase selected text.
-2.  *Commit* (`Editor::commit_replacement`): resolve the stable selection **in
-    the current document**, derive the deletion from the resolved ends, write
-    it, write the paste at the start of the range, and end the undo step once.
+2.  *Commit* (`Editor::replace_selection`, which takes the `StagedReplacement`
+    from step 1): resolve the stable selection **in the current document**,
+    derive the deletion from the resolved ends, write it, write the paste at the
+    start of the range, and end the undo step once. The writes and the
+    caret-dependent paste checks first run on an isolated replica
+    (`fork_for_edit`), so a content-dependent refusal leaves the document and
+    its undo history untouched.
 
 Because step 2 resolves the selection, a remote packet imported between 1 and 2
 is simply part of the document the selection is resolved in. The facade
 performs both stages inside one call; the split exists so the kernel (and its
-tests) can prove the property. A single `commit_step` closes the delete and the
-paste together, so there is one undo step.
+tests) can prove the property. A single `Document::commit_step` closes the delete
+and the paste together, so there is one undo step.
 
 The range between the ends is taken in **document order** (the preorder of the
 content tree, the order `State.blocks` lists). A selection that spans blocks
@@ -55,7 +59,7 @@ with what a host that edits concurrently and tracks a selection needs:
     the error. A failing third command changes nothing, not even the revision.
 -   `expected_revision` is a precondition. If the document has moved, the
     batch is refused with `bindings.stale` and nothing is written (the app's
-    `editAnchored` proposal).
+    earlier `editAnchored` proposal; that name is not an engine symbol).
 -   `selection` is mapped through the batch's effects and returned, so the host
     never recomputes a caret from a stale position.
 
@@ -104,12 +108,14 @@ source has, so honest traffic cannot cross:
 -   a source *delta* with a rewritten document id still cannot apply, because it
     depends on operations the copy lacks.
 
-*Known gap.* A relay that rewrites the document id on a source **snapshot**
-packet makes the copy merge it, because a snapshot carries all its own history.
-Packets are not authenticated (see `collaboration.md`), so the relay must keep
-one room per document id. Closing the gap in-band needs a lineage marker in the
-document, which is a new stored form and so a package feature bit; it is left
-as a follow-up.
+*Known gap (narrowed by the review fixes, section 6 below).* Originally a relay
+that rewrote the document id on a source **snapshot** packet made the copy merge
+it, because a snapshot carries all its own history. The durable lineage marker
+(`document1`, sync bit 3 `document-lineage1`) now closes that for framed
+packets: rewriting only the outer document id no longer crosses, including after
+reopen. What remains: packets are not authenticated (see `collaboration.md`), so
+an attacker who rewrites the whole payload still gets through, and the relay
+must keep one room per document id.
 
 The copy may use the same peer id as the source. The two histories are
 independent, so their operation ids can coincide; nothing ever merges them.
@@ -214,7 +220,12 @@ Commands: `batch` (`Batch`), `replace_selection`, `replace_text`,
 `DiagnosticList`, `Mark` (new fields), `ReadingStep` (`start`, `end`),
 `PacketBound`/`maxPacketBytes()`. Worker kinds: `import-copy`,
 `workspace-font`, `workspace-font-settings`, `batch`, `replace`,
-`replace-text`, `diagnostics`. Host protocol (`app/engine/protocol.ts`)
-additions: `importCopy`, `batch`, `replaceClipboard` (selection plus native,
-HTML and text; try native first and fall back on `clipboard.invalid` or
-`clipboard.version`), `diagnostics`, `workspaceFont`.
+`replace-text`, `diagnostics`. The host protocol additions are a **proposal for
+the app repository**: `app/engine/protocol.ts` is not in this repository, and
+none of these camelCase names exists in the engine, which has the worker kinds
+above. The proposal: `importCopy` (worker `import-copy`), `batch`,
+`replaceClipboard` (selection plus native, HTML and text; try native first and
+fall back on `clipboard.invalid` or `clipboard.version`; the worker has
+`replace` for native bytes and `replace-text` for HTML or plain text, so the
+fallback is a second request), `diagnostics`, `workspaceFont` (worker
+`workspace-font`).
