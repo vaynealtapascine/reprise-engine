@@ -330,11 +330,8 @@ impl Document {
     /// Conservative feature detection includes tombstones and unknown values.
     pub fn has_marks(&self) -> bool {
         use loro::{Container, LoroValue, ValueOrContainer};
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return true;
-        };
         // Even an empty root retains the new property operations in history.
-        if roots.contains_key(PATCHES) {
+        if self.has_root(PATCHES) {
             return true;
         }
         let style = |map: &loro::LoroMap| {
@@ -349,7 +346,7 @@ impl Document {
         };
         let mut visited = 0usize;
         for name in ["styles", crate::flow::BREAKS] {
-            if !roots.contains_key(name) {
+            if name != "content" && !self.has_root(name) {
                 continue;
             }
             if let LoroValue::Map(records) = self.doc.get_map(name).get_value() {
@@ -375,7 +372,7 @@ impl Document {
             }
         }
         for name in ["content", "relations"] {
-            if !roots.contains_key(name) {
+            if name != "content" && !self.has_root(name) {
                 continue;
             }
             let tree = self.tree(name);

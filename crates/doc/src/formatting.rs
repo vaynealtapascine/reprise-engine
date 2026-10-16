@@ -277,7 +277,7 @@ impl Document {
     /// `get_tree` materialises it in exported state, so reads that must not
     /// change saved bytes check first.
     pub(crate) fn has_ranges_root(&self) -> bool {
-        matches!(self.doc.get_value(), loro::LoroValue::Map(m) if m.contains_key("ranges"))
+        self.has_root("ranges")
     }
 
     fn build_format_index(&self) -> Result<FormatIndex, DocError> {

@@ -1,7 +1,7 @@
 //! A bounded transfer of authored style roots, independent of clipboard appearance.
 use std::collections::BTreeMap;
 
-use loro::{Container, ContainerType, LoroMap, LoroValue, ValueOrContainer};
+use loro::{Container, LoroMap, LoroValue, ValueOrContainer};
 
 use crate::{DocError, Document};
 
@@ -94,12 +94,9 @@ fn properties(map: &LoroMap, budget: &mut Budget) -> Result<BTreeMap<String, Lor
 
 impl Document {
     fn style_graph_root(&self, name: &str) -> Result<Option<LoroMap>, DocError> {
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return Err(invalid());
-        };
-        match roots.get(name) {
+        match self.doc.get_by_str_path(name) {
             None => Ok(None),
-            Some(LoroValue::Container(id)) if id.container_type() == ContainerType::Map => {
+            Some(ValueOrContainer::Container(loro::Container::Map(_))) => {
                 Ok(Some(self.doc.get_map(name)))
             }
             Some(_) => Err(invalid()),

@@ -560,11 +560,8 @@ impl Document {
             PARAGRAPH_KEYS.iter().any(|k| map.get(k).is_some())
                 || get_str(map, "alignment").as_deref() == Some("justify")
         };
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return true;
-        };
         let mut visited = 0usize;
-        if roots.contains_key("styles") {
+        if self.has_root("styles") {
             let styles = self.doc.get_map("styles");
             for name in styles.keys() {
                 visited += 1;
@@ -578,7 +575,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key(crate::marks::PATCHES) {
+        if self.has_root(crate::marks::PATCHES) {
             let marks = self.doc.get_map(crate::marks::PATCHES);
             for k in marks.keys() {
                 visited += 1;
@@ -590,7 +587,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key(crate::flow::BREAKS)
+        if self.has_root(crate::flow::BREAKS)
             && let LoroValue::Map(records) = self.doc.get_map(crate::flow::BREAKS).get_value()
         {
             for value in records.values() {
@@ -609,7 +606,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key("content") {
+        {
             let tree = self.doc.get_tree("content");
             for id in tree.nodes() {
                 visited += 1;
