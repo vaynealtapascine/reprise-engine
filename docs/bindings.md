@@ -134,6 +134,7 @@ releases it; WASM clients call `release_job` after completion/cancellation.
 | Presentation | `display_page`, `display_json`, `svg`, `png`, `glyph_outlines`, `reading_order`, `diagnostics` |
 | Extensions | `load_plugin`, `install_plugin`, `run_plugin_edit`; WASM `release_plugin` |
 | Collaboration | `sync_info`, `export_updates`, `import_updates`, `awareness`, `validate_awareness` |
+| Collaboration (format 2) | `sync_export`, `sync_import`, `set_selection`, `anchor_selection`, `resolve_selection`, `local_selection`, `presence`, `resolve_presence`, `undo_report`, `redo_report` (WASM exports; the native facade has the same names) |
 
 `glyph_outlines(Payload<GlyphRequest>)` returns, for one face and at most 4,096
 glyph IDs, each glyph's outline as absolute SVG path data in font design units
@@ -208,9 +209,21 @@ The main thread drives explicit steps, leaving room for edits/cancellation betwe
 messages. There are no hidden threads, timers or unbounded pump loops.
 
 Every message is `{ version: 1, data: { id, kind, ... } }`. `id` is a caller
-correlation string. Request kinds are `create`, `open`, `font`, `font-settings`, `asset`, `image`, `edit`, `start`,
-`step`, `cancel`, `save`, `sync-export`, `sync-import`, and `close`. Responses are
-`state`, `asset`, `started`, `layout`, `saved`, `sync`, `ack`, or `error`.
+correlation string. The request and response unions in `worker.ts` are the
+complete list. Request kinds are `create`, `open`, `import-copy`, `workspace-font`,
+`workspace-font-settings`, `batch`, `replace`, `replace-text`, `diagnostics`, `font`,
+`font-settings`, `asset`, `image`, `edit`, `start`, `step`, `cancel`, `outline`,
+`marks`, `annotation`, `annotations-at`, `annotations-in`, `annotations-of-kind`,
+`annotation-geometry`, `page-links`, `atom-rect`, `field-target`, `save`,
+`sync-export`, `sync-info`, `sync-packet-import`, `selection`, `resolve-selection`,
+`presence`, `resolve-presence`, `undo`, `redo`, `sync-import` and `close`.
+Responses are `state`, `edited`, `batched`, `replaced`, `diagnostics`, `face`,
+`asset`, `started`, `layout`, `outline`, `marks`, `annotation`, `annotations`,
+`annotation-geometry`, `page-links`, `atom-rect`, `field-target`, `saved`, `sync`,
+`sync-packet`, `sync-info`, `synced`, `selection`, `resolved-selection`, `presence`,
+`resolved-presence`, `history`, `ack` or `error`. `outline` returns `outline` with
+`headings: Payload<OutlineEntry[]>`; the other kinds are described in the sections
+below.
 An `asset` request carries declaration and bytes; its `asset` response returns
 the content hash for the following `image` insertion request.
 `font-settings` carries `Payload<FontSettings>` and acknowledges a successful
