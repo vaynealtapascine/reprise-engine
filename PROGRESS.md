@@ -2,6 +2,65 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-17: foundations wave 1, review fixes 1, and a docs sync
+
+**Foundations wave 1 (merged on main).** Five reusable building blocks, each with a
+design note and an extension point proved by a second kind:
+
+-   **Annotations** (`docs/annotations.md`): typed range annotations on persistent
+    ranges. Kinds `link` and `comment` (the comment *anchor* only). Package bit 16.
+-   **Plumbing** (`docs/plumbing.md`): atomic `replace_selection`/`replace_text`,
+    `batch` with `expected_revision`, `import_copy`, workspace-level fonts, mark facts,
+    reading-order byte ranges, `PacketBound`/`maxPacketBytes()`.
+-   **Paragraph styles** (`docs/paragraph-styles.md`): indents, spacing, keeps, widows
+    and orphans, justification, per-property unset. Package bit 13.
+-   **Roles and lists** (`docs/roles-and-lists.md`): paragraph roles (`role1`) and
+    derived list numbering. Package bit 14.
+-   **Inline objects and fields** (`docs/inline.md`): U+FFFC atoms with metrics, fields
+    that settle with pagination. Package bit 15.
+
+**Review fixes 1** (`docs/review-fixes-1-report.md`): refused composite edits and
+selection replacement are preflighted on an isolated replica; copies carry a durable
+document lineage (sync bit 3, `document-lineage1`); stable style owners and built-in
+compatibility (package bit 18, sync bits 4 and 5); the packet cap covers total wire
+bytes; session faces survive a workspace refresh; missing-anchor explanations reach
+`diagnostics_for`; table cells, notes and floats honour logical indents
+(`layout.paragraph-context` Warning). The hostile suite has 108 fixtures.
+
+**Docs sync (branch `docs/sync-1`).** Reference docs were checked against the code at
+4d99028; see the commits for what changed. Package feature bit **17 is reserved for
+sections** (`crates/format/SPEC.md` has the registry). Four of the audit's claims
+(`doc-drift-f13a4ee`) were false and are not tracked here.
+
+**Known follow-ups, by workstream:**
+
+-   *Annotations:* thread storage (messages, resolved state) is **not built**, so the
+    host keeps thread contents; suggestions are **not built** (kind, `suggesting`
+    transaction flag, `ResolveSuggestions`, hidden-span layout mode); the per-revision
+    annotation index is rebuilt per edit, and an incremental index is a follow-up;
+    bookmarks are not built.
+-   *Plumbing:* a replacement can't be a batch command, so "replace, then act" features
+    cost two undo steps unless they add a kernel command that plans its own anchors;
+    the host-protocol names in the note (`importCopy`, `replaceClipboard`,
+    `workspaceFont`) are a proposal for the app repository, not engine symbols; the
+    relay must still authenticate and keep one room per document id, because an
+    attacker who rewrites a whole payload defeats lineage (it is not a signature).
+-   *Paragraph styles:* built-in `Header`/`Footer` styles are not built; lists could
+    reference durable style IDs for levels; unmarked legacy built-in names keep a
+    fallback interpretation by policy; sections must join `Plan::needs_trial` before
+    they publish.
+-   *Roles and lists:* captions with sequence numbering, checklists (`checked1`) and
+    cross-references that read a heading's marker are **not built**; a table of
+    contents is only the derived `outline()` view.
+-   *Inline:* `section-heading` and `date` fields, footnote reference markers,
+    equations and mentions are not built; objects live only in flow hosts, not in
+    table, row or cell containers; a paragraph with an object taller than its strut
+    is composed first-fit, not optimally.
+-   *Review fixes:* unmarked legacy binary histories are refused by facade sessions
+    (framed sync only); native callers that mutate `Editor::document()` directly must
+    commit before a composite edit, which is refused otherwise; the app findings from
+    that review are outside this repository.
+
 ## 2026-10-10: supplied engine logo
 
 Added the supplied SVG at `docs/branding/reprise-engine-logo.svg` and displayed
