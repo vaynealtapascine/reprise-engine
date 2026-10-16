@@ -1006,6 +1006,11 @@ Native, WASM and the reference worker expose identical additive sync, stable
 selection, tracked undo/redo and presence APIs. Native sessions can select scoped
 layout workers with `set_layout_threads`; output and work budgets are invariant.
 Existing `Caret`, `Selection` and v1 signatures are unchanged.
+A delta is Loro's JSON change schema, and every count, counter, Lamport timestamp,
+peer, tree target and text position (at its causal version) is checked before the
+store sees it; remote operations are not checked semantically. Readers normalise them
+deterministically, and `Document::audit` reports `collab.*` findings. Stable selections
+and presence (a versioned payload inside the awareness bytes) are additive types.
 The reference worker's local `edit` and `image` responses now use `edited`,
 carrying both `Applied` (created IDs and selection effects) and current `State`.
 

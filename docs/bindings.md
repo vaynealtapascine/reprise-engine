@@ -199,6 +199,41 @@ Awareness is at most 64 KiB of opaque bytes, is scoped to document/peer, and is
 never interpreted or stored. These primitives do not authenticate senders.
 Compact deltas and sync-format negotiation are a follow-up, not v1 behavior.
 
+**Sync packet format 2** is the transport for untrusted peers; v1 stays unchanged
+and readable for trusted legacy peers. The design, the trust model and the post-merge
+invariants are in [collaboration.md](collaboration.md).
+
+-   `sync_export({ since })` returns a `SyncPacket`. Pass the receiver's vector for a
+    delta of what it lacks, or `null` for a full snapshot (first join).
+-   The packet's `format`, `features`, `kind`, `since` and `vector` mirror its binary
+    frame in `content`, so a transport can route without decoding. `sync_import`
+    refuses a packet whose mirror disagrees with its frame (`bindings.invalid`), one for
+    another document (`bindings.id`), one from the receiver's own peer
+    (`bindings.invalid`), and one from another durable document lineage or from the
+    document this one was copied from (`bindings.copy-source`).
+-   A refused packet changes nothing and keeps its core code, all `Error`:
+    -   `sync.format`, `sync.feature`: unsupported frame version or feature set.
+    -   `sync.missing`: dependencies are missing. Request a delta since
+        `sync_info().data.vector`.
+    -   `sync.invalid`, `sync.local-peer`: a malformed or impersonating sender.
+    -   `sync.limit`: over a bound. Send a snapshot, or use v1 for a trusted peer.
+    -   `sync.store`: the store refused a packet that passed every check.
+-   Replays are harmless and report `changed: false`.
+-   `SyncReport` lists the changed blocks (possibly more than changed, never fewer),
+    structure, styles, relations and ranges. It also returns the local selection
+    anchored with `set_selection`, transformed by the import (`selection_moved` says
+    whether it had to move); `undo_report` and `redo_report` do the same for undo and
+    redo, and `local_selection` resolves it now.
+-   `anchor_selection` and `resolve_selection` convert explicitly between a
+    `Selection` and a `StableSelection` (opaque hex anchors, scoped to this document).
+-   `presence({ selection, meta })` builds awareness bytes. `meta` holds at most 16
+    entries, with keys of at most 64 bytes and values of at most 1 KiB.
+    `resolve_presence(awareness)` returns the peer's metadata, its resolved selection,
+    and `caret` and `rects` when a current layout exists. Garbage, foreign or stale
+    presence gives an empty view, never an error.
+-   Bounds: packet bodies 32 MiB (`maxPacketBytes()`), 1,000,000 changes and 4,000,000
+    operation atoms; vectors 4,096 entries; counters and Lamport timestamps below 2^30.
+
 ## Worker protocol
 
 [`worker.ts`](../crates/reprise-wasm/ts/worker.ts) is a dependency-free reference,
