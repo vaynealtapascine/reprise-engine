@@ -20,6 +20,8 @@ pub(crate) mod attach;
 mod combo_tests;
 pub(crate) mod compose;
 #[cfg(test)]
+mod incremental_tests;
+#[cfg(test)]
 mod layout_tests;
 #[cfg(test)]
 mod tests;

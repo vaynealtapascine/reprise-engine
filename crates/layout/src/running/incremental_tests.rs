@@ -7,7 +7,13 @@ use reprise_geom::Length;
 use serde_json::json;
 
 /// Twelve one-paragraph pages with a header, a footer and a background.
-fn twelve() -> (crate::Engine, reprise_doc::Document, Vec<NodeId>, NodeId, NodeId) {
+fn twelve() -> (
+    crate::Engine,
+    reprise_doc::Document,
+    Vec<NodeId>,
+    NodeId,
+    NodeId,
+) {
     let (engine, doc) = setup();
     let head = story(&doc, &["Running head"]);
     let foot = story(&doc, &["Footer"]);
@@ -39,10 +45,14 @@ fn full_equals_incremental_after_body_header_style_image_and_geometry_edits() {
     let (mut engine, doc, nodes, head, foot) = twelve();
     let hash = engine
         .assets
-        .insert(include_bytes!("../../../../fixtures/images/red-1x1.png"))
+        .insert(&include_bytes!("../../../../fixtures/images/red-1x1.png")[..])
         .unwrap();
     let image = doc
-        .append_image("s", &reprise_doc::image::ImageData::new(hash.clone()), "alt")
+        .append_image(
+            "s",
+            &reprise_doc::image::ImageData::new(hash.clone()),
+            "alt",
+        )
         .unwrap();
     doc.commit();
     let mut session = LayoutSession::new(&engine);
@@ -102,7 +112,11 @@ fn an_unaffected_prefix_and_suffix_are_reused() {
     let mut session = LayoutSession::new(&engine);
     let baseline = session.layout(&doc).unwrap();
     assert_eq!(baseline.pages.len(), 12);
-    assert_eq!(session.counters().running_compositions, 3, "header, footer, background once each");
+    assert_eq!(
+        session.counters().running_compositions,
+        3,
+        "header, footer, background once each"
+    );
 
     // A body edit recomposes that paragraph only; the other transitions hit.
     edit_text(&doc, nodes[8], "edit ");
@@ -196,7 +210,12 @@ fn a_partial_view_never_shows_a_page_without_its_regions() {
         let s = partial.snapshot();
         if let Some(m) = &s.sections {
             for page in 0..s.pages.len() {
-                let on = |slot: &str| m.running.iter().filter(|r| r.page == page && r.slot == slot).count();
+                let on = |slot: &str| {
+                    m.running
+                        .iter()
+                        .filter(|r| r.page == page && r.slot == slot)
+                        .count()
+                };
                 // Every page that is shown has all three of its instances, and
                 // every instance's frame and lines are in the view.
                 assert_eq!(
@@ -209,7 +228,12 @@ fn a_partial_view_never_shows_a_page_without_its_regions() {
             for r in &m.running {
                 assert!(r.page < s.pages.len());
                 assert!(r.frame < s.frames.len());
-                assert!(r.blocks.iter().flat_map(|b| &b.lines).all(|l| l.frame == r.frame));
+                assert!(
+                    r.blocks
+                        .iter()
+                        .flat_map(|b| &b.lines)
+                        .all(|l| l.frame == r.frame)
+                );
             }
         }
         if step.complete {
