@@ -3665,3 +3665,108 @@ pub fn inline_fields_with_oscillating_regions() -> Result<Fixture, DocError> {
         &["layout.region-cycle"],
     ))
 }
+
+/// Running regions: variants, a tall clipped header, an empty story, a
+/// background, a deleted story, a story holding a note, bad distances and keys.
+/// Dedicated until S9 carries sections through the shared roundtrip.
+pub fn sections_regions_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::NewBlock;
+    use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
+    let doc = document()?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(Length::from_pt(300)),
+        height: Some(Length::from_pt(300)),
+        top: Some(Length::from_pt(36)),
+        right: Some(Length::from_pt(36)),
+        bottom: Some(Length::from_pt(36)),
+        left: Some(Length::from_pt(36)),
+    })?;
+    let story = |texts: &[&str]| -> Result<NodeId, DocError> {
+        let blocks: Vec<_> = texts
+            .iter()
+            .map(|t| NewBlock::new(BlockKind::Paragraph, "body", t))
+            .collect();
+        doc.create_story(&blocks)
+    };
+    let head = story(&["Running head", "second line", "third line"])?;
+    let tall = story(&[&"tall first-page header ".repeat(400)])?;
+    let nothing = doc.create_story(&[])?;
+    let foot = story(&["Footer"])?;
+    let mark = story(&["DRAFT"])?;
+    let ghost = story(&["deleted"])?;
+    let unsupported = doc.create_story(&[
+        NewBlock::new(BlockKind::Paragraph, "body", "supported"),
+        NewBlock::new(BlockKind::Annotation, "note", "a note in a story"),
+    ])?;
+    doc.delete_block(ghost)?;
+    let bind = |story: NodeId| story.to_string();
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &SectionProperties::from([
+            ("region.header.default".into(), bind(head).into()),
+            ("region.header.first".into(), bind(tall).into()),
+            ("region.header.even".into(), bind(nothing).into()),
+            ("region.footer.default".into(), bind(foot).into()),
+            ("region.background.default".into(), bind(mark).into()),
+            ("region.first".into(), true.into()),
+            ("region.even".into(), true.into()),
+            ("header.distance".into(), 2048.into()),
+        ]),
+        &[],
+    )?;
+    let nodes: Vec<_> = (0..5)
+        .map(|i| {
+            doc.append_block(
+                BlockKind::Paragraph,
+                "body",
+                &format!("Page {i} body text."),
+            )
+        })
+        .collect::<Result<_, _>>()?;
+    for node in &nodes[1..3] {
+        let life = doc.mint_lifetime(*node)?;
+        doc.activate_start(
+            *node,
+            &life,
+            BreakKind::Page,
+            &SectionProperties::from([("break".into(), "page".into())]),
+        )?;
+    }
+    for (node, own) in [
+        (
+            nodes[3],
+            SectionProperties::from([
+                ("break".into(), "section".into()),
+                ("region.header.default".into(), bind(ghost).into()),
+                ("region.footer.default".into(), "".into()),
+                ("header.distance".into(), (-5).into()),
+                ("region.header.writing-mode".into(), "vertical-rl".into()),
+                ("region.margin.default".into(), "bogus".into()),
+            ]),
+        ),
+        (
+            nodes[4],
+            SectionProperties::from([
+                ("break".into(), "section".into()),
+                ("region.header.default".into(), bind(unsupported).into()),
+            ]),
+        ),
+    ] {
+        let life = doc.mint_lifetime(node)?;
+        doc.activate_start(node, &life, BreakKind::Section, &own)?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "sections_regions_hostile",
+        doc,
+        &[
+            "layout.running-clipped",
+            "layout.running-missing",
+            "layout.story-unsupported",
+            "section.property",
+            "section.region-writing-mode",
+            "section.region-slot",
+        ],
+    ))
+}

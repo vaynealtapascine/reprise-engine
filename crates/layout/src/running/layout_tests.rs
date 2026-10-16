@@ -6,7 +6,7 @@ use reprise_font::{Face, FontStore};
 use reprise_geom::Length;
 use serde_json::{Value, json};
 
-pub(super) fn setup() -> (Engine, Document) {
+pub(crate) fn setup() -> (Engine, Document) {
     let mut fonts = FontStore::default();
     fonts.add(
         Face::from_bytes(
@@ -37,7 +37,7 @@ pub(super) fn setup() -> (Engine, Document) {
     (engine, doc)
 }
 
-pub(super) fn story(doc: &Document, texts: &[&str]) -> NodeId {
+pub(crate) fn story(doc: &Document, texts: &[&str]) -> NodeId {
     let blocks: Vec<_> = texts
         .iter()
         .map(|t| NewBlock::new(BlockKind::Paragraph, "s", t))
@@ -45,35 +45,35 @@ pub(super) fn story(doc: &Document, texts: &[&str]) -> NodeId {
     doc.create_story(&blocks).unwrap()
 }
 
-pub(super) fn props(entries: &[(&str, Value)]) -> SectionProperties {
+pub(crate) fn props(entries: &[(&str, Value)]) -> SectionProperties {
     entries
         .iter()
         .map(|(k, v)| ((*k).into(), v.clone()))
         .collect()
 }
 
-pub(super) fn first(doc: &Document, entries: &[(&str, Value)]) {
+pub(crate) fn first(doc: &Document, entries: &[(&str, Value)]) {
     doc.write_section_properties(SectionId::First, "0", &props(entries), &[])
         .unwrap();
 }
 
-pub(super) fn bind(story: NodeId) -> Value {
+pub(crate) fn bind(story: NodeId) -> Value {
     json!(story.to_string())
 }
 
-pub(super) fn boundary(doc: &Document, node: NodeId, kind: BreakKind, entries: &[(&str, Value)]) {
+pub(crate) fn boundary(doc: &Document, node: NodeId, kind: BreakKind, entries: &[(&str, Value)]) {
     let mut own = props(entries);
     own.insert("break".into(), json!(kind.token()));
     let life = doc.mint_lifetime(node).unwrap();
     doc.activate_start(node, &life, kind, &own).unwrap();
 }
 
-pub(super) fn body(doc: &Document, text: &str) -> NodeId {
+pub(crate) fn body(doc: &Document, text: &str) -> NodeId {
     doc.append_block(BlockKind::Paragraph, "s", text).unwrap()
 }
 
 /// `count` one-line paragraphs, each its own page: a page break before each.
-pub(super) fn pages(doc: &Document, count: usize) -> Vec<NodeId> {
+pub(crate) fn pages(doc: &Document, count: usize) -> Vec<NodeId> {
     let nodes: Vec<_> = (0..count)
         .map(|i| body(doc, &format!("page {i}")))
         .collect();
@@ -83,14 +83,14 @@ pub(super) fn pages(doc: &Document, count: usize) -> Vec<NodeId> {
     nodes
 }
 
-pub(super) fn instances<'a>(s: &'a LayoutSnapshot, slot: &str) -> Vec<&'a crate::RunningInstance> {
+pub(crate) fn instances<'a>(s: &'a LayoutSnapshot, slot: &str) -> Vec<&'a crate::RunningInstance> {
     s.sections
         .as_ref()
         .map(|m| m.running.iter().filter(|r| r.slot == slot).collect())
         .unwrap_or_default()
 }
 
-pub(super) fn text_of(instance: &crate::RunningInstance) -> String {
+pub(crate) fn text_of(instance: &crate::RunningInstance) -> String {
     instance
         .blocks
         .iter()

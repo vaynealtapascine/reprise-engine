@@ -103,15 +103,6 @@ pub(crate) struct Shared {
     prepared: crate::incremental::Evaluation,
 }
 
-/// What a section's pages show in their regions, as a memo key: the effective
-/// bindings, the variant switches and the inputs of every bound story.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RunningKey {
-    bindings: super::SectionBindings,
-    switches: (bool, bool),
-    stories: Vec<(NodeId, DigestRef)>,
-}
-
 /// What `compose` needs to know about the frame and the page it is on.
 pub(crate) struct Request<'a> {
     pub engine: &'a Engine,
@@ -129,9 +120,13 @@ pub(crate) struct Request<'a> {
 }
 
 impl Shared {
-    /// A new job reads a possibly different document: forget its digests.
+    /// A new job reads a possibly different document: forget its digests and
+    /// start its counts.
     pub fn begin_job(&self) {
-        self.memo.borrow_mut().digests.clear();
+        let mut memo = self.memo.borrow_mut();
+        memo.digests.clear();
+        memo.compositions = 0;
+        memo.reused = 0;
     }
     /// A document edit that raced a job can leave anything in the memo.
     pub fn clear(&self) {
@@ -142,25 +137,6 @@ impl Shared {
     pub fn counts(&self) -> (usize, usize) {
         let m = self.memo.borrow();
         (m.compositions, m.reused)
-    }
-
-    /// The key of what a section's pages show.
-    pub fn key(
-        &self,
-        doc: &Document,
-        bindings: &super::SectionBindings,
-        switches: (bool, bool),
-    ) -> RunningKey {
-        let stories = bindings
-            .stories()
-            .into_iter()
-            .map(|s| (s, DigestRef(self.digest(doc, s))))
-            .collect();
-        RunningKey {
-            bindings: bindings.clone(),
-            switches,
-            stories,
-        }
     }
 
     fn digest(&self, doc: &Document, story: NodeId) -> Rc<Digest> {
@@ -328,7 +304,7 @@ impl Shared {
             blocks: std::mem::take(&mut scratch.blocks),
             used,
             empty: digest.nodes.is_empty() && !digest.omitted,
-            clipped: clipped || !unsupported.is_empty(),
+            clipped,
             unsupported,
             notes,
             reads,
@@ -345,13 +321,18 @@ fn still_valid(entry: &Entry, request: &Request<'_>) -> bool {
     {
         return false;
     }
-    reads.fields.iter().all(|(id, was)| {
+    reads.fields.iter().all(|(read, was)| {
+        // The entry may have been composed for another page: the same object
+        // on this page is the same object of the same slot.
         let key = crate::inline::FieldKey {
-            id: *id,
-            instance: FieldInstance::Running {
-                page: u32::try_from(request.page).unwrap_or(u32::MAX),
-                slot: request.slot,
-                repeat: 0,
+            id: read.id,
+            instance: match read.instance {
+                FieldInstance::Running { slot, repeat, .. } => FieldInstance::Running {
+                    page: u32::try_from(request.page).unwrap_or(u32::MAX),
+                    slot,
+                    repeat,
+                },
+                other => other,
             },
         };
         let _ = entry.page;
@@ -419,11 +400,11 @@ pub(crate) fn place(
         .map(|mut block| {
             for line in &mut block.lines {
                 line.frame = frame;
-                line.rect.origin.y = line.rect.origin.y + by;
-                line.baseline = line.baseline + by;
+                line.rect.origin.y += by;
+                line.baseline += by;
                 for atom in &mut line.atoms {
-                    atom.rect.origin.y = atom.rect.origin.y + by;
-                    atom.baseline = atom.baseline + by;
+                    atom.rect.origin.y += by;
+                    atom.baseline += by;
                     if matches!(atom.instance, FieldInstance::Running { .. }) {
                         atom.instance = instance;
                     }

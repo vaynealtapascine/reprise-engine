@@ -26,6 +26,9 @@ pub(crate) struct Ctx<'a> {
     pub doc: &'a Document,
     pub plan: &'a Plan,
     pub shared: &'a Shared,
+    /// Whether a filler page made now shows the owner's regions: the policy
+    /// of the section whose start requested it, not of the page's owner.
+    pub filler_regions: bool,
 }
 
 struct Part {
@@ -37,6 +40,27 @@ struct Part {
     /// Bottom-aligned content (a footer) is shifted down inside its frame.
     shift: Length,
     clipped: bool,
+}
+
+/// Everything a page's regions are a function of, besides the stories and the
+/// plan's field values: where the page is and who owns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PageSpec {
+    pub section: SectionId,
+    pub life: String,
+    pub kind: PageKind,
+    pub first_owned: bool,
+    /// 0-based physical index.
+    pub page: usize,
+    pub filler_regions: bool,
+}
+
+/// What a page's regions came to, without their text: the room they took, and
+/// which story is where. A memoised transition is valid while this is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Outcome {
+    reserve: (Length, Length),
+    parts: Vec<(SlotId, Variant, NodeId, Rect<PageSpace>)>,
 }
 
 /// A page's regions, composed but not yet in the snapshot.
@@ -94,7 +118,7 @@ pub(crate) fn prepare(
         return None;
     }
     let filler = kind == PageKind::Filler;
-    if filler && !section.filler_running {
+    if filler && !ctx.filler_regions {
         return None;
     }
     let facts = PageFacts {
@@ -190,8 +214,9 @@ pub(crate) fn prepare(
         } else {
             Length::ZERO
         };
-        let clipped = composed.clipped || composed.used > cap || (capped && composed.used > depth);
-        if clipped {
+        let omitted = composed.clipped || composed.used > cap || (capped && composed.used > depth);
+        let clipped = omitted || !composed.unsupported.is_empty();
+        if omitted {
             notes.push(diagnostic(
                 Severity::Error,
                 "layout.running-clipped",
@@ -252,14 +277,77 @@ fn length(v: i64) -> Length {
     super::length(v)
 }
 
+/// Composes the regions of `spec` again, for a transition that read them. The
+/// outer `None` means the page's owner is no longer what it was, so the read
+/// cannot hold.
+pub(crate) fn outcome_of(
+    ctx: &Ctx<'_>,
+    table: &Table,
+    spec: &PageSpec,
+) -> Option<Option<Outcome>> {
+    let section = table.get(spec.section)?;
+    if section.life() != spec.life {
+        return None;
+    }
+    let index = *table.by_id.get(&spec.section)?;
+    let ctx = Ctx {
+        filler_regions: spec.filler_regions,
+        ..*ctx
+    };
+    Some(
+        prepare(
+            &ctx,
+            table,
+            index,
+            section,
+            spec.page,
+            spec.kind,
+            spec.first_owned,
+        )
+        .map(|r| r.outcome()),
+    )
+}
+
+/// Puts the regions of replayed page `page` back: its frames came with the
+/// replay, so only the instances and what they reported are made again.
+pub(crate) fn reinstall(ctx: &Ctx<'_>, table: &Table, snapshot: &mut LayoutSnapshot, page: usize) {
+    let Some(descriptor) = snapshot.sections.as_ref().and_then(|s| s.pages.get(page)) else {
+        return;
+    };
+    let (owner, kind, first_owned) = (descriptor.section, descriptor.kind, descriptor.first_owned);
+    let Some(section) = table.get(owner) else {
+        return;
+    };
+    let Some(&index) = table.by_id.get(&owner) else {
+        return;
+    };
+    // A filler shows regions only on its requester's say-so; a replayed
+    // filler is never inside a paragraph's delta, so this is the normal case.
+    if let Some(regions) = prepare(ctx, table, index, section, page, kind, first_owned) {
+        regions.reinstall(snapshot, page);
+    }
+}
+
 impl PageRegions {
+    pub fn outcome(&self) -> Outcome {
+        Outcome {
+            reserve: self.reserve,
+            parts: self
+                .parts
+                .iter()
+                .map(|p| (p.slot, p.variant, p.story, p.rect))
+                .collect(),
+        }
+    }
+
     /// Adds the region frames, instances and notes of `page` to the snapshot.
     /// The body frames are the template's, made by the caller.
     pub fn install(self, snapshot: &mut LayoutSnapshot, page: usize) {
-        let mut instances = Vec::new();
-        for part in self.parts {
+        let mut frames = Vec::new();
+        for part in &self.parts {
             let role = role_of(part.slot);
             let index = snapshot.frames.len();
+            frames.push(Some(index));
             snapshot.frames.push(FrameLayout {
                 name: role.clone(),
                 role: FrameRole::Flow(role),
@@ -272,6 +360,31 @@ impl PageRegions {
                 ),
                 writing_mode: WritingMode::HorizontalTb,
             });
+        }
+        self.add_instances(snapshot, page, &frames);
+    }
+
+    /// Adds the instances of a page whose region frames are already in the
+    /// snapshot, found by their role.
+    pub fn reinstall(self, snapshot: &mut LayoutSnapshot, page: usize) {
+        let frames: Vec<_> = self
+            .parts
+            .iter()
+            .map(|part| {
+                let role = FrameRole::Flow(role_of(part.slot));
+                snapshot
+                    .frames
+                    .iter()
+                    .rposition(|f| f.page == page && f.role == role)
+            })
+            .collect();
+        self.add_instances(snapshot, page, &frames);
+    }
+
+    fn add_instances(self, snapshot: &mut LayoutSnapshot, page: usize, frames: &[Option<usize>]) {
+        let mut instances = Vec::new();
+        for (part, index) in self.parts.into_iter().zip(frames) {
+            let Some(index) = *index else { continue };
             let instance = crate::FieldInstance::Running {
                 page: u32::try_from(page).unwrap_or(u32::MAX),
                 slot: part.slot,
@@ -338,7 +451,7 @@ pub(crate) fn cut(
             continue;
         }
         changed = true;
-        frame.y = frame.y + (new_start - start);
+        frame.y += new_start - start;
         let extent = new_end - new_start;
         if vertical_block {
             frame.depth = extent;

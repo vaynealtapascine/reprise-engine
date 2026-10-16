@@ -162,6 +162,7 @@ fn running_ctx<'x>(
         doc,
         plan,
         shared,
+        filler_regions: false,
     })
 }
 
@@ -339,6 +340,8 @@ impl Cursor {
             doc,
             running,
             fields: None,
+            log: Default::default(),
+            field_log: Default::default(),
             evaluation: None,
             previous: None,
             template,
@@ -482,16 +485,8 @@ impl Cursor {
                 && let Some(table) = flow.section_table.clone().filter(|s| s.enabled)
                 && let Some(section) = table.get(owner)
             {
-                let ctx = running_ctx(&flow.running, &table, engine, doc, plan);
-                crate::pages::PageFactory::push_section(
-                    engine,
-                    &table,
-                    section,
-                    kind,
-                    flow.snapshot,
-                    ctx.as_ref(),
-                )
-                .is_some()
+                let index = table.by_id.get(&section.id()).copied();
+                index.is_some_and(|index| flow.open_page(&table, index, kind, false).is_some())
             } else {
                 flow.new_page()
             };
@@ -528,6 +523,8 @@ impl Cursor {
             doc,
             running: self.running,
             fields: self.fields,
+            log: Default::default(),
+            field_log: Default::default(),
             template: self.template,
             snapshot,
             plan,
@@ -576,6 +573,10 @@ pub(crate) struct Flow<'a> {
     pub(crate) doc: &'a Document,
     running: Option<std::rc::Rc<crate::running::compose::Shared>>,
     fields: Option<FieldContext>,
+    /// What the paragraph in progress has read from the plan, for the memo.
+    log: std::cell::RefCell<Option<Vec<crate::reads::PlanRead>>>,
+    /// The field values it composed with (folded into `log` when taken).
+    field_log: std::cell::RefCell<crate::inline::Reads>,
     pub(crate) pending: Vec<Pending>,
     pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
     pub(crate) previous: Option<NodeId>,
@@ -722,20 +723,16 @@ impl Flow<'_> {
                 };
                 if parity.is_some_and(|parity| {
                     (self.snapshot.pages.len().saturating_add(1) % 2) != parity
-                }) && let Some(owner) = table.sections.get(self.section)
-                    && {
-                        let ctx =
-                            running_ctx(&self.running, &table, self.engine, self.doc, self.plan);
-                        crate::pages::PageFactory::push_section(
-                            self.engine,
+                }) && table.sections.get(self.section).is_some()
+                    // The filler policy is the requesting (incoming) section's.
+                    && self
+                        .open_page(
                             &table,
-                            owner,
+                            self.section,
                             crate::PageKind::Filler,
-                            self.snapshot,
-                            ctx.as_ref(),
+                            section.filler_running,
                         )
                         .is_none()
-                    }
                 {
                     self.page_limit();
                     return;
@@ -960,22 +957,6 @@ impl Flow<'_> {
         }
     }
 
-    /// What the running regions of a page this flow may make depend on, for
-    /// memo keys. `None` for documents without regions.
-    pub(crate) fn running_key(
-        &self,
-        doc: &Document,
-    ) -> Option<crate::running::compose::RunningKey> {
-        let shared = self.running.as_deref()?;
-        let table = self.section_table.as_ref().filter(|s| s.enabled)?;
-        let bindings = table
-            .running
-            .of(self.section)
-            .filter(|_| table.running.any())?;
-        let section = table.sections.get(self.section)?;
-        Some(shared.key(doc, bindings, (section.region_first, section.region_even)))
-    }
-
     /// Adds what running regions reported to the diagnostics, once each.
     fn merge_running_notes(&mut self) {
         let Some(sections) = self.snapshot.sections.as_mut() else {
@@ -994,6 +975,52 @@ impl Flow<'_> {
         }
     }
 
+    /// Makes the next page of section `index`: its regions are composed, what
+    /// they came to is noted for the memo, and the factory makes the page. The
+    /// template its body frames came from is returned.
+    fn open_page(
+        &mut self,
+        table: &std::sync::Arc<crate::sections::Table>,
+        index: usize,
+        kind: crate::PageKind,
+        filler_regions: bool,
+    ) -> Option<std::sync::Arc<ResolvedTemplate>> {
+        let section = table.sections.get(index)?;
+        let page = self.snapshot.pages.len();
+        let first_owned = crate::running::attach::first_owned(self.snapshot, section.id(), kind);
+        let ctx = running_ctx(&self.running, table, self.engine, self.doc, self.plan).map(|c| {
+            crate::running::attach::Ctx {
+                filler_regions,
+                ..c
+            }
+        });
+        let regions = ctx.as_ref().and_then(|ctx| {
+            crate::running::attach::prepare(ctx, table, index, section, page, kind, first_owned)
+        });
+        if ctx.is_some() {
+            self.read(|| crate::reads::PlanRead::Regions {
+                spec: crate::running::attach::PageSpec {
+                    section: section.id(),
+                    life: section.life().into(),
+                    kind,
+                    first_owned,
+                    page,
+                    filler_regions,
+                },
+                outcome: regions.as_ref().map(|r| r.outcome()),
+            });
+        }
+        crate::pages::PageFactory::push_prepared(
+            self.engine,
+            table,
+            section,
+            kind,
+            self.snapshot,
+            first_owned,
+            regions,
+        )
+    }
+
     /// Makes the next page from the template, unless the limit is reached.
     fn new_page(&mut self) -> bool {
         if !self.source.can_page() {
@@ -1002,18 +1029,8 @@ impl Flow<'_> {
         let base = self.snapshot.frames.len();
         let mut page_template = None;
         let pushed = if let Some(table) = self.section_table.clone().filter(|s| s.enabled) {
-            let ctx = running_ctx(&self.running, &table, self.engine, self.doc, self.plan);
-            table.sections.get(self.section).is_some_and(|section| {
-                page_template = crate::pages::PageFactory::push_section(
-                    self.engine,
-                    &table,
-                    section,
-                    crate::PageKind::Content,
-                    self.snapshot,
-                    ctx.as_ref(),
-                );
-                page_template.is_some()
-            })
+            page_template = self.open_page(&table, self.section, crate::PageKind::Content, false);
+            page_template.is_some()
         } else {
             crate::pages::PageFactory::push(self.engine, &self.template, self.snapshot)
         };
@@ -1128,11 +1145,19 @@ impl Flow<'_> {
         })
     }
     pub(crate) fn exclusions(&self, index: usize) -> Option<Vec<Rect<FrameSpace>>> {
-        let mut boxes = self
-            .frame_reference(index)
-            .and_then(|frame| self.plan.exclusions_for(&frame))
-            .cloned()
-            .unwrap_or_default();
+        let frame = self.frame_reference(index);
+        let own = frame
+            .as_ref()
+            .and_then(|frame| self.plan.exclusions_for(frame))
+            .cloned();
+        if let Some(frame) = &frame {
+            self.read(|| crate::reads::PlanRead::Exclusions {
+                addr: frame.address.clone(),
+                provenance: frame.provenance.clone(),
+                value: own.clone(),
+            });
+        }
+        let mut boxes = own.unwrap_or_default();
         boxes.extend(
             self.plan
                 .physical_exclusions_for(&self.catalog, self.snapshot, index),
@@ -1140,10 +1165,19 @@ impl Flow<'_> {
         (!boxes.is_empty()).then_some(boxes)
     }
     pub(crate) fn depth(&self, index: usize, full: Length) -> Length {
+        let frame = self.frame_reference(index);
+        let reserved = frame
+            .as_ref()
+            .and_then(|frame| self.plan.reservation_for(frame));
+        if let Some(frame) = &frame {
+            self.read(|| crate::reads::PlanRead::Reservation {
+                addr: frame.address.clone(),
+                provenance: frame.provenance.clone(),
+                value: reserved,
+            });
+        }
         (full
-            - self
-                .frame_reference(index)
-                .and_then(|frame| self.plan.reservation_for(&frame))
+            - reserved
                 .unwrap_or_default()
                 .max(
                     self.plan
@@ -1390,8 +1424,6 @@ pub(crate) struct Mark {
     blocks: usize,
     diagnostics: usize,
     tail: usize,
-    running: usize,
-    notes: usize,
 }
 impl Flow<'_> {
     pub(crate) fn position_key(&self) -> PositionKey {
@@ -1433,13 +1465,69 @@ impl Flow<'_> {
                 env.trace = ctx.trace.as_deref();
                 env
             }
-            None => crate::inline::FieldEnv::at(
-                self.page,
-                self.page.saturating_add(1),
-                crate::inline::FieldInstance::Single,
-                Some(&self.plan.fields),
-            ),
+            None => {
+                let mut env = crate::inline::FieldEnv::at(
+                    self.page,
+                    self.page.saturating_add(1),
+                    crate::inline::FieldInstance::Single,
+                    Some(&self.plan.fields),
+                );
+                env.trace = self.recording().then_some(&self.field_log);
+                env
+            }
         }
+    }
+
+    /// Whether a paragraph's reads are being recorded.
+    fn recording(&self) -> bool {
+        self.log.borrow().is_some()
+    }
+
+    /// Notes one read, built only when recording.
+    pub(crate) fn read(&self, read: impl FnOnce() -> crate::reads::PlanRead) {
+        if let Some(log) = self.log.borrow_mut().as_mut() {
+            crate::reads::note(log, read());
+        }
+    }
+
+    /// Starts recording, continuing from `earlier` reads.
+    pub(crate) fn record_from(&self, earlier: Vec<crate::reads::PlanRead>) {
+        *self.log.borrow_mut() = Some(earlier);
+    }
+
+    /// Stops recording and returns everything read: plan entries, then field
+    /// values.
+    pub(crate) fn take_reads(&self) -> Vec<crate::reads::PlanRead> {
+        let mut reads = self.log.borrow_mut().take().unwrap_or_default();
+        let fields = std::mem::take(&mut *self.field_log.borrow_mut());
+        for (key, value) in fields.fields {
+            crate::reads::note(&mut reads, crate::reads::PlanRead::Field { key, value });
+        }
+        reads
+    }
+
+    /// Whether every read of a memoised transition still holds: the plan
+    /// entries answer as they did, and the regions of the pages it made come to
+    /// the same.
+    pub(crate) fn reads_hold(&self, reads: &[crate::reads::PlanRead]) -> bool {
+        reads.iter().all(|read| match read.holds(self.plan) {
+            Some(holds) => holds,
+            None => {
+                let crate::reads::PlanRead::Regions { spec, outcome } = read else {
+                    return false;
+                };
+                let Some(table) = self.section_table.as_ref() else {
+                    return false;
+                };
+                match running_ctx(&self.running, table, self.engine, self.doc, self.plan) {
+                    Some(ctx) => {
+                        crate::running::attach::outcome_of(&ctx, table, spec).as_ref()
+                            == Some(outcome)
+                    }
+                    None => outcome.is_none(),
+                }
+            }
+        })
     }
 
     pub(crate) fn plan(&self) -> &Plan {
@@ -1452,12 +1540,6 @@ impl Flow<'_> {
             blocks: self.snapshot.blocks.len(),
             diagnostics: self.snapshot.diagnostics.len(),
             tail: self.page_base.last().copied().unwrap_or(0),
-            running: self
-                .snapshot
-                .sections
-                .as_ref()
-                .map_or(0, |s| s.running.len()),
-            notes: self.snapshot.sections.as_ref().map_or(0, |s| s.notes.len()),
         }
     }
     fn delta(&self, before: Mark) -> Delta {
@@ -1473,8 +1555,10 @@ impl Flow<'_> {
                 .as_ref()
                 .map(|s| crate::SectionsLayout {
                     pages: s.pages.get(before.pages..).unwrap_or_default().to_vec(),
-                    running: s.running.get(before.running..).unwrap_or_default().to_vec(),
-                    notes: s.notes.get(before.notes..).unwrap_or_default().to_vec(),
+                    // Instances and what they reported are made again from the
+                    // running memo when the transition is replayed.
+                    running: Vec::new(),
+                    notes: Vec::new(),
                     rules: s
                         .rules
                         .iter()
@@ -1528,12 +1612,29 @@ impl Flow<'_> {
             tail: before.tail,
         }
     }
+    /// Makes the running instances of replayed pages again, from the running
+    /// memo: a transition that made a page is replayed when what the page's
+    /// regions came to is unchanged, and their text may not be.
+    fn reinstall_regions(&mut self, from: usize) {
+        let Some(table) = self.section_table.clone() else {
+            return;
+        };
+        let Some(ctx) = running_ctx(&self.running, &table, self.engine, self.doc, self.plan)
+        else {
+            return;
+        };
+        for page in from..self.snapshot.pages.len() {
+            crate::running::attach::reinstall(&ctx, &table, self.snapshot, page);
+        }
+    }
     fn apply_delta(&mut self, delta: Delta) -> bool {
+        let first_replayed = self.snapshot.pages.len();
         if !crate::pages::PageFactory::replay(self.engine, self.snapshot, delta.pages, delta.frames)
         {
             return false;
         }
         crate::pages::PageFactory::replay_sections(self.snapshot, delta.sections);
+        self.reinstall_regions(first_replayed);
         self.catalog.extend(self.snapshot);
         self.snapshot.blocks.extend(delta.blocks);
         self.snapshot.diagnostics.extend(delta.diagnostics);

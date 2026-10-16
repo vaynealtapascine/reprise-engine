@@ -217,17 +217,34 @@ impl PageFactory {
             return None;
         }
         let page = snapshot.pages.len();
+        let first_owned = crate::running::attach::first_owned(snapshot, section.id(), kind);
+        let regions = running.and_then(|ctx| {
+            let index = *sections.by_id.get(&section.id())?;
+            crate::running::attach::prepare(ctx, sections, index, section, page, kind, first_owned)
+        });
+        Self::push_prepared(engine, sections, section, kind, snapshot, first_owned, regions)
+    }
+    /// As [`Self::push_section`], with the page's regions already composed
+    /// (the flow records what they came to for its memo).
+    pub fn push_prepared(
+        engine: &Engine,
+        sections: &crate::sections::Table,
+        section: &crate::sections::Section,
+        kind: crate::PageKind,
+        snapshot: &mut LayoutSnapshot,
+        first_owned: bool,
+        regions: Option<crate::running::attach::PageRegions>,
+    ) -> Option<std::sync::Arc<ResolvedTemplate>> {
+        if snapshot.pages.len() >= engine.flow.max_pages.max(1) as usize {
+            return None;
+        }
+        let page = snapshot.pages.len();
         let first_content = section.restart.is_some()
             && snapshot.sections.as_ref().is_none_or(|s| {
                 !s.pages
                     .iter()
                     .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
             });
-        let regions = running.and_then(|ctx| {
-            let index = *sections.by_id.get(&section.id())?;
-            let first_owned = crate::running::attach::first_owned(snapshot, section.id(), kind);
-            crate::running::attach::prepare(ctx, sections, index, section, page, kind, first_owned)
-        });
         let template = regions
             .as_ref()
             .and_then(|r| r.template.clone())
@@ -287,7 +304,7 @@ impl PageFactory {
         let mut body_rect = section.geometry.body_rect();
         let mut block_extent = section.geometry.block_extent();
         let taken = reserve.0 + reserve.1;
-        body_rect.origin.y = body_rect.origin.y + reserve.0;
+        body_rect.origin.y += reserve.0;
         body_rect.height = (body_rect.height - taken).max(reprise_geom::Length::ZERO);
         if section.geometry.writing_mode == WritingMode::HorizontalTb {
             block_extent = (block_extent - taken).max(reprise_geom::Length::ZERO);
@@ -314,6 +331,7 @@ impl PageFactory {
                 Vec::new()
             },
             reserve,
+            first_owned,
         });
         if kind == crate::PageKind::Content {
             let top = section.geometry.dimensions.top + reserve.0;

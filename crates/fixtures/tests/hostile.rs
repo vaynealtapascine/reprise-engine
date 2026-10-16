@@ -1290,3 +1290,85 @@ fn sections_bands_hostile() {
 hostile_tests!(inline_bidi);
 hostile_tests!(inline_storm);
 hostile_tests!(inline_storm_readable);
+
+#[test]
+fn sections_regions_hostile() {
+    let fixture = hostile::sections_regions_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let sections = snapshot.sections.as_ref().unwrap();
+    assert_eq!(snapshot.pages.len(), 5);
+    let shown = |page: usize, slot: &str| -> Option<String> {
+        sections
+            .running
+            .iter()
+            .find(|r| r.page == page && r.slot == slot)
+            .map(|r| r.variant.clone())
+    };
+    // Page 1 takes the (clipped) first-page header, page 2 the empty even
+    // header, page 3 the default; the footer follows the first section.
+    assert_eq!(shown(0, "header").as_deref(), Some("first"));
+    assert_eq!(shown(1, "header").as_deref(), Some("even"));
+    assert_eq!(shown(2, "header").as_deref(), Some("default"));
+    assert_eq!(shown(0, "footer").as_deref(), Some("default"));
+    assert_eq!(shown(0, "background").as_deref(), Some("default"));
+    // A deleted story renders empty; an explicit none hides the footer.
+    assert_eq!(shown(3, "header"), None);
+    assert_eq!(shown(3, "footer"), None);
+    assert!(shown(4, "header").is_some());
+    let first_header = sections
+        .running
+        .iter()
+        .find(|r| r.page == 0 && r.slot == "header")
+        .unwrap();
+    assert!(first_header.clipped);
+    // 300 pt pages with 36 pt margins: D = 228 and the body keeps a quarter,
+    // 57 pt. The header (distance 2 pt) may take 300 - 36 - 57 - 2 = 205 pt:
+    // as many whole lines as fit. It then needs 2 pt more than those lines, so
+    // the body starts exactly there, and the footer, whose cap is what remains
+    // above the body's quarter, is clipped.
+    let lines = first_header.blocks[0].lines.len();
+    let line = first_header.blocks[0].lines[0].rect.height;
+    assert_eq!(
+        Length(205 * 1024 / line.0 * line.0),
+        line.mul_ratio(lines as i32, 1)
+    );
+    let used = line.mul_ratio(lines as i32, 1);
+    let header_frame = &snapshot.frames[first_header.frame];
+    assert_eq!(header_frame.rect.height, used);
+    let top = Length::from_pt(2) + used;
+    let band = &sections.pages[0].bands[0];
+    assert_eq!(band.body.origin.y, top);
+    let body_frame = snapshot
+        .frames
+        .iter()
+        .find(|f| f.page == 0 && f.role == reprise_doc::FrameRole::Flow("main".into()))
+        .unwrap();
+    assert_eq!(
+        body_frame.to_page.apply(reprise_geom::Point::origin()).y,
+        top
+    );
+    assert!(body_frame.rect.height >= Length::from_pt(57));
+    assert_eq!(
+        body_frame.rect.height,
+        snapshot.pages[0].height
+            - top
+            - Length::from_pt(36)
+                .max(snapshot.pages[0].height - (band.body.origin.y + band.body.height))
+    );
+    let footer = sections
+        .running
+        .iter()
+        .find(|r| r.page == 0 && r.slot == "footer")
+        .unwrap();
+    assert!(footer.clipped);
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|p| p.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}

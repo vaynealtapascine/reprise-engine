@@ -91,7 +91,7 @@ fn a_header_wins_over_the_body_in_its_rectangle_and_the_body_elsewhere() {
     let (doc, header, footer, body) = three_pages();
     let snapshot = engine().layout(&doc);
     let nav = Navigator::semantic(&snapshot, &doc);
-    for page in 0..3 {
+    for (page, node) in body.iter().enumerate() {
         let hit = nav
             .hit_placed(page, centre(&snapshot, page, "header"), HitMode::Normal)
             .unwrap();
@@ -123,7 +123,7 @@ fn a_header_wins_over_the_body_in_its_rectangle_and_the_body_elsewhere() {
         // The middle of the body is the body.
         let middle = Point::new(Length::from_pt(306), Length::from_pt(300));
         match nav.hit_placed(page, middle, HitMode::Normal).unwrap() {
-            PlacedHit::Body(hit) => assert_eq!(hit.caret.node, body[page]),
+            PlacedHit::Body(hit) => assert_eq!(hit.caret.node, *node),
             other => panic!("{other:?}"),
         }
     }

@@ -24,6 +24,8 @@ pub(crate) struct Paragraph {
     finished: bool,
     /// The flow memo key and snapshot mark, captured when the block started.
     memo: Option<(FlowKey, Mark)>,
+    /// What the transition has read so far, between units.
+    reads: Vec<crate::reads::PlanRead>,
     ctx: ResolutionContext,
     preparation_notes: Vec<Diagnostic>,
     prepared: Option<Prepared>,
@@ -65,6 +67,7 @@ impl Paragraph {
             started: false,
             finished: false,
             memo: None,
+            reads: Vec::new(),
             ctx: ResolutionContext::default(),
             preparation_notes: Vec::new(),
             prepared: None,
@@ -127,22 +130,32 @@ impl Flow<'_> {
             }) {
                 let ahead = self.keep_lookahead(doc, p.node);
                 let key = FlowKey::new(self, doc, p.node, ahead);
-                if let Some(delta) = evaluation.flow_hit(p.node, &key, self.engine)
+                if let Some(delta) =
+                    evaluation.flow_hit(p.node, &key, &|reads| self.reads_hold(reads), self.engine)
                     && self.apply_delta(delta)
                 {
                     p.finished = true;
                     return used;
                 }
                 p.memo = Some((key, self.mark()));
+                self.record_from(Vec::new());
             }
             p.ctx = self.paragraph_context();
             p.after = After::Initial;
             self.start_preparation(doc, p);
-        } else if p.preparing.is_some() {
-            used = self.advance_preparation(p, allowance);
+        } else {
+            if p.memo.is_some() {
+                self.record_from(std::mem::take(&mut p.reads));
+            }
+            if p.preparing.is_some() {
+                used = self.advance_preparation(p, allowance);
+            }
         }
         if p.preparing.is_none() && !p.finished {
             self.iteration(doc, p);
+        }
+        if p.memo.is_some() {
+            p.reads = self.take_reads();
         }
         used.max(1)
     }
@@ -561,7 +574,10 @@ impl Flow<'_> {
         p.preparing = None;
         if let (Some(evaluation), Some((key, mark))) = (self.evaluation, p.memo.take()) {
             let delta = self.delta(mark);
-            evaluation.flow_miss(p.node, key, &delta);
+            let reads = self.take_reads();
+            evaluation.flow_miss(p.node, key, reads, &delta);
+        } else {
+            self.take_reads();
         }
     }
 }

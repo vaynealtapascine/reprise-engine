@@ -149,6 +149,9 @@ pub struct WorkCounters {
     pub region_passes: usize,
     pub relation_passes: usize,
     pub reading_order_passes: usize,
+    /// Running-region compositions made, and reused from the running memo.
+    pub running_compositions: usize,
+    pub running_reused: usize,
 }
 /// The work one [`LayoutJob::step`] did, as counters (never time). Hosts and
 /// tests use it to check the per-step bounds in `docs/incremental.md`.
@@ -342,14 +345,14 @@ pub(crate) struct FlowKey {
     previous: Option<NodeId>,
     position: PositionKey,
     template: ResolvedTemplate,
-    // Geometry is the entire frozen input plan. It includes query results and
-    // relation-driven placements, not merely the authored relation IDs.
-    plan: Plan,
+    /// The page-owned physical planes (floats and notes across bands), whole:
+    /// they are projected into frames that may not exist yet, so a read of
+    /// them cannot be recorded by address. Empty, and absent, for most
+    /// documents. Everything else the transition reads from the plan is
+    /// recorded with it, by frame address and provenance.
+    physical: Option<Plan>,
     /// The blocks keep-with-next lookahead may read, with their inputs.
     lookahead: Vec<(NodeId, Option<Inputs>, bool)>,
-    /// What the pages this transition may make would show in their running
-    /// regions: the section's effective bindings and the stories' inputs.
-    running: Option<crate::running::compose::RunningKey>,
 }
 impl FlowKey {
     /// `ahead` is what [`flow::Flow::keep_lookahead`] says the paragraph's
@@ -375,8 +378,7 @@ impl FlowKey {
             previous: flow.previous,
             position: flow.position_key(),
             template: (*flow.template).clone(),
-            plan: flow.plan().clone(),
-            running: flow.running_key(doc),
+            physical: flow.plan().physical_only(),
         }
     }
 }
@@ -408,6 +410,8 @@ struct PreparedEntry {
 #[derive(Clone)]
 struct FlowEntry {
     key: FlowKey,
+    /// What the transition read from the plan, beyond its key.
+    reads: Vec<crate::reads::PlanRead>,
     delta: Delta,
 }
 // Resolve authored inputs when deriving keys, rather than attempting to
@@ -983,15 +987,23 @@ impl Evaluation {
             snapshot: snapshot.clone(),
         });
     }
-    pub(crate) fn flow_hit(&self, node: NodeId, key: &FlowKey, engine: &Engine) -> Option<Delta> {
-        let mut cache = self.cache.borrow_mut();
-        let delta = cache
+    pub(crate) fn flow_hit(
+        &self,
+        node: NodeId,
+        key: &FlowKey,
+        holds: &dyn Fn(&[crate::reads::PlanRead]) -> bool,
+        engine: &Engine,
+    ) -> Option<Delta> {
+        let delta = self
+            .cache
+            .borrow()
             .flow
             .get(&node)?
             .iter()
-            .find(|e| &e.key == key)?
+            .find(|e| &e.key == key && holds(&e.reads))?
             .delta
             .clone();
+        let mut cache = self.cache.borrow_mut();
         if let Some(inputs) = &key.inputs {
             cache.graph.record(
                 Computation::Style(node),
@@ -1028,7 +1040,13 @@ impl Evaluation {
         cache.counters.reused_compositions = cache.counters.reused_compositions.saturating_add(1);
         Some(delta)
     }
-    pub(crate) fn flow_miss(&self, node: NodeId, key: FlowKey, delta: &Delta) {
+    pub(crate) fn flow_miss(
+        &self,
+        node: NodeId,
+        key: FlowKey,
+        reads: Vec<crate::reads::PlanRead>,
+        delta: &Delta,
+    ) {
         let mut cache = self.cache.borrow_mut();
         let mut reasons = BTreeSet::new();
         if let Some(old) = cache.flow.get(&node).and_then(|v| v.last()) {
@@ -1043,7 +1061,7 @@ impl Evaluation {
             if key.template != old.key.template {
                 reasons.insert(Dependency::Template);
             }
-            if key.plan != old.key.plan {
+            if key.physical != old.key.physical || reads != old.reads {
                 reasons.insert(Dependency::Computed(Computation::Regions));
             }
         } else {
@@ -1079,6 +1097,7 @@ impl Evaluation {
         }
         entries.push(FlowEntry {
             key,
+            reads,
             delta: delta.clone(),
         });
     }
@@ -1208,7 +1227,9 @@ impl<'engine> LayoutSession<'engine> {
         }
     }
     pub fn counters(&self) -> WorkCounters {
-        self.evaluation.cache.borrow().counters.clone()
+        let mut counters = self.evaluation.cache.borrow().counters.clone();
+        (counters.running_compositions, counters.running_reused) = self.evaluation.running().counts();
+        counters
     }
     /// Lends the session an executor for pure preparation tasks (see
     /// `docs/incremental.md`, "Native workers"). Output, unit charging and

@@ -298,6 +298,7 @@ pub(crate) fn allocate(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn allocate_with_sections(
     engine: &Engine,
     doc: &Document,
@@ -314,6 +315,7 @@ pub(crate) fn allocate_with_sections(
         doc,
         plan: previous,
         shared: running,
+        filler_regions: false,
     });
     let mut scratch = flowed.clone();
     let mut out = Plan::default();

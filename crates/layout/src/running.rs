@@ -13,7 +13,11 @@ use reprise_doc::sections::{BindingView, SectionId, SectionView};
 use reprise_geom::{Length, PageSpace, Point, Rect};
 use serde::{Serialize, Serializer};
 
+#[cfg(test)]
+mod accept_tests;
 pub(crate) mod attach;
+#[cfg(test)]
+mod combo_tests;
 pub(crate) mod compose;
 #[cfg(test)]
 mod layout_tests;
@@ -220,20 +224,6 @@ impl SectionBindings {
         self.cells
             .get(slot * 3 + variant.index())
             .map_or((&UNSET, SectionId::First), |(e, s)| (e, *s))
-    }
-    /// The distinct stories this section can show, in a fixed order.
-    pub fn stories(&self) -> Vec<NodeId> {
-        let mut out: Vec<NodeId> = self
-            .cells
-            .iter()
-            .filter_map(|(e, _)| match e {
-                Effective::Story(s) => Some(*s),
-                _ => None,
-            })
-            .collect();
-        out.sort();
-        out.dedup();
-        out
     }
     /// Whether any cell shows something (or reports something missing).
     fn active(&self) -> bool {

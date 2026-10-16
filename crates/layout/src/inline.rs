@@ -495,7 +495,7 @@ pub(crate) type FieldValues = BTreeMap<FieldKey, String>;
 /// region's memo is valid for another request exactly when these still hold.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Reads {
-    pub fields: BTreeMap<InlineId, Option<String>>,
+    pub fields: BTreeMap<FieldKey, Option<String>>,
     /// `(page, pages)` when some field was guessed from the page context.
     pub guessed: Option<(usize, usize)>,
 }
@@ -503,10 +503,12 @@ pub(crate) struct Reads {
 /// Where reads are recorded while a composition runs.
 pub(crate) type Trace = std::rc::Rc<std::cell::RefCell<Reads>>;
 
-/// The labels of the pages made so far.
+/// The labels of the pages made so far. Read by the field adapters (S8a).
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub(crate) struct PageLabels<'a>(pub &'a [crate::PageDescriptor]);
 
+#[allow(dead_code)]
 impl PageLabels<'_> {
     /// The label of 0-based `page`, if the page has a descriptor.
     pub fn label(&self, page: usize) -> Option<&str> {
@@ -530,6 +532,7 @@ pub(crate) struct FieldEnv<'a> {
     /// on (sections §10, N6). A placed composition renders `page-number` from
     /// its page's label directly; an unplaced one (an annotation, composed
     /// before its page is known) reads the previous pass's value.
+    #[allow(dead_code)] // read by the field adapters in S8a
     pub labels: Option<PageLabels<'a>>,
     pub placed: bool,
     pub trace: Option<&'a std::cell::RefCell<Reads>>,
@@ -582,7 +585,7 @@ impl FieldEnv<'_> {
         let found = self.values.and_then(|v| v.get(&key));
         if let Some(trace) = self.trace {
             let mut reads = trace.borrow_mut();
-            reads.fields.insert(id, found.cloned());
+            reads.fields.insert(key, found.cloned());
             if found.is_none() {
                 reads.guessed = Some((self.page, self.pages));
             }

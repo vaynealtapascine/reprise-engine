@@ -37,6 +37,14 @@ fn project(
 }
 
 impl Plan {
+    /// A plan holding only the page-owned physical planes, when there are any.
+    pub(crate) fn physical_only(&self) -> Option<Plan> {
+        (!self.physical_exclusions.is_empty() || !self.note_areas.is_empty()).then(|| Plan {
+            physical_exclusions: self.physical_exclusions.clone(),
+            note_areas: self.note_areas.clone(),
+            ..Plan::default()
+        })
+    }
     pub(crate) fn physical_exclusions_for(
         &self,
         catalog: &Catalog,

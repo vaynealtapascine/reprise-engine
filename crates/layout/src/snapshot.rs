@@ -85,6 +85,10 @@ pub struct PageDescriptor {
     /// page's body, beyond the authored margins. Derived; not serialised.
     #[serde(skip)]
     pub(crate) reserve: (Length, Length),
+    /// The page is its owner's first content page (it takes the `first`
+    /// variant). Derived; not serialised.
+    #[serde(skip)]
+    pub(crate) first_owned: bool,
 }
 fn section_token<S: serde::Serializer>(
     value: &reprise_doc::sections::SectionId,
