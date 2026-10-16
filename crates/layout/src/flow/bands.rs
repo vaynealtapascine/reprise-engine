@@ -3,6 +3,7 @@
 //! Checkpoints contain geometry and the active block, never completed prefix
 //! text. A successful trial is retained as output; committing never reflows it.
 use super::*;
+use reprise_geom::{FrameSpace, PageSpace, Point, Rect, Transform};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -44,6 +45,78 @@ pub(super) struct Balance {
     trial: Option<Trial>,
 }
 
+/// A band's block axis in page coordinates. The main frames of an authored
+/// spatial template start anywhere along it, so a depth is measured from the
+/// band's start edge and never in one frame's own coordinates.
+#[derive(Clone, Copy)]
+struct Axis {
+    vertical: bool,
+    forward: bool,
+    start: Length,
+}
+
+impl Axis {
+    fn new(mode: reprise_doc::WritingMode, band: &crate::Band) -> Self {
+        use reprise_doc::WritingMode;
+        match mode {
+            WritingMode::HorizontalTb => Axis {
+                vertical: false,
+                forward: true,
+                start: band.body.origin.y,
+            },
+            WritingMode::VerticalRl => Axis {
+                vertical: true,
+                forward: false,
+                start: band.body.origin.x + band.body.width,
+            },
+            WritingMode::VerticalLr | WritingMode::SidewaysLr => Axis {
+                vertical: true,
+                forward: true,
+                start: band.body.origin.x,
+            },
+        }
+    }
+
+    /// Distance from the start edge in the block direction.
+    fn along(&self, p: Point<PageSpace>) -> Length {
+        let v = if self.vertical { p.x } else { p.y };
+        if self.forward {
+            v - self.start
+        } else {
+            self.start - v
+        }
+    }
+
+    fn across(&self, p: Point<PageSpace>) -> Length {
+        if self.vertical { p.y } else { p.x }
+    }
+
+    /// Where a frame's block start lies on the axis. `None` when the frame is
+    /// rotated, scaled or flipped against it: its own depth is then not a
+    /// distance along the band, so clipping it can't clip the band.
+    fn frame_start(&self, to_page: &Transform<FrameSpace, PageSpace>) -> Option<Length> {
+        // A long probe keeps a tilt too small for a unit step from passing.
+        let unit = Length::from_pt(1024);
+        let origin = to_page.apply(Point::origin());
+        let block = to_page.apply(Point::new(Length::ZERO, unit));
+        let inline = to_page.apply(Point::new(unit, Length::ZERO));
+        let start = self.along(origin);
+        (self.along(block) - start == unit
+            && self.across(block) == self.across(origin)
+            && self.along(inline) == start)
+            .then_some(start)
+    }
+
+    /// How far a page rectangle reaches along the axis.
+    fn reach(&self, r: &Rect<PageSpace>) -> Length {
+        match (self.vertical, self.forward) {
+            (false, _) => r.max_y() - self.start,
+            (true, true) => r.max_x() - self.start,
+            (true, false) => self.start - r.origin.x,
+        }
+    }
+}
+
 /// Clone only geometry and pass identity. Completed text stays in the caller's
 /// snapshot while a trial owns the suffix it produces.
 fn header(snapshot: &LayoutSnapshot) -> LayoutSnapshot {
@@ -82,6 +155,27 @@ impl Cursor {
             diagnostics: snapshot.diagnostics.len(),
             repeats: snapshot.repeated_headers.len(),
         }));
+    }
+
+    /// The block axis of the band this cursor is in, from the page owner.
+    fn band_axis(&self, snapshot: &LayoutSnapshot) -> Option<Axis> {
+        let page = snapshot.sections.as_ref()?.pages.get(self.page)?;
+        let band = page.bands.get(self.band)?;
+        let owner = self.section_table.as_ref()?.get(page.section)?;
+        Some(Axis::new(owner.geometry.writing_mode, band))
+    }
+
+    /// How deep the band is when every frame is full: the farthest frame end
+    /// from the band's start edge. `None` when a frame can't be measured.
+    fn band_extent(&self, axis: &Axis) -> Option<Length> {
+        self.thread
+            .iter()
+            .filter_map(|i| self.template.frames.get(*i))
+            .filter(|f| f.takes_text())
+            .try_fold(Length::ZERO, |extent, frame| {
+                let start = axis.frame_start(&frame.to_page())?;
+                Some(extent.max(start + frame.depth))
+            })
     }
 
     fn continuous(&self, node: NodeId) -> Option<&crate::sections::Section> {
@@ -170,8 +264,14 @@ impl Cursor {
                     .and_then(|s| s.pages.get(self.page))
                     .map_or(0, |p| p.bands.len());
                 if self.compatible(section, snapshot) && bands < MAX_BANDS {
+                    let mut measurable = true;
                     if let Some(checkpoint) = self.band_start.clone() {
-                        let full = checkpoint.cursor.max_depth;
+                        let extent = checkpoint
+                            .cursor
+                            .band_axis(&checkpoint.header)
+                            .and_then(|axis| checkpoint.cursor.band_extent(&axis));
+                        measurable = extent.is_some();
+                        let full = extent.unwrap_or_default();
                         if full > Length::ZERO
                             && fit(
                                 snapshot,
@@ -198,7 +298,11 @@ impl Cursor {
                         "start",
                         "section.continuous-new-page",
                         Severity::Warning,
-                        "ordinary reference does not fit; its output is kept at full depth",
+                        if measurable {
+                            "ordinary reference does not fit; its output is kept at full depth"
+                        } else {
+                            "a frame of the band is rotated, scaled or flipped against its block axis; not balanced, kept at full depth"
+                        },
                     ));
                 } else {
                     snapshot.diagnostics.push(crate::sections::diagnostic(
@@ -374,6 +478,14 @@ impl Cursor {
     }
 
     fn clip_band(&mut self, snapshot: &mut LayoutSnapshot, depth: Length, balanced: bool) {
+        let axis = self.band_axis(snapshot);
+        // What a frame keeps of the band's depth: the part past where the
+        // frame starts along the block axis. A frame that can't be measured
+        // keeps the band's depth, as a band's own column always does.
+        let room = |to_page: &Transform<FrameSpace, PageSpace>| {
+            axis.and_then(|a| a.frame_start(to_page))
+                .map_or(depth, |start| (depth - start).max(Length::ZERO))
+        };
         let frames = snapshot
             .sections
             .as_mut()
@@ -388,16 +500,22 @@ impl Cursor {
         let mut template = (*self.template).clone();
         for index in frames {
             if let Some(frame) = snapshot.frames.get_mut(index) {
-                frame.rect.height = frame.rect.height.min(depth);
+                frame.rect.height = frame.rect.height.min(room(&frame.to_page));
             }
         }
         for frame in &mut template.frames {
             if frame.is_main_flow() {
-                frame.depth = frame.depth.min(depth);
+                frame.depth = frame.depth.min(room(&frame.to_page()));
             }
         }
         self.template = Arc::new(template);
-        self.max_depth = depth;
+        self.max_depth = self
+            .thread
+            .iter()
+            .filter_map(|i| self.template.frames.get(*i))
+            .map(|f| f.depth)
+            .max()
+            .unwrap_or(depth);
         crate::pages::PageFactory::clip_rules(snapshot, self.page, self.band, depth);
     }
 }
@@ -410,6 +528,7 @@ fn fit(
     start: (usize, usize),
 ) -> bool {
     let diagnostics = snapshot.diagnostics.get(start.0..).unwrap_or_default();
+    let axis = checkpoint.cursor.band_axis(&checkpoint.header);
     let frames = checkpoint
         .header
         .sections
@@ -429,8 +548,12 @@ fn fit(
         .iter()
         .flat_map(|b| &b.lines)
         .all(|line| {
-            snapshot.frame(line.frame).is_some()
-                && (frames.is_none_or(|frames| !frames.contains(&line.frame))
-                    || line.rect.origin.y + line.rect.height <= depth)
+            let Some(frame) = snapshot.frame(line.frame) else {
+                return false;
+            };
+            // A band line must end inside the band's depth where it physically
+            // is, however far down its frame starts.
+            frames.is_none_or(|frames| !frames.contains(&line.frame))
+                || axis.is_some_and(|axis| axis.reach(&frame.to_page.bounds(&line.rect)) <= depth)
         })
 }

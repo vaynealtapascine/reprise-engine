@@ -880,3 +880,139 @@ fn continuous_spatial_templates_preserve_authored_depths_and_overflow_detection(
         assert_eq!(snapshot, complete_by_units(&engine, &doc));
     }
 }
+
+fn page_rects(
+    snapshot: &crate::LayoutSnapshot,
+    node: NodeId,
+) -> Vec<(usize, reprise_geom::Rect<reprise_geom::PageSpace>)> {
+    snapshot
+        .block(node)
+        .map(|b| {
+            b.lines
+                .iter()
+                .map(|l| {
+                    let f = &snapshot.frames[l.frame];
+                    (f.page, f.to_page.bounds(&l.rect))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn overlaps(
+    a: &reprise_geom::Rect<reprise_geom::PageSpace>,
+    b: &reprise_geom::Rect<reprise_geom::PageSpace>,
+) -> bool {
+    a.origin.x < b.max_x()
+        && b.origin.x < a.max_x()
+        && a.origin.y < b.max_y()
+        && b.origin.y < a.max_y()
+}
+
+/// Review of S1-S5: balancing compared each frame's local line bottoms against
+/// one shared depth, so a main frame that starts lower than the band did was
+/// certified at a depth its content physically exceeds, and the next band
+/// started on top of it.
+#[test]
+fn staggered_spatial_frames_balance_in_band_coordinates_and_never_overlap_the_next_band() {
+    for (lines, expected) in [
+        (4, Length::from_pt(48)),
+        (10, Length::from_pt(86)),
+        (1, Length::from_pt(12)),
+    ] {
+        let (engine, doc) = setup();
+        doc.set_page_template(
+            &PageTemplate::new("spatial", Dim::pt(200), Dim::pt(200))
+                .with_frame(FrameTemplate::new(
+                    "one",
+                    FrameRole::Flow("main".into()),
+                    (Dim::pt(0), Dim::pt(0)),
+                    (Dim::pt(100), Dim::pt(100)),
+                ))
+                .with_frame(FrameTemplate::new(
+                    "two",
+                    FrameRole::Flow("main".into()),
+                    (Dim::pt(100), Dim::pt(50)),
+                    (Dim::pt(100), Dim::pt(100)),
+                )),
+        )
+        .unwrap();
+        first(&doc, &[("mode", json!("paged"))]);
+        let a = block(&doc, &vec!["a"; lines].join("\n"));
+        let b = block(&doc, "b");
+        continuous(&doc, b, &[("columns.count", json!(1)), ("right", json!(0))]);
+        let snapshot = engine.layout(&doc);
+        let page = &snapshot.sections.as_ref().unwrap().pages[0];
+        assert_eq!(page.bands.len(), 2, "{lines}: {:?}", snapshot.diagnostics);
+        assert_eq!(page.bands[0].depth, expected, "{lines}");
+        assert_eq!(page.bands[1].offset, expected, "{lines}");
+        assert!(page.bands[0].balanced);
+        // No two placed lines intersect, whichever band and frame made them.
+        let all: Vec<_> = [a, b]
+            .iter()
+            .flat_map(|n| page_rects(&snapshot, *n).into_iter().map(move |r| (*n, r)))
+            .collect();
+        assert_eq!(all.len(), lines + 1, "{lines}: nothing is left out");
+        for (i, (_, (pa, ra))) in all.iter().enumerate() {
+            for (_, (pb, rb)) in &all[i + 1..] {
+                assert!(pa != pb || !overlaps(ra, rb), "{lines}: {ra:?} / {rb:?}");
+            }
+        }
+        // The outgoing band's text ends inside its depth, the incoming starts at it.
+        let first_page = |n| {
+            page_rects(&snapshot, n)
+                .into_iter()
+                .filter(|(p, _)| *p == 0)
+                .map(|(_, r)| r)
+                .collect::<Vec<_>>()
+        };
+        let out = first_page(a).iter().map(|r| r.max_y()).max().unwrap();
+        let incoming = first_page(b).iter().map(|r| r.origin.y).min().unwrap();
+        assert!(out <= expected && expected <= incoming, "{lines}");
+        assert_eq!(snapshot, complete_by_units(&engine, &doc), "{lines}");
+    }
+}
+
+/// Frames the band can't measure along its own block axis (a rotated frame)
+/// are not balanced: the next section starts a new page, with a diagnostic.
+#[test]
+fn spatial_frames_off_the_block_axis_are_not_balanced() {
+    let (engine, doc) = setup();
+    let mut turned = FrameTemplate::new(
+        "turned",
+        FrameRole::Flow("main".into()),
+        (Dim::pt(100), Dim::pt(0)),
+        (Dim::pt(100), Dim::pt(100)),
+    );
+    turned.transform.rotation = reprise_doc::Rotation::Quarter(1);
+    doc.set_page_template(
+        &PageTemplate::new("spatial", Dim::pt(200), Dim::pt(200))
+            .with_frame(FrameTemplate::new(
+                "one",
+                FrameRole::Flow("main".into()),
+                (Dim::pt(0), Dim::pt(0)),
+                (Dim::pt(100), Dim::pt(100)),
+            ))
+            .with_frame(turned),
+    )
+    .unwrap();
+    first(&doc, &[("mode", json!("paged"))]);
+    let a = block(&doc, "a\na\na\na");
+    let b = block(&doc, "b");
+    continuous(&doc, b, &[("columns.count", json!(1))]);
+    let snapshot = engine.layout(&doc);
+    assert_eq!(snapshot.pages.len(), 2, "{:?}", snapshot.diagnostics);
+    let metadata = snapshot.sections.as_ref().unwrap();
+    assert!(metadata.pages[0].bands.iter().all(|b| !b.balanced));
+    assert_eq!(metadata.pages[0].bands.len(), 1);
+    assert_eq!(
+        snapshot
+            .diagnostics_with("section.continuous-new-page")
+            .count(),
+        1,
+        "{:?}",
+        snapshot.diagnostics
+    );
+    assert!(snapshot.block(a).is_some() && snapshot.block(b).is_some());
+    assert_eq!(snapshot, complete_by_units(&engine, &doc));
+}
