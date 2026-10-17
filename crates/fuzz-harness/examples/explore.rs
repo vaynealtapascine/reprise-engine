@@ -7,18 +7,30 @@
 //!
 //! `NO_MINIMIZE=1` prints failures unshrunk (faster). `FACADE=1` drives the
 //! scenarios through the public `reprise` facade instead of the core crates.
+//! `FOUNDATIONS=1` drives the wave-1 foundations scenario (styles, lists,
+//! inline objects, annotations, batch, copies) through the facade;
+//! `TWICE=1` also runs each of those scenarios a second time and compares.
 
 use reprise_fuzz_harness::facade::run_facade_bytes;
+use reprise_fuzz_harness::foundations::{run_foundations, run_foundations_twice};
 use reprise_fuzz_harness::input::seed_bytes;
 use reprise_fuzz_harness::minimize::minimize;
 use reprise_fuzz_harness::{Violation, hex, run_bytes};
 use std::time::Instant;
 
-fn run(facade: bool, bytes: &[u8]) -> Option<Violation> {
-    if facade {
-        run_facade_bytes(bytes).err()
-    } else {
-        run_bytes(bytes).err()
+#[derive(Clone, Copy)]
+enum Mode {
+    Core,
+    Facade,
+    Foundations { twice: bool },
+}
+
+fn run(mode: Mode, bytes: &[u8]) -> Option<Violation> {
+    match mode {
+        Mode::Core => run_bytes(bytes).err(),
+        Mode::Facade => run_facade_bytes(bytes).err(),
+        Mode::Foundations { twice: false } => run_foundations(bytes).err(),
+        Mode::Foundations { twice: true } => run_foundations_twice(bytes).err(),
     }
 }
 
@@ -34,12 +46,33 @@ fn main() {
     let first = args.first().copied().unwrap_or(0);
     let count = args.get(1).copied().unwrap_or(100);
     let len = args.get(2).copied().unwrap_or(300) as usize;
-    let facade = std::env::var_os("FACADE").is_some();
+    let mode = if std::env::var_os("FOUNDATIONS").is_some() {
+        Mode::Foundations {
+            twice: std::env::var_os("TWICE").is_some(),
+        }
+    } else if std::env::var_os("FACADE").is_some() {
+        Mode::Facade
+    } else {
+        Mode::Core
+    };
+    // `HEX=<bytes>` runs one scenario as given (use with FOUNDATIONS_TRACE=1).
+    if let Ok(text) = std::env::var("HEX") {
+        let digits: Vec<u8> = text.bytes().filter(u8::is_ascii_hexdigit).collect();
+        let bytes: Vec<u8> = digits
+            .chunks(2)
+            .filter_map(|p| u8::from_str_radix(std::str::from_utf8(p).ok()?, 16).ok())
+            .collect();
+        match run(mode, &bytes) {
+            Some(v) => println!("{v}"),
+            None => println!("passes"),
+        }
+        return;
+    }
     let mut failures = 0;
     for seed in first..first + count {
         let bytes = seed_bytes(seed, len);
         let started = Instant::now();
-        let failure = run(facade, &bytes);
+        let failure = run(mode, &bytes);
         let took = started.elapsed();
         let Some(violation) = failure else {
             if took.as_secs() >= 2 {
@@ -56,13 +89,13 @@ fn main() {
             );
             continue;
         }
-        let small = minimize(&bytes, violation.oracle, |b| run(facade, b));
+        let small = minimize(&bytes, violation.oracle, |b| run(mode, b));
         println!(
             "seed {seed} ({took:?}): {}\n  minimised ({} bytes): {}\n  -> {}\n",
             shown(&violation),
             small.len(),
             hex(&small),
-            run(facade, &small).map_or("passes?!".into(), |v| shown(&v))
+            run(mode, &small).map_or("passes?!".into(), |v| shown(&v))
         );
     }
     println!("{failures} failing of {count}");
