@@ -449,7 +449,10 @@ impl Document {
                     }
                     | if self.has_style_identities() {
                         Features::STYLE_IDENTITIES.0
-                    } else if self.legacy_builtin_context() {
+                    } else {
+                        0
+                    }
+                    | if self.legacy_builtin_context() {
                         Features::LEGACY_BUILTINS.0
                     } else {
                         0
@@ -494,16 +497,30 @@ impl Document {
     }
 
     fn import_delta(&self, header: &PacketHeader, body: &[u8]) -> Result<ChangeReport, SyncError> {
+        if self.legacy_builtin_context() || header.features.0 & Features::LEGACY_BUILTINS.0 != 0 {
+            self.fork_for_edit()
+                .map_err(|e| SyncError::Store(e.to_string()))?
+                .import_delta_inner(header, body)?;
+        }
+        self.import_delta_inner(header, body)
+    }
+
+    fn import_delta_inner(
+        &self,
+        header: &PacketHeader,
+        body: &[u8],
+    ) -> Result<ChangeReport, SyncError> {
         check_position_strings(body)?;
         let json: JsonSchema =
             serde_json::from_slice(body).map_err(|e| SyncError::Invalid(e.to_string()))?;
         self.preflight_delta(header, &json)?;
-        let adopt_legacy =
-            header.features.0 & Features::LEGACY_BUILTINS.0 != 0 && !self.has_style_identities();
-        if adopt_legacy {
-            self.check_legacy_context_adoption(&header.until)
-                .map_err(|e| SyncError::Store(e.to_string()))?;
-        }
+        let incoming_legacy = header.features.0 & Features::LEGACY_BUILTINS.0 != 0;
+        let legacy_join = incoming_legacy || self.legacy_builtin_context();
+        let own_pins = if legacy_join {
+            self.legacy_join_pins(self.legacy_builtin_context(), None)
+        } else {
+            Vec::new()
+        };
         let (status, mut report) = self.tracked(|| self.doc.import_json_updates(json));
         let status = status.map_err(|e| SyncError::Store(e.to_string()))?;
         if status.pending.is_some() {
@@ -515,8 +532,9 @@ impl Document {
         if header.features.0 & Features::STYLE_IDENTITIES.0 != 0 {
             self.retain_style_identities();
         }
-        if adopt_legacy {
-            self.adopt_legacy_context()
+        if legacy_join {
+            let incoming = self.legacy_join_pins(incoming_legacy, Some(&header.until));
+            self.apply_legacy_join_pins(incoming.into_iter().chain(own_pins))
                 .map_err(|e| SyncError::Store(e.to_string()))?;
             report.styles = true;
         }

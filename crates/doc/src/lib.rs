@@ -49,6 +49,7 @@ pub mod inline;
 #[cfg(test)]
 mod inline_tests;
 pub mod invariants;
+mod legacy_join;
 mod lifecycle;
 pub mod lists;
 #[cfg(test)]
@@ -495,22 +496,41 @@ impl Document {
         }
         self.commit();
         other.commit();
+        if self.legacy_builtin_context() || other.legacy_builtin_context() {
+            self.fork_for_edit()?.merge_inner(other)?;
+        }
+        self.merge_inner(other)
+    }
+
+    fn merge_inner(&self, other: &Document) -> Result<(), DocError> {
+        if self.document_lineage()? != other.document_lineage()? {
+            return Err(DocError::Store(
+                "documents have different durable lineages".into(),
+            ));
+        }
+        self.commit();
+        other.commit();
         // Only what this replica lacks: both documents are this process's own,
         // so the binary update encoding is trusted here (see `sync`).
-        let adopt_legacy = !self.has_style_identities()
-            && !other.has_style_identities()
-            && other.legacy_builtin_context();
-        if adopt_legacy {
-            self.check_legacy_context_adoption(&other.version_vector())?;
-        }
+        let legacy_join = self.legacy_builtin_context() || other.legacy_builtin_context();
+        let own_pins = if legacy_join {
+            self.legacy_join_pins(self.legacy_builtin_context(), None)
+        } else {
+            Vec::new()
+        };
+        let incoming_pins = if legacy_join {
+            other.legacy_join_pins(other.legacy_builtin_context(), None)
+        } else {
+            Vec::new()
+        };
         let updates = other
             .doc
             .export(loro::ExportMode::updates(&self.doc.oplog_vv()))
             .map_err(|e| DocError::Export(e.to_string()))?;
         self.doc.import(&updates)?;
         self.refresh_style_identity_root();
-        if adopt_legacy {
-            self.adopt_legacy_context()?;
+        if legacy_join {
+            self.apply_legacy_join_pins(incoming_pins.into_iter().chain(own_pins))?;
         }
         if other.has_style_identities() {
             self.retain_style_identities();

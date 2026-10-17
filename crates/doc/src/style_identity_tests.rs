@@ -561,3 +561,106 @@ fn copied_owner_tokens_cannot_be_reallocated_when_fresh_history_catches_up() {
     assert_eq!(copy.computed_style(old).unwrap().weight, Some(500));
     assert_ne!(copy.style_identity("A"), copy.style_identity("C"));
 }
+
+#[test]
+fn historical_builtin_join_preserves_each_sides_context_and_undo() {
+    let bytes = include_bytes!("../tests/data/review5-legacy.bin");
+    let heading = crate::NodeId::parse("2@1").unwrap();
+    for framed in [false, true] {
+        for reverse in [false, true] {
+            let old = Document::import(bytes, 11).unwrap();
+            // A parent reference has the same historical interpretation.
+            old.doc
+                .get_map("styles1")
+                .insert("parent/Child", "Heading 1")
+                .unwrap();
+            old.doc
+                .get_map("styles1")
+                .insert("state/Child", "defined")
+                .unwrap();
+            let child = old
+                .append_block(BlockKind::Paragraph, "Child", "child")
+                .unwrap();
+            old.commit();
+            assert_eq!(
+                old.computed_style(heading).unwrap().size,
+                Length::from_pt(20)
+            );
+            assert_eq!(old.computed_style(child).unwrap().size, Length::from_pt(20));
+            let receiver = Document::new(2).unwrap();
+            let unmarked = receiver
+                .append_block(BlockKind::Paragraph, "", "unmarked")
+                .unwrap();
+            receiver
+                .meta_of(unmarked)
+                .unwrap()
+                .insert("style", "Heading 1")
+                .unwrap();
+            receiver
+                .define_named_style("NewPeerStyle", &Style::default())
+                .unwrap();
+            receiver.commit();
+            assert_eq!(
+                receiver.computed_style(unmarked).unwrap().size,
+                Length::from_pt(10)
+            );
+            let mut undo = receiver.undo_stack();
+            receiver
+                .block(unmarked)
+                .unwrap()
+                .text
+                .insert(8, "!")
+                .unwrap();
+            receiver.commit_step();
+            let deliver = |to: &Document, from: &Document| {
+                if framed {
+                    to.import_packet(&from.export_snapshot_packet().unwrap())
+                        .unwrap();
+                } else {
+                    to.merge(from).unwrap();
+                }
+            };
+            if reverse {
+                deliver(&old, &receiver);
+                deliver(&receiver, &old);
+            } else {
+                deliver(&receiver, &old);
+                deliver(&old, &receiver);
+            }
+            deliver(&receiver, &old);
+            deliver(&old, &receiver);
+            for doc in [&old, &receiver] {
+                assert_eq!(
+                    doc.computed_style(heading).unwrap().size,
+                    Length::from_pt(20)
+                );
+                assert_eq!(doc.computed_style(child).unwrap().size, Length::from_pt(20));
+                assert_eq!(
+                    doc.computed_style(unmarked).unwrap().size,
+                    Length::from_pt(10)
+                );
+                for mode in [PersistenceMode::History, PersistenceMode::Shallow] {
+                    let reopen = Document::import(&doc.try_export(mode).unwrap(), 20).unwrap();
+                    assert_eq!(
+                        reopen.computed_style(heading).unwrap().size,
+                        Length::from_pt(20)
+                    );
+                    assert_eq!(
+                        reopen.computed_style(unmarked).unwrap().size,
+                        Length::from_pt(10)
+                    );
+                }
+            }
+            assert!(undo.undo().unwrap());
+            assert_eq!(
+                receiver.block(unmarked).unwrap().text.to_string(),
+                "unmarked"
+            );
+            assert_eq!(
+                receiver.computed_style(heading).unwrap().size,
+                Length::from_pt(20)
+            );
+            assert!(!undo.undo().unwrap());
+        }
+    }
+}
