@@ -889,7 +889,7 @@ fn matching_revision_annotation_refusals_keep_content_history_and_redo() {
             s.undo().unwrap();
             let before = s.state().unwrap().data;
             assert!(before.can_undo && before.can_redo);
-            let bytes = s.export_updates().unwrap().data.bytes;
+            let bytes = s.export_updates().unwrap().data.content.bytes;
             let target_ref = match kind {
                 0 => LinkDestination::Node {
                     node: target.clone(),
@@ -918,7 +918,7 @@ fn matching_revision_annotation_refusals_keep_content_history_and_redo() {
                 }))
                 .is_err()
             );
-            assert_eq!(s.export_updates().unwrap().data.bytes, bytes);
+            assert_eq!(s.export_updates().unwrap().data.content.bytes, bytes);
             assert_eq!(
                 serde_json::to_value(s.state().unwrap().data).unwrap(),
                 serde_json::to_value(before).unwrap()
