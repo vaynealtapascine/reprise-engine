@@ -1215,7 +1215,9 @@ serialise byte-identically.
     data. `FieldInstance::{Single, Page}` are unchanged.
 -   **Navigation** (`reprise-edit`).
     -   `Navigator::hit_placed(point) -> Option<PlacedHit>`, where `PlacedHit`
-        is `Body(Hit)` or `Running { position, instance: RegionInstance }`;
+        is `Body(Hit)` or `Running { position, instance: RegionInstance }`.
+        `PlacedHit` and `PageKind` are `#[non_exhaustive]`, so a frame chain's
+        hit and a canvas tile can be added without breaking a match;
     -   `RegionInstance { page, slot }`;
     -   `HitMode::{Normal, Background}`;
     -   `Navigator::caret_in(instance, position)`;

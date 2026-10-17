@@ -12,8 +12,13 @@ pub enum Domain {
 
 impl Document {
     /// Isolated validation replica with identical operation-ID allocation.
+    ///
+    /// A plain fork commits what is pending, which would publish a native
+    /// caller's raw writes on behalf of an edit that may then be refused. This
+    /// is the preflight fork: it refuses pending writes and over-deep trees
+    /// first (`DocError::UncommittedEdit`, `EditPreflightDepth`).
     pub fn validation_fork(&self) -> Result<Document, crate::DocError> {
-        self.fork(self.doc.peer_id())
+        self.fork_for_edit()
     }
 
     pub(crate) fn is_story_node(&self, id: TreeID) -> bool {
