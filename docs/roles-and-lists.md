@@ -313,11 +313,13 @@ page numbers at once.
     node, page). A TOC is a derived view; a stored TOC would be a block whose
     entries are `reprise.reference` relations to heading nodes, refreshed from
     the outline.
--   **Cross-references to numbered headings:** heading numbering is a list whose
+-   **Cross-references to numbered headings (partly built):** `list_numbering()` exists,
+    but no cross-reference relation reads a marker yet. Heading numbering is a list whose
     items have heading roles (`Heading 1` items at level 0, `Heading 2` at level
     1, a template like `%1.%2`). A cross-reference relation targets the heading
     node and reads its marker text from `list_numbering()` at query time.
--   **Captions and figure numbering:** a `caption` role plus a definition per
+-   **Captions and figure numbering (not built):** `Role` has no `caption`
+    variant and no sequence definitions exist. The proposal is a `caption` role plus a definition per
     sequence ("Figure %1"). Captions are items of that list; numbering continues
     across the document by the same counters. A reference to a figure reads the
     caption's marker.
@@ -326,7 +328,8 @@ page numbers at once.
     `default_style`), `CreateList`/`SetListItem`/`RemoveListItem`, and binds Tab,
     Shift+Tab, Enter and Backspace to `IndentListItem`, `Enter` and
     `BackspaceAtStart`.
--   **Checklists:** a `checkbox` format whose marker text is `☐` or `☑`. The
+-   **Checklists (not built):** `NumberFormat` has no `checkbox` variant and
+    nothing stores `checked1`. The proposal is a `checkbox` format whose marker text is `☐` or `☑`. The
     checked state is authored per item, so it would be one more flat key next to
     `list1` (`checked1`, a bool), copied on split as `false`. Rendering reads it
     when choosing the glyph; PDF tags the marker as a form-free `Lbl` with

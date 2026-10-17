@@ -239,7 +239,12 @@ inline objects), including tombstoned and unreadable records, so an older
 engine refuses the file rather than show bare ranges. Documents without
 annotations are unchanged.
 
-## Comment threads: in the document CRDT
+## Comment threads: in the document CRDT (design only; not built)
+
+**Not built.** Only the comment *anchor* exists (`CommentAnchor { thread }`, with
+the thread ID bounded by `MAX_THREAD_BYTES`). No thread root, message storage or
+resolved state exists in the document, so the host keeps thread contents itself.
+Follow-up: add the thread root below and the commands that write it.
 
 Thread contents (messages, authors, resolved state) belong in the document's
 CRDT, under a dedicated root keyed by thread ID, not on a server:
@@ -256,7 +261,13 @@ The server keeps what isn't document state: notifications, mentions, mapping
 peers to accounts, and retention. Deleting a message tombstones it, as with
 any CRDT content; purging needs the explicit compaction from decision 07.
 
-## Suggestions (design only)
+## Suggestions (design only; not built)
+
+**Not built.** `annotation::Kind` (and the facade's `AnnotationKind`) has no `suggestion` kind, no transaction flag
+`suggesting(author)` exists, there is no `ResolveSuggestions` command and layout has
+no hidden-span display mode. Everything named below is the proposal, not code.
+Follow-up: the suggestion kind, the rewrite of typing, `ResolveSuggestions`, and the
+layout display mode, in that order.
 
 Suggestion mode would add a `suggestion` kind. One suggestion is a **group**: a
 suggestion ID shared by one or two annotations (a replacement is a deletion and
@@ -311,8 +322,8 @@ The engine would additionally need:
     `AddAnnotation { comment { thread } }`; the sidebar lists
     `annotations_of_kind("comment")` (or `State.annotations`), orders by
     `annotation_geometry(id).top`, and shows orphans in a separate section.
-    Thread storage is a later root (above), keyed by the same thread ID.
--   **Suggestion mode:** a new kind with the needs listed above.
+    Thread storage is not built (see above); it would be a later root keyed by the same thread ID.
+-   **Suggestion mode:** not built; a new kind with the needs listed above.
 -   **Bookmarks and internal links:** a bookmark is a small new kind (`POINT`
     policy, orphan on empty, payload a name). Internal links already target a
     node, a heading or a range; a bookmark is a range target, and its HTML

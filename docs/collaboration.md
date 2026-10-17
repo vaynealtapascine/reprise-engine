@@ -60,6 +60,9 @@ A remote packet is checked for **shape and cost**, never for meaning:
 
 -   its frame, format version and feature set;
 -   its size, change count, operation count, counters and Lamport timestamps;
+-   that its operations are in the `delta-json` vocabulary, that tree operations name
+    nodes that exist, and that text positions are inside their text at the operation's
+    causal version (Loro 1.16 aborts the process otherwise; see *Delta preflight*);
 -   that it is causally complete against this replica (see *Missing dependencies*);
 -   that it carries no operation under the receiving replica's own peer ID that the receiver
     has not already seen.
@@ -101,7 +104,7 @@ normalisation needs no agreement, because it is a pure function of the CRDT stat
 | I1 | **Tree shape:** the content tree is acyclic and each node has one parent. | C: concurrent moves that would create a cycle. H: raw tree moves. | Loro's movable tree resolves cyclic moves deterministically: the later move in its total order is ignored. The invariant always holds; there is no diagnostic. |
 | I2 | **Block envelope:** each live content node has a known `kind` string, a `text` container and a string `style`. | H: raw meta writes such as a missing or ill-typed kind, text as a value, or an unknown kind. | `Document::block` returns `DocError::Malformed`. Layout omits the block with `layout.malformed-block` (Error); its children still lay out. `audit` reports `collab.malformed-node`. An unknown kind written by a newer engine is kept (34). |
 | I3 | **Deletion flag:** `deleted` is a boolean; a node is live when no ancestor carries `true`, and Loro's tree has not physically deleted it. | C: concurrent delete and restore (map last-writer-wins). H: a non-boolean flag, or a raw tree delete. | A non-boolean flag reads as *not deleted*. A physically deleted node and its subtree are not live; relations and ranges use their deletion policies (15). `audit` reports `collab.tree-tombstone` (Warning) for a physically deleted node that still has content: the kernel never deletes physically, so its content is hidden, not deleted by an author. |
-| I4 | **Live content under a deleted parent** is not expected: the kernel only adds children under live parents, and a join requires the second block to have no live children. | C: a block inserted or moved under a parent that another peer deletes or joins at the same time. | The subtree is hidden (the ancestor flag wins), deterministically. `audit` reports `collab.hidden-content` (Warning) on the live-flagged child, so a UI can offer to restore or move it. Undo of the deletion reveals it again. |
+| I4 | **No live content inside a joined block:** a join requires the second block to have no live children. | C: a block inserted or moved under a block that another peer joins at the same time. (The same shape under a merely *deleted* parent is indistinguishable from deleting a subtree, so it is not reported.) | The subtree is hidden (the ancestor flag wins), deterministically. `audit` reports `collab.hidden-content` (Warning) on each live-flagged child of a soft-deleted block that has a successor, so a UI can offer to restore or move it. Undoing the join reveals it again. |
 | I5 | **Table grid:** a table's children are rows, a row's children are cells, a cell's `column` is inside the table's column list, and the role record is readable. | C: row deletion against cell edits, concurrent column changes and cell inserts. H: raw role records. | Layout's table reader reports `layout.table-invalid` and lays out the readable part, as the tables workstream defines. A deleted row hides its cells and their edits; undoing the deletion brings them back with the concurrent edits. |
 | I6 | **Relation ownership:** an owned relation's owner is live; its JSON matches a registered schema. | C: owner deleted concurrently, or a relation added to a node deleted concurrently. H: raw JSON. | Resolution reports `relation.owner-deleted` (Info), `relation.target-deleted`, `relation.missing-target`, `relation.unreadable` or `relation.unknown-schema`, per 14 and 15. Nothing is written. |
 | I7 | **Range endpoints:** both anchors are in the range's node's text, start ≤ end, and the policy record is readable. | C: endpoint text deleted, or ends crossed by concurrent edits. H: raw anchors or policies. | `resolve_range` gives `Rebound`, `Missing`, or empty at the start for crossed ends (12). An unreadable policy resolves as `Missing`. Nothing is written. |
@@ -139,17 +142,31 @@ diagnostics use only documented codes.
 
 ### Hostile-peer fuzz
 
-`crates/doc/src/hostile_tests.rs` writes seeded random raw Loro operations into the
-engine's containers from a separate `LoroDoc`:
+`reprise_doc::hostile` (feature `hostile-peer`, so Loro stays inside `reprise-doc`)
+writes seeded random raw Loro operations into the engine's containers from a forked
+replica:
 
 -   wrong value types, unknown keys and kinds;
 -   texts in the wrong place, and huge or negative numbers;
 -   tree moves, creates and physical deletes;
 -   policy, relation, image and table records that are garbage or almost right.
 
-It exports a delta packet and imports it into a kernel-built document, then runs layout,
-display, save and reopen. Nothing may panic, and every diagnostic code must appear in the
-contracts table. The fuzz is bounded and seeded, so it runs in `cargo test`.
+Its edits reach a victim only through a delta packet. Three suites use it, all seeded and
+bounded so they run in `cargo test`:
+
+-   `crates/doc/src/hostile_tests.rs` imports the attacker's delta beside an honest
+    concurrent edit and checks that replicas read everything identically, also after a
+    save and reopen. It also mutates single leaves of real delta JSON (positions,
+    lengths, IDs, container names), against both idle and concurrently edited victims.
+    The default is 300 seeds; `REPRISE_HOSTILE_SEEDS=4000` runs the long sweep.
+-   `crates/reprise/tests/hostile_peer.rs` runs the whole facade pipeline: import,
+    layout, every page as display JSON, SVG and PNG, exports, save, reopen and compare.
+    Every diagnostic and refusal must use a code from the contracts table.
+-   The fixture `collab_hostile_peer` pins one scripted attack in the hostile suite.
+
+The fuzz found three ways a packet could abort the process inside Loro 1.16, each now
+refused by the preflight: a tree move of an unknown node, positions above `i32::MAX`,
+and text marks or positions that are inconsistent with the text at their version.
 
 ## Sync packets, format 2
 
@@ -234,6 +251,21 @@ and the trusted v1 compatibility API remain binary; their separate limits are be
     path terminates and two distinct neighbours always have a position between them.
     `Document::import` applies the same check to every content node of a saved package
     or v1 snapshot, and refuses the document.
+10. **Vocabulary:** `delta-json` is what the engine writes: map writes, text insertions
+    and deletions, and tree creates, moves and deletes. Text marks, lists, movable lists
+    and counters are refused (`sync.invalid`); an engine that needs them must declare a
+    new feature bit. Every text position and length is in `0..2^30` (`sync.limit`).
+11. **Tree targets:** every tree operation names a node (and parent) that exists in that
+    tree here, or is created earlier in the packet's Lamport order.
+12. **Text positions at their causal version:** changes are processed in Lamport order
+    (a change ordered before its dependencies is refused), and every text insertion and
+    deletion must lie inside the text as it was at the change's dependencies. Lengths come
+    from, cheapest first: the live state along a linear chain; the live state for texts
+    that nothing after the dependencies changed (from Loro's changed-container index); or
+    a **shadow replica** checked out at the dependencies. The live document is never
+    checked out, because that clears Loro's undo stacks. The shadow is built on first need,
+    updated incrementally, stays checked out where it last was, and is rebuilt after a
+    refused packet that reached it (a peer could resend the same IDs with other content).
 
 If any check fails, nothing is imported. When the checks pass, Loro imports the changes.
 `ImportStatus.pending` must then be `None`. If it is not, the checks above have a bug: the
@@ -283,6 +315,14 @@ mirroring the frame so a transport can route without decoding, plus the frame in
 `SyncReport` carries the new `SyncInfo`, whether anything changed, the change report, and
 the transformed local selection (see below).
 
+The other additions are `set_selection`, `local_selection`, `anchor_selection`,
+`resolve_selection`, `undo_report`, `redo_report`, `presence` and `resolve_presence`.
+WASM exposes them under the same names. A refused packet keeps its core code
+(`sync.format`, `sync.feature`, `sync.invalid`, `sync.limit`, `sync.missing`,
+`sync.local-peer`, `sync.store`), all `Error`. Facade checks, such as a mismatch between
+mirrored fields and the frame, a foreign document or the receiver's own peer, use the
+existing `bindings.*` codes. `sync_info` and the v1 methods are unchanged.
+
 ## Stable positions
 
 ### Stable carets
@@ -308,7 +348,8 @@ the same state resolves it to the same caret. It works in this order:
 1.  **The node is live:** resolve the cursor. If its character was deleted, Loro gives the
     position where it was, between its surviving neighbours. The offset is then clamped to
     the text, and floored to a grapheme boundary (a concurrent combining mark can split a
-    cluster).
+    cluster). If the anchored character or block is gone, authored copy and move
+    relocations are followed first (see *Copies across hosts* under *Known limits*).
 2.  **The node is not live** (soft-deleted, under a deleted ancestor, physically deleted,
     or unreadable):
     1.  If succession (15) gives live successors, use the first in document order. The
@@ -320,14 +361,21 @@ the same state resolves it to the same caret. It works in this order:
     3.  Otherwise, the nearest live text block after it, at its start.
     4.  Otherwise, `None`: the document has no live text block.
 
-A resolved caret that is not in the original node, or not at its anchored character, is
-reported as *moved* (`Resolution::Moved`), so a UI can tell the user.
+An anchor that does not decode or belongs to another text, in a live node, resolves to
+the start of that node. A resolved caret that is not in the original node, or not at its
+anchored character, is reported as *moved* (`Resolution::Moved`), so a UI can tell the
+user.
+
+Anchors name a text container by its CRDT ID, which is only unique within one document.
+Presence and stable selections are therefore scoped by document ID at the facade.
 
 ### The local selection across sync, undo and redo
 
-`DocumentSession::set_selection(Option<Selection>)` anchors the host's current selection.
-`sync_import`, `undo_report` and `redo_report` resolve it after their change and return the
-transformed selection, and keep it anchored. The kernel's own `Applied.effects` remain the
+`DocumentSession::set_selection(Option<Selection>)` anchors the host's current selection;
+`local_selection()` resolves it now. `sync_import`, `undo_report` and `redo_report`
+resolve it after their change and return the transformed selection. Where an end had to
+take a fallback, the selection is re-anchored there, so the fallback position is kept. The
+kernel's own `Applied.effects` remain the
 way to move carets through **local** transactions. Stable anchors are for edits the local
 UI did not make.
 
@@ -340,9 +388,14 @@ Presence is a versioned JSON payload inside the existing awareness bytes, so tra
 need no change:
 
 ```json
-{ "presence": 1, "selection": { "anchor": StableCaret, "focus": StableCaret } | null,
+{ "presence": 1,
+  "selection": { "anchor": { "node": "12@1", "affinity": "downstream", "anchor": "<hex>" },
+                 "focus":  { "node": "12@1", "affinity": "upstream",   "anchor": "<hex>" } },
   "meta": { "name": "Ada", "color": "#a0f" } }
 ```
+
+`selection` may be `null`. Unknown fields make the payload unreadable, which degrades to
+an empty view.
 
 -   `meta` is opaque to the engine. It is bounded to 16 entries, with keys of at most 64
     bytes and values of at most 1 KiB.
@@ -364,8 +417,8 @@ current layout. Only an unsupported facade envelope version is an error, as ever
     deletion flag or position changed, its descendants are added, because their visibility
     may have changed with it. The list may over-approximate. It never under-approximates.
 -   `structure`: whether any tree node was created, moved or deleted.
--   `styles`: whether any named style changed. A UI should then treat every block as
-    restyled.
+-   `styles`: whether any named style, page template or page setup changed. A UI should
+    then treat every block as restyled.
 -   `relations` and `ranges`: the IDs whose records changed.
 -   `other`: whether an unknown root container changed.
 
@@ -451,6 +504,16 @@ What the Reprise side sends:
     span digest. Dead intermediate identities remain searchable. Authored ranges
     follow their endpoints across paragraphs of the same flow. These read limits
     never reject or rewrite replicated operations; excess records remain saved.
+-   **Cost of concurrent edits to the same text.** When a peer's change depends on a
+    version where the same text was also edited here, its positions are checked through
+    the shadow replica, and Loro's checkout cost grows with history. The three-peer soak
+    (`crates/reprise/tests/soak.rs`, peers deliberately editing the same few paragraphs)
+    averaged about 10 ms per import in release after 2,000 edits when the hardening
+    workstream measured it (not re-measured since). Live typing on top of this replica,
+    and concurrent edits to different texts, avoid the shadow. A per-text operation
+    index could replace checkouts.
+-   **Malformed nodes outside the sync path.** `state()` leaves them out and reports
+    `collab.malformed-node` (Error). Layout leaves them out (`layout.malformed-block`).
 -   **Authentication and authorisation** are out of scope (see the trust model).
 
 ## End-to-end verification

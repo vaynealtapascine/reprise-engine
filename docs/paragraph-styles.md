@@ -236,8 +236,8 @@ Required bit 13, `REQUIRED_PARAGRAPH_STYLES`, is declared when `styles1` or
 `para1` exists (even emptied: its operations stay in history), when any nested
 style or override map holds one of the new keys, when `alignment` is
 `justify` anywhere (including `marks1`), or when a formatting envelope has a
-`clear` member. An older engine refuses such a package. Bit numbers will
-collide with parallel workstreams; 13 is the next free bit after 8495a66.
+`clear` member. An older engine refuses such a package. The bit is 13 (`features.rs`), fixed at
+integration; see `crates/format/SPEC.md` for the registry.
 
 ## How later features plug in
 
@@ -245,14 +245,19 @@ collide with parallel workstreams; 13 is the next free bit after 8495a66.
     `indent-start` and a negative `indent-first`; the marker hangs in the
     first-line outdent, which `Indented` already reserves. Lists add marker
     properties as new keyword properties (the extension recipe below).
--   **Headings**: built-in `Heading 1`–`6` are named styles; their semantic
-    role is read by `heading_level` from the name today. A `role` keyword
-    property would make the role independent of the name: one new property.
+-   **Headings**: built-in `Heading 1`–`6` are named styles. The semantic role
+    is no longer only the style name: a paragraph can carry an authored role
+    (`role1`, `reprise_doc::roles::Role`, `docs/roles-and-lists.md`), which is
+    paragraph metadata, **not** a style `Property`; no `role` keyword property
+    exists. `clipboard::pdf_tags::heading_level` still reads a
+    style name for export, as a fallback when a paragraph has no role.
 -   **Style menu and paragraph dialog**: `State.styles`, `State.resolved`,
     `define-style`/`update-style`/`rename-style`/`delete-style`/`apply-style`,
     and `set-style` with `clear` for the dialog's per-property "inherit".
--   **Headers and footers**: their paragraphs name their own styles (built-in
-    `Header`/`Footer` can be added to the built-in table); properties resolve
+-   **Headers and footers**: their paragraphs name their own styles (**not
+    built**: the built-in table, `BUILTIN_STYLES`, has `Normal`, `Title`,
+    `Subtitle` and `Heading 1`–`6` only; `Header` and `Footer` would be added
+    to it, with a package-compatibility check); properties resolve
     in the header frame's context because resolution is per starting frame.
 -   **Table cell paragraphs**: cells hold ordinary paragraph blocks, so they
     resolve the same properties; indents shrink the cell's measure through the

@@ -43,7 +43,7 @@ references already inside the Loro document are scoped by the containing
 document ID. Cross-document references must use the envelope. This does not
 change or migrate the frozen authored `SnapshotRef` type.
 
-Version 1 defines two table feature bits (`features.rs`), both bit 8, declared on
+Version 1 defines two table feature bits (`features.rs`), both bit 8 (the other bits are in the registry below), declared on
 every save from the live content and recomputed (a removed span clears its bit):
 optional `TABLE_HEADERS` (a row is a header row; older readers lay out without
 repeating it, so it degrades) and required `TABLE_SPANS` (a cell spans rows or
@@ -56,6 +56,30 @@ read-only. Its document is exposed through `DocumentAt`; editable access and
 all save paths return `ReadOnly`. Compatibility assumes that core section
 semantics and framing stay stable and future incompatible changes set a
 required bit. Changing framing requires a new magic or required feature.
+
+### Feature bit registry
+
+`features.rs` is the source. A bit is declared on save from the live content and is
+recomputed, except where a section below says history keeps it.
+
+| Bit | Constant | Mask | Declares |
+| --- | --- | --- | --- |
+| 8 | `OPTIONAL_TABLE_HEADERS` | optional | A row is a header row |
+| 8 | `REQUIRED_TABLE_SPANS` | required | A cell spans rows or columns, or has unreadable table metadata |
+| 9 | `REQUIRED_TEXT_FORMATTING` | required | Anchored character formatting |
+| 10 | `REQUIRED_TEXT_EMPHASIS` | required | Weight/slant, underline/strike, colour |
+| 11 | `REQUIRED_MARKS` | required | Authored breaks, tabs, alignment |
+| 12 | `REQUIRED_PAGE_SETUP` | required | Retained `page-setup1` root |
+| 13 | `REQUIRED_PARAGRAPH_STYLES` | required | Paragraph properties, named-style records, clearing actions |
+| 14 | `REQUIRED_BLOCK_SEMANTICS` | required | Paragraph roles, list membership and definitions |
+| 15 | `REQUIRED_INLINE_OBJECTS` | required | Inline object records |
+| 16 | `REQUIRED_ANNOTATIONS` | required | Links and comment anchors |
+| 17 | none | none | **Reserved** for sections (work in progress); no constant is defined and no reader may assign it another meaning |
+| 18 | `REQUIRED_STYLE_IDENTITIES` | required | Durable style owners (`styles2`) |
+
+`KNOWN_REQUIRED` is the union of every required constant above; `KNOWN_OPTIONAL` is
+`OPTIONAL_TABLE_HEADERS`. A package that sets a required bit outside `KNOWN_REQUIRED`,
+bit 17 included, is `RequiredFeatures`.
 
 ## Sections
 
@@ -270,7 +294,7 @@ paragraph key (`indent-start`, `indent-end`, `indent-first`, `space-before`,
 when a `format1` envelope carries `clear`. An older reader would silently drop
 those properties, styles or masks, so it must refuse. Untouched documents,
 including those that only name built-in styles, keep their old mask. See
-`docs/paragraph-styles.md`; the bit number may be renumbered on integration.
+`docs/paragraph-styles.md`.
 
 ## Block semantics feature (required bit 14)
 
@@ -300,7 +324,8 @@ annotations. See `docs/inline.md`.
 removed (tombstoned), unreadable and future-kind records. An older reader would
 show such ranges as bare ranges and copy them without their data, so it must
 refuse the package. Documents without annotations keep their old required mask.
-See `docs/annotations.md`. Bits 14 and 15 are reserved for lists and inline objects.
+See `docs/annotations.md`. Bits 14 and 15 belong to block semantics and inline objects;
+bit 17 is reserved for sections.
 
 ## Stable style owners and built-in semantics (required bit 18)
 
