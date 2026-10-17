@@ -202,6 +202,43 @@ impl PageFactory {
         );
         true
     }
+    /// The counter and label the next page of `section` will carry (sections
+    /// §7.5), and whether the previous counter had already saturated. A pure
+    /// function of the pages made so far, so a page's regions can be composed
+    /// with their label before the page exists.
+    pub fn next_label(
+        sections: &crate::sections::Table,
+        section: &crate::sections::Section,
+        kind: crate::PageKind,
+        snapshot: &LayoutSnapshot,
+    ) -> (i64, String, bool) {
+        let first_content = section.restart.is_some()
+            && snapshot.sections.as_ref().is_none_or(|s| {
+                !s.pages
+                    .iter()
+                    .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
+            });
+        let previous = snapshot
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.last())
+            .map(|p| p.counter);
+        let mut saturated = false;
+        let counter =
+            if kind == crate::PageKind::Content && first_content && section.restart.is_some() {
+                section.restart.unwrap_or(1)
+            } else if let Some(previous) = previous {
+                saturated = previous == i64::MAX;
+                previous.saturating_add(1)
+            } else {
+                sections
+                    .sections
+                    .first()
+                    .and_then(|s| s.restart)
+                    .unwrap_or(1)
+            };
+        (counter, counter.to_string(), saturated)
+    }
     /// Makes the next page of `section`, with its running regions when the
     /// section table has any. The template the page's body frames came from is
     /// returned: the section's own, or its copy with room made for the regions.
@@ -218,9 +255,19 @@ impl PageFactory {
         }
         let page = snapshot.pages.len();
         let first_owned = crate::running::attach::first_owned(snapshot, section.id(), kind);
+        let (_, label, _) = Self::next_label(sections, section, kind, snapshot);
         let regions = running.and_then(|ctx| {
             let index = *sections.by_id.get(&section.id())?;
-            crate::running::attach::prepare(ctx, sections, index, section, page, kind, first_owned)
+            crate::running::attach::prepare(
+                ctx,
+                sections,
+                index,
+                section,
+                page,
+                kind,
+                first_owned,
+                &label,
+            )
         });
         Self::push_prepared(
             engine,
@@ -247,12 +294,6 @@ impl PageFactory {
             return None;
         }
         let page = snapshot.pages.len();
-        let first_content = section.restart.is_some()
-            && snapshot.sections.as_ref().is_none_or(|s| {
-                !s.pages
-                    .iter()
-                    .any(|p| p.section == section.id() && p.kind == crate::PageKind::Content)
-            });
         let template = regions
             .as_ref()
             .and_then(|r| r.template.clone())
@@ -260,35 +301,19 @@ impl PageFactory {
         let reserve = regions
             .as_ref()
             .map_or_else(Default::default, |r| r.reserve);
-        let previous = snapshot
-            .sections
-            .as_ref()
-            .and_then(|s| s.pages.last())
-            .map(|p| p.counter);
-        let counter =
-            if kind == crate::PageKind::Content && first_content && section.restart.is_some() {
-                section.restart.unwrap_or(1)
-            } else if let Some(previous) = previous {
-                if previous == i64::MAX {
-                    let note = crate::sections::diagnostic(
-                        section.id(),
-                        "numbering.restart",
-                        "section.page-counter",
-                        reprise_diag::Severity::Warning,
-                        "page counter saturates at i64::MAX",
-                    );
-                    if !snapshot.diagnostics.contains(&note) {
-                        snapshot.diagnostics.push(note);
-                    }
-                }
-                previous.saturating_add(1)
-            } else {
-                sections
-                    .sections
-                    .first()
-                    .and_then(|s| s.restart)
-                    .unwrap_or(1)
-            };
+        let (counter, label, saturated) = Self::next_label(sections, section, kind, snapshot);
+        if saturated {
+            let note = crate::sections::diagnostic(
+                section.id(),
+                "numbering.restart",
+                "section.page-counter",
+                reprise_diag::Severity::Warning,
+                "page counter saturates at i64::MAX",
+            );
+            if !snapshot.diagnostics.contains(&note) {
+                snapshot.diagnostics.push(note);
+            }
+        }
         let base = snapshot.frames.len();
         let frames: Vec<_> = if kind == crate::PageKind::Filler {
             Vec::new()
@@ -324,7 +349,7 @@ impl PageFactory {
             section: section.id(),
             kind,
             counter,
-            label: counter.to_string(),
+            label,
             bands: if kind == crate::PageKind::Content {
                 vec![crate::Band {
                     section: section.id(),

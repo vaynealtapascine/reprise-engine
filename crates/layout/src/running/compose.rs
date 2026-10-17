@@ -117,6 +117,8 @@ pub(crate) struct Request<'a> {
     pub width: Length,
     pub depth: Length,
     pub page_size: (Length, Length),
+    /// The label of `page`, which is not in the snapshot yet.
+    pub label: &'a str,
 }
 
 impl Shared {
@@ -255,6 +257,7 @@ impl Shared {
             instance,
             page: request.page,
             pages: request.pages,
+            label: request.label.to_owned(),
             trace: Some(trace.clone()),
         });
         let owners = crate::regions::owners(engine, doc);
@@ -316,6 +319,11 @@ impl Shared {
 /// request's plan says, and the page context it guessed with is the same.
 fn still_valid(entry: &Entry, request: &Request<'_>) -> bool {
     let reads = &entry.composed.reads;
+    if let Some(label) = &reads.label
+        && label != request.label
+    {
+        return false;
+    }
     if let Some((page, pages)) = reads.guessed
         && (page, pages) != (request.page, request.pages)
     {

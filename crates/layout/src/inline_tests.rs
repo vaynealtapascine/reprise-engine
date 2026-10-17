@@ -228,3 +228,54 @@ fn size_atoms_carries_the_placement_into_each_box() {
         assert_eq!(env.text(id(1), &atoms[0].object), text);
     }
 }
+
+fn descriptor(counter: i64, label: &str) -> crate::PageDescriptor {
+    crate::PageDescriptor {
+        section: reprise_doc::sections::SectionId::First,
+        kind: crate::PageKind::Content,
+        counter,
+        label: label.into(),
+        bands: Vec::new(),
+        reserve: Default::default(),
+        first_owned: false,
+    }
+}
+
+#[test]
+fn a_placed_page_number_reads_its_label_and_an_unplaced_one_reads_the_plan() {
+    let pages = [descriptor(7, "vii"), descriptor(8, "viii")];
+    let object = InlineObject::field("page-number");
+    // A stale value from the page this atom moved off.
+    let stale: FieldValues = BTreeMap::from([(key(1, FieldInstance::Single), "7".to_string())]);
+    let env = |placed, labels| FieldEnv {
+        page: 1,
+        pages: 2,
+        instance: FieldInstance::Single,
+        values: Some(&stale),
+        labels,
+        placed,
+        trace: None,
+    };
+    let labels = Some(PageLabels::Pages(&pages));
+    // Placed: the page's own label, whatever the plan remembers.
+    assert_eq!(env(true, labels).text(id(1), &object), "viii");
+    // Unplaced (an annotation composed before its page is known): feedback.
+    assert_eq!(env(false, labels).text(id(1), &object), "7");
+    assert_eq!(env(false, labels).text(id(2), &object), "2");
+    // No labels (a layout without sections): feedback, as before.
+    assert_eq!(env(true, None).text(id(1), &object), "7");
+    // A page the labels do not know is not guessed from.
+    let one = Some(PageLabels::One(0, "x"));
+    assert_eq!(env(true, one).text(id(1), &object), "7");
+    // The label read is traced, for a memo to depend on.
+    let trace = std::cell::RefCell::new(Reads::default());
+    let traced = FieldEnv {
+        trace: Some(&trace),
+        ..env(true, Some(PageLabels::One(1, "ix")))
+    };
+    assert_eq!(traced.text(id(1), &object), "ix");
+    assert_eq!(trace.borrow().label.as_deref(), Some("ix"));
+    // Counts and text fields are the plan's, placed or not.
+    let count = InlineObject::field("page-count");
+    assert_eq!(env(true, labels).text(id(3), &count), "2");
+}

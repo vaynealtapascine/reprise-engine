@@ -52,6 +52,8 @@ pub(crate) struct PageSpec {
     pub first_owned: bool,
     /// 0-based physical index.
     pub page: usize,
+    /// The page's label: running fields show it.
+    pub label: String,
     pub filler_regions: bool,
 }
 
@@ -112,6 +114,7 @@ pub(crate) fn prepare(
     page: usize,
     kind: PageKind,
     first_owned: bool,
+    label: &str,
 ) -> Option<PageRegions> {
     let bindings = table.running.of(index)?;
     if !table.running.any() {
@@ -178,6 +181,7 @@ pub(crate) fn prepare(
             width: frame_width,
             depth: cap,
             page_size: (width, height),
+            label,
         });
         let used = composed.used.min(cap);
         let mut capped = false;
@@ -299,6 +303,7 @@ pub(crate) fn outcome_of(ctx: &Ctx<'_>, table: &Table, spec: &PageSpec) -> Optio
             spec.page,
             spec.kind,
             spec.first_owned,
+            &spec.label,
         )
         .map(|r| r.outcome()),
     )
@@ -311,6 +316,7 @@ pub(crate) fn reinstall(ctx: &Ctx<'_>, table: &Table, snapshot: &mut LayoutSnaps
         return;
     };
     let (owner, kind, first_owned) = (descriptor.section, descriptor.kind, descriptor.first_owned);
+    let label = descriptor.label.clone();
     let Some(section) = table.get(owner) else {
         return;
     };
@@ -319,7 +325,7 @@ pub(crate) fn reinstall(ctx: &Ctx<'_>, table: &Table, snapshot: &mut LayoutSnaps
     };
     // A filler shows regions only on its requester's say-so; a replayed
     // filler is never inside a paragraph's delta, so this is the normal case.
-    if let Some(regions) = prepare(ctx, table, index, section, page, kind, first_owned) {
+    if let Some(regions) = prepare(ctx, table, index, section, page, kind, first_owned, &label) {
         regions.reinstall(snapshot, page);
     }
 }

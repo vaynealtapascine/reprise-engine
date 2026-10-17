@@ -291,3 +291,47 @@ fn a_binding_edit_in_an_earlier_section_changes_a_later_sections_pages() {
             .all(|r| r.story == two)
     );
 }
+
+/// S7b: a header that shows the page count depends on every page.
+#[test]
+fn a_page_count_in_a_header_follows_a_later_edit_back_to_page_one() {
+    use super::field_tests::{P, fill, on, shown, story_of};
+    let (engine, doc) = setup();
+    let head = story_of(&doc, &[P::T("of "), P::F("page-count")]);
+    first(&doc, &[("region.header.default", bind(head))]);
+    let nodes = pages(&doc, 12);
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let s = session.layout(&doc).unwrap();
+    assert!((0..12).all(|p| shown(on(&s, p, "header")) == ["12"]));
+
+    // A thirteenth page: every earlier header changes, none changes height,
+    // so no earlier body transition is redone while every earlier header says 13.
+    let more = body(&doc, "page 12");
+    boundary(&doc, more, BreakKind::Page, &[]);
+    doc.commit();
+    let s = session.layout(&doc).unwrap();
+    assert_eq!(s, engine.layout(&doc));
+    assert!((0..13).all(|p| shown(on(&s, p, "header")) == ["13"]));
+    let c = session.counters();
+    assert!(c.reused_compositions >= 12, "bodies are reused: {c:?}");
+    // Pages that show the same count share one composition; the guess of the
+    // first pass and the settled one are the only two.
+    assert!((1..=3).contains(&c.running_compositions), "{c:?}");
+    assert!(c.running_reused >= 20, "{c:?}");
+    assert_eq!(c.reflowed_pages.iter().collect::<Vec<_>>(), [&12], "{c:?}");
+
+    // The same count with a story edit that does change the header's height:
+    // the body reflows from page 0.
+    fill(
+        &doc,
+        doc.top(reprise_doc::Domain::Story(head))[0],
+        &[P::T(&" and so on".repeat(120))],
+    );
+    doc.commit();
+    let s = session.layout(&doc).unwrap();
+    assert_eq!(s, engine.layout(&doc));
+    let c = session.counters();
+    assert_eq!(c.reflowed_pages.iter().min(), Some(&0), "{c:?}");
+    let _ = nodes;
+}

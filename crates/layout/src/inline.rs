@@ -143,8 +143,18 @@ pub(crate) trait FieldFunction: Sync {
     fn name(&self) -> &'static str;
     /// The text to assume before any pass has resolved it.
     fn guess(&self, object: &InlineObject, env: &FieldEnv<'_>) -> String;
+    /// The text a composition on its final page can know without any earlier
+    /// pass, or `None` to read the plan and guess as usual (sections §10, N6).
+    fn direct(&self, _: &InlineObject, _: &FieldEnv<'_>) -> Option<String> {
+        None
+    }
     /// The text a finished pass resolves, or why it can't.
     fn resolve(&self, object: &InlineObject, at: &FieldContext<'_>) -> Result<String, String>;
+    /// The text of a field that couldn't resolve, given the text it was
+    /// composed with. Most keep it.
+    fn failed(&self, composed: String) -> String {
+        composed
+    }
 }
 
 pub(crate) static KINDS: &[&dyn InlineKind] = &[&ImageKind, &FieldKind];
@@ -498,21 +508,29 @@ pub(crate) struct Reads {
     pub fields: BTreeMap<FieldKey, Option<String>>,
     /// `(page, pages)` when some field was guessed from the page context.
     pub guessed: Option<(usize, usize)>,
+    /// The page label a field was composed with, when one was read directly.
+    pub label: Option<String>,
 }
 
 /// Where reads are recorded while a composition runs.
 pub(crate) type Trace = std::rc::Rc<std::cell::RefCell<Reads>>;
 
-/// The labels of the pages made so far. Read by the field adapters (S8a).
+/// The labels of the pages a composition can know.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
-pub(crate) struct PageLabels<'a>(pub &'a [crate::PageDescriptor]);
+pub(crate) enum PageLabels<'a> {
+    /// The pages made so far, in order.
+    Pages(&'a [crate::PageDescriptor]),
+    /// The one page a running region is composed for, before it exists.
+    One(usize, &'a str),
+}
 
-#[allow(dead_code)]
 impl PageLabels<'_> {
-    /// The label of 0-based `page`, if the page has a descriptor.
+    /// The label of 0-based `page`, if it is a page this knows.
     pub fn label(&self, page: usize) -> Option<&str> {
-        self.0.get(page).map(|p| p.label.as_str())
+        match self {
+            PageLabels::Pages(pages) => pages.get(page).map(|p| p.label.as_str()),
+            PageLabels::One(only, label) => (*only == page).then_some(*label),
+        }
     }
 }
 
@@ -532,7 +550,6 @@ pub(crate) struct FieldEnv<'a> {
     /// on (sections §10, N6). A placed composition renders `page-number` from
     /// its page's label directly; an unplaced one (an annotation, composed
     /// before its page is known) reads the previous pass's value.
-    #[allow(dead_code)] // read by the field adapters in S8a
     pub labels: Option<PageLabels<'a>>,
     pub placed: bool,
     pub trace: Option<&'a std::cell::RefCell<Reads>>,
@@ -576,12 +593,29 @@ impl FieldEnv<'_> {
         FieldEnv { instance, ..self }
     }
 
+    /// What a field on its final page can say without feedback: only where
+    /// the page is known to be the one the line lands on (`placed`) and its
+    /// label is at hand. An annotation composed before its page is known is
+    /// neither, so it keeps reading the previous pass.
+    fn direct(&self, object: &InlineObject) -> Option<String> {
+        if !self.placed || self.labels.is_none() {
+            return None;
+        }
+        field_function(object)?.direct(object, self)
+    }
+
     /// The text a field composes with.
     pub(crate) fn text(&self, id: InlineId, object: &InlineObject) -> String {
         let key = FieldKey {
             id,
             instance: self.instance,
         };
+        if let Some(text) = self.direct(object) {
+            if let Some(trace) = self.trace {
+                trace.borrow_mut().label = Some(text.clone());
+            }
+            return text;
+        }
         let found = self.values.and_then(|v| v.get(&key));
         if let Some(trace) = self.trace {
             let mut reads = trace.borrow_mut();
@@ -605,6 +639,16 @@ pub(crate) struct FieldContext<'a> {
 }
 
 impl FieldContext<'_> {
+    /// The label of 0-based `page`: its descriptor's when the layout has
+    /// sections, else the decimal physical number.
+    fn label(&self, page: usize) -> String {
+        self.snapshot
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.get(page))
+            .map_or_else(|| (page + 1).to_string(), |p| p.label.clone())
+    }
+
     /// The 1-based page of a byte of a placed block.
     fn page_of(&self, node: NodeId, at: usize) -> Option<usize> {
         let line = self.snapshot.line_containing(node, at)?;
@@ -621,8 +665,11 @@ impl FieldFunction for PageNumber {
     fn guess(&self, _: &InlineObject, env: &FieldEnv<'_>) -> String {
         (env.page + 1).to_string()
     }
+    fn direct(&self, _: &InlineObject, env: &FieldEnv<'_>) -> Option<String> {
+        env.labels?.label(env.page).map(str::to_owned)
+    }
     fn resolve(&self, _: &InlineObject, at: &FieldContext<'_>) -> Result<String, String> {
-        Ok((at.page + 1).to_string())
+        Ok(at.label(at.page))
     }
 }
 
@@ -658,6 +705,11 @@ impl FieldFunction for PageOf {
             .map(|p| p.to_string())
             .ok_or_else(|| "page-of target is not placed".into())
     }
+    /// A target that was resolved and then became unplaced must not keep
+    /// showing its old page.
+    fn failed(&self, _: String) -> String {
+        "?".into()
+    }
 }
 
 /// Its `text` parameter, verbatim: a field with no pagination dependency.
@@ -675,12 +727,20 @@ impl FieldFunction for TextField {
 }
 
 /// The blocks of a finished pass that fields can be in: the flowed and
-/// placed blocks, then the copies of repeated table header rows.
+/// placed blocks, the copies of repeated table header rows, then the blocks of
+/// running regions, each page's own.
 fn field_blocks(snapshot: &LayoutSnapshot) -> impl Iterator<Item = &crate::BlockLayout> {
     snapshot
         .blocks
         .iter()
         .chain(snapshot.repeated_headers.iter().flat_map(|h| &h.blocks))
+        .chain(
+            snapshot
+                .sections
+                .iter()
+                .flat_map(|s| &s.running)
+                .flat_map(|r| &r.blocks),
+        )
 }
 
 /// Every field's text as a finished pass places it, with the fields that
@@ -729,7 +789,7 @@ pub(crate) fn resolve_fields(
                         out.insert(key, text);
                     }
                     Err(why) => {
-                        out.insert(key, atom.text());
+                        out.insert(key, function.failed(atom.text()));
                         failed.push((block.node, atom.at, why));
                     }
                 }

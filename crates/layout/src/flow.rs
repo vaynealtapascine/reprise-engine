@@ -145,6 +145,9 @@ pub(crate) struct FieldContext {
     pub instance: crate::inline::FieldInstance,
     pub page: usize,
     pub pages: usize,
+    /// The label of `page`, which does not exist yet while its regions are
+    /// composed.
+    pub label: String,
     pub trace: Option<crate::inline::Trace>,
 }
 
@@ -988,6 +991,8 @@ impl Flow<'_> {
         let section = table.sections.get(index)?;
         let page = self.snapshot.pages.len();
         let first_owned = crate::running::attach::first_owned(self.snapshot, section.id(), kind);
+        let (_, label, _) =
+            crate::pages::PageFactory::next_label(table, section, kind, self.snapshot);
         let ctx = running_ctx(&self.running, table, self.engine, self.doc, self.plan).map(|c| {
             crate::running::attach::Ctx {
                 filler_regions,
@@ -995,7 +1000,16 @@ impl Flow<'_> {
             }
         });
         let regions = ctx.as_ref().and_then(|ctx| {
-            crate::running::attach::prepare(ctx, table, index, section, page, kind, first_owned)
+            crate::running::attach::prepare(
+                ctx,
+                table,
+                index,
+                section,
+                page,
+                kind,
+                first_owned,
+                &label,
+            )
         });
         if ctx.is_some() {
             self.read(|| crate::reads::PlanRead::Regions {
@@ -1005,6 +1019,7 @@ impl Flow<'_> {
                     kind,
                     first_owned,
                     page,
+                    label: label.clone(),
                     filler_regions,
                 },
                 outcome: regions.as_ref().map(|r| r.outcome()),
@@ -1462,6 +1477,7 @@ impl Flow<'_> {
                     Some(&self.plan.fields),
                 );
                 env.placed = true;
+                env.labels = Some(crate::inline::PageLabels::One(ctx.page, &ctx.label));
                 env.trace = ctx.trace.as_deref();
                 env
             }
@@ -1472,6 +1488,15 @@ impl Flow<'_> {
                     crate::inline::FieldInstance::Single,
                     Some(&self.plan.fields),
                 );
+                // The body's lines land on the page being filled, whose label
+                // is fixed when the page is made. A layout without sections
+                // has no labels, and reads the plan as it always did.
+                env.placed = true;
+                env.labels = self
+                    .snapshot
+                    .sections
+                    .as_ref()
+                    .map(|s| crate::inline::PageLabels::Pages(&s.pages));
                 env.trace = self.recording().then_some(&self.field_log);
                 env
             }
