@@ -987,8 +987,11 @@ impl Document {
 
     /// The live record of an annotation, readable or not.
     fn annotation_record(&self, id: AnnotationId) -> Result<loro::LoroMap, AnnotationError> {
+        if !self.has_ranges_root() {
+            return Err(AnnotationError::Missing(id));
+        }
         let tree = self.tree("ranges");
-        if !self.has_ranges_root() || !self.live(&tree, id.0) {
+        if !self.live(&tree, id.0) {
             return Err(AnnotationError::Missing(id));
         }
         let meta = tree.get_meta(id.0)?;

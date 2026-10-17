@@ -456,16 +456,33 @@ fn indexed_resolution_matches_range_extent_under_flow_edits() {
 
 #[test]
 fn undo_annotations_after_deleted_atom() {
-    use reprise_doc::{Document, BlockKind as BK, InlineObject};
-    use reprise_doc::annotation::{AnnotationData, LinkTarget, CommentAnchor};
+    use crate::annotation::{AnnotationData, CommentAnchor, LinkTarget};
+    use crate::{BlockKind as BK, Document, InlineObject};
     let doc = Document::new(1).unwrap();
     let p = doc.append_block(BK::Paragraph, "", "abcd").unwrap();
-    doc.insert_inline(p, 2, &InlineObject::field("text").with("text", "x")).unwrap();
+    doc.insert_inline(p, 2, &InlineObject::field("text").with("text", "x"))
+        .unwrap();
     doc.commit_step();
     doc.delete_text(p, 2..5).unwrap();
     doc.commit_step();
-    let link = doc.add_annotation(p, 1..3, &AnnotationData::Link(LinkTarget::Url {url:"https://example.com".into()})).unwrap();
-    let comment = doc.add_annotation(p, 1..3, &AnnotationData::Comment(CommentAnchor {thread:"thread".into()})).unwrap();
+    let link = doc
+        .add_annotation(
+            p,
+            1..3,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://example.com".into(),
+            }),
+        )
+        .unwrap();
+    let comment = doc
+        .add_annotation(
+            p,
+            1..3,
+            &AnnotationData::Comment(CommentAnchor {
+                thread: "thread".into(),
+            }),
+        )
+        .unwrap();
     doc.commit_step();
     let before_link = doc.annotation(link).unwrap();
     let before_comment = doc.annotation(comment).unwrap();
@@ -473,20 +490,26 @@ fn undo_annotations_after_deleted_atom() {
     doc.delete_text(p, 0..4).unwrap();
     doc.commit_step();
     for _ in 0..3 {
-    assert!(undo.undo().unwrap());
-    assert_eq!(doc.block(p).unwrap().text.to_string(), "abcd");
-    println!("link before={before_link:?} after={:?}; comment before={before_comment:?} after={:?}", doc.annotation(link),doc.annotation(comment));
-    assert_eq!(doc.annotation(link).unwrap(), before_link);
-    assert_eq!(doc.annotation(comment).unwrap(), before_comment);
-    assert!(undo.redo().unwrap());
-    assert_eq!(doc.block(p).unwrap().text.to_string(), "");
+        assert!(undo.undo().unwrap());
+        assert_eq!(doc.block(p).unwrap().text.to_string(), "abcd");
+        println!(
+            "link before={before_link:?} after={:?}; comment before={before_comment:?} after={:?}",
+            doc.annotation(link),
+            doc.annotation(comment)
+        );
+        assert_eq!(doc.annotation(link).unwrap(), before_link);
+        assert_eq!(doc.annotation(comment).unwrap(), before_comment);
+        assert!(undo.redo().unwrap());
+        assert_eq!(doc.block(p).unwrap().text.to_string(), "");
     }
     let remote = doc.fork(2).unwrap();
-    let changed = AnnotationData::Comment(CommentAnchor { thread: "remote-edit".into() });
-    remote.update_annotation(comment, &changed).unwrap(); remote.commit();
+    let changed = AnnotationData::Comment(CommentAnchor {
+        thread: "remote-edit".into(),
+    });
+    remote.update_annotation(comment, &changed).unwrap();
+    remote.commit();
     doc.merge(&remote).unwrap();
     assert!(undo.undo().unwrap());
     assert_eq!(doc.annotation(comment).unwrap().data, changed);
     assert_eq!(doc.annotation(comment).unwrap().state, before_comment.state);
 }
-

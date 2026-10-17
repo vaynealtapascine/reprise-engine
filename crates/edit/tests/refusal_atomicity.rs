@@ -473,32 +473,123 @@ fn annotation_target_deletions_are_atomic_in_additions_and_updates() {
         for target_range in [false, true] {
             for ancestor in [false, true] {
                 let doc = Document::new(1).unwrap();
-                let source = doc.append_block(BlockKind::Paragraph, "", "source").unwrap();
-                let parent = doc.append_block(BlockKind::Paragraph, "", "parent").unwrap();
-                let target = doc.insert_block_at(Some(parent), 0, &reprise_doc::NewBlock {
-                    kind: BlockKind::Paragraph, style: String::new(), text: "target".into(), overrides: Default::default()
-                }).unwrap();
-                let range = doc.add_annotation(target, 0..6, &AnnotationData::Comment(CommentAnchor { thread: "thread".into() })).unwrap();
-                let link = doc.add_annotation(source, 0..6, &AnnotationData::Link(LinkTarget::Url { url: "https://example.com".into() })).unwrap();
+                let source = doc
+                    .append_block(BlockKind::Paragraph, "", "source")
+                    .unwrap();
+                let parent = doc
+                    .append_block(BlockKind::Paragraph, "", "parent")
+                    .unwrap();
+                let target = doc
+                    .insert_block_at(
+                        Some(parent),
+                        0,
+                        &reprise_doc::NewBlock {
+                            kind: BlockKind::Paragraph,
+                            style: String::new(),
+                            text: "target".into(),
+                            overrides: Default::default(),
+                        },
+                    )
+                    .unwrap();
+                let range = doc
+                    .add_annotation(
+                        target,
+                        0..6,
+                        &AnnotationData::Comment(CommentAnchor {
+                            thread: "thread".into(),
+                        }),
+                    )
+                    .unwrap();
+                let link = doc
+                    .add_annotation(
+                        source,
+                        0..6,
+                        &AnnotationData::Link(LinkTarget::Url {
+                            url: "https://example.com".into(),
+                        }),
+                    )
+                    .unwrap();
                 doc.commit();
                 let mut e = Editor::new(doc, reprise_doc::SchemaRegistry::builtin());
                 for text in ["!", "?"] {
-                    e.apply_command(Command::InsertText { node: source, at: 6, text: text.into() }).unwrap();
+                    e.apply_command(Command::InsertText {
+                        node: source,
+                        at: 6,
+                        text: text.into(),
+                    })
+                    .unwrap();
                 }
                 e.undo().unwrap();
                 assert!(e.undo_count() > 0 && e.redo_count() > 0);
                 let before = frozen(&e);
-                let data = AnnotationData::Link(if target_range { LinkTarget::Range { range } } else { LinkTarget::Node { node: target } });
-                let delete = if target_range && !ancestor { Command::RemoveAnnotation { id: range } } else { Command::DeleteBlock { node: if ancestor { parent } else { target } } };
-                let write = if update { Command::UpdateAnnotation { id: link, data } } else { Command::AddAnnotation { node: source, range: 0..6, data } };
-                let error = e.apply(&Transaction::from(vec![delete, write])).unwrap_err();
+                let data = AnnotationData::Link(if target_range {
+                    LinkTarget::Range { range }
+                } else {
+                    LinkTarget::Node { node: target }
+                });
+                let delete = if target_range && !ancestor {
+                    Command::RemoveAnnotation { id: range }
+                } else {
+                    Command::DeleteBlock {
+                        node: if ancestor { parent } else { target },
+                    }
+                };
+                let write = if update {
+                    Command::UpdateAnnotation { id: link, data }
+                } else {
+                    Command::AddAnnotation {
+                        node: source,
+                        range: 0..6,
+                        data,
+                    }
+                };
+                let error = e
+                    .apply(&Transaction::from(vec![delete, write]))
+                    .unwrap_err();
                 assert_eq!(error.command, Some(1));
-                assert!(frozen(&e) == before, "refusal changed history, revision or undo/redo");
-                assert_eq!(e.document().block(source).unwrap().text.to_string(), "source!");
+                assert!(
+                    frozen(&e) == before,
+                    "refusal changed history, revision or undo/redo"
+                );
+                assert_eq!(
+                    e.document().block(source).unwrap().text.to_string(),
+                    "source!"
+                );
                 assert!(e.document().is_live(target));
                 assert!(e.redo().unwrap());
-                assert_eq!(e.document().block(source).unwrap().text.to_string(), "source?!");
+                assert_eq!(
+                    e.document().block(source).unwrap().text.to_string(),
+                    "source?!"
+                );
             }
         }
+    }
+}
+
+#[test]
+fn missing_annotation_validation_preserves_absent_roots_and_history() {
+    use reprise_doc::annotation::{AnnotationData, LinkTarget};
+    for update in [false, true] {
+        let doc = Document::new(1).unwrap();
+        doc.append_block(BlockKind::Paragraph, "", "text").unwrap();
+        doc.commit();
+        let mut e = Editor::new(doc, reprise_doc::SchemaRegistry::builtin());
+        let before = frozen(&e);
+        let id = reprise_doc::RangeId::parse("3@9").unwrap();
+        let command = if update {
+            Command::UpdateAnnotation {
+                id,
+                data: AnnotationData::Link(LinkTarget::Url {
+                    url: "https://example.com".into(),
+                }),
+            }
+        } else {
+            Command::RemoveAnnotation { id }
+        };
+        assert!(e.apply_command(command).is_err());
+        assert!(
+            frozen(&e) == before,
+            "missing-ID validation changed history, revision or undo/redo"
+        );
     }
 }

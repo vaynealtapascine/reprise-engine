@@ -9,8 +9,8 @@ use crate::annotation::OnEmpty;
 use crate::relation::{CopyAction, CopySet, plan_copy};
 use crate::text::{Affinity, Empty, RangePolicy};
 use crate::{
-    BlockKind, DocError, Document, NodeId, RangeId, RangeState, Relation, RelationId,
-    SchemaRegistry, Style, get_str,
+    BlockKind, DocError, Document, NodeId, RangeId, Relation, RelationId, SchemaRegistry, Style,
+    get_str,
 };
 
 pub const FRAGMENT_VERSION: u32 = 1;
@@ -792,7 +792,12 @@ impl Document {
         at: usize,
         policy: RangePolicy,
     ) -> Result<(), DocError> {
-        let text = self.block(node).map(|b| b.text).ok().or_else(|| self.text_of_any(node)).ok_or(DocError::NoNode(node))?;
+        let text = self
+            .block(node)
+            .map(|b| b.text)
+            .ok()
+            .or_else(|| self.text_of_any(node))
+            .ok_or(DocError::NoNode(node))?;
         let end = text.anchor(at, policy.end)?;
         self.doc
             .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
