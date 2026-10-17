@@ -29,7 +29,7 @@
 //! Like the core harness, a scenario is a byte string and decoding is total.
 
 mod commands;
-mod oracles;
+pub mod oracles;
 
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -561,6 +561,22 @@ impl World<'_> {
                 for c in &commands {
                     self.count(format!("ok:{}", command_name(c)));
                     note_flags(&mut self.reps[i].may, c);
+                }
+                // An object made and deleted inside one transaction is never seen
+                // in a state, yet leaves a hidden marker (the shape of Astra 4 R4).
+                if commands
+                    .iter()
+                    .any(|c| matches!(c, Command::InsertInline { .. }))
+                    && commands.iter().any(|c| {
+                        matches!(
+                            c,
+                            Command::DeleteText { .. }
+                                | Command::DeleteBlock { .. }
+                                | Command::JoinBlocks { .. }
+                        )
+                    })
+                {
+                    self.reps[i].retired = true;
                 }
                 self.reps[i].old_revision = before.revision.clone();
                 let after = self.state(i)?;
@@ -1627,7 +1643,7 @@ impl World<'_> {
 }
 
 /// A short account of how two states differ, for violation details.
-fn describe_difference(want: &State, got: &State) -> String {
+pub fn describe_difference(want: &State, got: &State) -> String {
     let mut parts = Vec::new();
     if want.blocks != got.blocks {
         let ids_want: Vec<&str> = want.blocks.iter().map(|b| b.id.as_str()).collect();

@@ -14,6 +14,9 @@ use loro::{
 
 use crate::Document;
 
+mod foundations;
+pub use foundations::*;
+
 /// A small deterministic generator (SplitMix64), so runs reproduce by seed.
 #[derive(Clone, Debug)]
 pub struct Rng(u64);

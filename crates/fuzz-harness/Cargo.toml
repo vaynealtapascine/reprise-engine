@@ -21,3 +21,4 @@ reprise-fixtures.workspace = true
 reprise.workspace = true
 
 [dev-dependencies]
+reprise-doc = { workspace = true, features = ["hostile-peer"] }

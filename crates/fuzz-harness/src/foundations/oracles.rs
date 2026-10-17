@@ -55,6 +55,10 @@ pub fn state_is_coherent(state: &State) -> R {
         "two blocks share an ID"
     );
     let limited = state.diagnostics.iter().any(|d| d.code == "bindings.limit");
+    let malformed = state
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "collab.malformed-node");
     let list_ids: BTreeSet<&str> = state.lists.iter().map(|l| l.id.as_str()).collect();
     let mut inline_ids = BTreeSet::new();
     for b in &state.blocks {
@@ -67,8 +71,10 @@ pub fn state_is_coherent(state: &State) -> R {
             state.resolved.len()
         );
         if let Some(parent) = &b.parent {
+            // A child of a node whose envelope doesn't read is listed with its
+            // parent left out (the malformed node is reported instead).
             ensure!(
-                ids.contains(parent.as_str()),
+                ids.contains(parent.as_str()) || malformed,
                 "state-coherent",
                 "block {} has the missing parent {parent}",
                 b.id
@@ -86,8 +92,10 @@ pub fn state_is_coherent(state: &State) -> R {
         ensure!(
             atoms == entries,
             "inline-matches-text",
-            "block {}: U+FFFC at {atoms:?} but inline entries at {entries:?}",
-            b.id
+            "block {} ({:?}, parent {:?}): U+FFFC at {atoms:?} but inline entries at {entries:?}",
+            b.id,
+            b.kind,
+            b.parent
         );
         for entry in &b.inline {
             ensure!(
