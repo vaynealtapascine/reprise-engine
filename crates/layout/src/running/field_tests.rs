@@ -358,3 +358,168 @@ fn an_annotation_composed_before_its_page_is_known_follows_feedback_to_the_final
             .is_none()
     );
 }
+
+fn labels(s: &LayoutSnapshot) -> Vec<String> {
+    s.sections
+        .as_ref()
+        .unwrap()
+        .pages
+        .iter()
+        .map(|p| p.label.clone())
+        .collect()
+}
+
+/// S8b: a roman front matter, then a decimal body restarting at 1.
+#[test]
+fn roman_then_decimal_restart_labels_headers_body_and_page_of() {
+    let (engine, doc) = setup();
+    let foot = story_of(&doc, &[P::T("p."), P::F("page-number")]);
+    first(
+        &doc,
+        &[
+            ("region.footer.default", bind(foot)),
+            ("numbering.format", serde_json::json!("lower-roman")),
+        ],
+    );
+    let nodes = pages(&doc, 5);
+    // The fourth page starts a decimal section that restarts at 1.
+    boundary(
+        &doc,
+        nodes[3],
+        BreakKind::Section,
+        &[
+            ("numbering.format", serde_json::json!("decimal")),
+            ("numbering.restart", serde_json::json!("1")),
+        ],
+    );
+    // A table of contents entry in the last page's text aims at a page of each.
+    let toc = body(&doc, "");
+    let aims = [nodes[1], nodes[4]].map(|n| doc.field_target(n, 0).unwrap());
+    let objects = aims.map(|a| InlineObject::field("page-of").with("target", a.as_str()));
+    let text: String = objects.iter().map(|_| reprise_text::OBJECT).collect();
+    doc.insert_with_inline(toc, 0, &text, &objects).unwrap();
+    doc.commit();
+    let s = engine.layout(&doc);
+    assert_eq!(labels(&s), ["i", "ii", "iii", "1", "2"]);
+    for (page, label) in labels(&s).iter().enumerate() {
+        assert_eq!(
+            shown(on(&s, page, "footer")),
+            [label.clone()],
+            "page {page}"
+        );
+    }
+    let aimed: Vec<_> = s
+        .block(toc)
+        .unwrap()
+        .lines
+        .iter()
+        .flat_map(|l| &l.atoms)
+        .map(|a| a.text())
+        .collect();
+    // The second front-matter page is "ii"; the last body page is "2".
+    assert_eq!(aimed, ["ii", "2"]);
+    assert!(
+        s.diagnostics_with("section.page-number-range")
+            .next()
+            .is_none()
+    );
+    let mut session = LayoutSession::new(&engine);
+    assert_eq!(session.layout(&doc).unwrap(), s);
+}
+
+#[test]
+fn an_unknown_format_token_shows_decimal_without_a_range_warning() {
+    let (engine, doc) = setup();
+    first(&doc, &[("numbering.format", serde_json::json!("klingon"))]);
+    pages(&doc, 2);
+    doc.commit();
+    let s = engine.layout(&doc);
+    assert_eq!(labels(&s), ["1", "2"]);
+    // Retained and reported as the unknown property it is, not as a counter
+    // the format cannot show.
+    assert!(s.diagnostics_with("section.property").next().is_some());
+    assert!(
+        s.diagnostics_with("section.page-number-range")
+            .next()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_counter_the_format_cannot_show_falls_back_to_decimal_with_one_warning() {
+    for (format, restart, expected) in [
+        ("lower-roman", "4000", ["4000", "4001", "4002"]),
+        ("upper-roman", "-2", ["-2", "-1", "0"]),
+        ("upper-alpha", "0", ["0", "A", "B"]),
+        ("lower-roman", "3998", ["mmmcmxcviii", "mmmcmxcix", "4000"]),
+    ] {
+        let (engine, doc) = setup();
+        let foot = story_of(&doc, &[P::F("page-number")]);
+        first(
+            &doc,
+            &[
+                ("region.footer.default", bind(foot)),
+                ("numbering.format", serde_json::json!(format)),
+                ("numbering.restart", serde_json::json!(restart)),
+            ],
+        );
+        pages(&doc, 3);
+        doc.commit();
+        let s = engine.layout(&doc);
+        assert_eq!(labels(&s), expected, "{format} from {restart}");
+        for (page, label) in expected.iter().enumerate() {
+            assert_eq!(shown(on(&s, page, "footer")), [*label], "{format} {page}");
+        }
+        // One warning for the section however many pages fall back.
+        assert_eq!(
+            s.diagnostics_with("section.page-number-range").count(),
+            1,
+            "{format} from {restart}: {:?}",
+            s.diagnostics
+        );
+        assert!(
+            s.diagnostics_with("section.page-number-range")
+                .all(|d| d.severity == reprise_diag::Severity::Warning)
+        );
+    }
+}
+
+#[test]
+fn a_numbering_edit_reaches_the_body_and_running_labels_incrementally() {
+    let (engine, doc) = setup();
+    let foot = story_of(&doc, &[P::F("page-number")]);
+    first(&doc, &[("region.footer.default", bind(foot))]);
+    let nodes = pages(&doc, 4);
+    let note = doc.block(nodes[2]).unwrap().text.len();
+    doc.insert_with_inline(
+        nodes[2],
+        note,
+        &reprise_text::OBJECT.to_string(),
+        &[InlineObject::field("page-number")],
+    )
+    .unwrap();
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let before = session.layout(&doc).unwrap();
+    assert_eq!(labels(&before), ["1", "2", "3", "4"]);
+    for (format, restart, expected) in [
+        ("lower-roman", "9", ["ix", "x", "xi", "xii"]),
+        ("upper-alpha", "1", ["A", "B", "C", "D"]),
+    ] {
+        first(
+            &doc,
+            &[
+                ("region.footer.default", bind(foot)),
+                ("numbering.format", serde_json::json!(format)),
+                ("numbering.restart", serde_json::json!(restart)),
+            ],
+        );
+        doc.commit();
+        let after = session.layout(&doc).unwrap();
+        assert_eq!(after, engine.layout(&doc), "{format}");
+        assert_eq!(labels(&after), expected, "{format}");
+        // The page-number field in the body of the third page follows too.
+        let field = after.block(nodes[2]).unwrap().lines[0].atoms[0].text();
+        assert_eq!(field, expected[2], "{format}");
+    }
+}

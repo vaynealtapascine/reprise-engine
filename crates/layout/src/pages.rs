@@ -179,6 +179,16 @@ impl Catalog {
     }
 }
 
+/// What the next page of a section is numbered.
+pub(crate) struct Numbering {
+    pub counter: i64,
+    pub label: String,
+    /// The previous page's counter was already `i64::MAX`.
+    pub saturated: bool,
+    /// The section's format could not show `counter`: the label is decimal.
+    pub fallback: bool,
+}
+
 /// One limit and one append path, including memo replay. Diagnostics stay at
 /// their existing call sites so the legacy path retains its exact output.
 pub(crate) struct PageFactory;
@@ -203,15 +213,14 @@ impl PageFactory {
         true
     }
     /// The counter and label the next page of `section` will carry (sections
-    /// §7.5), and whether the previous counter had already saturated. A pure
-    /// function of the pages made so far, so a page's regions can be composed
-    /// with their label before the page exists.
+    /// §7.5). A pure function of the pages made so far, so a page's regions
+    /// can be composed with their label before the page exists.
     pub fn next_label(
         sections: &crate::sections::Table,
         section: &crate::sections::Section,
         kind: crate::PageKind,
         snapshot: &LayoutSnapshot,
-    ) -> (i64, String, bool) {
+    ) -> Numbering {
         let first_content = section.restart.is_some()
             && snapshot.sections.as_ref().is_none_or(|s| {
                 !s.pages
@@ -237,7 +246,16 @@ impl PageFactory {
                     .and_then(|s| s.restart)
                     .unwrap_or(1)
             };
-        (counter, counter.to_string(), saturated)
+        // The label is the counter in the owner's format; one the format
+        // can't show (a roman numeral past 3,999, a letter below 1) is decimal.
+        let (label, fallback) =
+            reprise_doc::lists::NumberFormat::parse(&section.format).render_or_decimal(counter);
+        Numbering {
+            counter,
+            label,
+            saturated,
+            fallback,
+        }
     }
     /// Makes the next page of `section`, with its running regions when the
     /// section table has any. The template the page's body frames came from is
@@ -255,7 +273,7 @@ impl PageFactory {
         }
         let page = snapshot.pages.len();
         let first_owned = crate::running::attach::first_owned(snapshot, section.id(), kind);
-        let (_, label, _) = Self::next_label(sections, section, kind, snapshot);
+        let Numbering { label, .. } = Self::next_label(sections, section, kind, snapshot);
         let regions = running.and_then(|ctx| {
             let index = *sections.by_id.get(&section.id())?;
             crate::running::attach::prepare(
@@ -301,7 +319,24 @@ impl PageFactory {
         let reserve = regions
             .as_ref()
             .map_or_else(Default::default, |r| r.reserve);
-        let (counter, label, saturated) = Self::next_label(sections, section, kind, snapshot);
+        let Numbering {
+            counter,
+            label,
+            saturated,
+            fallback,
+        } = Self::next_label(sections, section, kind, snapshot);
+        if fallback {
+            let note = crate::sections::diagnostic(
+                section.id(),
+                "numbering.format",
+                "section.page-number-range",
+                reprise_diag::Severity::Warning,
+                "the page counter can't be shown in this format; decimal is used",
+            );
+            if !snapshot.diagnostics.contains(&note) {
+                snapshot.diagnostics.push(note);
+            }
+        }
         if saturated {
             let note = crate::sections::diagnostic(
                 section.id(),

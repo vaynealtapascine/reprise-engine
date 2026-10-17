@@ -991,7 +991,7 @@ impl Flow<'_> {
         let section = table.sections.get(index)?;
         let page = self.snapshot.pages.len();
         let first_owned = crate::running::attach::first_owned(self.snapshot, section.id(), kind);
-        let (_, label, _) =
+        let crate::pages::Numbering { label, .. } =
             crate::pages::PageFactory::next_label(table, section, kind, self.snapshot);
         let ctx = running_ctx(&self.running, table, self.engine, self.doc, self.plan).map(|c| {
             crate::running::attach::Ctx {
@@ -1410,6 +1410,9 @@ pub(crate) struct PositionKey {
     frames: usize,
     fills: Vec<Fill>,
     section: Option<(reprise_doc::sections::SectionId, String)>,
+    /// The current section's page-number format: labels of the pages the
+    /// transition makes (and numbers it composes) come from it.
+    numbering: Option<String>,
     owner: Option<(reprise_doc::sections::SectionId, i64)>,
 }
 #[derive(Clone)]
@@ -1458,6 +1461,12 @@ impl Flow<'_> {
                 .filter(|s| s.enabled)
                 .and_then(|s| s.sections.get(self.section))
                 .map(|s| (s.id(), s.life().into())),
+            numbering: self
+                .section_table
+                .as_ref()
+                .filter(|s| s.enabled)
+                .and_then(|s| s.sections.get(self.section))
+                .map(|s| s.format.clone()),
             owner: self
                 .snapshot
                 .sections

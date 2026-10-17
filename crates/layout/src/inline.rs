@@ -702,7 +702,7 @@ impl FieldFunction for PageOf {
             .resolve_field_target(target)
             .ok_or("page-of target is unreadable or gone")?;
         at.page_of(node, offset)
-            .map(|p| p.to_string())
+            .map(|p| at.label(p - 1))
             .ok_or_else(|| "page-of target is not placed".into())
     }
     /// A target that was resolved and then became unplaced must not keep
