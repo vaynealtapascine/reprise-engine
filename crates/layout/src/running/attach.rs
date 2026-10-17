@@ -106,6 +106,7 @@ fn subject_of(section: SectionId) -> Subject {
 /// Composes the regions of a page that `section` (index `index` in `table`)
 /// owns. `page` is its 0-based physical index; `first_owned` says whether it
 /// is the section's first content page.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     ctx: &Ctx<'_>,
     table: &Table,

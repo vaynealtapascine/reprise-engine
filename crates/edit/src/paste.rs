@@ -1015,7 +1015,8 @@ impl Editor {
         graph: &reprise_doc::AuthoredStyleGraph,
     ) -> Result<Pasted, EditError> {
         self.doc.check_edit_preflight().map_err(store)?;
-        if !self.doc.blocks().is_empty() {
+        // Empty in every domain: a body with no blocks but a story is not.
+        if !self.doc.authored_order().is_empty() {
             return Err(invalid(FragmentError::Invalid(
                 "document copy target is not empty".into(),
             )));

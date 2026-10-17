@@ -1,14 +1,14 @@
 #!/bin/bash
-# Copy of gate-integrate's prescribed checks, scoped to this worktree/cache.
+# Copy of gate-integrate's prescribed checks, scoped to this worktree. Builds go to F: (G: was saturated by parallel builds during B2).
 set -euo pipefail
 cd F:/reprise-wt/eng-sections2
-export TMP=G:/tmp TEMP=G:/tmp
+export TMP=F:/reprise-target/b2-tmp TEMP=F:/reprise-target/b2-tmp CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 export CARGO_BUILD_JOBS=4 RUSTC_WRAPPER=''
-T=G:/reprise-target/eng-sections
+T=F:/reprise-target/eng-sections2-b2; export CARGO_TARGET_DIR=$T
 step() { local name="$1"; shift; echo "=== $name"; "$@"; echo '=== rc=0'; }
 step types cargo run -q -p reprise --example generate_types
-step wasmbuild env RUSTFLAGS='-C link-arg=-zstack-size=1048576' CARGO_TARGET_DIR=G:/reprise-target/eng-sections-wasm cargo build -q --target wasm32-unknown-unknown -p reprise-wasm
-W=G:/reprise-target/eng-sections-wasm/wasm32-unknown-unknown/debug/reprise_wasm.wasm
+step wasmbuild env RUSTFLAGS='-C link-arg=-zstack-size=1048576' CARGO_TARGET_DIR=F:/reprise-target/eng-sections2-b2-wasm cargo build -q --target wasm32-unknown-unknown -p reprise-wasm
+W=F:/reprise-target/eng-sections2-b2-wasm/wasm32-unknown-unknown/debug/reprise_wasm.wasm
 step bindgen-web wasm-bindgen "$W" --target web --typescript --out-dir "$T/pkg-web"
 cp "$T/pkg-web/reprise_wasm.d.ts" crates/reprise-wasm/ts/reprise_wasm.d.ts
 step bindgen-node wasm-bindgen "$W" --target nodejs --typescript --out-dir "$T/pkg-node"

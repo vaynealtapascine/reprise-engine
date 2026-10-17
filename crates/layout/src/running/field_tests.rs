@@ -155,7 +155,11 @@ fn page_count_settles_across_the_digit_boundary() {
     );
     let total = s.pages.len().to_string();
     for page in 0..s.pages.len() {
-        assert_eq!(shown(on(&s, page, "header")), [total.clone()], "{page}");
+        assert_eq!(
+            shown(on(&s, page, "header")),
+            std::slice::from_ref(&total),
+            "{page}"
+        );
     }
     // One page more crosses the boundary.
     let more = body(&doc, "one more");
@@ -404,7 +408,7 @@ fn roman_then_decimal_restart_labels_headers_body_and_page_of() {
     for (page, label) in labels(&s).iter().enumerate() {
         assert_eq!(
             shown(on(&s, page, "footer")),
-            [label.clone()],
+            std::slice::from_ref(label),
             "page {page}"
         );
     }
