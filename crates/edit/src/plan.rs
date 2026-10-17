@@ -513,8 +513,7 @@ fn command_needs_trial(command: &Command) -> bool {
         | Command::UpdateAnnotation { .. }
         | Command::RemoveAnnotation { .. }
         | Command::InsertInline { .. }
-        | Command::UpdateInline { .. }
-        | Command::DeleteInline { .. } => true,
+        | Command::UpdateInline { .. } => true,
         Command::InsertText { .. }
         | Command::DeleteText { .. }
         | Command::InsertLineBreak { .. }

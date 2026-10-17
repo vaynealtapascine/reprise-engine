@@ -729,30 +729,74 @@ fn pdf_links_over_atoms_in_lists() {
 
 #[test]
 fn copy_preserves_link_across_list_paragraphs_and_field() {
-    use reprise_doc::{Document, SchemaRegistry};
+    use reprise_doc::annotation::{AnnotationState, Kind};
     use reprise_doc::fragment::CopyBlock;
-    use reprise_doc::annotation::{Kind, AnnotationState};
+    use reprise_doc::{Document, SchemaRegistry};
     use reprise_edit::Editor;
-    let (_,doc,_) = reprise_fixtures::inline::page(300,300,Default::default()).unwrap();
-    let p = reprise_fixtures::inline::paragraph(&doc,vec![reprise_fixtures::inline::Part::Text("first second "),reprise_fixtures::inline::Part::Object(reprise_doc::InlineObject::field("page-number"))]).unwrap();
-    let link = doc.add_annotation(p,0..16,&AnnotationData::Link(LinkTarget::Url{url:"https://example.com".into()})).unwrap();
-    let q = doc.split_block(p,6).unwrap();
-    let list = doc.create_list(&reprise_doc::ListDefinition::numbered()).unwrap();
-    doc.set_list_item(p,list,0).unwrap();
-    doc.set_list_item(q,list,0).unwrap();
+    let (_, doc, _) = reprise_fixtures::inline::page(300, 300, Default::default()).unwrap();
+    let p = reprise_fixtures::inline::paragraph(
+        &doc,
+        vec![
+            reprise_fixtures::inline::Part::Text("first second "),
+            reprise_fixtures::inline::Part::Object(reprise_doc::InlineObject::field("page-number")),
+        ],
+    )
+    .unwrap();
+    let link = doc
+        .add_annotation(
+            p,
+            0..16,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://example.com".into(),
+            }),
+        )
+        .unwrap();
+    let q = doc.split_block(p, 6).unwrap();
+    let list = doc
+        .create_list(&reprise_doc::ListDefinition::numbered())
+        .unwrap();
+    doc.set_list_item(p, list, 0).unwrap();
+    doc.set_list_item(q, list, 0).unwrap();
     doc.commit();
-    println!("source={:?}",doc.annotation(link));
-    let mut counts=Vec::new();
-    for whole in [false,true] {
+    println!("source={:?}", doc.annotation(link));
+    let mut counts = Vec::new();
+    for whole in [false, true] {
         let schemas = SchemaRegistry::builtin();
-        let fragment = if whole {doc.copy_document_fragment("source",&schemas).unwrap()} else {doc.copy_fragment("source",&[CopyBlock{node:q,bytes:None}],&schemas).unwrap()};
+        let fragment = if whole {
+            doc.copy_document_fragment("source", &schemas).unwrap()
+        } else {
+            doc.copy_fragment(
+                "source",
+                &[CopyBlock {
+                    node: q,
+                    bytes: None,
+                }],
+                &schemas,
+            )
+            .unwrap()
+        };
         let mut editor = Editor::new(Document::new(2).unwrap(), schemas);
-        editor.paste(&fragment,None,"destination").unwrap();
-        let annotations=editor.document().annotations_of_kind(Kind::Link);
-        let covered:usize=annotations.annotations.iter().map(|a|match &a.state{AnnotationState::Active{pieces,..}=>pieces.iter().map(|p|p.bytes.len()).sum(),_=>0}).sum();
-        println!("whole={whole}; ranges={:?}; copied={annotations:?}; covered={covered}",fragment.ranges);
+        editor.paste(&fragment, None, "destination").unwrap();
+        let annotations = editor.document().annotations_of_kind(Kind::Link);
+        let covered: usize = annotations
+            .annotations
+            .iter()
+            .map(|a| match &a.state {
+                AnnotationState::Active { pieces, .. } => {
+                    pieces.iter().map(|p| p.bytes.len()).sum()
+                }
+                _ => 0,
+            })
+            .sum();
+        println!(
+            "whole={whole}; ranges={:?}; copied={annotations:?}; covered={covered}",
+            fragment.ranges
+        );
         counts.push(covered);
     }
-    assert_eq!(counts,vec![10,16],"every copied linked byte must keep its link");
+    assert_eq!(
+        counts,
+        vec![10, 16],
+        "every copied linked byte must keep its link"
+    );
 }
-
