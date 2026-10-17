@@ -139,7 +139,7 @@ struct Replica {
     redo: Vec<State>,
     /// The revision before the last edit: the source of a believable stale one.
     old_revision: Vec<reprise::Clock>,
-    atoms: usize,
+    inline_ids: std::collections::BTreeSet<String>,
     /// An inline atom was removed or deactivated here at some point.
     retired: bool,
 }
@@ -350,7 +350,7 @@ impl World<'_> {
             trail: Vec::new(),
             redo: Vec::new(),
             old_revision: state.revision.clone(),
-            atoms: total_atoms(&state),
+            inline_ids: inline_ids(&state),
             retired: false,
         });
         Ok(self.reps.len() - 1)
@@ -480,6 +480,9 @@ impl World<'_> {
         };
         if commands.len() == 1 && matches!(commands[0], Command::InsertImage { .. }) {
             commands.clear();
+        }
+        for _ in 0..commands::exclude_known_shapes(&mut commands) {
+            self.count("excluded:astra-4-R1");
         }
         let expectation = if batch { self.input.u8() } else { 0 };
         let expected = match expectation {
@@ -669,9 +672,7 @@ impl World<'_> {
         let mid = self.state(i)?;
         // Undo deactivates the atoms the step made; they stay in the text as
         // hidden markers (the shape of Astra 4 R4).
-        if total_atoms(&mid) < total_atoms(after) {
-            self.reps[i].retired = true;
-        }
+        self.note_retired(i, &mid);
         if authored(&mid) != authored(before) {
             return self.restore_mismatch(
                 i,
@@ -748,11 +749,7 @@ impl World<'_> {
     fn observe(&mut self, i: usize, state: &State) -> R {
         oracles::state_is_coherent(state)?;
         oracles::documented_diagnostics(state)?;
-        let atoms = total_atoms(state);
-        if atoms < self.reps[i].atoms {
-            self.reps[i].retired = true;
-        }
-        self.reps[i].atoms = atoms;
+        self.note_retired(i, state);
         self.features(state);
         let Some(layout) = run_job(&mut self.reps[i].s, &self.opts, &[])? else {
             return Ok(());
@@ -1345,7 +1342,28 @@ impl World<'_> {
         ensure!(
             a == b,
             "import-copy-keeps-content",
-            "import_copy changed the content:\n--- source\n{a}\n--- copy\n{b}"
+            "import_copy changed the content:\n{}",
+            first_differences(&a, &b)
+        );
+        // Annotations inside one paragraph come across exactly; a copy never
+        // has more than its source.
+        let (mut from_copy, copied_total) = oracles::annotation_lines(&copied);
+        let (from_source, source_total) = oracles::annotation_lines(&source);
+        for line in &from_source {
+            let found = from_copy.iter().position(|l| l == line);
+            ensure!(
+                found.is_some(),
+                "import-copy-keeps-annotations",
+                "import_copy lost the annotation `{line}`; the copy has {from_copy:?}"
+            );
+            if let Some(at) = found {
+                from_copy.remove(at);
+            }
+        }
+        ensure!(
+            copied_total <= source_total,
+            "import-copy-keeps-annotations",
+            "import_copy made {copied_total} annotations from {source_total}"
         );
         // A source delta can't apply to the copy.
         if let Some(update) = call(self.reps[i].s.export_updates())? {
@@ -1669,5 +1687,50 @@ fn tracing() -> bool {
 fn trace(what: impl FnOnce() -> String) {
     if tracing() {
         eprintln!("{}", what());
+    }
+}
+
+/// The first lines where two multi-line texts differ, each cut short.
+fn first_differences(a: &str, b: &str) -> String {
+    let cut = |s: &str| s.chars().take(400).collect::<String>();
+    let (la, lb): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
+    let mut out = Vec::new();
+    for n in 0..la.len().max(lb.len()) {
+        let (x, y) = (
+            la.get(n).copied().unwrap_or(""),
+            lb.get(n).copied().unwrap_or(""),
+        );
+        if x != y {
+            out.push(format!(
+                "line {n}:\n  source {}\n  copy   {}",
+                cut(x),
+                cut(y)
+            ));
+            if out.len() == 3 {
+                break;
+            }
+        }
+    }
+    out.join("\n")
+}
+
+fn inline_ids(state: &State) -> std::collections::BTreeSet<String> {
+    state
+        .blocks
+        .iter()
+        .flat_map(|b| b.inline.iter().map(|e| e.id.clone()))
+        .collect()
+}
+
+impl World<'_> {
+    /// Notes that an inline object went away or was replaced since the last
+    /// look at replica `i`: its marker stays in the text as a hidden
+    /// U+FFFC, the shape of Astra 4 R4.
+    fn note_retired(&mut self, i: usize, state: &State) {
+        let ids = inline_ids(state);
+        if !self.reps[i].inline_ids.is_subset(&ids) {
+            self.reps[i].retired = true;
+        }
+        self.reps[i].inline_ids = ids;
     }
 }

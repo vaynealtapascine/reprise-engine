@@ -350,24 +350,40 @@ pub fn shape(state: &State) -> String {
     let _ = writeln!(out, "lists {lists:?}");
     let _ = writeln!(out, "styles {:?}", state.styles);
     let _ = writeln!(out, "page {:?}", state.page_setup);
-    let mut notes: Vec<String> = state
+    out
+}
+
+/// The annotations of `state` by place, for comparing a document with its
+/// `import_copy`: the lines of those inside one paragraph, and how many there
+/// are in all. One that crosses paragraphs is only counted, because the copy
+/// keeps just its first paragraph's part (Astra 4 R3, known).
+pub fn annotation_lines(state: &State) -> (Vec<String>, usize) {
+    let block_ord: BTreeMap<&str, usize> = state
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(n, b)| (b.id.as_str(), n))
+        .collect();
+    let mut lines: Vec<String> = state
         .annotations
         .iter()
+        .filter(|a| a.spans.len() == 1)
         .map(|a| {
-            let spans = if a.spans.len() == 1 {
-                format!(
-                    "{}:{}..{}",
-                    ord(&block_ord, &a.spans[0].node),
-                    a.spans[0].start,
-                    a.spans[0].end
-                )
-            } else {
-                "cross-paragraph".to_owned()
-            };
-            format!("{:?} {:?} {:?} {spans}", a.kind, a.status, a.thread)
+            let span = &a.spans[0];
+            format!(
+                "{:?} {:?} {:?} {}:{}..{}",
+                a.kind,
+                a.status,
+                a.thread,
+                block_ord
+                    .get(span.node.as_str())
+                    .copied()
+                    .unwrap_or(usize::MAX),
+                span.start,
+                span.end
+            )
         })
         .collect();
-    notes.sort();
-    let _ = writeln!(out, "annotations {notes:?}");
-    out
+    lines.sort();
+    (lines, state.annotations.len())
 }

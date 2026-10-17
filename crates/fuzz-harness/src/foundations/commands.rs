@@ -728,8 +728,10 @@ impl<'a> Gen<'a, '_> {
                     .position(|b| first.is_some_and(|f| f.id == b.id))
                     .and_then(|i| all.get(i + 1))
                 {
-                    Some(next) if self.input.chance(220) => Some(next),
-                    _ => self.block(Want::Any),
+                    Some(next) if self.input.chance(230) => Some(next),
+                    // Not an adjacent paragraph: refused, or an unordered join
+                    // that drops the link coverage of the text it appends.
+                    _ => first,
                 };
                 Command::JoinBlocks {
                     first: Self::id_of(first),
@@ -1214,4 +1216,46 @@ impl<'a> Gen<'a, '_> {
             }
         }
     }
+}
+
+/// Keeps shapes that trip faults the review stream already owns out of a
+/// generated transaction, so a run goes on to find new bugs. Returns how many
+/// commands it changed. Each exclusion has an ignored regression in
+/// `tests/foundations_regressions.rs`; delete the exclusion when that test
+/// stops being ignored.
+///
+/// -   Astra 4 R1: a refused batch publishes the commands before it when an
+///     annotation's internal link target was deleted, moved or joined away by
+///     an earlier command of the same transaction. The link becomes a plain
+///     Comment payload instead.
+pub fn exclude_known_shapes(commands: &mut [Command]) -> usize {
+    let mut changed = 0;
+    let mut structural = false;
+    for command in commands {
+        match command {
+            Command::DeleteBlock { .. }
+            | Command::JoinBlocks { .. }
+            | Command::MoveBlock { .. }
+            | Command::RemoveAnnotation { .. } => structural = true,
+            Command::AddAnnotation { annotation, .. }
+            | Command::UpdateAnnotation { annotation, .. }
+                if structural
+                    && matches!(
+                        annotation,
+                        AnnotationPayload::Link {
+                            target: LinkDestination::Node { .. }
+                                | LinkDestination::Heading { .. }
+                                | LinkDestination::Range { .. }
+                        }
+                    ) =>
+            {
+                *annotation = AnnotationPayload::Comment {
+                    thread: "t-x".into(),
+                };
+                changed += 1;
+            }
+            _ => {}
+        }
+    }
+    changed
 }
