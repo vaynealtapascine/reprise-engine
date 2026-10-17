@@ -20,6 +20,42 @@ const LATIN: &str = "The quick brown fox jumps over the lazy dog while the patie
 const HEBREW: &str = "שלום עולם זהו טקסט בעברית שנכתב כדי לבדוק הזחות ומרווחים בשורות \
                       רבות של פסקה אחת ארוכה מאוד.";
 
+#[test]
+fn table_cell_uses_resolved_paragraph_indents() {
+    let doc = document(WritingMode::HorizontalTb, 220, 400);
+    let t = doc
+        .append_table(reprise_doc::TableColumns {
+            columns: vec![reprise_doc::Column {
+                width: reprise_doc::ColumnWidth::Fixed(Length::from_pt(220)),
+            }],
+        })
+        .unwrap();
+    let r = doc.append_table_row(t, false).unwrap();
+    let c = doc.append_table_cell(r, 0).unwrap();
+    let n = doc
+        .append_cell_block(c, BlockKind::Paragraph, "", LATIN)
+        .unwrap();
+    doc.set_overrides(
+        n,
+        &with(
+            Style::default(),
+            &[
+                (Property::IndentStart, "20pt"),
+                (Property::IndentEnd, "10pt"),
+                (Property::IndentFirst, "-5pt"),
+            ],
+        ),
+    )
+    .unwrap();
+    doc.commit();
+    let snapshot = engine().layout(&doc);
+    let lines = &block(&snapshot, n).lines;
+    assert!(lines.len() > 1);
+    assert_eq!(lines[0].available.start, Length::from_pt(15));
+    assert_eq!(lines[1].available.start, Length::from_pt(20));
+    assert_eq!(lines[0].available.end, Length::from_pt(210));
+}
+
 fn length(text: &str) -> Authored {
     Authored::Expr(Expr::parse(text).unwrap())
 }

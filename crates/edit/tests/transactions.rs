@@ -903,7 +903,7 @@ fn random_command(rng: &mut Rng, doc: &Document) -> Command {
             chars[rng.below(chars.len())]
         }
     };
-    match rng.below(10) {
+    match rng.below(23) {
         0..=2 => Command::InsertText {
             node,
             at: offset(rng),
@@ -930,6 +930,51 @@ fn random_command(rng: &mut Rng, doc: &Document) -> Command {
             block: NewBlock::new(BlockKind::Paragraph, "body", SNIPPETS[rng.below(7)]),
         },
         8 => Command::DeleteBlock { node },
+        9 => Command::CreateList {
+            definition: reprise_doc::ListDefinition::numbered(),
+        },
+        10 => Command::UpdateList {
+            list: doc
+                .lists()
+                .first()
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| reprise_doc::ListId::parse("0@99").unwrap()),
+            definition: reprise_doc::ListDefinition::bulleted(),
+        },
+        11 => Command::DeleteList {
+            list: reprise_edit::ListRef::New(rng.below(2)),
+        },
+        12 => Command::SetListItem {
+            node,
+            list: reprise_edit::ListRef::New(rng.below(2)),
+            level: rng.below(11) as u8,
+        },
+        13 => Command::RemoveListItem { node },
+        14 => Command::SetListLevel {
+            node,
+            level: rng.below(11) as u8,
+        },
+        15 => Command::IndentListItem { node, by: 1 },
+        16 => Command::RestartList {
+            node,
+            value: Some(2),
+        },
+        17 => Command::ContinueList { node },
+        18 => Command::Enter {
+            node,
+            at: offset(rng),
+        },
+        19 => Command::BackspaceAtStart { node },
+        20 => Command::InsertInline {
+            node,
+            at: offset(rng),
+            object: reprise_doc::InlineObject::field("page-number"),
+        },
+        21 => Command::UpdateInline {
+            node,
+            at: offset(rng),
+            patch: reprise_doc::InlinePatch::default(),
+        },
         _ => Command::MoveBlock {
             node,
             parent: if rng.below(2) == 0 { pick(rng) } else { None },
@@ -976,14 +1021,26 @@ fn random_transactions_never_corrupt_and_refusals_change_nothing() {
     let (mut ok, mut bad) = (0, 0);
     for _ in 0..600 {
         let tx = random_transaction(&mut rng, e.document());
-        let before = (dump(e.document()), e.document().revision());
+        let before = (
+            dump(e.document()),
+            e.document().revision(),
+            e.document().export(reprise_doc::PersistenceMode::History),
+            e.undo_count(),
+            e.redo_count(),
+        );
         match e.apply(&tx) {
             Ok(_) => ok += 1,
             Err(error) => {
                 bad += 1;
                 assert_eq!(
                     before,
-                    (dump(e.document()), e.document().revision()),
+                    (
+                        dump(e.document()),
+                        e.document().revision(),
+                        e.document().export(reprise_doc::PersistenceMode::History),
+                        e.undo_count(),
+                        e.redo_count()
+                    ),
                     "{tx:?}: {error:?}"
                 );
             }
@@ -1005,14 +1062,26 @@ fn undoing_everything_and_redoing_everything_restores_each_state() {
         for _ in 0..80 {
             let tx = random_transaction(&mut rng, e.document());
             let steps = e.undo_count();
-            let before = (dump(e.document()), e.document().revision());
+            let before = (
+                dump(e.document()),
+                e.document().revision(),
+                e.document().export(reprise_doc::PersistenceMode::History),
+                e.undo_count(),
+                e.redo_count(),
+            );
             // A transaction that changes nothing is not a step.
             match e.apply(&tx) {
                 Ok(_) if e.undo_count() > steps => states.push(dump(e.document())),
                 Ok(_) => {}
                 Err(error) => assert_eq!(
                     before,
-                    (dump(e.document()), e.document().revision()),
+                    (
+                        dump(e.document()),
+                        e.document().revision(),
+                        e.document().export(reprise_doc::PersistenceMode::History),
+                        e.undo_count(),
+                        e.redo_count()
+                    ),
                     "seed {seed}: {tx:?}: {error:?}"
                 ),
             }

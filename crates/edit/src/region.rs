@@ -37,7 +37,11 @@ pub enum HitMode {
 }
 
 /// What a point on a page means.
+///
+/// Non-exhaustive: a frame chain's frame is a further placement (the frames
+/// design adds `Chain`), so match with a wildcard.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PlacedHit {
     Body(Hit),
     Running {

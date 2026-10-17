@@ -115,6 +115,8 @@ fn trace(
 
 #[test]
 fn every_executor_steps_identically_on_every_fixture() {
+    let timing = std::env::var_os("REPRISE_TIMING_TRACE").is_some();
+    let started = std::time::Instant::now();
     let mut cases: Vec<(String, Engine, Document)> = hostile::all()
         .unwrap()
         .into_iter()
@@ -125,7 +127,11 @@ fn every_executor_steps_identically_on_every_fixture() {
         reprise_fixtures::engine(),
         spike::document().unwrap().doc,
     ));
+    if timing {
+        eprintln!("fixture construction: {:?}", started.elapsed());
+    }
     for (i, (name, engine, doc)) in cases.iter().enumerate() {
+        let case_started = std::time::Instant::now();
         let seed = 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1);
         let full = engine.layout(doc);
         let mut reference = None;
@@ -147,6 +153,9 @@ fn every_executor_steps_identically_on_every_fixture() {
                     "{name}: {label} observed different steps than serial"
                 ),
             }
+        }
+        if timing {
+            eprintln!("fixture {name}: {:?}", case_started.elapsed());
         }
     }
 }

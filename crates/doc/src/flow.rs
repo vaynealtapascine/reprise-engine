@@ -40,6 +40,7 @@ const BREAK_BYTES: usize = 3;
 pub(crate) struct FlowCache {
     frontiers: Option<Frontiers>,
     hosts: HashMap<TreeID, Option<Arc<HostFlow>>>,
+    records: Option<LoroMap>,
 }
 
 /// One host's paragraphs as read now.
@@ -249,10 +250,26 @@ impl Document {
         self.doc.get_map(BREAKS)
     }
 
+    /// Read-only root lookup. Retain its handle to avoid scanning all break
+    /// records for every paragraph; roots are never removed.
+    fn read_break_records(&self) -> Option<LoroMap> {
+        let mut cache = self.flows.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(records) = &cache.records {
+            return Some(records.clone());
+        }
+        let ValueOrContainer::Container(Container::Map(records)) =
+            self.doc.get_by_str_path(BREAKS)?
+        else {
+            return None;
+        };
+        cache.records = Some(records.clone());
+        Some(records)
+    }
+
     /// A break paragraph's record, if it has a readable one.
     pub(crate) fn break_record(&self, id: NodeId) -> Option<LoroMap> {
         id.mark?;
-        match self.break_records().get(&id.to_string())? {
+        match self.read_break_records()?.get(&id.to_string())? {
             ValueOrContainer::Container(Container::Map(m)) if get_i64(&m, VERSION) == Some(1) => {
                 Some(m)
             }
@@ -314,7 +331,10 @@ impl Document {
         let mut marks = Vec::new();
         let mut objects = Vec::new();
         if s.contains(BREAK) || s.contains(OBJECT) {
-            let records = self.break_records();
+            let records = s
+                .contains(BREAK)
+                .then(|| self.read_break_records())
+                .flatten();
             let mut seen = HashSet::new();
             let mut u = 0;
             for (byte, c) in s.char_indices() {
@@ -327,9 +347,11 @@ impl Document {
                     }
                 } else if c == BREAK {
                     let id = text.get_cursor(u, Side::Left).and_then(|c| c.id);
-                    let (mark, recorded) = match id {
-                        Some(id) => self.classify(&tree, &records, host, id, &mut seen),
-                        None => (Mark::Hidden, false),
+                    let (mark, recorded) = match (id, records.as_ref()) {
+                        (Some(id), Some(records)) => {
+                            self.classify(&tree, records, host, id, &mut seen)
+                        }
+                        _ => (Mark::Hidden, false),
                     };
                     let nid = id.map(|id| NodeId::at_break(host, id));
                     if recorded && let Some(nid) = nid {
@@ -530,7 +552,10 @@ impl Document {
             ))?;
         self.stage_mark(id.node, pos, |rec| {
             rec.insert("kind", block.kind.as_str())?;
-            rec.insert("style", block.style.clone().unwrap_or_default())?;
+            rec.insert(
+                "style",
+                get_str(&self.meta_of(id)?, "style").unwrap_or_default(),
+            )?;
             if block.overrides != crate::Style::default() {
                 block
                     .overrides

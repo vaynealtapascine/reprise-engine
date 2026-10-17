@@ -25,7 +25,6 @@
 use crate::flow::{Flow, Prepared, unplaced};
 use crate::region::Bounded;
 use crate::{BlockLayout, Diagnostic, LineLayout, Subject, codes};
-use reprise_compose::Measure;
 use reprise_diag::Severity;
 use reprise_doc::{Document, NodeId};
 use reprise_geom::Length;
@@ -657,7 +656,19 @@ impl Flow<'_> {
                     "frozen table columns exceed this continuation frame's width",
                 ));
             }
-            let measure = Measure(width);
+            let measure = p.paragraph_measure(width, cursor.1);
+            if p.indents(width).1 {
+                diagnostics.push(crate::flow::indent_clamped(&subject));
+            }
+            p.diagnose_context(false, diagnostics);
+            if cursor.1 == 0 && y > y0 && !p.is_image() {
+                let after = cursor
+                    .0
+                    .checked_sub(1)
+                    .and_then(|i| cell.blocks.get(i))
+                    .map_or(Length::ZERO, |previous| previous.style.space_after);
+                y += after.max(p.style.space_before);
+            }
             let bounded = Bounded {
                 inner: &measure,
                 depth,

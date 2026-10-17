@@ -53,7 +53,7 @@ fn invalid(error: FragmentError) -> EditError {
 fn store(error: DocError) -> EditError {
     EditError {
         command: None,
-        reason: Reason::Store(error.to_string()),
+        reason: Reason::from(error),
     }
 }
 
@@ -63,6 +63,17 @@ pub(crate) fn prepare(
     fragment: &Fragment,
     at: Option<(NodeId, usize)>,
     target: &str,
+) -> Result<Prepared, EditError> {
+    prepare_with_styles(doc, schemas, fragment, at, target, false)
+}
+
+fn prepare_with_styles(
+    doc: &Document,
+    schemas: &SchemaRegistry,
+    fragment: &Fragment,
+    at: Option<(NodeId, usize)>,
+    target: &str,
+    preserve_graph: bool,
 ) -> Result<Prepared, EditError> {
     fragment.validate().map_err(invalid)?;
     if at.is_none()
@@ -164,13 +175,14 @@ pub(crate) fn prepare(
             references.insert(parent.clone());
         }
     }
-    let clash = fragment
-        .styles
-        .iter()
-        .any(|(n, s)| doc.style(n).is_some_and(|t| t != *s))
-        || references
+    let clash = !preserve_graph
+        && (fragment
+            .styles
             .iter()
-            .any(|n| !fragment.styles.contains_key(n) && doc.style(n).is_some());
+            .any(|(n, s)| doc.style(n).is_some_and(|t| t != *s))
+            || references
+                .iter()
+                .any(|n| !fragment.styles.contains_key(n) && doc.style(n).is_some()));
     if clash {
         prepared.notes.push(Note::warning(
             STYLE_CLASH,
@@ -209,7 +221,7 @@ pub(crate) fn prepare(
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.clone());
-        if doc.style(&new).is_none() {
+        if !preserve_graph && doc.style(&new).is_none() {
             prepared.styles.insert(new, style);
         }
     }
@@ -992,6 +1004,41 @@ fn write_into_flow(
 }
 
 impl Editor {
+    /// Rebuild a whole-document duplicate in an empty content/style target.
+    /// Its bounded authored graph owns all style records; the fragment's
+    /// appearance projection does not materialise or rename them. Both graph
+    /// installation and content paste are tried before any live write.
+    pub fn paste_document_fragment(
+        &mut self,
+        fragment: &Fragment,
+        target_namespace: &str,
+        graph: &reprise_doc::AuthoredStyleGraph,
+    ) -> Result<Pasted, EditError> {
+        self.doc.check_edit_preflight().map_err(store)?;
+        if !self.doc.blocks().is_empty() {
+            return Err(invalid(FragmentError::Invalid(
+                "document copy target is not empty".into(),
+            )));
+        }
+        let trial = self.doc.fork_for_edit().map_err(store)?;
+        trial.restore_authored_style_graph(graph).map_err(store)?;
+        let prepared = prepare_with_styles(
+            &trial,
+            &self.schemas,
+            fragment,
+            None,
+            target_namespace,
+            true,
+        )?;
+        write(&trial, &self.schemas, prepared.clone())?;
+        self.doc
+            .restore_authored_style_graph(graph)
+            .map_err(store)?;
+        let result = write(&self.doc, &self.schemas, prepared);
+        self.doc.commit_step();
+        result
+    }
+
     /// Paste as one transaction and undo step, returning all identity remappings and losses.
     /// `at = None` appends whole roots; an empty target additionally receives page setup.
     pub fn paste(
@@ -1000,7 +1047,10 @@ impl Editor {
         at: Option<(NodeId, usize)>,
         target_namespace: &str,
     ) -> Result<Pasted, EditError> {
+        self.doc.check_edit_preflight().map_err(store)?;
         let prepared = prepare(&self.doc, &self.schemas, fragment, at, target_namespace)?;
+        let trial = self.doc.fork_for_edit().map_err(store)?;
+        write(&trial, &self.schemas, prepared.clone())?;
         let result = write(&self.doc, &self.schemas, prepared);
         self.doc.commit_step();
         result

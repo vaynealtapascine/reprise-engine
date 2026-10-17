@@ -214,11 +214,12 @@ impl Document {
         text: &str,
     ) -> Result<NodeId, DocError> {
         crate::check_authored(text)?;
+        let style_reference = self.authored_style_reference(style)?;
         let tree = self.tree("content");
         let id = tree.create(parent.map(|n| n.node))?;
         let meta = tree.get_meta(id)?;
         meta.insert("kind", kind.as_str())?;
-        meta.insert("style", style)?;
+        meta.insert("style", style_reference)?;
         meta.insert_container("text", LoroText::new())?
             .insert_utf8(0, text)?;
         Ok(NodeId::tree(id))

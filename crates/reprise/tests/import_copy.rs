@@ -4,6 +4,199 @@ use reprise::*;
 const SOURCE: &str = "00112233445566778899aabbccddeeff";
 const COPY: &str = "ffeeddccbbaa99887766554433221100";
 
+fn unmarked_package(id: u8, peer: u64, text: &str) -> Vec<u8> {
+    let doc = reprise_doc::Document::new(peer).unwrap();
+    doc.define_style("", &reprise_doc::Style::default())
+        .unwrap();
+    doc.append_block(reprise_doc::BlockKind::Paragraph, "", text)
+        .unwrap();
+    doc.commit();
+    reprise_format::Package::new(
+        &doc,
+        reprise_format::DocumentId([id; 16]),
+        reprise_doc::PersistenceMode::History,
+    )
+    .unwrap()
+    .save()
+    .unwrap()
+}
+
+fn historical_copy_refusal(legacy: bool) {
+    let original = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "1".into(),
+            }),
+            &unmarked_package(1, 1, "source"),
+        )
+        .unwrap();
+    // Models a copy saved before durable metadata was introduced: its package
+    // identity and history are independent, but neither document has a marker.
+    let mut copy = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "2".into(),
+            }),
+            &unmarked_package(2, 2, "copy"),
+        )
+        .unwrap();
+    // Prime the query roots before capturing the history used for refusal checks.
+    copy.state().unwrap();
+    let before = (
+        copy.export_updates().unwrap().data,
+        copy.state().unwrap().data,
+    );
+    let id = before.1.document_id.clone();
+    if legacy {
+        let mut packet = original.export_updates().unwrap();
+        packet.data.document_id = id;
+        assert!(
+            copy.import_updates(&packet).is_err(),
+            "unbound history merged"
+        );
+    } else {
+        let mut packet = original
+            .sync_export(&Payload::new(SyncRequest { since: None }))
+            .unwrap();
+        packet.data.document_id = id;
+        assert!(
+            copy.sync_import(&packet).is_err(),
+            "foreign snapshot merged"
+        );
+    }
+    assert!(
+        before
+            == (
+                copy.export_updates().unwrap().data,
+                copy.state().unwrap().data
+            )
+    );
+}
+
+#[test]
+fn historical_unmarked_copy_refuses_rewritten_snapshot() {
+    historical_copy_refusal(false);
+}
+
+#[test]
+fn historical_unmarked_copy_refuses_unverifiable_legacy_history() {
+    historical_copy_refusal(true);
+}
+
+#[test]
+fn unmarked_packages_scope_frames_without_authoring_identity() {
+    let bytes = unmarked_package(1, 1, "source");
+    let original = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "1".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let mut peer = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "3".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let before = original.export_updates().unwrap().data;
+    let packet = original
+        .sync_export(&Payload::new(SyncRequest { since: None }))
+        .unwrap();
+    assert!(
+        packet
+            .data
+            .features
+            .iter()
+            .any(|f| f == "document-lineage1")
+    );
+    peer.sync_import(&packet).unwrap();
+    assert_eq!(before, original.export_updates().unwrap().data);
+    let persisted = reprise_doc::Document::import(&before.content.bytes, 7).unwrap();
+    assert_eq!(persisted.document_lineage().unwrap(), None);
+    assert_eq!(
+        original.state().unwrap().data.blocks,
+        peer.state().unwrap().data.blocks
+    );
+}
+
+#[test]
+fn rewritten_source_envelope_cannot_contaminate_reopened_or_transitive_copy() {
+    let (bytes, mut original) = source();
+    let mut copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let saved = copy.save().unwrap().data.bytes;
+    let reopened = workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "3".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    let transitive = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: "00000000000000000000000000000009".into(),
+                peer_id: "4".into(),
+            }),
+            &saved,
+        )
+        .unwrap();
+    let since = original.sync_info().data.vector;
+    let n = original.state().unwrap().data.blocks[0].id.clone();
+    tx(
+        &mut original,
+        vec![Command::InsertText {
+            node: n,
+            at: 0,
+            text: "foreign ".into(),
+        }],
+    );
+    let packet = original
+        .sync_export(&Payload::new(SyncRequest { since: None }))
+        .unwrap();
+    let delta = original
+        .sync_export(&Payload::new(SyncRequest { since: Some(since) }))
+        .unwrap();
+    let legacy = original.export_updates().unwrap();
+    for mut receiver in [copy, reopened, transitive] {
+        let before = (
+            receiver.save().unwrap().data.bytes,
+            receiver.state().unwrap().data,
+            receiver.sync_info().data,
+        );
+        for mut forged in [packet.clone(), delta.clone()] {
+            forged.data.document_id = receiver.state().unwrap().data.document_id;
+            assert!(
+                receiver.sync_import(&forged).is_err(),
+                "rewritten envelope merged source history"
+            );
+        }
+        let mut forged = legacy.clone();
+        forged.data.document_id = receiver.state().unwrap().data.document_id;
+        assert!(receiver.import_updates(&forged).is_err());
+        assert_eq!(
+            (
+                receiver.save().unwrap().data.bytes,
+                receiver.state().unwrap().data,
+                receiver.sync_info().data
+            ),
+            before
+        );
+    }
+}
+
 fn workspace() -> Workspace {
     Workspace::new()
 }
@@ -367,5 +560,147 @@ fn a_copy_keeps_paragraph_styles() {
     };
     for i in 0..2 {
         assert_eq!(style_of(&b, i), style_of(&a, i));
+    }
+}
+
+fn renamed_parent_copy(populated: bool) {
+    let mut source = session(SOURCE, "1");
+    tx(
+        &mut source,
+        vec![
+            Command::DefineStyle {
+                name: "Parent".into(),
+                parent: Some("".into()),
+                style: Style {
+                    size: Some("40pt".into()),
+                    ..Default::default()
+                },
+            },
+            Command::DefineStyle {
+                name: "Child".into(),
+                parent: Some("Parent".into()),
+                style: Style::default(),
+            },
+            Command::RenameStyle {
+                from: "Parent".into(),
+                to: "Renamed".into(),
+            },
+        ],
+    );
+    if populated {
+        let node = tx(&mut source, vec![block("child", 0)]).data.blocks[0].clone();
+        tx(
+            &mut source,
+            vec![Command::ApplyStyle {
+                node,
+                style: Some("Child".into()),
+            }],
+        );
+    }
+    let mut copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &source.save().unwrap().data.bytes,
+        )
+        .unwrap();
+    for document in [&mut source, &mut copy] {
+        if !populated {
+            let node = tx(document, vec![block("child", 0)]).data.blocks[0].clone();
+            tx(
+                document,
+                vec![Command::ApplyStyle {
+                    node,
+                    style: Some("Child".into()),
+                }],
+            );
+        }
+        let state = document.state().unwrap().data;
+        assert_eq!(
+            state.resolved[state.blocks[0].style.resolved as usize].size,
+            40 * 1024,
+            "copy detached an unused parent alias"
+        );
+        tx(
+            document,
+            vec![Command::UpdateStyle {
+                name: "Renamed".into(),
+                parent: None,
+                style: Style {
+                    size: Some("50pt".into()),
+                    ..Default::default()
+                },
+                clear: Vec::new(),
+            }],
+        );
+        let state = document.state().unwrap().data;
+        assert_eq!(
+            state.resolved[state.blocks[0].style.resolved as usize].size,
+            50 * 1024,
+            "copy materialised the alias as a detached definition"
+        );
+    }
+}
+
+#[test]
+fn empty_copy_retains_unused_parent_aliases() {
+    renamed_parent_copy(false);
+}
+
+#[test]
+fn populated_copy_retains_parent_aliases_after_later_edits() {
+    renamed_parent_copy(true);
+}
+
+#[test]
+fn copy_retains_referenced_tombstones_and_builtin_forwarding() {
+    let mut source = session(SOURCE, "1");
+    let node = tx(&mut source, vec![block("deleted quote", 0)]).data.blocks[0].clone();
+    tx(
+        &mut source,
+        vec![
+            Command::DefineStyle {
+                name: "Gone".into(),
+                parent: Some("".into()),
+                style: Style {
+                    size: Some("40pt".into()),
+                    ..Default::default()
+                },
+            },
+            Command::ApplyStyle {
+                node,
+                style: Some("Gone".into()),
+            },
+            Command::DeleteStyle {
+                name: "Gone".into(),
+            },
+            Command::RenameStyle {
+                from: "Subtitle".into(),
+                to: "Subheading".into(),
+            },
+        ],
+    );
+    let copy = workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: COPY.into(),
+                peer_id: "2".into(),
+            }),
+            &source.save().unwrap().data.bytes,
+        )
+        .unwrap();
+    let native = |session: &DocumentSession| {
+        reprise_doc::Document::import(&session.export_updates().unwrap().data.content.bytes, 9)
+            .unwrap()
+    };
+    let (a, b) = (native(&source), native(&copy));
+    for name in ["Gone", "Subtitle", "Subheading"] {
+        assert_eq!(
+            a.style_record(name),
+            b.style_record(name),
+            "lost authored record {name}"
+        );
     }
 }

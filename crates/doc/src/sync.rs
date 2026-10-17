@@ -14,8 +14,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loro::{
-    Container, ContainerID, ContainerType, JsonOpContent, JsonSchema, JsonTextOp, JsonTreeOp,
-    TreeID, VersionVector,
+    Container, ContainerID, ContainerType, JsonMapOp, JsonOpContent, JsonSchema, JsonTextOp,
+    JsonTreeOp, TreeID, VersionVector,
 };
 use reprise_diag::{Code, Note, Severity};
 
@@ -26,7 +26,7 @@ use crate::persist::MAX_PERSIST_OPS;
 /// The packet format this engine writes and reads. Format 1 is the facade's
 /// self-contained `SyncUpdate` snapshot, which stays readable there.
 pub const SYNC_FORMAT: u16 = 2;
-/// Largest packet body.
+/// Largest complete wire packet, including the frame and both vectors.
 pub const MAX_PACKET_BYTES: usize = 32 * 1024 * 1024;
 /// Most changes in one delta.
 pub const MAX_PACKET_CHANGES: usize = 1_000_000;
@@ -62,14 +62,25 @@ impl Features {
     pub const SNAPSHOT_LORO_1_16: Features = Features(1 << 1);
     /// A complete history in the same bounded JSON vocabulary as deltas.
     pub const SNAPSHOT_JSON: Features = Features(1 << 2);
+    /// A 32-byte durable document ID prefixes the JSON body.
+    pub const DOCUMENT_LINEAGE: Features = Features(1 << 3);
+    /// Durable style owners and versioned built-in references.
+    pub const STYLE_IDENTITIES: Features = Features(1 << 4);
+    /// Historical paragraph-v1 builtin context, including an empty schema root.
+    pub const LEGACY_BUILTINS: Features = Features(1 << 5);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features = Features(1 | (1 << 2) | crate::sections::REQUIRED_SECTIONS);
+    pub const SUPPORTED: Features = Features(
+        1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | crate::sections::REQUIRED_SECTIONS,
+    );
 
-    const NAMES: [(Features, &'static str); 3] = [
+    const NAMES: [(Features, &'static str); 6] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),
+        (Features::DOCUMENT_LINEAGE, "document-lineage1"),
+        (Features::STYLE_IDENTITIES, "style-identities1"),
+        (Features::LEGACY_BUILTINS, "legacy-builtins1"),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -272,6 +283,9 @@ fn write_vector(out: &mut Vec<u8>, vector: &[(u64, i32)]) -> Result<(), SyncErro
 /// features are checked before anything else, so a newer packet is refused
 /// with [`SyncError::Format`] or [`SyncError::Feature`], never misread.
 pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
+    if bytes.len() > MAX_PACKET_BYTES {
+        return Err(SyncError::Limit("packet bytes"));
+    }
     let mut r = Reader(bytes);
     if r.take(4)? != MAGIC {
         return Err(invalid("not a sync packet"));
@@ -281,6 +295,11 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         return Err(SyncError::Format(format));
     }
     let features = Features(u64::from_le_bytes(r.array()?));
+    if features.0 & Features::STYLE_IDENTITIES.0 != 0
+        && features.0 & Features::LEGACY_BUILTINS.0 != 0
+    {
+        return Err(invalid("conflicting style context declarations"));
+    }
     let unknown = features.0 & !Features::SUPPORTED.0;
     if unknown != 0 {
         return Err(SyncError::Feature(unknown));
@@ -295,7 +314,13 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         PacketKind::Delta => Features::DELTA_JSON,
         PacketKind::Snapshot => Features::SNAPSHOT_JSON,
     };
-    if features.0 & !crate::sections::REQUIRED_SECTIONS != needed.0 {
+    if features.0
+        & !(Features::DOCUMENT_LINEAGE.0
+            | Features::STYLE_IDENTITIES.0
+            | Features::LEGACY_BUILTINS.0
+            | crate::sections::REQUIRED_SECTIONS)
+        != needed.0
+    {
         return Err(invalid("packet features don't match its kind"));
     }
     let since = r.vector()?;
@@ -306,6 +331,7 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         return Err(SyncError::Limit("packet bytes"));
     }
     let body = r.take(len)?;
+    lineage_body(features, body)?;
     if !r.0.is_empty() {
         return Err(invalid("trailing bytes after the packet body"));
     }
@@ -327,11 +353,34 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
     Ok((header, body))
 }
 
+fn lineage_body(features: Features, body: &[u8]) -> Result<(Option<&str>, &[u8]), SyncError> {
+    if features.0 & Features::DOCUMENT_LINEAGE.0 == 0 {
+        return Ok((None, body));
+    }
+    let id = body
+        .get(..32)
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .filter(|id| crate::identity::valid(id))
+        .ok_or_else(|| invalid("invalid packet lineage"))?;
+    Ok((Some(id), body.get(32..).unwrap_or_default()))
+}
+
+/// Durable lineage carried inside the frame, independent of host DTO metadata.
+pub fn packet_lineage(bytes: &[u8]) -> Result<Option<&str>, SyncError> {
+    let (header, body) = read_header(bytes)?;
+    lineage_body(header.features, body).map(|(id, _)| id)
+}
+
 fn write_packet(header: &PacketHeader, body: &[u8]) -> Result<Vec<u8>, SyncError> {
-    if body.len() > MAX_PACKET_BYTES {
+    let size = 23usize
+        .saturating_add(
+            12usize.saturating_mul(header.since.len().saturating_add(header.until.len())),
+        )
+        .saturating_add(body.len());
+    if size > MAX_PACKET_BYTES {
         return Err(SyncError::Limit("packet bytes"));
     }
-    let mut out = Vec::with_capacity(body.len().saturating_add(64));
+    let mut out = Vec::with_capacity(size);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&header.format.to_le_bytes());
     out.extend_from_slice(&header.features.0.to_le_bytes());
@@ -382,13 +431,34 @@ impl Document {
         let json = self
             .doc
             .export_json_updates(&to_vv(&clamped), &to_vv(&until));
-        let body = serde_json::to_vec(&json).map_err(|e| SyncError::Store(e.to_string()))?;
+        let mut body = serde_json::to_vec(&json).map_err(|e| SyncError::Store(e.to_string()))?;
+        let lineage = self
+            .document_lineage()
+            .map_err(|e| SyncError::Store(e.to_string()))?;
+        if let Some(id) = &lineage {
+            let mut bound = Vec::with_capacity(body.len().saturating_add(32));
+            bound.extend_from_slice(id.as_bytes());
+            bound.append(&mut body);
+            body = bound;
+        }
         let header = PacketHeader {
             format: SYNC_FORMAT,
             features: Features(
                 Features::DELTA_JSON.0
+                    | if lineage.is_some() {
+                        Features::DOCUMENT_LINEAGE.0
+                    } else {
+                        0
+                    }
                     | if self.has_sections() {
                         crate::sections::REQUIRED_SECTIONS
+                    } else {
+                        0
+                    }
+                    | if self.has_style_identities() {
+                        Features::STYLE_IDENTITIES.0
+                    } else if self.legacy_builtin_context() {
+                        Features::LEGACY_BUILTINS.0
                     } else {
                         0
                     },
@@ -406,7 +476,12 @@ impl Document {
         let (mut header, body) = read_header(&packet)?;
         header.kind = PacketKind::Snapshot;
         header.features = Features(
-            Features::SNAPSHOT_JSON.0 | (header.features.0 & crate::sections::REQUIRED_SECTIONS),
+            Features::SNAPSHOT_JSON.0
+                | (header.features.0
+                    & (Features::DOCUMENT_LINEAGE.0
+                        | Features::STYLE_IDENTITIES.0
+                        | Features::LEGACY_BUILTINS.0
+                        | crate::sections::REQUIRED_SECTIONS)),
         );
         write_packet(&header, body)
     }
@@ -416,6 +491,13 @@ impl Document {
     /// nothing and reports nothing.
     pub fn import_packet(&self, bytes: &[u8]) -> Result<ChangeReport, SyncError> {
         let (header, body) = read_header(bytes)?;
+        let (lineage, body) = lineage_body(header.features, body)?;
+        let mine = self
+            .document_lineage()
+            .map_err(|e| SyncError::Store(e.to_string()))?;
+        if lineage != mine.as_deref() {
+            return Err(invalid("packet belongs to a different document lineage"));
+        }
         self.commit();
         self.import_delta(&header, body)
     }
@@ -425,12 +507,27 @@ impl Document {
         let json: JsonSchema =
             serde_json::from_slice(body).map_err(|e| SyncError::Invalid(e.to_string()))?;
         self.preflight_delta(header, &json)?;
-        let (status, report) = self.tracked(|| self.doc.import_json_updates(json));
+        let adopt_legacy =
+            header.features.0 & Features::LEGACY_BUILTINS.0 != 0 && !self.has_style_identities();
+        if adopt_legacy {
+            self.check_legacy_context_adoption(&header.until)
+                .map_err(|e| SyncError::Store(e.to_string()))?;
+        }
+        let (status, mut report) = self.tracked(|| self.doc.import_json_updates(json));
         let status = status.map_err(|e| SyncError::Store(e.to_string()))?;
         if status.pending.is_some() {
             return Err(SyncError::Missing {
                 have: self.version_vector(),
             });
+        }
+        self.refresh_style_identity_root();
+        if header.features.0 & Features::STYLE_IDENTITIES.0 != 0 {
+            self.retain_style_identities();
+        }
+        if adopt_legacy {
+            self.adopt_legacy_context()
+                .map_err(|e| SyncError::Store(e.to_string()))?;
+            report.styles = true;
         }
         Ok(report)
     }
@@ -481,6 +578,15 @@ impl Document {
             for op in &change.ops {
                 if i64::from(op.counter) != end {
                     return Err(invalid("operation counters are not contiguous"));
+                }
+                if header.features.0 & Features::STYLE_IDENTITIES.0 == 0 {
+                    let identity_root = matches!(&op.container, ContainerID::Root { name, .. } if name.as_str() == crate::style_identity::ROOT);
+                    let identity_reference = matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, value: loro::LoroValue::String(value) }) if (matches!(key.as_str(), "style" | "parent") || matches!(&op.container, ContainerID::Root { name, .. } if (name.as_str() == "styles1" && key.starts_with("parent/")) || (name.as_str() == "para1" && key.ends_with("/parent")))) && (value.starts_with("\u{1}style1:") || value.starts_with("\u{2}builtin1:")));
+                    if identity_root || identity_reference {
+                        return Err(invalid(
+                            "style identity operations require style-identities1",
+                        ));
+                    }
                 }
                 check_op(&op.content)?;
                 let len = op_len(&op.content);
@@ -771,6 +877,12 @@ fn op_len(content: &JsonOpContent) -> u64 {
 
 #[cfg(test)]
 pub(crate) mod tests_support {
+    pub(crate) fn try_write(
+        header: &super::PacketHeader,
+        body: &[u8],
+    ) -> Result<Vec<u8>, super::SyncError> {
+        super::write_packet(header, body)
+    }
     pub(crate) fn write(header: &super::PacketHeader, body: &[u8]) -> Vec<u8> {
         super::write_packet(header, body).unwrap()
     }

@@ -214,6 +214,51 @@ fn bytes(v: &js_sys::Uint8Array, max: u32) -> Result<Vec<u8>, JsValue> {
     Ok(v.to_vec())
 }
 fn decode<T: DeserializeOwned>(value: &JsValue) -> Result<Payload<T>, JsValue> {
+    from_snapshot(&snapshot_payload(value)?)
+}
+/// Host configuration fields that `FontSettings` accepts. The copied object is checked
+/// against them before any caller mutates state.
+const FONT_SETTINGS_FIELDS: &[&str] = &["generics", "fallbacks", "synthetic_oblique"];
+/// `decode` for a payload whose `data` may only carry `fields`. serde_wasm_bindgen reads
+/// a struct's known properties and ignores the rest, so the check runs on the snapshot
+/// that serde then decodes, not on the caller's live object.
+fn decode_fields<T: DeserializeOwned>(
+    value: &JsValue,
+    fields: &[&str],
+) -> Result<Payload<T>, JsValue> {
+    let snapshot = snapshot_payload(value)?;
+    let data = js_sys::Reflect::get(&snapshot, &JsValue::from_str("data"))
+        .map_err(|_| error(Error::Invalid("missing data".into())))?;
+    if data.is_object() {
+        let keys = js_sys::Reflect::own_keys(&data)
+            .map_err(|_| error(Error::Invalid("invalid settings object".into())))?;
+        let known = |key: JsValue| {
+            key.as_string()
+                .is_some_and(|key| fields.contains(&key.as_str()))
+        };
+        if !keys.iter().all(known) {
+            return Err(error(Error::Invalid("unknown field".into())));
+        }
+    }
+    from_snapshot(&snapshot)
+}
+fn from_snapshot<T: DeserializeOwned>(snapshot: &JsValue) -> Result<Payload<T>, JsValue> {
+    serde_wasm_bindgen::from_value(snapshot.clone())
+        .map_err(|e| error(Error::Invalid(e.to_string())))
+}
+/// Checks the version, then copies the whole payload into plain JS objects.
+fn snapshot_payload(value: &JsValue) -> Result<JsValue, JsValue> {
+    snapshot_payload_bounded(value, 128 * 1024 * 1024)
+}
+
+fn decode_packet<T: DeserializeOwned>(value: &JsValue) -> Result<Payload<T>, JsValue> {
+    from_snapshot(&snapshot_payload_bounded(
+        value,
+        reprise::MAX_PACKET_BYTES as u32,
+    )?)
+}
+
+fn snapshot_payload_bounded(value: &JsValue, byte_limit: u32) -> Result<JsValue, JsValue> {
     let version = js_sys::Reflect::get(value, &JsValue::from_str("version"))
         .map_err(|_| error(Error::Invalid("missing version".into())))?
         .as_f64()
@@ -268,7 +313,7 @@ fn decode<T: DeserializeOwned>(value: &JsValue) -> Result<Payload<T>, JsValue> {
         }
         if let Some(array) = v.dyn_ref::<js_sys::Uint8Array>() {
             byte_count = byte_count.saturating_add(array.length());
-            if byte_count > 128 * 1024 * 1024 {
+            if byte_count > byte_limit {
                 return Err(error(Error::Limit("JS byte buffers".into())));
             }
             let copy = js_sys::Uint8Array::from(array.to_vec().as_slice());
@@ -320,12 +365,11 @@ fn decode<T: DeserializeOwned>(value: &JsValue) -> Result<Payload<T>, JsValue> {
             }
         }
     }
-    let snapshot = js_sys::Reflect::get(&holder, &JsValue::from_str("payload"))
-        .map_err(|_| error(Error::Invalid("object snapshot".into())))?;
-    serde_wasm_bindgen::from_value(snapshot).map_err(|e| error(Error::Invalid(e.to_string())))
+    js_sys::Reflect::get(&holder, &JsValue::from_str("payload"))
+        .map_err(|_| error(Error::Invalid("object snapshot".into())))
 }
 
-/// The one bound on a sync packet body, in bytes (32 MiB). The TypeScript
+/// The one bound on complete sync wire bytes, in bytes (32 MiB). The TypeScript
 /// type `PacketBound` is this number as a literal. See the native constant
 /// `reprise::MAX_PACKET_BYTES` for the rationale.
 #[wasm_bindgen(js_name = maxPacketBytes)]
@@ -382,7 +426,8 @@ impl WasmWorkspace {
     }
     /// Default font settings for every session of this workspace.
     pub fn set_font_settings(&self, request: &FontSettingsPayload) -> Result<UnitPayload, JsValue> {
-        Ok(encode(self.inner.set_font_settings(&decode(request.as_ref())?))?.unchecked_into())
+        let request = decode_fields(request.as_ref(), FONT_SETTINGS_FIELDS)?;
+        Ok(encode(self.inner.set_font_settings(&request))?.unchecked_into())
     }
     pub fn open(
         &self,
@@ -435,7 +480,7 @@ impl WasmDocument {
         &mut self,
         request: &SyncPacketPayload,
     ) -> Result<SyncReportPayload, JsValue> {
-        Ok(encode(self.inner.sync_import(&decode(request.as_ref())?))?.unchecked_into())
+        Ok(encode(self.inner.sync_import(&decode_packet(request.as_ref())?))?.unchecked_into())
     }
     pub fn set_selection(
         &mut self,
@@ -579,7 +624,7 @@ impl WasmDocument {
         &mut self,
         request: &SyncUpdatePayload,
     ) -> Result<SyncInfoPayload, JsValue> {
-        Ok(encode(self.inner.import_updates(&decode(request.as_ref())?))?.unchecked_into())
+        Ok(encode(self.inner.import_updates(&decode_packet(request.as_ref())?))?.unchecked_into())
     }
     pub fn validate_awareness(&self, request: &AwarenessPayload) -> Result<BytesPayload, JsValue> {
         Ok(encode(self.inner.validate_awareness(&decode(request.as_ref())?))?.unchecked_into())
@@ -607,7 +652,8 @@ impl WasmDocument {
         &mut self,
         request: &FontSettingsPayload,
     ) -> Result<UnitPayload, JsValue> {
-        Ok(encode(self.inner.set_font_settings(&decode(request.as_ref())?))?.unchecked_into())
+        let request = decode_fields(request.as_ref(), FONT_SETTINGS_FIELDS)?;
+        Ok(encode(self.inner.set_font_settings(&request))?.unchecked_into())
     }
     pub fn register_asset(
         &mut self,

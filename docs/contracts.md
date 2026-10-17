@@ -1,5 +1,65 @@
 # Frozen contracts
 
+## Review fixes: edit publication, lineage and transport bounds
+
+- Refused editor transactions, paste and selection replacement preserve authored
+  bytes, retained CRDT history, revision and undo/redo. The planner checks basic
+  input and explicit capacity effects. Plans with possible implicit formatting
+  transfers or reauthoring invalid imported style properties, paste and
+  replacement then run exhaustively on an isolated same-peer
+  document, including formatting copies and post-deletion paste checks.
+  Only a successful preflight is replayed through the live editor's undo origin.
+  A standalone plain text splice has no staging or implicit transfers; its
+  complete effect is checked by the paragraph model, retaining the typing path.
+  The model also accounts for explicit multi-command format actions. Composite
+  formatting transfers, invalid imported style captures and paste/replacement
+  require a committed store for
+  isolated preflight: direct core writes made after `Editor::new` must be
+  committed first. A refusal uses `edit.invalid-command` (Error) and publishes
+  none of those pending writes. Facade sessions maintain this boundary already.
+  Isolated preflight bounds physical content/range/relation tree depth, including
+  tombstones, at 64, before entering Loro's recursive snapshot codec; excess is
+  `edit.limit` (Error), with no mutation. The general editing ancestry bound and
+  the paragraph model's direct text path retain their existing limits.
+- `reprise::MAX_PACKET_BYTES` and the TypeScript `PacketBound` remain **33554432**.
+  This caps the complete `content.bytes` wire buffer on framed and legacy sync
+  imports and exports. Format-2 framing is exactly
+  `23 + 12 * (since.len + until.len)` bytes, plus a 32-byte lineage prefix when
+  `document-lineage1` is required. The body allowance is that constant minus
+  the actual overhead; there is no additional frame allowance. WASM checks
+  typed byte-buffer lengths before copying. Package, asset, font and awareness
+  bounds are separate, unchanged limits.
+- Fresh facade documents and copies store their lowercase 32-hex package ID in
+  an empty `document1:<32-hex-ID>` root (the earlier `document1.id` form remains readable). Reopening checks package identity against this durable ID.
+  Copies have a new ID and history. Legacy unmarked documents stay unmarked on
+  read. Facade sessions attach the durable package ID as read-only sync context,
+  including historical unmarked copies. Format-2 packets from these sessions
+  require sync feature bit 3,
+  `document-lineage1`, and prefix their JSON body with that ID. Older sync readers
+  refuse this feature. The metadata does not affect rendering and is retained
+  by old package readers as opaque Loro state; it needs no package rendering bit.
+  Legacy binary histories must carry the matching stored marker; an unmarked
+  history cannot prove its source ID and is refused by scoped sessions. Use
+  framed sync for historical packages. Raw unscoped native documents retain
+  legacy interoperability. `Document::set_sync_scope` attaches context without
+  changing stored bytes, revision or pending writes, and forks preserve it.
+  Hosts must still authenticate room routing: lineage is an isolation check,
+  not a signature against an attacker who forges the whole body.
+- Explicit session font declarations, imported font resources and restored
+  package pins take precedence over workspace faces with the same `FaceId`.
+  A redeclaration at one scope replaces descriptors at that scope; identical
+  workspace declarations remain deduplicated. Workspace refreshes update only
+  workspace-owned entries. Invalid WASM font setting keys are refused on the
+  copied object before mutation, preserving settings and active layout jobs.
+- Missing anchor targets expose `relation.missing-target` consistently in mark
+  facts and the relation-filtered diagnostics query.
+- Body, cell, note and float text share logical paragraph indent geometry,
+  including RTL mirroring, first-line continuation and bounded clamping.
+  Cell paragraph spacing collapses between paragraphs and is truncated at
+  fragment starts. Auxiliary contexts report `layout.paragraph-context`
+  (**Warning**) when authored keeps/widows/orphans cannot apply; notes and floats
+  also report it for outer paragraph spacing controlled by their region policy.
+
 These are the interfaces that parallel workstreams build against (decision 40, step 2),
 frozen on 2026-10-03. Each section says where the contract lives, what it guarantees, and
 which parts are deliberately left open for a workstream to fill in.
@@ -51,9 +111,8 @@ Codes in use:
 | roles / lists | `role.unknown`, `list.definition-missing`, `list.definition-unreadable`, `list.definition-cycle`, `list.level-clamped`, `list.format-unknown`, `list.counter-range`, `list.limit` |
 | section / story | `section.property`, `section.geometry`, `section.template`, `section.columns-limit`, `section.columns-fit`, `section.column-narrow`, `section.continuous-new-page`, `section.band-limit`, `section.balance-approx`, `section.page-counter`, `section.page-number-range`, `section.region-slot`, `section.region-writing-mode`, `section.mode-unsupported`, `section.inactive`, `section.orphan-start`, `story.orphan`, `story.nested` |
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
-| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit`, `compose.line-height-limit` |
-| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.annotation-revision`, `layout.inline-orphan-marker`, `layout.inline-orphan-record`, `layout.inline-kind`, `layout.field-unsettled`, `layout.field-target`, `layout.running-missing`, `layout.running-clipped`, `layout.story-unsupported` |
+| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.paragraph-context`, `layout.annotation-revision`, `layout.inline-orphan-marker`, `layout.inline-orphan-record`, `layout.inline-kind`, `layout.field-unsettled`, `layout.field-target`, `layout.running-missing`, `layout.running-clipped`, `layout.story-unsupported` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit`, `style.deleted`, `style.rename-cycle` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
@@ -948,6 +1007,11 @@ Native, WASM and the reference worker expose identical additive sync, stable
 selection, tracked undo/redo and presence APIs. Native sessions can select scoped
 layout workers with `set_layout_threads`; output and work budgets are invariant.
 Existing `Caret`, `Selection` and v1 signatures are unchanged.
+A delta is Loro's JSON change schema, and every count, counter, Lamport timestamp,
+peer, tree target and text position (at its causal version) is checked before the
+store sees it; remote operations are not checked semantically. Readers normalise them
+deterministically, and `Document::audit` reports `collab.*` findings. Stable selections
+and presence (a versioned payload inside the awareness bytes) are additive types.
 The reference worker's local `edit` and `image` responses now use `edited`,
 carrying both `Applied` (created IDs and selection effects) and current `State`.
 
@@ -1036,6 +1100,20 @@ one-em box. Source byte offsets remain available for text edits and authored ran
 ## Paragraph style additions (08, 17, 18, 23, 24, 29, 34, 37)
 
 Additive; the design is `docs/paragraph-styles.md`.
+
+-   **Whole-document duplication.** `Document::authored_style_graph` captures
+    the existing `styles` and `styles1` roots, including unused definitions,
+    aliases, tombstones, raw values and patched-versus-defined state. It creates
+    no missing roots. The opaque graph retains at most 65536 keys/entries and
+    16 MiB of keys/values, with literal value depth at most 64. Unexpected CRDT
+    containers refuse with a store error rather than losing data.
+    `restore_authored_style_graph` refuses a target with either style root.
+    `Editor::paste_document_fragment` stages graph installation and whole-root
+    content paste in an empty target before live writes, preserving the installed
+    authored graph instead of materialising fragment appearance definitions.
+    `Workspace::import_copy` uses this path and starts fresh history. Partial
+    clipboard paste retains its existing projection and clash policy. This
+    adds no stored representation, DTO or package feature bit.
 
 -   **Properties.** `Property` gains `IndentStart`, `IndentEnd`, `IndentFirst`,
     `SpaceBefore` and `SpaceAfter` (held in `Style.values`, every stored form,
@@ -1192,3 +1270,23 @@ serialise byte-identically.
     Reads, empty patches and refused commands never create these roots.
 -   **Diagnostics.** The `section / story` row, and the additions to the
     `layout` and `clipboard` rows, in the codes table above.
+
+Stable style ownership (review-fixes 1): native `Document::style_identity(name)`
+returns an opaque document-scoped owner token, and `style_reference(node)` returns
+the underlying resolution/copy reference. Public labels remain strings.
+`AuthoredStyleGraph` also preserves `styles2` and built-in interpretation in fresh
+history. Required package bit 18 and sync bit 4 declare the stored semantics in
+`docs/paragraph-styles.md`; all existing DTO shapes remain unchanged. Unmarked
+legacy unresolved names use their legacy fallback; builtin authoring is tagged.
+
+Copied style owners are protected from reallocation by bounded scalar per-peer
+allocation floors under `styles2.clock/<peer>`. Capture includes these added keys
+in its existing graph budget; unreadable clocks refuse new owner allocation.
+
+Required sync feature `legacy-builtins1` (bit 5) preserves known historical
+paragraph-v1 built-in interpretation without changing a source during export.
+A receiver lacking stable identities adopts the context with one preflighted,
+staged `styles2.legacy-builtins1` operation, excluded from user undo; its
+revision changes and subsequent packages declare required bit 18. Existing
+identity-aware receivers retain their own context. It cannot be combined with
+required sync feature `style-identities1` (bit 4).

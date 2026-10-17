@@ -208,3 +208,52 @@ fn diagnostics_filter_is_bounded_and_validated() {
         .unwrap();
     assert!(none.data.diagnostics.is_empty());
 }
+
+#[test]
+fn deleted_anchor_target_explains_missing_mark_and_query() {
+    let mut s = session();
+    let ids = apply(&mut s, vec![paragraph("source", 0), paragraph("target", 1)])
+        .data
+        .blocks;
+    let relation = apply(
+        &mut s,
+        vec![anchor(
+            &ids[0],
+            0,
+            LineEdge::Start,
+            &ids[1],
+            0,
+            AnchorEdge::Position,
+        )],
+    )
+    .data
+    .relations[0]
+        .clone();
+    apply(
+        &mut s,
+        vec![Command::DeleteBlock {
+            node: ids[1].clone(),
+        }],
+    );
+    finish(&mut s);
+    let marks = anchors(&s);
+    let mark = marks
+        .iter()
+        .find(|m| m.relation.as_ref() == Some(&relation))
+        .unwrap();
+    assert!(!mark.applied);
+    assert_eq!(mark.diagnostic.as_deref(), Some("relation.missing-target"));
+    let facts = s
+        .diagnostics_for(&Payload::new(DiagnosticFilter {
+            subject: Some(relation),
+            ..Default::default()
+        }))
+        .unwrap()
+        .data;
+    assert!(
+        facts
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "relation.missing-target")
+    );
+}

@@ -43,6 +43,8 @@ pub const REQUIRED_INLINE_OBJECTS: u64 = 1 << 15;
 pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
 /// Retained sections, independent stories and geometry mode.
 pub const REQUIRED_SECTIONS: u64 = 1 << 17;
+/// Durable style owners, editable labels and versioned built-in references.
+pub const REQUIRED_STYLE_IDENTITIES: u64 = 1 << 18;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
@@ -53,7 +55,8 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_BLOCK_SEMANTICS
     | REQUIRED_INLINE_OBJECTS
     | REQUIRED_ANNOTATIONS
-    | REQUIRED_SECTIONS;
+    | REQUIRED_SECTIONS
+    | REQUIRED_STYLE_IDENTITIES;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -66,6 +69,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if document.has_sections() {
         flags.required |= REQUIRED_SECTIONS;
+    }
+    if document.has_style_identities() {
+        flags.required |= REQUIRED_STYLE_IDENTITIES;
     }
     if document.has_annotations() {
         flags.required |= REQUIRED_ANNOTATIONS;

@@ -573,6 +573,9 @@ impl Document {
 
     /// Whether a definition exists, is not deleted and is readable.
     pub fn is_list_live(&self, id: ListId) -> bool {
+        if !self.has_root(LISTS) {
+            return false;
+        }
         let tree = self.lists_tree();
         tree.contains(id.0)
             && !tree.is_node_deleted(&id.0).unwrap_or(true)
@@ -596,6 +599,9 @@ impl Document {
     /// Every live definition in ID order. Unreadable ones are `Err` and kept
     /// in the document (34).
     pub fn lists(&self) -> Vec<(ListId, Result<ListDefinition, String>)> {
+        if !self.has_root(LISTS) {
+            return Vec::new();
+        }
         let tree = self.lists_tree();
         let mut ids: Vec<TreeID> = tree
             .nodes()

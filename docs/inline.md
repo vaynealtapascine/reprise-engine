@@ -232,8 +232,8 @@ Built-in kinds:
         cross-reference;
     -   `text`: `p:text` verbatim — the placeholder field that proves the
         extension point carries a field function with no pagination dependency.
-        A `section-heading(level)` or `date(format)` joins by adding one entry
-        to `FIELDS`.
+        `section-heading(level)` and `date(format)` do not exist (not built); one
+        would join by adding an entry to `FIELDS`.
 
 ## Fields and pagination feedback (26)
 

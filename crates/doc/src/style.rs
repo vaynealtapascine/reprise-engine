@@ -998,7 +998,7 @@ pub struct Specified {
 }
 
 pub(crate) fn specify(doc: &Document, block: &Block) -> Specified {
-    specify_parts(doc, block.style.clone(), &block.overrides)
+    specify_parts(doc, doc.style_reference(block.id), &block.overrides)
 }
 
 /// Stage 1 for a style name and direct overrides, without a block: what
@@ -1037,12 +1037,14 @@ pub fn style_chain(
 ) -> (Vec<(String, Option<StyleRecord>)>, Vec<Note>) {
     let mut notes = Vec::new();
     let mut chain: Vec<(String, Option<StyleRecord>)> = Vec::new();
+    let mut visited = Vec::new();
     let mut next = start;
     let mut from = "the block".to_string();
     let mut renamed = false;
     let mut from_builtin = false;
     while let Some(name) = next.take() {
-        if chain.iter().any(|(n, _)| n == &name) {
+        if visited.contains(&name) {
+            let name = doc.reference_label(&name);
             let (code, what) = if renamed {
                 (
                     codes::STYLE_RENAME_CYCLE,
@@ -1064,6 +1066,7 @@ pub fn style_chain(
             break;
         }
         if chain.len() > MAX_CHAIN {
+            let name = doc.reference_label(&name);
             notes.push(Note::warning(
                 codes::STYLE_CHAIN_TOO_LONG,
                 format!(
@@ -1072,7 +1075,9 @@ pub fn style_chain(
             ));
             break;
         }
-        let Some(record) = doc.style_record(&name) else {
+        visited.push(name.clone());
+        let Some((label, mut record)) = doc.reference_record(&name) else {
+            let name = doc.reference_label(&name);
             // Built-ins name the document base, which bare engine documents
             // don't define: that is not the author's problem.
             if !(from_builtin && name.is_empty()) {
@@ -1084,6 +1089,7 @@ pub fn style_chain(
             chain.push((name, None));
             break;
         };
+        let name = label;
         renamed = false;
         from_builtin = record.builtin;
         match &record.status {
@@ -1106,6 +1112,10 @@ pub fn style_chain(
                 renamed = true;
                 from = format!("style {name} (renamed to {to})");
             }
+        }
+        record.style = doc.public_style(record.style);
+        if let StyleStatus::Renamed(to) = &record.status {
+            record.status = StyleStatus::Renamed(doc.reference_label(to));
         }
         chain.push((name, Some(record)));
     }

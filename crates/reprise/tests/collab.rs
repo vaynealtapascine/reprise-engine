@@ -323,7 +323,10 @@ fn deltas_converge_and_report_changes() {
     let packet = delta(&b, &a);
     assert_eq!(packet.data.kind, SyncKind::Delta);
     assert_eq!(packet.data.format, 2);
-    assert_eq!(packet.data.features, vec!["delta-json".to_owned()]);
+    assert_eq!(
+        packet.data.features,
+        vec!["delta-json".to_owned(), "document-lineage1".to_owned()]
+    );
     assert!(packet.data.content.bytes.len() < 1024);
     let report = a.sync_import(&packet).unwrap().data;
     assert!(report.changed);
@@ -726,6 +729,54 @@ fn three_peer_partition_rejoin_soak() {
 /// the packet bytes with this golden. Re-record with REPRISE_RECORD_SYNC=1.
 #[test]
 fn delta_packet_bytes_are_pinned() {
+    // Retain the exact unbound legacy wire golden. New documents explicitly
+    // use the versioned lineage feature and have their own pin below.
+    let legacy = reprise_doc::Document::new(1).unwrap();
+    let bytes = reprise_format::Package::new(
+        &legacy,
+        reprise_format::DocumentId([
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ]),
+        reprise_doc::PersistenceMode::History,
+    )
+    .unwrap()
+    .save()
+    .unwrap();
+    let mut s = Workspace::new()
+        .open(
+            &Payload::new(Open {
+                peer_id: "1".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let p = paragraph(&mut s, "parity");
+    type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
+    // Bare historical frames remain a native-core wire contract. Facade
+    // sessions now attach their durable package ID even to unmarked stores.
+    let unbound =
+        reprise_doc::Document::import(&s.export_updates().unwrap().data.content.bytes, 1).unwrap();
+    let packet = unbound.export_delta(&Vec::new()).unwrap();
+    let hex: String = packet.iter().map(|b| format!("{b:02x}")).collect();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sync_delta.hex");
+    if std::env::var_os("REPRISE_RECORD_SYNC").is_some() {
+        std::fs::write(&path, &hex).unwrap();
+    }
+    assert_eq!(hex, include_str!("sync_delta.hex").trim());
+    // The same packet joins a fresh replica.
+    let fresh = reprise_doc::Document::new(2).unwrap();
+    fresh.import_packet(&packet).unwrap();
+    let actual: Vec<_> = fresh
+        .blocks()
+        .into_iter()
+        .map(|id| (id.to_string(), fresh.block(id).unwrap().text.to_string()))
+        .collect();
+    assert_eq!(actual, blocks(&s));
+}
+
+#[test]
+fn lineage_delta_packet_bytes_are_pinned() {
     let mut s = create("1");
     let p = paragraph(&mut s, "parity");
     type_at(&mut s, &p, 6, " \u{5d0}\u{5d1}");
@@ -741,12 +792,7 @@ fn delta_packet_bytes_are_pinned() {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sync_delta.hex");
-    if std::env::var_os("REPRISE_RECORD_SYNC").is_some() {
-        std::fs::write(&path, &hex).unwrap();
-    }
-    assert_eq!(hex, include_str!("sync_delta.hex").trim());
-    // The same packet joins a fresh replica.
+    assert_eq!(hex, include_str!("sync_lineage_delta.hex").trim());
     let mut fresh = create("2");
     fresh.sync_import(&Payload::new(packet)).unwrap();
     assert_eq!(blocks(&fresh), blocks(&s));

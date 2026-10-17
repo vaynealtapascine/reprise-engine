@@ -234,7 +234,7 @@ impl Document {
         let objects = self.inline_slice(id, at..block.text.len())?;
         let new = self.stage_block(&NewBlock {
             kind: block.kind,
-            style: block.style.unwrap_or_default(),
+            style: self.style_reference(id).unwrap_or_default(),
             overrides: block.overrides,
             text: tail,
         })?;

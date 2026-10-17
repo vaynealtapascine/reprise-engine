@@ -1791,6 +1791,35 @@ impl Prepared {
             width,
         )
     }
+    /// One logical paragraph measure policy for body, cells, notes and floats.
+    pub(crate) fn paragraph_measure(&self, width: Length, start: usize) -> Indented<Measure> {
+        Indented {
+            base: Measure(width),
+            indents: self.indents(width).0,
+            first_line: start == 0,
+            reversed: self.base_level % 2 == 1,
+        }
+    }
+
+    /// Auxiliary contexts have no paragraph keep solver. Notes and floats
+    /// also have region-owned outer spacing, rather than paragraph spacing.
+    pub(crate) fn diagnose_context(&self, spacing: bool, diagnostics: &mut Vec<Diagnostic>) {
+        if (self.style.has_keeps()
+            || (spacing
+                && (self.style.space_before != Length::ZERO
+                    || self.style.space_after != Length::ZERO)))
+            && !diagnostics.iter().any(|d| {
+                d.code == codes::PARAGRAPH_CONTEXT && d.subject == Subject::Node(self.node)
+            })
+        {
+            diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                codes::PARAGRAPH_CONTEXT,
+                Subject::Node(self.node),
+                "paragraph keep rules or outer spacing cannot apply in this composition context",
+            ));
+        }
+    }
     pub(crate) fn line_height(&self) -> Length {
         self.image
             .as_ref()
@@ -1798,6 +1827,9 @@ impl Prepared {
     }
     pub(crate) fn node(&self) -> NodeId {
         self.node
+    }
+    pub(crate) fn is_image(&self) -> bool {
+        self.image.is_some()
     }
     /// Composes the text from byte `start` into one region, with its first
     /// line `block_start` down the frame's block axis. Lines are in frame

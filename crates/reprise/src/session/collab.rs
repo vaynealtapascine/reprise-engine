@@ -166,11 +166,14 @@ impl DocumentSession {
             ));
         }
         cv::peer(&r.from_peer)?;
-        if r.content.bytes.len() > crate::MAX_PACKET_BYTES.saturating_add(1 << 20) {
+        if r.content.bytes.len() > crate::MAX_PACKET_BYTES {
             return Err(Error::Limit("sync packet bytes".into()));
         }
         // The frame decides; the mirrored fields must agree with it.
         let (header, _) = sync::read_header(&r.content.bytes)?;
+        if sync::packet_lineage(&r.content.bytes)? != self.doc().document_lineage()?.as_deref() {
+            return Err(self.lineage_refusal());
+        }
         let kind = match header.kind {
             PacketKind::Delta => SyncKind::Delta,
             PacketKind::Snapshot => SyncKind::Snapshot,
@@ -214,6 +217,15 @@ impl DocumentSession {
             });
         }
         Ok(())
+    }
+
+    pub(super) fn lineage_refusal(&self) -> Error {
+        Error::Core {
+            code: "bindings.copy-source".into(),
+            severity: Severity::Error,
+            message: "packet belongs to a different durable document lineage".into(),
+            command: None,
+        }
     }
 
     /// Anchors the host's current selection, so that `sync_import`,

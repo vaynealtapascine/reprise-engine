@@ -242,9 +242,109 @@ pub(crate) struct Plan {
     /// List definitions to stage; [`Step::ActivateList`] names them by index.
     pub lists: Vec<reprise_doc::ListDefinition>,
     pub steps: Vec<Step>,
+    /// Command owning each write, including implicit structural effects.
+    pub step_commands: Vec<usize>,
+    /// A section, break, story or region command is in the batch.
+    pub sections: bool,
     /// The commands' effects, with staged blocks as indices; the editor
     /// resolves them once those have IDs.
     pub effects: Vec<PlannedEffect>,
+}
+
+impl Plan {
+    /// Explicit formatting counts are fully modelled. Structural copies can
+    /// also write reset/copy actions; exercise those on the resulting state.
+    pub(crate) fn needs_trial(&self, doc: &Document) -> Result<bool, DocError> {
+        // Breaks, section properties, stories and region bindings write
+        // lifetimes, staged copies and bindings against the state the earlier
+        // steps of the batch made, so any of them may refuse late. Exercise
+        // the whole batch on an isolated replica before anything is published.
+        if self.sections {
+            return Ok(true);
+        }
+        if self.created.iter().any(|created| match created {
+            Created::Staged(block) => {
+                doc.style_record(&block.style).is_some_and(|r| r.builtin)
+                    || block.overrides.parent.is_some()
+                    || reprise_doc::PARAGRAPH_KEYS
+                        .iter()
+                        .any(|key| block.overrides.stored(key).is_some())
+                    || block.overrides.alignment == Some(reprise_doc::marks::Alignment::Justify)
+            }
+            Created::Split => false,
+        }) {
+            return Ok(true);
+        }
+        if !self.lists.is_empty() || self.paste.is_some() {
+            return Ok(true);
+        }
+        let explicit = self
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::FormatText { .. }));
+        for step in &self.steps {
+            let node = match step {
+                // Alias allocation and imported property validation can refuse.
+                // Exercise preceding repairs and the resulting metadata state.
+                Step::RenameStyle { .. }
+                | Step::ActivateList { .. }
+                | Step::UpdateList { .. }
+                | Step::DeleteList { .. }
+                | Step::SetListItem { .. }
+                | Step::RemoveListItem { .. }
+                | Step::SetListRestart { .. }
+                | Step::InsertInline { .. }
+                | Step::UpdateInline { .. } => return Ok(true),
+                Step::SetAlignment {
+                    alignment: reprise_doc::marks::Alignment::Justify,
+                    ..
+                } => return Ok(true),
+                Step::FormatText { style, .. } if !style.clear.is_empty() => return Ok(true),
+                Step::DefineStyle { .. } | Step::PatchStyle { .. } | Step::DeleteStyle { .. } => {
+                    return Ok(true);
+                }
+                Step::SetStyleName { name, .. }
+                    if doc.has_style_identities()
+                        || doc.style_record(name).is_some_and(|r| r.builtin) =>
+                {
+                    return Ok(true);
+                }
+                Step::SetOverrides { style, .. }
+                    if style.parent.is_some()
+                        || reprise_doc::PARAGRAPH_KEYS
+                            .iter()
+                            .any(|k| style.stored(k).is_some())
+                        || style.alignment == Some(reprise_doc::marks::Alignment::Justify) =>
+                {
+                    return Ok(true);
+                }
+                Step::PatchOverrides { patch, .. }
+                    if patch.set.parent.is_some()
+                        || reprise_doc::PARAGRAPH_KEYS
+                            .iter()
+                            .any(|k| patch.set.stored(k).is_some())
+                        || patch.set.alignment == Some(reprise_doc::marks::Alignment::Justify) =>
+                {
+                    return Ok(true);
+                }
+                Step::Split { node, .. } | Step::MoveCopy { node, .. } => node,
+                Step::Join { first, second } => {
+                    if explicit
+                        || doc.text_format_capacity(*first)?.0 != 0
+                        || doc.text_format_capacity(*second)?.0 != 0
+                    {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+                _ => continue,
+            };
+            if explicit || doc.text_format_capacity(*node)?.0 != 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -401,6 +501,7 @@ pub(crate) fn plan(
     };
     for (i, command) in commands.iter().enumerate() {
         model.run(command).map_err(|r| EditError::at(i, r))?;
+        model.plan.step_commands.resize(model.plan.steps.len(), i);
     }
     Ok(model.plan)
 }
@@ -597,6 +698,18 @@ impl Model<'_> {
     }
 
     fn run(&mut self, command: &Command) -> Result<(), Reason> {
+        if matches!(
+            command,
+            Command::InsertBreak { .. }
+                | Command::RemoveBreak { .. }
+                | Command::SetSection { .. }
+                | Command::CreateStory { .. }
+                | Command::SetRegion { .. }
+                | Command::CreateRegion { .. }
+                | Command::DeleteStory { .. }
+        ) {
+            self.plan.sections = true;
+        }
         match command {
             Command::InsertBreak { at, kind, patch } => self.insert_break(*at, *kind, patch),
             Command::RemoveBreak { block } => self.remove_break(*block),
@@ -1365,7 +1478,7 @@ impl Model<'_> {
             let new = self.plan.created.len();
             self.plan.created.push(Created::Staged(Box::new(NewBlock {
                 kind: block.kind,
-                style: block.style.unwrap_or_default(),
+                style: self.doc.style_reference(node).unwrap_or_default(),
                 overrides,
                 text,
             })));
@@ -1435,7 +1548,11 @@ impl Model<'_> {
 
 impl From<DocError> for Reason {
     fn from(e: DocError) -> Reason {
-        Reason::Store(e.to_string())
+        match e {
+            DocError::UncommittedEdit => Reason::UncommittedEdit,
+            DocError::EditPreflightDepth(max) => Reason::PreflightDepth { max },
+            e => Reason::Store(e.to_string()),
+        }
     }
 }
 

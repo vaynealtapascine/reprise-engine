@@ -45,6 +45,7 @@ mod history;
 pub mod hostile;
 #[cfg(test)]
 mod hostile_tests;
+mod identity;
 pub mod image;
 pub mod inline;
 #[cfg(test)]
@@ -70,6 +71,10 @@ pub mod roles;
 pub mod sections;
 mod structure;
 mod style;
+mod style_graph;
+mod style_identity;
+#[cfg(test)]
+mod style_identity_tests;
 pub mod sync;
 #[cfg(test)]
 mod sync_tests;
@@ -108,6 +113,7 @@ pub use reprise_geom::{TextCombineUpright, TextOrientation};
 pub use reprise_text as text;
 pub use resolve::{Binding, Cause, Found, Gone, Outcome, ResolvedRelation, ResolvedTarget};
 pub use structure::{MAX_SUCCESSION_DEPTH, Succession};
+pub use style_graph::AuthoredStyleGraph;
 pub mod emphasis;
 pub use emphasis::{Decoration, TextSlant};
 
@@ -303,6 +309,10 @@ pub struct Block {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DocError {
+    #[error("commit direct document edits before isolated edit preflight")]
+    UncommittedEdit,
+    #[error("edit preflight tree depth exceeds {0}")]
+    EditPreflightDepth(usize),
     #[error("no live node {0}")]
     NoNode(NodeId),
     #[error("node {0} is malformed: {1}")]
@@ -338,6 +348,14 @@ pub struct Revision(pub Vec<(u64, i32)>);
 
 pub struct Document {
     doc: LoroDoc,
+    /// The trusted package identity, also for legacy stores without a marker.
+    /// This is context, not a Loro operation or an authored migration.
+    sync_scope: Option<String>,
+    /// Compatibility context inferred from legacy paragraph-style storage.
+    legacy_builtins: bool,
+    style_identities: std::sync::Mutex<style_identity::IdentityCache>,
+    style_root: std::sync::Mutex<style_identity::RootCache>,
+    style_root_absent: std::sync::atomic::AtomicBool,
     /// A lazily built replica that sync checks out to read text lengths at
     /// past versions (see `sync`). Checking out `doc` itself would clear
     /// its undo history.
@@ -371,6 +389,11 @@ impl Document {
     ) -> Document {
         Document {
             doc,
+            sync_scope: None,
+            legacy_builtins: false,
+            style_identities: Default::default(),
+            style_root: Default::default(),
+            style_root_absent: Default::default(),
             shadow: std::sync::Mutex::new(None),
             lineage_pending: std::sync::Mutex::new(Vec::new()),
             flows,
@@ -396,20 +419,105 @@ impl Document {
         self.commit();
         let doc = self.doc.fork();
         doc.set_peer_id(peer)?;
-        Ok(Document::wrap(doc))
+        let mut fork = Document::wrap(doc);
+        fork.sync_scope = self.sync_scope.clone();
+        fork.legacy_builtins = self.legacy_builtins;
+        Ok(fork)
+    }
+
+    /// An isolated, same-peer replica for exhaustive edit preflight. Never
+    /// publish its history: the editor replays the checked writes locally so
+    /// they retain the ordinary per-peer undo origin and identity allocation.
+    pub fn fork_for_edit(&self) -> Result<Document, DocError> {
+        // Loro's fork has an implicit commit barrier. Never let a refused
+        // command publish an external caller's still-pending raw writes.
+        self.check_edit_preflight()?;
+        let doc = self.doc.fork();
+        doc.set_peer_id(self.doc.peer_id())?;
+        let mut fork = Document::wrap(doc);
+        fork.sync_scope = self.sync_scope.clone();
+        fork.legacy_builtins = self.legacy_builtins;
+        Ok(fork)
+    }
+
+    /// Staging uses Loro's recursive snapshot codec. Bound physical tree
+    /// ancestry (tombstones included) before entering it, on native and WASM.
+    pub fn check_edit_preflight(&self) -> Result<(), DocError> {
+        const MAX_DEPTH: usize = 64;
+        if self.doc.get_pending_txn_len() != 0
+            || !self
+                .lineage_pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        {
+            return Err(DocError::UncommittedEdit);
+        }
+        let roots = match self.doc.get_value() {
+            LoroValue::Map(roots) => roots,
+            _ => return Err(DocError::Store("unreadable document roots".into())),
+        };
+        for value in roots.values() {
+            let LoroValue::Container(id) = value else {
+                continue;
+            };
+            let Some(Container::Tree(tree)) = self.doc.get_container(id.clone()) else {
+                continue;
+            };
+            // Node listings also compute sibling indices, which is quadratic
+            // in a wide range tree. Only physical IDs and parents are needed.
+            let parents: std::collections::BTreeMap<_, _> = tree
+                .nodes()
+                .into_iter()
+                .map(|id| (id, tree.parent(id).unwrap_or(loro::TreeParentId::Root)))
+                .collect();
+            for &first in parents.values() {
+                let mut parent = first;
+                let mut depth = 0usize;
+                while let loro::TreeParentId::Node(id) = parent {
+                    if depth >= MAX_DEPTH {
+                        return Err(DocError::EditPreflightDepth(MAX_DEPTH));
+                    }
+                    parent = parents
+                        .get(&id)
+                        .copied()
+                        .unwrap_or(loro::TreeParentId::Root);
+                    depth += 1;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Merges another replica's edits into this one (29).
     pub fn merge(&self, other: &Document) -> Result<(), DocError> {
+        if self.document_lineage()? != other.document_lineage()? {
+            return Err(DocError::Store(
+                "documents have different durable lineages".into(),
+            ));
+        }
         self.commit();
         other.commit();
         // Only what this replica lacks: both documents are this process's own,
         // so the binary update encoding is trusted here (see `sync`).
+        let adopt_legacy = !self.has_style_identities()
+            && !other.has_style_identities()
+            && other.legacy_builtin_context();
+        if adopt_legacy {
+            self.check_legacy_context_adoption(&other.version_vector())?;
+        }
         let updates = other
             .doc
             .export(loro::ExportMode::updates(&self.doc.oplog_vv()))
             .map_err(|e| DocError::Export(e.to_string()))?;
         self.doc.import(&updates)?;
+        self.refresh_style_identity_root();
+        if adopt_legacy {
+            self.adopt_legacy_context()?;
+        }
+        if other.has_style_identities() {
+            self.retain_style_identities();
+        }
         Ok(())
     }
 
@@ -445,12 +553,14 @@ impl Document {
     }
 
     pub fn define_style(&self, name: &str, style: &Style) -> Result<(), DocError> {
+        let owner = self.definition_owner(name)?;
+        let style = self.authored_paragraph_style(style)?;
         let map = self
             .doc
             .get_map("styles")
-            .insert_container(name, LoroMap::new())?;
+            .insert_container(&owner, LoroMap::new())?;
         style.write(&map)?;
-        self.reset_flat_style(name)?;
+        self.reset_flat_style(&owner)?;
         Ok(())
     }
 
@@ -469,11 +579,12 @@ impl Document {
         text: &str,
     ) -> Result<NodeId, DocError> {
         check_authored(text)?;
+        let style_reference = self.authored_style_reference(style)?;
         let tree = self.tree("content");
         let id = tree.create(None)?;
         let meta = tree.get_meta(id)?;
         meta.insert("kind", kind.as_str())?;
-        meta.insert("style", style)?;
+        meta.insert("style", style_reference)?;
         let t = meta.insert_container("text", LoroText::new())?;
         t.insert_utf8(0, text)?;
         Ok(NodeId::tree(id))
@@ -512,8 +623,8 @@ impl Document {
         Ok(Block {
             id,
             kind,
-            style: get_str(&meta, "style"),
-            overrides,
+            style: get_str(&meta, "style").map(|reference| self.reference_label(&reference)),
+            overrides: self.public_style(overrides),
             text,
         })
     }
@@ -521,11 +632,13 @@ impl Document {
     /// Sets the name of a block's style. Does not commit.
     pub fn set_style_name(&self, id: NodeId, name: &str) -> Result<(), DocError> {
         self.block(id)?;
-        self.meta_of(id)?.insert("style", name)?;
+        self.meta_of(id)?
+            .insert("style", self.authored_style_reference(name)?)?;
         Ok(())
     }
 
     pub fn set_overrides(&self, id: NodeId, style: &Style) -> Result<(), DocError> {
+        let style = self.authored_paragraph_style(style)?;
         self.clear_mark_patches(id)?;
         self.clear_para_patches(id)?;
         let meta = self.meta_of(id)?;
@@ -620,6 +733,9 @@ impl Document {
     /// Where a range is now. A range whose ends have crossed (possible after
     /// concurrent edits) is treated as empty at its start.
     pub fn resolve_range(&self, id: RangeId) -> RangeState {
+        if !self.has_ranges_root() {
+            return RangeState::Missing { node: None };
+        }
         let tree = self.tree("ranges");
         if !self.live(&tree, id.0) {
             return RangeState::Missing { node: None };
@@ -713,6 +829,9 @@ impl Document {
     /// can't be read, for example because a newer engine wrote it; it is kept
     /// in the document either way (34).
     pub fn relations(&self) -> Vec<(RelationId, Result<Relation, String>)> {
+        if !self.has_root("relations") {
+            return Vec::new();
+        }
         let tree = self.tree("relations");
         let mut ids: Vec<TreeID> = tree
             .nodes()

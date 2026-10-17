@@ -31,6 +31,57 @@ fn repack(header: &PacketHeader, body: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn maximum_vectors_use_the_total_wire_bound_at_exact_boundary() {
+    let vector: Vector = (1..=MAX_VECTOR_ENTRIES as u64).map(|p| (p, 1)).collect();
+    let header = PacketHeader {
+        format: SYNC_FORMAT,
+        features: Features::DELTA_JSON,
+        kind: PacketKind::Delta,
+        since: vector.clone(),
+        until: vector,
+    };
+    let overhead = 23 + 12 * (header.since.len() + header.until.len());
+    let mut body = vec![b' '; MAX_PACKET_BYTES - overhead];
+    let packet = super::sync::tests_support::try_write(&header, &body).unwrap();
+    assert_eq!(packet.len(), MAX_PACKET_BYTES);
+    assert_eq!(read_header(&packet).unwrap().0, header);
+    body.push(b' ');
+    assert!(matches!(
+        super::sync::tests_support::try_write(&header, &body),
+        Err(SyncError::Limit("packet bytes"))
+    ));
+    let mut oversized = packet;
+    oversized.push(0);
+    assert!(matches!(
+        read_header(&oversized),
+        Err(SyncError::Limit("packet bytes"))
+    ));
+}
+
+#[test]
+fn valid_bound_join_at_exact_wire_limit_imports() {
+    let source = Document::new(1).unwrap();
+    let id = "00112233445566778899aabbccddeeff";
+    source.bind_document_lineage(id).unwrap();
+    let node = source
+        .append_block(BlockKind::Paragraph, "", "boundary")
+        .unwrap();
+    source.commit();
+    let small = source.export_snapshot_packet().unwrap();
+    let (header, body) = read_header(&small).unwrap();
+    let overhead = small.len() - body.len();
+    let mut padded = body.to_vec();
+    padded.resize(MAX_PACKET_BYTES - overhead, b' ');
+    let packet = super::sync::tests_support::try_write(&header, &padded).unwrap();
+    assert_eq!(packet.len(), MAX_PACKET_BYTES);
+    let receiver = Document::new(2).unwrap();
+    receiver.bind_document_lineage(id).unwrap();
+    receiver.commit();
+    receiver.import_packet(&packet).unwrap();
+    assert_eq!(receiver.block(node).unwrap().text.to_string(), "boundary");
+}
+
+#[test]
 fn delta_converges_and_is_idempotent() {
     let (a, b, p) = pair();
     type_at(&b, p, 5, " world");
@@ -485,4 +536,103 @@ fn saved_documents_with_invalid_tree_positions_are_refused() {
     a.doc.import_json_updates(json).unwrap();
     let bytes = a.try_export(crate::PersistenceMode::History).unwrap();
     assert!(Document::import(&bytes, 9).is_err());
+}
+
+#[test]
+fn identity_feature_transfers_empty_root_and_rejects_downgraded_references() {
+    let (a, b, node) = pair();
+    a.set_style_name(node, "Heading 1").unwrap();
+    a.commit();
+    let packet = a.export_delta(&b.version_vector()).unwrap();
+    let (header, body) = read_header(&packet).unwrap();
+    assert_ne!(header.features.0 & Features::STYLE_IDENTITIES.0, 0);
+    let before = b.try_export(crate::PersistenceMode::History).unwrap();
+    let mut downgraded = header.clone();
+    downgraded.features.0 &= !Features::STYLE_IDENTITIES.0;
+    assert!(b.import_packet(&repack(&downgraded, body)).is_err());
+    assert_eq!(
+        before,
+        b.try_export(crate::PersistenceMode::History).unwrap()
+    );
+    b.import_packet(&packet).unwrap();
+    assert!(b.has_style_identities());
+    assert_eq!(
+        a.computed_style(node).unwrap(),
+        b.computed_style(node).unwrap()
+    );
+}
+
+#[test]
+fn downgraded_flat_builtin_parent_is_refused_without_merging() {
+    let (a, b, _) = pair();
+    a.define_named_style(
+        "Child",
+        &Style {
+            parent: Some("Heading 1".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    a.commit();
+    let packet = a.export_delta(&b.version_vector()).unwrap();
+    let (mut header, body) = read_header(&packet).unwrap();
+    header.features.0 &= !Features::STYLE_IDENTITIES.0;
+    let before = b.try_export(crate::PersistenceMode::History).unwrap();
+    assert!(b.import_packet(&repack(&header, body)).is_err());
+    assert_eq!(
+        before,
+        b.try_export(crate::PersistenceMode::History).unwrap()
+    );
+}
+
+#[test]
+fn historical_builtin_context_survives_join_even_with_empty_legacy_root() {
+    for (empty, native) in [(false, false), (true, false), (false, true), (true, true)] {
+        let raw = Document::new(1).unwrap();
+        let node = raw.append_block(BlockKind::Paragraph, "", "old").unwrap();
+        raw.meta_of(node)
+            .unwrap()
+            .insert("style", "Heading 1")
+            .unwrap();
+        let legacy = raw.doc.get_map("styles1");
+        if !empty {
+            legacy.insert("weight/Unused", "400").unwrap();
+        }
+        raw.commit();
+        let source =
+            Document::import(&raw.try_export(crate::PersistenceMode::History).unwrap(), 3).unwrap();
+        let before = source.try_export(crate::PersistenceMode::History).unwrap();
+        let packet = source.export_snapshot_packet().unwrap();
+        assert_eq!(
+            before,
+            source.try_export(crate::PersistenceMode::History).unwrap()
+        );
+        let receiver = Document::new(2).unwrap();
+        let mut undo = receiver.undo_stack();
+        let old_revision = receiver.revision();
+        if native {
+            receiver.merge(&source).unwrap();
+        } else {
+            let report = receiver.import_packet(&packet).unwrap();
+            assert!(report.styles);
+        }
+        assert_ne!(receiver.revision(), old_revision);
+        assert!(receiver.has_style_identities());
+        assert_eq!(
+            receiver.computed_style(node).unwrap().size,
+            source.computed_style(node).unwrap().size
+        );
+        let reopened = Document::import(
+            &receiver
+                .try_export(crate::PersistenceMode::History)
+                .unwrap(),
+            4,
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.computed_style(node).unwrap().size,
+            source.computed_style(node).unwrap().size
+        );
+        assert!(!undo.undo().unwrap());
+    }
 }

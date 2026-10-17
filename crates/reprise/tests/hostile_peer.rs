@@ -151,6 +151,10 @@ fn hostile_raw_operations_never_break_the_pipeline() {
             .sync_export(&Payload::new(SyncRequest { since: None }))
             .unwrap();
         let attacker = reprise_doc::Document::new(66).unwrap();
+        // A raw core peer must declare the lineage it is joining; routing
+        // a frame alone must never adopt another document's identity.
+        attacker.bind_document_lineage(DOC).unwrap();
+        attacker.commit();
         attacker
             .import_packet(&snapshot.data.content.bytes)
             .unwrap();

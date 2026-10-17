@@ -236,8 +236,8 @@ Required bit 13, `REQUIRED_PARAGRAPH_STYLES`, is declared when `styles1` or
 `para1` exists (even emptied: its operations stay in history), when any nested
 style or override map holds one of the new keys, when `alignment` is
 `justify` anywhere (including `marks1`), or when a formatting envelope has a
-`clear` member. An older engine refuses such a package. Bit numbers will
-collide with parallel workstreams; 13 is the next free bit after 8495a66.
+`clear` member. An older engine refuses such a package. The bit is 13 (`features.rs`), fixed at
+integration; see `crates/format/SPEC.md` for the registry.
 
 ## How later features plug in
 
@@ -245,14 +245,19 @@ collide with parallel workstreams; 13 is the next free bit after 8495a66.
     `indent-start` and a negative `indent-first`; the marker hangs in the
     first-line outdent, which `Indented` already reserves. Lists add marker
     properties as new keyword properties (the extension recipe below).
--   **Headings**: built-in `Heading 1`–`6` are named styles; their semantic
-    role is read by `heading_level` from the name today. A `role` keyword
-    property would make the role independent of the name: one new property.
+-   **Headings**: built-in `Heading 1`–`6` are named styles. The semantic role
+    is no longer only the style name: a paragraph can carry an authored role
+    (`role1`, `reprise_doc::roles::Role`, `docs/roles-and-lists.md`), which is
+    paragraph metadata, **not** a style `Property`; no `role` keyword property
+    exists. `clipboard::pdf_tags::heading_level` still reads a
+    style name for export, as a fallback when a paragraph has no role.
 -   **Style menu and paragraph dialog**: `State.styles`, `State.resolved`,
     `define-style`/`update-style`/`rename-style`/`delete-style`/`apply-style`,
     and `set-style` with `clear` for the dialog's per-property "inherit".
--   **Headers and footers**: their paragraphs name their own styles (built-in
-    `Header`/`Footer` can be added to the built-in table); properties resolve
+-   **Headers and footers**: their paragraphs name their own styles (**not
+    built**: the built-in table, `BUILTIN_STYLES`, has `Normal`, `Title`,
+    `Subtitle` and `Heading 1`–`6` only; `Header` and `Footer` would be added
+    to it, with a package-compatibility check); properties resolve
     in the header frame's context because resolution is per starting frame.
 -   **Table cell paragraphs**: cells hold ordinary paragraph blocks, so they
     resolve the same properties; indents shrink the cell's measure through the
@@ -306,3 +311,127 @@ heading role). Each step names the enum or table the property joins.
 A note on clearing: clearing a property of a style whose base is a built-in
 reveals the built-in's value (that is what "inherit" means for that layer);
 set the property explicitly to turn a built-in's keep off.
+
+## Review addendum: durable identity and compatibility (2026-10-14)
+
+### Immutable owners and editable names
+
+Existing nested `styles` and flat `styles1` property keys remain immutable,
+document-scoped owners. `styles2` stores `alias/<name>` selectors and
+`label/<owner>` display labels. Renaming changes these entries without copying
+properties. Concurrent property edits, including queued legacy-key edits, still
+reach the same owner. Concurrent first patches to an undefined legacy name use
+the same original-name owner. Reusing a renamed or deleted name allocates a fresh
+owner from the editing peer and its next operation counter; existing block and
+parent references keep their original owner.
+
+Competing renames use Loro's deterministic per-key conflict rule. Both aliases
+remain selectors for the owner. Equal desired labels on different owners receive
+a deterministic full SHA-256 owner suffix, with the prefix truncated at a UTF-8
+boundary to the 256-byte name limit. Both records remain selectable through their
+computed labels. Public names stay strings; no facade DTO changes are needed.
+`Document::style_identity` exposes an opaque document-scoped owner token for
+native consumers. `Document::style_reference` supplies the underlying block
+reference for resolution, incremental keys and whole-document duplication.
+
+Existing block/parent strings bind to their original owners. Current references
+use reserved control-prefixed strings in the same fields:
+
+- `U+0001 + "style1:" + lowercase hex UTF-8 owner` binds an immutable owner.
+- `U+0002 + "builtin1:" + name` binds version-1 built-in semantics.
+- Fresh owners on name reuse use `U+0003 + peer + ":" + next counter`.
+
+Public style queries decode display labels. Resolution follows raw references;
+legacy alias/tombstone records remain readable. Identity metadata is limited to
+65536 keys. A wrong-type or over-limit root refuses fallible authoring before
+publication; listings report their existing bounded style-limit diagnostic.
+
+### Built-in compatibility policy
+
+Using a built-in, including as a parent, explicitly tags the reference. New named
+style edits or paragraph-style authoring create `styles2`, even when empty.
+Required package bit **18** (`REQUIRED_STYLE_IDENTITIES`) declares these semantics.
+Bits 14-17 retain their other workstreams' reservations. Required sync bit **4**
+(`style-identities1`) transfers this declaration, including an empty root. An
+unaware package or sync reader refuses. New-root/reference operations without the
+sync flag are refused before merging. Older legacy-key property updates are still
+accepted and merge against their original owners.
+
+Root presence survives binary history/shallow snapshots and undo without an
+extra CRDT operation, preserving existing node IDs, revisions and layout goldens.
+Reads never create the root or set bit 18. Old unmarked unresolved built-in names
+keep legacy fallback. Explicit legacy definitions remain authoritative. An old
+document already carrying paragraph-style semantics retains its built-in
+interpretation; first authored adoption pins `legacy-builtins1 = "1"` in `styles2`.
+A renamed or patched built-in pins `base/<owner> = "builtin1"`, so clearing a
+patch continues to reveal its built-in base.
+
+Unmarked old references cannot distinguish legacy intent from a writer that
+omitted the compatibility signal. The selected policy preserves legacy fallback;
+a host can explicitly apply a built-in to adopt the tagged semantics. Opening or
+querying a document never performs that adoption.
+
+### Independent whole-document graph transfer
+
+The opaque `AuthoredStyleGraph` captures `styles`, `styles1`, `styles2` and the
+legacy built-in interpretation without resolving properties. It includes unused
+records, parents, aliases, tombstones and unreadable literal values. Capture is
+bounded at 65536 keys/entries, 16 MiB of keys/values and literal depth 64.
+Unsupported container-valued properties refuse instead of losing data.
+
+`Workspace::import_copy` installs the graph into fresh history, preserving local
+owner tokens in the copy's independent document namespace. Block/parent edges
+retain those tokens consistently; source operation IDs and causal history do not
+cross the boundary. `Editor::paste_document_fragment` requires an empty content
+and style target and stages graph installation and content paste together.
+Ordinary clipboard/HTML transfer remains an appearance projection.
+
+### Regression coverage and later consumers
+
+Native tests cover concurrent rename/property edits, first patches, deletion,
+label collisions, name reuse, undo/redo, built-in base clearing, old marked and
+unmarked documents, read purity, malformed roots and downgraded sync. Copy tests
+cover unused aliases, tombstones and later parent edits. Package tests verify bit
+18 and refusal by an older known-mask reader. Existing layout goldens stay fixed.
+The formerly standalone deferred probes are promoted into normal Cargo tests.
+
+Lists may use document-scoped style identities for their levels. Headings should
+eventually expose an authored semantic role rather than deriving it from a mutable
+label. Table cells and future headers/footers share the inherited graph.
+
+### Allocation clocks when copying into fresh history
+
+A duplicate retains local owner tokens but resets operation history. To prevent
+its new allocations from colliding with copied tokens, `AuthoredStyleGraph` also
+transfers per-peer allocation floors into `styles2` keys `clock/<peer>`.
+Capture adds the source's operation high-water counter to its retained floor;
+new allocations add their local counter to that floor. These are scalar authored
+allocation metadata, never a source causal vector or imported operations.
+Transitive copies advance the floor again. Capture budgets include added keys;
+invalid clock metadata is retained and refuses allocation rather than guessing.
+
+### Transporting historical built-in interpretation
+
+Required sync bit 5, `legacy-builtins1`, declares the known paragraph-v1 built-in
+interpretation of an old document without `styles2`. It also carries an empty
+legacy schema root that JSON operations alone cannot represent. It is mutually
+exclusive with `style-identities1` on exported packets. Reads/export do not adopt
+or mutate the source. A receiver lacking identity semantics pins this declared
+context with a staged `styles2.legacy-builtins1` operation before publishing the
+import result. This advances its real revision, persists required bit 18, and
+keeps the metadata out of user undo. Existing upgraded receivers keep their
+already pinned context. Native merge uses the same adoption rule. Adoption's
+additional operation and actor are capacity-checked before merging.
+
+### Integration constraint: preserve pre-existing content IDs
+
+Lineage metadata must not consume an author operation counter: the existing
+list/outline goldens pin those IDs. A fresh binding therefore retains an empty
+root map named `document1:<32 lowercase hex ID>` rather than inserting an
+`id` property. Binary History/Shallow persistence retains this root without
+an operation, as it does the empty `styles2` declaration. Identity lookup scans
+only shallow root names and rejects conflicting or malformed declarations.
+The earlier `document1.id` representation remains readable. Framed sync still
+uses bit 3 and the same ID prefix; package-scoped unmarked historical replicas
+use framed transport and remain unmarked during read/export. No existing
+snapshot will be rewritten to accommodate a counter shift.

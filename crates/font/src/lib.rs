@@ -291,6 +291,11 @@ pub struct FontStore {
 }
 
 impl FontStore {
+    /// Explicitly installed face identities, in deterministic order.
+    pub fn registered_ids(&self) -> impl Iterator<Item = &FaceId> {
+        self.faces.keys()
+    }
+
     pub fn add(&mut self, face: Face) -> FaceId {
         let id = face.id.clone();
         self.faces.insert(id.clone(), Arc::new(face));

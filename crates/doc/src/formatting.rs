@@ -363,6 +363,9 @@ impl Document {
             style: style.clone(),
         })
         .map_err(|e| DocError::Store(e.to_string()))?;
+        if !style.clear.is_empty() {
+            self.author_style_identities()?;
+        }
         let id = self.stage_fragment_range(node, bytes, policy)?;
         // Keep the format envelope in staging too: redo only restores liveness.
         self.doc

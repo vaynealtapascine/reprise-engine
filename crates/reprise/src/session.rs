@@ -4,7 +4,7 @@ use crate::*;
 use reprise_doc::{Document, PersistenceMode};
 use reprise_layout::incremental::{LayoutCache, LayoutContinuation, LayoutSession};
 use reprise_layout::{Engine, LayoutSnapshot};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -74,7 +74,12 @@ impl Workspace {
             hash: face.id().hash.clone(),
         };
         let mut shared = lock(&self.fonts);
-        if !shared.faces.iter().any(|f| f.id() == face.id()) {
+        if let Some(index) = shared.faces.iter().position(|f| f.id() == face.id()) {
+            if shared.faces[index].declaration() != face.declaration() {
+                shared.faces[index] = Arc::new(face);
+                shared.generation = shared.generation.saturating_add(1);
+            }
+        } else {
             if shared.faces.len() >= MAX_WORKSPACE_FACES {
                 return Err(Error::Limit("workspace faces".into()));
             }
@@ -113,6 +118,7 @@ impl Workspace {
         let id = cv::document_id(&r.document_id)?;
         let peer = cv::peer(&r.peer_id)?;
         let doc = Document::new(peer)?;
+        doc.bind_document_lineage(&r.document_id)?;
         ensure_base_style(&doc)?;
         let package = reprise_format::Package::new(&doc, id, PersistenceMode::History)?;
         self.adopt(DocumentSession::new(
@@ -122,7 +128,7 @@ impl Workspace {
             r.peer_id.clone(),
             Engine::new(reprise_font::FontStore::default()),
             Vec::new(),
-        ))
+        )?)
     }
     /// Imports a package as a new, independent document. See `docs/plumbing.md`.
     ///
@@ -171,61 +177,19 @@ impl Workspace {
             .extend(opened.assets.restore_images(&mut engine.assets));
         let mut notes = opened.notes.clone();
         let old = opened.into_document()?;
+        let style_graph = old.authored_style_graph()?;
         // A duplicate keeps every annotation, comment anchors included.
         let fragment = old
             .copy_document_fragment(&source_id, &engine.schemas)
             .map_err(|e| Error::Invalid(e.to_string()))?;
-        // Every named style first, so unreferenced ones survive and the
-        // fragment's own styles are identical, not clashing. Each live style
-        // is written as its effective definition (nested and flat patches
-        // folded together); an untouched built-in is left to the engine so
-        // the copy needs no more format features than its source.
+        // Preserve authored properties, parent edges, forwarding records and
+        // tombstones, rather than copying clipboard appearance definitions.
         let fresh = Document::new(peer)?;
-        let (names, cut) = old.style_names();
-        if cut {
-            return Err(Error::Limit("named styles".into()));
-        }
-        for name in &names {
-            let Some(record) = old.style_record(name) else {
-                continue;
-            };
-            let builtin = record
-                .builtin
-                .then(|| reprise_doc::builtin_style(name))
-                .flatten();
-            let Some(base) = builtin else {
-                fresh.define_style(name, &record.style)?;
-                continue;
-            };
-            // A patched built-in stays a patch, so it keeps following the
-            // engine's definition for the properties it did not change.
-            let mut patch = reprise_doc::StylePatch::default();
-            for property in reprise_doc::STORED_KEYS {
-                match (record.style.stored(property), base.stored(property)) {
-                    (mine, theirs) if mine == theirs => {}
-                    (Some(raw), _) => patch.set.apply_stored(property, raw),
-                    (None, _) => {
-                        patch.clear.insert(property.to_string());
-                    }
-                }
-            }
-            if patch != reprise_doc::StylePatch::default() {
-                fresh.patch_named_style(name, &patch)?;
-            }
-        }
-        // A built-in the source deleted or renamed away stays gone.
-        for name in reprise_doc::BUILTIN_STYLES {
-            if old
-                .style_record(name)
-                .is_some_and(|r| r.status != reprise_doc::StyleStatus::Live)
-            {
-                fresh.delete_named_style(name)?;
-            }
-        }
+        fresh.bind_document_lineage(&r.document_id)?;
         fresh.commit();
         let mut editor = reprise_edit::Editor::new(fresh, engine.schemas.clone());
         let pasted = editor
-            .paste(&fragment, None, &r.document_id)
+            .paste_document_fragment(&fragment, &r.document_id, &style_graph)
             .map_err(Error::from)?;
         notes.extend(pasted.notes);
         let doc = editor.into_document();
@@ -268,7 +232,7 @@ impl Workspace {
             r.peer_id.clone(),
             engine,
             notes,
-        );
+        )?;
         session.copied_from = Some(source_id);
         self.adopt(session)
     }
@@ -294,7 +258,7 @@ impl Workspace {
             .notes
             .extend(opened.assets.restore_images(&mut engine.assets));
         let package = opened.package().clone();
-        let id = package
+        let id: String = package
             .document_id()
             .0
             .iter()
@@ -302,6 +266,11 @@ impl Workspace {
             .collect();
         let notes = opened.notes.clone();
         let doc = opened.into_document()?;
+        if doc.document_lineage()?.is_some_and(|lineage| lineage != id) {
+            return Err(Error::Invalid(
+                "package identity does not match document lineage".into(),
+            ));
+        }
         ensure_base_style(&doc)?;
         self.adopt(DocumentSession::new(
             doc,
@@ -310,7 +279,7 @@ impl Workspace {
             r.peer_id.clone(),
             engine,
             notes,
-        ))
+        )?)
     }
 }
 /// A single editable replica. Neither core nor CRDT handles cross the facade.
@@ -336,6 +305,8 @@ pub struct DocumentSession {
     shared: Option<Fonts>,
     shared_seen: u64,
     settings_local: bool,
+    /// Explicit session declarations and package pins override workspace faces.
+    local_faces: BTreeSet<reprise_font::FaceId>,
     /// The document this one was copied from (`import_copy`), if any.
     copied_from: Option<String>,
     /// Resolved paragraph styles for `state`, per (style, overrides), valid
@@ -378,14 +349,16 @@ impl DocumentSession {
         self.poisoned.is_some()
     }
     fn new(
-        doc: Document,
+        mut doc: Document,
         package: reprise_format::Package,
         document_id: String,
         peer_id: String,
         engine: Engine,
         notes: Vec<reprise_diag::Note>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        doc.set_sync_scope(&document_id)?;
+        let local_faces = engine.fonts.registered_ids().cloned().collect();
+        Ok(Self {
             editor: Box::new(reprise_edit::Editor::new(doc, engine.schemas.clone())),
             engine,
             package,
@@ -403,9 +376,10 @@ impl DocumentSession {
             shared: None,
             shared_seen: 0,
             settings_local: false,
+            local_faces,
             copied_from: None,
             style_cache: Default::default(),
-        }
+        })
     }
     /// Takes the workspace's font changes since last time, sharing its faces
     /// by handle. Invalidates layout only when something changed.
@@ -418,6 +392,9 @@ impl DocumentSession {
             return Ok(());
         }
         for face in &shared.faces {
+            if self.local_faces.contains(face.id()) {
+                continue;
+            }
             let held = self
                 .engine
                 .fonts
@@ -532,7 +509,8 @@ impl DocumentSession {
                 formatting: self.doc().text_formats(node).ok().and_then(cv::text_runs),
                 style: {
                     let overrides = serde_json::to_string(&block.overrides).unwrap_or_default();
-                    let k = (block.style.clone(), overrides);
+                    let reference = self.doc().style_reference(node);
+                    let k = (reference.clone(), overrides);
                     let index = match indices.get(&k) {
                         Some(i) => *i,
                         None => {
@@ -542,7 +520,7 @@ impl DocumentSession {
                                 .or_insert_with(|| {
                                     let used = reprise_doc::specify_parts(
                                         self.doc(),
-                                        block.style.clone(),
+                                        reference.clone(),
                                         &block.overrides,
                                     )
                                     .compute(&self.engine.functions)
@@ -914,6 +892,7 @@ impl DocumentSession {
             .fonts
             .register(bytes.to_vec(), declaration)
             .map_err(|e| Error::note(e.note()))?;
+        self.local_faces.insert(id.clone());
         self.reconfigure()?;
         Ok(Payload::new(Face {
             family: id.family,
@@ -1290,6 +1269,7 @@ impl DocumentSession {
         assets: reprise_display::AssetStore,
     ) -> Result<()> {
         for face in fonts {
+            self.local_faces.insert(face.id().clone());
             self.engine.fonts.add(face);
         }
         self.engine.assets = assets;
@@ -1876,13 +1856,15 @@ impl DocumentSession {
     /// A version vector is still exchanged; transport can suppress equal vectors.
     pub fn export_updates(&self) -> Result<Payload<SyncUpdate>> {
         let info = self.sync_info().data;
+        let bytes = self.doc().try_export(PersistenceMode::History)?;
+        if bytes.len() > crate::MAX_PACKET_BYTES {
+            return Err(Error::Limit("sync bytes".into()));
+        }
         Ok(Payload::new(SyncUpdate {
             document_id: info.document_id,
             from_peer: info.peer_id,
             vector: info.vector,
-            content: Bytes {
-                bytes: self.doc().try_export(PersistenceMode::History)?,
-            },
+            content: Bytes { bytes },
         }))
     }
     pub fn import_updates(&mut self, request: &Payload<SyncUpdate>) -> Result<Payload<SyncInfo>> {
@@ -1897,7 +1879,7 @@ impl DocumentSession {
             ));
         }
         cv::peer(&r.from_peer)?;
-        if r.content.bytes.len() > 64 * 1024 * 1024 || r.vector.len() > 4096 {
+        if r.content.bytes.len() > crate::MAX_PACKET_BYTES || r.vector.len() > 4096 {
             return Err(Error::Limit("sync bytes/vector".into()));
         }
         for clock in &r.vector {
@@ -1907,6 +1889,9 @@ impl DocumentSession {
             }
         }
         let doc = Document::import(&r.content.bytes, cv::peer(&self.peer_id)?)?;
+        if doc.document_lineage()? != self.doc().document_lineage()? {
+            return Err(self.lineage_refusal());
+        }
         let actual: Vec<_> = doc
             .version_vector()
             .into_iter()

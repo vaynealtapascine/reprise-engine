@@ -392,3 +392,193 @@ fn a_style_batch_is_one_step_and_all_or_nothing() {
         "one undo removes both the definition and its use"
     );
 }
+
+#[test]
+fn refusal_matrix_preserves_history_and_existing_undo_redo() {
+    let mut s = session("1");
+    let nodes = tx(&mut s, vec![block("AB", 0), block("CD", 1)]).data.blocks;
+    let list = tx(
+        &mut s,
+        vec![Command::CreateList {
+            definition: ListDefinition::default(),
+        }],
+    )
+    .data
+    .lists[0]
+        .clone();
+    tx(
+        &mut s,
+        vec![
+            Command::SetListItem {
+                node: nodes[0].clone(),
+                list: ListRef::Existing { id: list.clone() },
+                level: 0,
+            },
+            Command::InsertInline {
+                node: nodes[0].clone(),
+                at: 1,
+                object: InlineObject {
+                    kind: "field".into(),
+                    align: InlineAlign::Baseline,
+                    params: [("field".into(), "page-number".into())].into(),
+                },
+            },
+        ],
+    );
+    tx(
+        &mut s,
+        vec![Command::InsertText {
+            node: nodes[1].clone(),
+            at: 2,
+            text: "!".into(),
+        }],
+    );
+    s.undo().unwrap();
+    // Prime read-only query roots before capturing persistence bytes; the
+    // assertion measures the refused edit, rather than a first state query.
+    s.state().unwrap();
+    assert!(s.state().unwrap().data.can_redo);
+    let prefixes = vec![
+        Command::CreateList {
+            definition: ListDefinition::default(),
+        },
+        Command::UpdateList {
+            list: list.clone(),
+            definition: ListDefinition::default(),
+        },
+        Command::DeleteList {
+            list: ListRef::Existing { id: list.clone() },
+        },
+        Command::SetListItem {
+            node: nodes[1].clone(),
+            list: ListRef::Existing { id: list.clone() },
+            level: 1,
+        },
+        Command::RemoveListItem {
+            node: nodes[0].clone(),
+        },
+        Command::SetListLevel {
+            node: nodes[0].clone(),
+            level: 2,
+        },
+        Command::IndentListItem {
+            node: nodes[0].clone(),
+            by: 1,
+        },
+        Command::RestartList {
+            node: nodes[0].clone(),
+            value: Some("8".into()),
+        },
+        Command::ContinueList {
+            node: nodes[0].clone(),
+        },
+        Command::Enter {
+            node: nodes[0].clone(),
+            at: 1,
+        },
+        Command::BackspaceAtStart {
+            node: nodes[0].clone(),
+        },
+        Command::InsertInline {
+            node: nodes[0].clone(),
+            at: 0,
+            object: InlineObject {
+                kind: "field".into(),
+                align: InlineAlign::Baseline,
+                params: [("field".into(), "page-number".into())].into(),
+            },
+        },
+        Command::UpdateInline {
+            node: nodes[0].clone(),
+            at: 1,
+            patch: InlinePatch::default(),
+        },
+        block("new", 2),
+        Command::DeleteText {
+            node: nodes[0].clone(),
+            start: 1,
+            end: 2,
+        },
+        Command::InsertText {
+            node: nodes[0].clone(),
+            at: 1,
+            text: "x".into(),
+        },
+        Command::SplitBlock {
+            node: nodes[0].clone(),
+            at: 1,
+        },
+        Command::JoinBlocks {
+            first: nodes[0].clone(),
+            second: nodes[1].clone(),
+        },
+        Command::MoveBlock {
+            node: nodes[1].clone(),
+            parent: None,
+            index: 0,
+        },
+        Command::DeleteBlock {
+            node: nodes[1].clone(),
+        },
+        Command::DefineStyle {
+            name: "New".into(),
+            parent: None,
+            style: Style::default(),
+        },
+    ];
+    for prefix in prefixes {
+        for stale in [false, true] {
+            let before = (s.export_updates().unwrap().data, s.state().unwrap().data);
+            let batch = Batch {
+                commands: vec![
+                    prefix.clone(),
+                    Command::InsertText {
+                        node: nodes[0].clone(),
+                        at: u32::MAX,
+                        text: "bad".into(),
+                    },
+                ],
+                expected_revision: Some(if stale { vec![] } else { revision(&s) }),
+                selection: None,
+            };
+            assert!(s.batch(&Payload::new(batch)).is_err());
+            let after = (s.export_updates().unwrap().data, s.state().unwrap().data);
+            assert!(
+                before == after,
+                "prefix {prefix:?}, stale={stale}, bytes equal={}, state equal={}",
+                before.0 == after.0,
+                before.1 == after.1
+            );
+        }
+    }
+    let mut stable = s
+        .anchor_selection(&Payload::new(selection(&nodes[0], 0, 1)))
+        .unwrap()
+        .data;
+    stable.anchor.anchor = "zz".into();
+    for html in [false, true] {
+        let before = (s.export_updates().unwrap().data, s.state().unwrap().data);
+        assert!(
+            s.replace_text(&Payload::new(ReplaceText {
+                selection: stable.clone(),
+                text: "X".into(),
+                html
+            }))
+            .is_err()
+        );
+        assert!(before == (s.export_updates().unwrap().data, s.state().unwrap().data));
+    }
+    let before = (s.export_updates().unwrap().data, s.state().unwrap().data);
+    assert!(
+        s.paste(&Payload::new(Paste { at: None }), b"malformed")
+            .is_err()
+    );
+    assert!(
+        s.replace_selection(
+            &Payload::new(ReplaceSelection { selection: stable }),
+            b"malformed"
+        )
+        .is_err()
+    );
+    assert!(before == (s.export_updates().unwrap().data, s.state().unwrap().data));
+}

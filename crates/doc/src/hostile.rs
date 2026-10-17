@@ -409,3 +409,10 @@ pub fn corrupt_inline_record(
     doc.commit();
     Ok(())
 }
+
+/// Reproduce an earlier durable identity encoding without changing its operation
+/// count. Used by the pinned foreign-copy fixture to keep its historical IDs.
+pub fn legacy_document_lineage(doc: &Document, id: &str) -> Result<(), crate::DocError> {
+    doc.doc.get_map(crate::identity::ROOT).insert("id", id)?;
+    Ok(())
+}

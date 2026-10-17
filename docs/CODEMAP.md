@@ -1,5 +1,25 @@
 # Code map
 
+## Adversarial review fixes (07, 15, 21, 23, 29, 34, 37)
+
+| Crate | Files | Responsibility |
+| --- | --- | --- |
+| doc | `src/identity.rs`, `src/lib.rs`, `src/style/store.rs`, `src/sync.rs`, `src/sync_tests.rs` | Durable document binding and immutable runtime package scope for unmarked stores, read-pure lookup guards, committed/bounded same-peer edit trials, versioned lineage prefix and total wire limits |
+| doc/edit/reprise | `doc/src/style_graph.rs`, `edit/src/paste.rs`, `edit/tests/style_graph_copy.rs`, `reprise/src/session.rs`, `reprise/tests/import_copy.rs` | Bounded raw authored style graph duplication, preserving aliases/tombstones/unused records and bypassing clipboard appearance materialisation |
+| design | `docs/paragraph-styles.md`, `crates/doc/src/style_identity_tests.rs` | Selected immutable-owner and built-in compatibility design, with normal Cargo regression tests |
+| edit | `src/{editor,error,plan,paste,replace}.rs`, `tests/refusal_atomicity.rs` | Isolated execution for implicit capacity effects, typed staging preconditions and command-indexed refusal; retained history/undo matrix |
+| font / reprise | `font/src/lib.rs`, `reprise/src/session.rs`, `session/collab.rs`, `reprise/tests/{import_copy,packet_bound,plumbing_edit,plumbing_marks,workspace_fonts}.rs` | Face provenance and scope precedence; durable copy isolation; transport, refusal and mark regressions |
+| layout | `src/flow.rs`, `src/flow/keeps.rs`, `src/{table_flow,notes,floats,codes}.rs`, `src/relations/alignment.rs` | Shared logical indent measure, cell spacing, unsupported auxiliary property diagnostics, missing-target explanations |
+| reprise-wasm | `src/lib.rs`, `ts/smoke.cjs` | Strict snapshotted font field validation and pre-copy sync byte bound |
+| fixtures | `src/hostile.rs`, `tests/{hostile,paragraph_styles,regions_geometry}.rs`, `tests/snapshots/hostile__{content_,}foreign_copy_snapshot.snap` | Independent copy history attack, cell/note/float geometry and two new goldens |
+
+New multi-write commands must model every fallible capacity effect or join
+`Plan::needs_trial` for isolated execution. The copy/transfer cases include reset
+format actions as well as explicit formatting. Rename also captures potentially
+invalid imported style values; staging allows an earlier repair in the same batch.
+Lists, inline and section commands
+should use that same publication boundary when integrated.
+
 Each crate lives in `crates/<name>` and is published to the workspace as `reprise-<name>`.
 The table is in crate dependency order. File paths are relative to that crate unless they
 start with `docs/`, which names repository-level documentation.
@@ -14,6 +34,7 @@ supplied engine logo displayed by `README.md`.
 | `geom` | `src/lib.rs` | `Length` (1/1024 pt) and `Fixed` (16.16), saturating and rounding rules, `Matrix` with exact integer direction/angle rotations, mirrors and pivot transforms, typed spaces, `Point`, `Rect`, `Transform` | 19, 20 |
 | `text` | `src/lib.rs` | `Text` (byte offsets over Loro), `Anchor`, `Affinity`, `RangePolicy`, `Resolved` | 09, 10, 12 |
 | `text` | `src/segment.rs` | Grapheme and word boundaries (ICU4X) | 09, 10 |
+| `text` | `src/orientation.rs`, `src/orientation_table.rs`, `src/generate_orientation.py` | UAX #50 `Vertical_Orientation`: the default upright/rotated lookup for vertical lines. The table is generated from the pinned UCD file by the script (never edit it by hand), and a test compares every code point with ICU4X | 20, 38 |
 | `doc` | `src/lib.rs` | `Document`: content tree, versioned authored ranges (`add_range`, `range_policy`, resolution), styles, relations, revisions, fork and merge; exports authored frame geometry and reading schemas; legacy policies remain distinguishable from unreadable metadata | 05–07, 10, 12, 15, 29, 34, 35 |
 | `reprise` | `tests/soak.rs`, `tests/sync_delta.hex` | Structural partition/rejoin/undo soak, deterministic peer fixture and native/WASM packet-byte golden | 29, 34, 38 |
 | `doc` | `src/flow.rs`, `src/flow_tests.rs`, `docs/flow.md` | Flow text: paragraphs as U+FDD0 breaks with records in `breaks1`, paragraph views, per-revision cache, staged breaks and embeds, `locate`, placement | 06, 07, 11, 12, 29 |
@@ -61,6 +82,7 @@ supplied engine logo displayed by `README.md`.
 | `display` | `src/svg.rs`, `src/png.rs`, `src/pdf.rs` | Backends; PDF ToUnicode, ordered run addresses and extraction spans, cluster ActualText and logical-run fallback for RTL/malformed ranges; `render_tagged` writes the PDF/UA-1 tagged PDF (MCIDs, StructTreeRoot/ParentTree, artifacts, outline, note link annotations, XMP title and `pdfuaid`) and drops the claim with `pdf.ua-not-met` when a requirement cannot be met | 32, 33, 37, 38 |
 | `display` | `src/pdf/tags.rs` | The structure a tagged PDF is built from: roles (P, H1–H6, Figure, Note, Reference, Div, Table/THead/TBody/TR/TD/TH), artifact runs, leaves addressing glyph and image items, `CellRole` (TD/TH, scope, spans), codes | 33 |
 | `display` | `tests/pdf_tags.rs`, `tests/common/checker.rs` | Structural checker over emitted bytes (MCIDs reachable once, ParentTree, nothing untagged, structure-order text, catalog/XMP, outline, links) and hand-built structures: roles, run splits, depth bound, bad leaf sets, missing-glyph fallback, cross-page order, determinism | 32, 33, 37, 38 |
+| `display` | `tests/common/mod.rs` | Declares the `checker` module shared by the PDF tag and text tests | 33 |
 | `display` | `tests/pdf_text.rs` | Ordered PDF extraction through rotated, mirrored, vertical and spiral layouts; generated-PDF extraction through lopdf plus bfchar/ActualText reader; ligatures, clusters, RTL, malformed ranges, ZWJ and empty runs | 33, 37, 39 |
 | `display` | `src/assets.rs`, `src/assets_tests.rs`, `src/image_pixels.rs` | Host image store, bounded integer PNG/JPEG/JFIF/EXIF headers; backend-only bounded pixel decode | 19, 32, 34, 37, 38 |
 | `display` | `tests/images.rs` | Image items in SVG, PNG and PDF, transforms and clips, ordered alt-text extraction, gray missing-resource boxes | 20, 32, 33, 37 |
@@ -114,7 +136,7 @@ supplied engine logo displayed by `README.md`.
 | `format` | `src/assets.rs` | Font pins (including versioned frontend declarations), bundled/external assets, hash validation, missing-font list, open-and-restore/store API and preservation of unknown declaration fields | 21, 34 |
 | `format` | `src/migration.rs` | Pure checked N -> N+1 migrations, synthetic v0 | 34 |
 | `format` | `src/package.rs` | Package save/open with additive used-layout-font and authored-image embedding, read-only newer files, snapshot envelopes and opaque cache tags/validation | 05, 07, 34 |
-| `format` | `src/tests.rs`, `tests/roundtrip.rs`, `tests/fonts.rs`, `tests/data/` | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence; history and shallow packages preserve all eight authored endpoint policies at Unicode text boundaries | 10, 12, 34, 35, 37–39 |
+| `format` | `src/tests.rs`, `tests/roundtrip.rs`, `tests/fonts.rs`, `tests/data/{v0,v1}.reprise` (checked-in version 0 and 1 package goldens, rewritten only when `FORMAT_WRITE_FIXTURES=1`) | Corruption/limits/migrations/golden tests, every hostile fixture and spike persistence/convergence; history and shallow packages preserve all eight authored endpoint policies at Unicode text boundaries | 10, 12, 34, 35, 37–39 |
 | `format` | `SPEC.md` | Version 1 wire specification, compatibility, bounds and dependency licenses | 34 |
 | `format` | `src/image_assets.rs` | Embed authored image references and restore verified bytes | 34 |
 | `format` | `src/features.rs` | Table feature bits declared from live content on save: optional headers, required spans | 24, 34 |
@@ -138,8 +160,10 @@ supplied engine logo displayed by `README.md`.
 | `fixtures` | `src/templates.rs` | Page templates for tests: columns, a margin, responsive sizing | 24 |
 | `fixtures` | `src/hostile.rs` | Hostile text/bidi/display-cluster fixtures; relation targets and policies; composers; style expressions, cycles and bases; transformed RTL, writing modes, spirals, reading cycles and degenerate/extreme transforms; editing lifecycle, transaction refusal and empty/zero-width carets; font chains, generics, three-face fallback, corrupt declarations and collection indices; plugin extensions/fuel fallback; persistence_tombstones (Unicode anchors, tombstones, retained history); ten region fixtures; six table fixtures (repeated headers, oversized header, whole-table and malformed spans, 1,000 columns, rowspan break in a rotated vertical frame, concurrent colliding spans); incremental_page_seam (UTF-8 pagination, following note, reading precedence); clipboard_unicode_seams (expanding/fixed/point policies over ligatures, combining text and RTL with note/reference edges); range_policy_endpoints (all eight authored policies, empty-text points, converged replica); pdf_structure_storm (heading style, ligature/overlapping/point/RTL note anchors, note on a note, empty note, float, table) | 07, 09, 10, 12, 17, 18, 20, 21, 24–27, 29, 33–39 |
 | `fixtures` | `src/plugins.rs`, `tests/plugins.rs` | Pinned WAT-derived binaries; end-to-end styles, geometry, relation resolution, envelope budgets and real editing kernel atomicity/undo | 04, 29, 36–38 |
-| `fixtures` | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks for 102 fixtures, editing undo/refusal/extreme-hit and region-role checks; paired layout/content goldens for all fixtures including plugins and authored endpoints; content-preserving debug overlay families and explainability geometry snapshots | 10, 12, 35–39 |
+| `fixtures` | `tests/hostile.rs`, `tests/snapshots/` | Invariant checks for 108 fixtures, editing undo/refusal/extreme-hit and region-role checks; paired layout/content goldens for all fixtures including plugins and authored endpoints; content-preserving debug overlay families and explainability geometry snapshots | 10, 12, 35–39 |
 | `fixtures` | `tests/relations.rs` | Relation targets, queries and deletion policies through layout | 13–15 |
+| `fixtures` | `tests/tables_orchestrator.rs` | Seeded random tables with every hostile span and header shape: no panics, determinism, incremental parity, each block's lines cover its text once; two peers changing spans and header flags converge on one grid | 24, 26, 33, 37, 38 |
+| `fixtures` | `tests/text_formatting.rs` | Mixed sizes shape separately, and an incremental session invalidates only the changed paragraph | 05, 26, 37 |
 | `fixtures` | `tests/fonts.rs` | Versioned font chain storage, legacy overrides, unknown versions, collection declarations and incremental parity including fallback-semantics cache invalidation | 21, 22, 34, 38 |
 | `fixtures` | `tests/styles_concurrent.rs` | Concurrent style expressions converge and keep unreadable values | 08, 17, 29, 34 |
 | `fixtures` | `tests/flow.rs` | Columns, pagination, fragmentation, annotations on later pages, responsive templates | 24, 34 |
@@ -153,8 +177,16 @@ supplied engine logo displayed by `README.md`.
 | `cli` | `src/main.rs` | The `reprise spike [OUT_DIR]` command | 40 |
 | `cli` | `tests/spike.rs`, `tests/snapshots/` | End-to-end spike tests and JSON fixtures | 38, 40 |
 | `reprise` | `src/lib.rs`, `dto.rs`, `error.rs`, `convert.rs`, `session.rs`, `typescript.rs`; `API.txt`, `tests/`, `examples/` | Versioned session facade, owned jobs, editor lifecycle, boundary validation, TypeScript generation and native display golden | 02, 04, 28, 29, 38, 41 |
+| `reprise` | `src/error.rs` | The typed boundary `Error` enum, each variant mapped to a stable `bindings.*` code (`Error::code`); internal error types never escape | 02, 37, 41 |
+| `reprise` | `examples/{display_golden,image_golden}.rs`, `tests/{display,images}.json` | Examples that rewrite the two display-list goldens; `editor_loop.rs` compares against them byte for byte | 29, 32 |
+| `reprise` | `examples/generate_types.rs` | Writes `reprise-wasm/ts/types.d.ts` from `typescript::declarations()` | 41 |
+| `reprise` | `tests/editor_loop.rs`, `tests/review_regressions.rs` | The complete edit/undo/save/reopen loop through the facade only (display and image goldens), and regression tests from the first review: default text without font registration, layout-required and ID errors, atomic image insertion | 29, 34, 37 |
+| `reprise` | `tests/boundary_hostile.rs`, `tests/boundary_fuzz.rs` | Malformed and future payloads, bad IDs and UTF-8, oversized bytes, cancelled, stale and foreign jobs, tampered sync packets and foreign awareness; every byte-accepting entry point fed damaged real artefacts must return typed errors without a panic and leave the session unchanged | 29, 34, 37 |
+| `reprise` | `tests/resources_plugins.rs` | Plugins installing functions, geometry and schemas without losing undo; opaque assets and unknown package sections surviving edit and save; malformed packages, fonts and plugins typed | 04, 34, 36, 37 |
+| `reprise` | `tests/public_api.rs`, `tests/sync_lineage_delta.hex` | The test that regenerates and compares `API.txt` (the only way to change it), and the wire golden for the scoped lineage feature (`sync_delta.hex` stays fixed) | 29, 41 |
 | `reprise-wasm` | `src/lib.rs`, `ts/`, `package.json` | Typed JavaScript objects, Uint8Array resources and explicit worker job steps over the same facade | 04, 28, 36, 38, 41 |
 | `fuzz-harness` | `src/input.rs`, `src/scenario.rs`, `src/pool.rs` | Total byte-to-scenario decoder (every byte string is valid), seeded byte generator, and the fixed pools (texts, styles, fonts, images, HTML) scenarios draw from | 39 |
+| `fuzz-harness` | `src/lib.rs` | Crate root: declares the modules above and re-exports the scenario runner (decision 39) | 39 |
 | `fuzz-harness` | `src/start.rs`, `src/engine.rs` | Starting documents (synthetic, or a hostile fixture through a saved package, once per peer) and the engine configuration as data, rebuilt when an op changes it | 34, 38, 39 |
 | `fuzz-harness` | `src/run.rs`, `src/oracle.rs`, `src/authored.rs`, `src/codes.rs`, `src/violation.rs` | The executor over two peers (edit, undo/redo, sync, copy/paste, import/export, styles/templates, layout through `Engine::layout` and budgeted jobs, save/reopen, render, navigation) and the oracles checked after every op: no panic, incremental equals reference, convergence, undo/redo restores state, reopen identical, copy/paste keeps text, reading order covers each line once, byte-identical output, documented diagnostic codes | 07, 16, 27–29, 33–35, 37–39 |
 | `fuzz-harness` | `src/minimize.rs`, `examples/explore.rs`, `examples/corpus_to_bin.rs` | Delta-debugging shrinker for failing byte strings, a seeded explorer that prints minimised failures, and the hex-corpus-to-libFuzzer converter | 39 |
@@ -167,6 +199,7 @@ supplied engine logo displayed by `README.md`.
 | `edit` | `src/stable.rs`, `tests/stable.rs`, `tests/concurrency.rs` | Anchored selections, per-user undo and the conflicting-command matrix | 07, 10, 12, 29, 30 |
 | `reprise` | `src/session/collab.rs`, `tests/collab.rs`, `tests/hostile_peer.rs` | Native multiplayer API, presence geometry, partition/rejoin soak and hostile-session pipeline | 29, 30, 37, 39 |
 | `reprise-wasm` | `src/lib.rs`, `ts/worker.ts`, `ts/smoke.cjs`, `ts/worker-smoke.cjs` | Browser multiplayer API, worker selection effects and native/WASM behavior parity | 29, 30, 38 |
+| `reprise-wasm` | `ts/tsconfig.json`, `.gitignore` | Type-check configuration for the TypeScript sources and the worker smoke; ignores generated build output | 38 |
 | `layout` | `src/shaping.rs`, `src/workers.rs`, `src/incremental.rs` | Fine layout units, scoped workers and deterministic staged preparation | 27, 28, 38 |
 | `fixtures` | `tests/incremental_steps.rs` | Budget bounds, worker order parity, stale jobs and remote memo reuse | 27, 28, 38 |
 | `fuzz-harness` | `src/facade.rs` | Public session, job, sync, save/reopen, clipboard and rendering oracles | 29, 34, 37, 39 |
@@ -353,6 +386,19 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `layout` | `src/flow/bands.rs`, `src/pages/bands.rs`, `src/table_flow/step.rs`, `src/regions/physical.rs`, `src/sections/spaces.rs`, `src/sections/tests/bands.rs` | S5: owned band checkpoints, bounded resumable balance trials, table fragment suspension, factory band append, page-owned float coordinate planes and physical-source constraint projection into every band's current geometry | 05, 20, 24, 26, 27, 37, 38 |
 | `fixtures`, `reprise`, tools | `crates/fixtures/{src/hostile,tests/hostile}.rs`, `crates/reprise/examples/sections_parity.rs`, `tools/sections-parity.cjs`, `tools/check-sections.sh` | Dedicated effective-section geometry/band backend fixtures; inactive retained-section shared fixture until S9; bounded native/WASM parity packages and full worktree gate | 20, 24, 26, 37–40 |
 | docs | `docs/sections-stage-b1-validation.md`, `docs/sections-stage-b1-report.md` | Per-slice validation evidence, reviewed goldens, full-gate results and S6–S12 handoff | 37–40 |
+
+### Stable style owner implementation
+
+| Crate | Files | Responsibility | Decisions |
+| --- | --- | --- | --- |
+| `doc` | `src/style_identity.rs`, `src/style_identity_tests.rs`, `src/{style,style/store,style_graph,sync}.rs` | Immutable owners, versioned references, merge-safe labels, built-in pins, read-pure legacy interpretation and whole-graph transfer | 05, 07, 29, 37 |
+| `format` | `src/features.rs`, `src/container.rs`, `SPEC.md` | Required style-identity bit 18, pure feature detection and old-reader refusal | 34 |
+| `edit` | `src/plan.rs` | Trial all fallible style-identity writes before publishing an edit; ordinary typing avoids staging | 29 |
+
+`fixtures/tests/incremental_steps.rs` accepts test-only `REPRISE_TIMING_TRACE=1`
+to log construction and per-fixture executor timings under `--nocapture`.
+Style graph transfer retains scalar allocation floors in `styles2.clock/<peer>`
+so fresh copied history cannot reallocate existing or dangling owner tokens.
 | `text` | `src/lib.rs` (`OBJECT`, `Span::retire`, `Text::delete`) | U+FFFC is reserved in authored text; a deletion keeps the objects a view retires | 09, 11 |
 | `doc` | `src/inline.rs`, `src/inline_tests.rs` | Inline objects: `inline1` records, staged insertion, deactivating deletion, typed images, patches, field targets, the audit; the record map is found by name once and kept | 05, 07, 09, 11, 37 |
 | `doc` | `src/hostile.rs` (`insert_object_marker`, `write_inline_record`, `corrupt_inline_record`) | A hostile peer's marker with no record, record with no marker, and overwritten record | 37 |
@@ -374,3 +420,18 @@ Every crate has a `Cargo.toml` manifest; shared dependencies live in the root ma
 | `layout`, `clipboard` | `src/regions.rs`, `src/flow/bands.rs`, `src/regions/tests.rs`, `src/sections/tests/bands.rs`, `clipboard/tests/story_isolation.rs` | Review fixes for B1: body region allocation is scoped to the body domain; balancing measures bands along their own block axis and refuses frames it cannot | 06, 20, 24, 37 |
 | `edit` | `src/region.rs`, `tests/regions.rs` | `Navigator::{hit_placed, caret_in, selection_rects_in}` over running instances; the instance is view state | 12, 33 |
 | docs | `docs/sections-stage-b2-report.md` | Stage B part 2 report: merge, S6–S8, validation evidence and hand-off | 37–40 |
+
+
+List and inline writes participate in `edit/src/plan.rs::Plan::needs_trial`.
+`edit/tests/refusal_atomicity.rs`, the seeded `transactions.rs` property tests,
+and `reprise/tests/plumbing_edit.rs` cover their capacity, malformed-input and
+revision refusals. `doc/src/style_identity.rs` caches root absence and root
+handles by committed frontiers; imports invalidate the cache without creating
+a root. `sync.rs` bit 5 carries historical built-in context across joins.
+
+`doc/src/identity.rs` retains named empty roots for counter-free binding and
+reads the earlier lineage field form; its tests cover History/Shallow and
+conflicting declarations. `doc/src/hostile.rs::legacy_document_lineage` keeps
+the foreign-copy fixture's existing operation IDs. `doc/src/lists.rs` registry
+queries stay read-only, and `reprise/tests/legacy_open_concurrent.rs` exercises
+the documented framed transport for unmarked historical packages.

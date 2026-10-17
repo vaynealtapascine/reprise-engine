@@ -157,6 +157,7 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         plumbing_mark_facts()?,
         list_semantics_storm()?,
         annotation_storm()?,
+        foreign_copy_snapshot()?,
         inline_bidi()?,
         inline_storm()?,
         inline_storm_readable()?,
@@ -3428,6 +3429,32 @@ pub fn sections_bands_hostile() -> Result<Fixture, DocError> {
     }
     doc.commit();
     Ok(Fixture::new("sections_bands_hostile", doc, &[]))
+}
+
+/// Source history cannot enter an independent copy when the host rewrites
+/// its outer routing ID: the frame carries the durable source identity.
+pub fn foreign_copy_snapshot() -> Result<Fixture, DocError> {
+    let source = Document::new(OTHER_PEER)?;
+    define_styles(&source)?;
+    reprise_doc::hostile::legacy_document_lineage(&source, "00000000000000000000000000000001")?;
+    source.append_block(BlockKind::Paragraph, "body", "foreign SOURCE")?;
+    source.commit();
+    let doc = document()?;
+    reprise_doc::hostile::legacy_document_lineage(&doc, "00000000000000000000000000000002")?;
+    doc.append_block(BlockKind::Paragraph, "body", "COPY")?;
+    doc.commit();
+    let before = doc.try_export(reprise_doc::PersistenceMode::History)?;
+    let packet = source
+        .export_snapshot_packet()
+        .map_err(|e| DocError::Store(e.to_string()))?;
+    if doc.import_packet(&packet).is_ok()
+        || doc.try_export(reprise_doc::PersistenceMode::History)? != before
+    {
+        return Err(DocError::Store(
+            "foreign copy snapshot was published".into(),
+        ));
+    }
+    Ok(Fixture::new("foreign_copy_snapshot", doc, &[]))
 }
 
 // ---- Inline objects and fields (`docs/inline.md`) ----

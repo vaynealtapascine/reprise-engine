@@ -134,6 +134,7 @@ releases it; WASM clients call `release_job` after completion/cancellation.
 | Presentation | `display_page`, `display_json`, `svg`, `png`, `glyph_outlines`, `reading_order`, `diagnostics` |
 | Extensions | `load_plugin`, `install_plugin`, `run_plugin_edit`; WASM `release_plugin` |
 | Collaboration | `sync_info`, `export_updates`, `import_updates`, `awareness`, `validate_awareness` |
+| Collaboration (format 2) | `sync_export`, `sync_import`, `set_selection`, `anchor_selection`, `resolve_selection`, `local_selection`, `presence`, `resolve_presence`, `undo_report`, `redo_report` (WASM exports; the native facade has the same names) |
 
 `glyph_outlines(Payload<GlyphRequest>)` returns, for one face and at most 4,096
 glyph IDs, each glyph's outline as absolute SVG path data in font design units
@@ -198,6 +199,41 @@ Awareness is at most 64 KiB of opaque bytes, is scoped to document/peer, and is
 never interpreted or stored. These primitives do not authenticate senders.
 Compact deltas and sync-format negotiation are a follow-up, not v1 behavior.
 
+**Sync packet format 2** is the transport for untrusted peers; v1 stays unchanged
+and readable for trusted legacy peers. The design, the trust model and the post-merge
+invariants are in [collaboration.md](collaboration.md).
+
+-   `sync_export({ since })` returns a `SyncPacket`. Pass the receiver's vector for a
+    delta of what it lacks, or `null` for a full snapshot (first join).
+-   The packet's `format`, `features`, `kind`, `since` and `vector` mirror its binary
+    frame in `content`, so a transport can route without decoding. `sync_import`
+    refuses a packet whose mirror disagrees with its frame (`bindings.invalid`), one for
+    another document (`bindings.id`), one from the receiver's own peer
+    (`bindings.invalid`), and one from another durable document lineage or from the
+    document this one was copied from (`bindings.copy-source`).
+-   A refused packet changes nothing and keeps its core code, all `Error`:
+    -   `sync.format`, `sync.feature`: unsupported frame version or feature set.
+    -   `sync.missing`: dependencies are missing. Request a delta since
+        `sync_info().data.vector`.
+    -   `sync.invalid`, `sync.local-peer`: a malformed or impersonating sender.
+    -   `sync.limit`: over a bound. Send a snapshot, or use v1 for a trusted peer.
+    -   `sync.store`: the store refused a packet that passed every check.
+-   Replays are harmless and report `changed: false`.
+-   `SyncReport` lists the changed blocks (possibly more than changed, never fewer),
+    structure, styles, relations and ranges. It also returns the local selection
+    anchored with `set_selection`, transformed by the import (`selection_moved` says
+    whether it had to move); `undo_report` and `redo_report` do the same for undo and
+    redo, and `local_selection` resolves it now.
+-   `anchor_selection` and `resolve_selection` convert explicitly between a
+    `Selection` and a `StableSelection` (opaque hex anchors, scoped to this document).
+-   `presence({ selection, meta })` builds awareness bytes. `meta` holds at most 16
+    entries, with keys of at most 64 bytes and values of at most 1 KiB.
+    `resolve_presence(awareness)` returns the peer's metadata, its resolved selection,
+    and `caret` and `rects` when a current layout exists. Garbage, foreign or stale
+    presence gives an empty view, never an error.
+-   Bounds: packet bodies 32 MiB (`maxPacketBytes()`), 1,000,000 changes and 4,000,000
+    operation atoms; vectors 4,096 entries; counters and Lamport timestamps below 2^30.
+
 ## Worker protocol
 
 [`worker.ts`](../crates/reprise-wasm/ts/worker.ts) is a dependency-free reference,
@@ -208,9 +244,21 @@ The main thread drives explicit steps, leaving room for edits/cancellation betwe
 messages. There are no hidden threads, timers or unbounded pump loops.
 
 Every message is `{ version: 1, data: { id, kind, ... } }`. `id` is a caller
-correlation string. Request kinds are `create`, `open`, `font`, `font-settings`, `asset`, `image`, `edit`, `start`,
-`step`, `cancel`, `save`, `sync-export`, `sync-import`, and `close`. Responses are
-`state`, `asset`, `started`, `layout`, `saved`, `sync`, `ack`, or `error`.
+correlation string. The request and response unions in `worker.ts` are the
+complete list. Request kinds are `create`, `open`, `import-copy`, `workspace-font`,
+`workspace-font-settings`, `batch`, `replace`, `replace-text`, `diagnostics`, `font`,
+`font-settings`, `asset`, `image`, `edit`, `start`, `step`, `cancel`, `outline`,
+`marks`, `annotation`, `annotations-at`, `annotations-in`, `annotations-of-kind`,
+`annotation-geometry`, `page-links`, `atom-rect`, `field-target`, `save`,
+`sync-export`, `sync-info`, `sync-packet-import`, `selection`, `resolve-selection`,
+`presence`, `resolve-presence`, `undo`, `redo`, `sync-import` and `close`.
+Responses are `state`, `edited`, `batched`, `replaced`, `diagnostics`, `face`,
+`asset`, `started`, `layout`, `outline`, `marks`, `annotation`, `annotations`,
+`annotation-geometry`, `page-links`, `atom-rect`, `field-target`, `saved`, `sync`,
+`sync-packet`, `sync-info`, `synced`, `selection`, `resolved-selection`, `presence`,
+`resolved-presence`, `history`, `ack` or `error`. `outline` returns `outline` with
+`headings: Payload<OutlineEntry[]>`; the other kinds are described in the sections
+below.
 An `asset` request carries declaration and bytes; its `asset` response returns
 the content hash for the following `image` insertion request.
 `font-settings` carries `Payload<FontSettings>` and acknowledges a successful

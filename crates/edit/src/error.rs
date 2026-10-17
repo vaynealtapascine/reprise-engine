@@ -31,6 +31,7 @@ impl EditError {
             | Reason::TextTooLong { .. }
             | Reason::TransactionTooLarge { .. }
             | Reason::TreeDepthLimit { .. }
+            | Reason::PreflightDepth { .. }
             | Reason::MarksLimit
             | Reason::StyleLimit { .. } => crate::codes::LIMIT,
             Reason::PageSetup(_) => crate::codes::PAGE_SETUP_INVALID,
@@ -59,6 +60,10 @@ pub enum Reason {
     CrossDomain { first: NodeId, second: NodeId },
     #[error("invalid section edit: {0}")]
     Section(String),
+    #[error("commit direct document edits before this composite edit")]
+    UncommittedEdit,
+    #[error("isolated edit preflight supports physical tree depth up to {max}")]
+    PreflightDepth { max: usize },
     #[error("invalid inline object: {0}")]
     Inline(String),
     #[error(transparent)]

@@ -3,7 +3,6 @@ use crate::region::Bounded;
 use crate::regions::{Plan, ensure_page, prepare};
 use crate::template::ResolvedTemplate;
 use crate::{Diagnostic, Engine, LayoutSnapshot, LineRef, Subject, codes};
-use reprise_compose::Measure;
 use reprise_diag::Severity;
 use reprise_doc::{Document, FrameRole, NotePlacement, Param, Relation, RelationId};
 use reprise_geom::{Length, Point};
@@ -255,7 +254,12 @@ impl Notes {
                     capacity = Length::ZERO;
                 }
             }
-            let measure = Measure(area.width);
+            let measure = prepared.paragraph_measure(area.width, start);
+            if prepared.indents(area.width).1 {
+                out.diagnostics
+                    .push(crate::flow::indent_clamped(&Subject::Node(owner)));
+            }
+            prepared.diagnose_context(true, &mut out.diagnostics);
             let overflow =
                 prepared.line_height() > area.depth && page > first_page && used == Length::ZERO;
             let bounded = Bounded {

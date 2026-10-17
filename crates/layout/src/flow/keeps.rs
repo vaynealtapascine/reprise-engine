@@ -22,15 +22,9 @@ impl Flow<'_> {
         prepared: &Prepared,
         start: usize,
     ) -> FrameRoom {
-        let (indents, _) = prepared.indents(frame.width);
         FrameRoom {
             runaround: Runaround {
-                base: Indented {
-                    base: Measure(frame.width),
-                    indents,
-                    first_line: start == 0,
-                    reversed: prepared.base_level % 2 == 1,
-                },
+                base: prepared.paragraph_measure(frame.width, start),
                 exclusions: self
                     .exclusions(index)
                     .into_iter()

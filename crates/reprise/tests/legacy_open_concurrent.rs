@@ -66,13 +66,18 @@ fn concurrent_opens_of_a_legacy_package_converge() {
         type_block(&mut a, "office אבג");
         type_block(&mut b, "ffi مرحبا");
 
-        let (from_a, from_b) = (a.export_updates().unwrap(), b.export_updates().unwrap());
+        let (from_a, from_b) = (
+            a.sync_export(&Payload::new(SyncRequest { since: None }))
+                .unwrap(),
+            b.sync_export(&Payload::new(SyncRequest { since: None }))
+                .unwrap(),
+        );
         if order {
-            b.import_updates(&from_a).unwrap();
-            a.import_updates(&from_b).unwrap();
+            b.sync_import(&from_a).unwrap();
+            a.sync_import(&from_b).unwrap();
         } else {
-            a.import_updates(&from_b).unwrap();
-            b.import_updates(&from_a).unwrap();
+            a.sync_import(&from_b).unwrap();
+            b.sync_import(&from_a).unwrap();
         }
         assert_eq!(a.sync_info().data.vector, b.sync_info().data.vector);
 

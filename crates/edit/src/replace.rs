@@ -224,10 +224,26 @@ impl Editor {
     }
 
     /// Replaces `selection`, resolved in the document as it is now, with the
-    /// staged fragment: one transaction and one undo step. An error before any
-    /// write leaves the document untouched; `Store` after one means the kernel
-    /// refused what it had validated (a bug), and what was written is one step.
+    /// staged fragment: one transaction and one undo step. Every write and
+    /// the post-deletion paste checks run on an isolated replica first, so
+    /// every content-dependent refusal leaves the document and undo untouched.
     pub fn replace_selection(
+        &mut self,
+        selection: &StableSelection,
+        staged: &StagedReplacement,
+    ) -> Result<Replaced, EditError> {
+        let mut trial = Editor::new(
+            self.doc.fork_for_edit().map_err(|e| EditError {
+                command: None,
+                reason: Reason::from(e),
+            })?,
+            self.schemas.clone(),
+        );
+        trial.replace_preflighted(selection, staged)?;
+        self.replace_preflighted(selection, staged)
+    }
+
+    fn replace_preflighted(
         &mut self,
         selection: &StableSelection,
         staged: &StagedReplacement,

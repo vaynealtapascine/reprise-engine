@@ -32,6 +32,61 @@ fn attach(doc: &Document, schema: reprise_doc::SchemaId, owner: NodeId, anchor: 
 }
 
 #[test]
+fn auxiliary_paragraph_indents_apply_and_unsupported_rules_are_explained() {
+    for schema in [FLOAT, NOTE] {
+        let doc = Document::new(PEER).unwrap();
+        define_styles(&doc).unwrap();
+        doc.set_page_template(
+            &PageTemplate::new("auxiliary", Dim::pt(320), Dim::pt(300))
+                .with_frame(FrameTemplate::new(
+                    "body",
+                    FrameRole::Flow(MAIN_FLOW.into()),
+                    (Dim::pt(20), Dim::pt(20)),
+                    (Dim::pt(180), Dim::pt(200)),
+                ))
+                .with_frame(FrameTemplate::new(
+                    "notes",
+                    FrameRole::Notes,
+                    (Dim::pt(220), Dim::pt(20)),
+                    (Dim::pt(80), Dim::pt(260)),
+                )),
+        )
+        .unwrap();
+        let p = doc
+            .append_block(BlockKind::Paragraph, "body", "body anchor text")
+            .unwrap();
+        let n = doc
+            .append_block(BlockKind::Annotation, "note", "note float text")
+            .unwrap();
+        let mut style = Style {
+            keep_together: Some(true),
+            ..Default::default()
+        };
+        style.set(
+            reprise_doc::Property::IndentStart,
+            reprise_doc::Authored::Expr(reprise_doc::Expr::parse("5pt").unwrap()),
+        );
+        style.set(
+            reprise_doc::Property::SpaceBefore,
+            reprise_doc::Authored::Expr(reprise_doc::Expr::parse("3pt").unwrap()),
+        );
+        doc.set_overrides(n, &style).unwrap();
+        attach(&doc, schema, n, p);
+        doc.commit();
+        let snapshot = engine().layout(&doc);
+        let block = snapshot.blocks.iter().find(|b| b.node == n).unwrap();
+        assert_eq!(block.lines[0].available.start, Length::from_pt(5));
+        assert!(
+            snapshot
+                .diagnostics
+                .iter()
+                .any(|d| d.code.as_str() == "layout.paragraph-context"
+                    && d.subject == reprise_layout::Subject::Node(n))
+        );
+    }
+}
+
+#[test]
 fn floats_and_nested_notes_in_transformed_frames() {
     let doc = Document::new(PEER).unwrap();
     define_styles(&doc).unwrap();

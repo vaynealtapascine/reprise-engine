@@ -65,8 +65,11 @@ pub struct SectionsLayout {
     #[serde(skip)]
     pub(crate) notes: Vec<Diagnostic>,
 }
+/// What a page is for. Non-exhaustive: a canvas tile is a further kind (the
+/// frames design adds one), so match with a wildcard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum PageKind {
     Content,
     Filler,
