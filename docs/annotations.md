@@ -358,3 +358,13 @@ kinds: `annotation`, `annotations-at`, `annotations-in`, `annotations-of-kind`,
     copies.
 -   Suggestions now say what groups are, how typing in suggestion mode is
     planned and which layout mechanism hidden text reuses.
+
+
+Cross-paragraph native ranges carry optional `FragmentRange.end { node, at }`.
+The original `node/bytes` remains the first piece. Copy clips both endpoints to
+selected paragraphs and remaps internal range targets; copy-all keeps one comment
+identity for the full extent. Stored distinct-host ends use `end-node1` and require
+package bit 20 and sync `range-endpoints1` (bit 6), including retained/deleted
+records. Older readers refuse the new semantics. A missing final endpoint leaves
+existing fragment JSON unchanged. This is the additive proposal authorized by the
+review-fixes-2 brief; see its report for exact contract wording.

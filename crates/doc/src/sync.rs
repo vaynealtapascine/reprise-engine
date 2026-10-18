@@ -68,17 +68,21 @@ impl Features {
     pub const STYLE_IDENTITIES: Features = Features(1 << 4);
     /// Historical paragraph-v1 builtin context, including an empty schema root.
     pub const LEGACY_BUILTINS: Features = Features(1 << 5);
+    /// Retained range endpoints in distinct text hosts.
+    pub const RANGE_ENDPOINTS: Features = Features(1 << 6);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features = Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5));
+    pub const SUPPORTED: Features =
+        Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6));
 
-    const NAMES: [(Features, &'static str); 6] = [
+    const NAMES: [(Features, &'static str); 7] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),
         (Features::DOCUMENT_LINEAGE, "document-lineage1"),
         (Features::STYLE_IDENTITIES, "style-identities1"),
         (Features::LEGACY_BUILTINS, "legacy-builtins1"),
+        (Features::RANGE_ENDPOINTS, "range-endpoints1"),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -312,7 +316,8 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
     if features.0
         & !(Features::DOCUMENT_LINEAGE.0
             | Features::STYLE_IDENTITIES.0
-            | Features::LEGACY_BUILTINS.0)
+            | Features::LEGACY_BUILTINS.0
+            | Features::RANGE_ENDPOINTS.0)
         != needed.0
     {
         return Err(invalid("packet features don't match its kind"));
@@ -449,6 +454,11 @@ impl Document {
                     } else {
                         0
                     }
+                    | if self.has_cross_paragraph_ranges() {
+                        Features::RANGE_ENDPOINTS.0
+                    } else {
+                        0
+                    }
                     | if self.legacy_builtin_context() {
                         Features::LEGACY_BUILTINS.0
                     } else {
@@ -472,7 +482,8 @@ impl Document {
                 | (header.features.0
                     & (Features::DOCUMENT_LINEAGE.0
                         | Features::STYLE_IDENTITIES.0
-                        | Features::LEGACY_BUILTINS.0)),
+                        | Features::LEGACY_BUILTINS.0
+                        | Features::RANGE_ENDPOINTS.0)),
         );
         write_packet(&header, body)
     }
@@ -593,6 +604,11 @@ impl Document {
                             "style identity operations require style-identities1",
                         ));
                     }
+                }
+                if header.features.0 & Features::RANGE_ENDPOINTS.0 == 0
+                    && matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, .. } | JsonMapOp::Delete { key }) if key.as_str() == "end-node1")
+                {
+                    return Err(invalid("range endpoints require range-endpoints1"));
                 }
                 check_op(&op.content)?;
                 let len = op_len(&op.content);

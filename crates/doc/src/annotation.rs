@@ -862,6 +862,19 @@ impl Document {
         })
     }
 
+    /// Retained portable endpoints, including deleted ranges. Older readers
+    /// must refuse them instead of interpreting both ends in the first host.
+    pub fn has_cross_paragraph_ranges(&self) -> bool {
+        if !self.has_ranges_root() {
+            return false;
+        }
+        let tree = self.tree("ranges");
+        tree.nodes().into_iter().any(|id| {
+            tree.get_meta(id)
+                .is_ok_and(|m| m.get("end-node1").is_some())
+        })
+    }
+
     /// Live annotation records, readable or not, for capacity checks.
     pub fn annotation_count(&self) -> usize {
         self.annotation_index().records

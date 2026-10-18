@@ -636,3 +636,26 @@ fn historical_builtin_context_survives_join_even_with_empty_legacy_root() {
         assert!(!undo.undo().unwrap());
     }
 }
+
+#[test]
+fn range_endpoint_packets_require_their_feature_before_merging() {
+    let (a, b, first) = pair();
+    let last = a.append_block(BlockKind::Paragraph, "", "last").unwrap();
+    let policy = crate::text::RangePolicy::FIXED;
+    let range = a.add_range(first, 1..3, policy).unwrap();
+    a.stage_fragment_range_end(range, last, 2, policy).unwrap();
+    a.commit();
+    let packet = a.export_snapshot_packet().unwrap();
+    let (mut header, body) = read_header(&packet).unwrap();
+    assert_ne!(header.features.0 & Features::RANGE_ENDPOINTS.0, 0);
+    header.features.0 &= !Features::RANGE_ENDPOINTS.0;
+    let before = b.try_export(crate::PersistenceMode::History).unwrap();
+    assert!(b.import_packet(&repack(&header, body)).is_err());
+    assert_eq!(
+        before,
+        b.try_export(crate::PersistenceMode::History).unwrap()
+    );
+    b.import_packet(&packet).unwrap();
+    assert_eq!(b.range_extent(range), a.range_extent(range));
+    assert!(b.has_cross_paragraph_ranges());
+}

@@ -422,3 +422,8 @@ the documented framed transport for unmarked historical packages.
 | `fixtures`, `reprise`, `reprise-wasm` | `fixtures/src/hostile.rs`, `fixtures/tests/hostile.rs`, `reprise/tests/deep_metadata.rs`, `reprise-wasm/ts/smoke.cjs`, `.github/workflows/ci.yml` | Default-stack deep metadata/codec tests, compact hidden-depth goldens, actual 1 MiB WASM execution. |
 | `fixtures` | `tests/review_fixes2_performance.rs` | Ignored manual phase probe for repeated, independently timed construction/reads/styles/layout. |
 | vendor | `vendor/loro-internal/REPRISE-PATCH.md` | Pinned MIT Loro 1.16.2 patch rationale and exact changed paths; bounded root inspection, fast snapshots and unchanged tree replay. |
+
+`format/src/features.rs::REQUIRED_RANGE_ENDPOINTS` (bit 20) and
+`doc/src/sync.rs::Features::RANGE_ENDPOINTS` (bit 6) protect retained `end-node1`
+metadata. The format old-reader test and sync downgrade test reject omission of
+the feature before importing history.

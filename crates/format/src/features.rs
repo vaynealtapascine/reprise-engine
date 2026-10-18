@@ -43,6 +43,8 @@ pub const REQUIRED_INLINE_OBJECTS: u64 = 1 << 15;
 pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
 /// Durable style owners, editable labels and versioned built-in references.
 pub const REQUIRED_STYLE_IDENTITIES: u64 = 1 << 18;
+/// Retained portable range endpoints in distinct text hosts.
+pub const REQUIRED_RANGE_ENDPOINTS: u64 = 1 << 20;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
@@ -53,7 +55,8 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_BLOCK_SEMANTICS
     | REQUIRED_INLINE_OBJECTS
     | REQUIRED_ANNOTATIONS
-    | REQUIRED_STYLE_IDENTITIES;
+    | REQUIRED_STYLE_IDENTITIES
+    | REQUIRED_RANGE_ENDPOINTS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -66,6 +69,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if document.has_style_identities() {
         flags.required |= REQUIRED_STYLE_IDENTITIES;
+    }
+    if document.has_cross_paragraph_ranges() {
+        flags.required |= REQUIRED_RANGE_ENDPOINTS;
     }
     if document.has_annotations() {
         flags.required |= REQUIRED_ANNOTATIONS;
@@ -240,5 +246,50 @@ mod semantics_tests {
         .into_document()
         .unwrap();
         assert_eq!(reopened.list_item(node).unwrap().marker, "1.");
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+    #[test]
+    fn an_old_reader_refuses_retained_cross_host_endpoints() {
+        use crate::container::{Container, Limits};
+        let doc = Document::new(1).unwrap();
+        let first = doc
+            .append_block(reprise_doc::BlockKind::Paragraph, "", "first")
+            .unwrap();
+        let last = doc
+            .append_block(reprise_doc::BlockKind::Paragraph, "", "last")
+            .unwrap();
+        let save = || {
+            crate::Package::new(
+                &doc,
+                crate::DocumentId([9; 16]),
+                reprise_doc::PersistenceMode::History,
+            )
+            .unwrap()
+            .save()
+            .unwrap()
+        };
+        let old = KNOWN_REQUIRED & !REQUIRED_RANGE_ENDPOINTS;
+        assert!(!doc.has_cross_paragraph_ranges());
+        Container::decode_known(&save(), Limits::default(), old).unwrap();
+        let policy = reprise_doc::text::RangePolicy::FIXED;
+        let range = doc.add_range(first, 1..3, policy).unwrap();
+        doc.stage_fragment_range_end(range, last, 2, policy)
+            .unwrap();
+        for deleted in [false, true] {
+            if deleted {
+                doc.delete_block(first).unwrap();
+            }
+            doc.commit();
+            assert!(doc.has_cross_paragraph_ranges());
+            let bytes = save();
+            assert!(
+                matches!(Container::decode_known(&bytes, Limits::default(), old), Err(crate::FormatError::RequiredFeatures(bits)) if bits == REQUIRED_RANGE_ENDPOINTS)
+            );
+            Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED).unwrap();
+        }
     }
 }
