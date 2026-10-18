@@ -166,7 +166,9 @@ impl TreeDiffCalculator {
             let mark = h.ensure_importing_caches_exist();
             let tree_ops = h.get_tree(&self.container, mark).unwrap();
             let tree = tree_ops.tree().lock();
-            tree.tree.keys().map(|id| (*id, tree.get_parent_with_id(*id)))
+            tree.tree
+                .keys()
+                .map(|id| (*id, tree.get_parent_with_id(*id)))
                 .collect::<FxHashMap<_, _>>()
         });
         let mut diff = self.checkout_diff(info, oplog);
@@ -174,13 +176,18 @@ impl TreeDiffCalculator {
         for item in &diff.diff {
             actions.entry(item.target).or_default().push(&item.action);
         }
-        let unchanged: BTreeSet<_> = actions.iter().filter_map(|(id, actions)| {
-            let [TreeInternalDiff::UnCreate, TreeInternalDiff::Create { parent, position }] = actions.as_slice() else {
-                return None;
-            };
-            let (old_parent, old_position, _) = before.get(id)?;
-            (old_parent == parent && old_position.as_ref() == Some(position)).then_some(*id)
-        }).collect();
+        let unchanged: BTreeSet<_> = actions
+            .iter()
+            .filter_map(|(id, actions)| {
+                let [TreeInternalDiff::UnCreate, TreeInternalDiff::Create { parent, position }] =
+                    actions.as_slice()
+                else {
+                    return None;
+                };
+                let (old_parent, old_position, _) = before.get(id)?;
+                (old_parent == parent && old_position.as_ref() == Some(position)).then_some(*id)
+            })
+            .collect();
         diff.diff.retain(|item| !unchanged.contains(&item.target));
         diff
     }
