@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 
 use reprise::*;
 use reprise_doc::hostile::{
-    Rng, dump_inline_records, scribble, scribble_foundations, write_node_entry, write_root_string,
-    write_shadow_root,
+    Rng, dump_inline_records, scribble, scribble_foundations, write_deep_chain, write_node_entry,
+    write_root_string, write_shadow_root,
 };
 use reprise_fuzz_harness::codes;
 use reprise_fuzz_harness::foundations::oracles;
@@ -1027,6 +1027,12 @@ fn named_attacks_are_survived() {
                 let _ = write_root_string(d, "document1", "id", "ffffffffffffffffffffffffffffffff");
             }),
         ),
+        (
+            "deep: 300 nested paragraphs",
+            Box::new(|d| {
+                let _ = write_deep_chain(d, 300);
+            }),
+        ),
     ];
     // A root is identified by name and type, so a peer can add one of another
     // type under a document root's name. Replicas must still read the same
@@ -1118,4 +1124,24 @@ undeliverable: {undeliverable:#?}"
 
 fn write_inline(doc: &reprise_doc::Document, key: &str, entry: &str, raw: &str) {
     let _ = reprise_doc::hostile::write_inline_entry(doc, key, entry, raw);
+}
+
+/// Trees as deep as `State` allows (1,024 levels) and just past it. The engine's
+/// cost here is quadratic in depth (`state()` goes 0.18 s, 0.67 s, 2.6 s at
+/// depths 125, 250, 500 in a debug build), so each of these takes minutes:
+/// run it with `--ignored`. Astra 4 R2 was a stack overflow at this depth in
+/// `list_numbering` and `has_block_semantics`; nothing may overflow now.
+#[test]
+#[ignore = "slow in debug (quadratic in tree depth): about four minutes per depth"]
+fn trees_at_and_past_the_depth_limit_are_survived() {
+    let ws = workspace();
+    let s = victim(&ws);
+    for depth in [1_000usize, 1_030] {
+        let case = format!("{depth} nested paragraphs");
+        let packet = attack(&s, |d| {
+            let _ = write_deep_chain(d, depth);
+        })
+        .expect("a deep chain doesn't touch the attacker's lineage");
+        run_case(&ws, &case, &packet);
+    }
 }

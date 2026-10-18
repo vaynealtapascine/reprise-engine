@@ -13,7 +13,9 @@
 //! runs never build the 1,024-deep trees that `LoroDoc::get_value` recurses
 //! through (Astra 4 R2).
 
-use loro::{Container, LoroMap, LoroTree, LoroValue, TreeID, TreeParentId, ValueOrContainer};
+use loro::{
+    Container, LoroMap, LoroText, LoroTree, LoroValue, TreeID, TreeParentId, ValueOrContainer,
+};
 
 use super::{Rng, nodes, texts, value};
 use crate::Document;
@@ -717,4 +719,23 @@ pub fn held_roots(doc: &Document) -> Vec<String> {
         .collect();
     out.sort();
     out
+}
+
+/// Writes a chain of `depth` paragraphs, each the child of the one before,
+/// under the root, as a peer can. The random attacks above never nest deeper
+/// than a few levels; this is the deep tree the facade limits at 1,024 levels
+/// (`State` refuses a deeper one with `bindings.limit`). Commits.
+pub fn write_deep_chain(doc: &Document, depth: usize) -> loro::LoroResult<()> {
+    let tree = doc.doc.get_tree("content");
+    let mut parent = TreeParentId::Root;
+    for _ in 0..depth {
+        let id = tree.create(parent)?;
+        let meta = tree.get_meta(id)?;
+        meta.insert("kind", "paragraph")?;
+        meta.insert_container("text", LoroText::new())?
+            .insert(0, "x")?;
+        parent = TreeParentId::Node(id);
+    }
+    doc.commit();
+    Ok(())
 }
