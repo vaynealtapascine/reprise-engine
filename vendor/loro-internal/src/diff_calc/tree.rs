@@ -157,7 +157,32 @@ impl TreeDiffCalculator {
 
     fn diff(&mut self, oplog: &OpLog, info: DiffCalcVersionInfo) -> TreeDelta {
         self.checkout(info.from_vv, info.from_frontiers, oplog);
-        self.checkout_diff(info, oplog)
+        // Concurrent replay can retreat an existing creation and then recreate
+        // it at precisely the same location. That is not a new container:
+        // emitting Create would revive its entire metadata/text as inserts and
+        // incorrectly transform pending undo positions. Elide only exact,
+        // two-action round trips; real moves, revivals and deletions remain.
+        let before = oplog.with_history_cache(|h| {
+            let mark = h.ensure_importing_caches_exist();
+            let tree_ops = h.get_tree(&self.container, mark).unwrap();
+            let tree = tree_ops.tree().lock();
+            tree.tree.keys().map(|id| (*id, tree.get_parent_with_id(*id)))
+                .collect::<FxHashMap<_, _>>()
+        });
+        let mut diff = self.checkout_diff(info, oplog);
+        let mut actions: FxHashMap<TreeID, Vec<&TreeInternalDiff>> = FxHashMap::default();
+        for item in &diff.diff {
+            actions.entry(item.target).or_default().push(&item.action);
+        }
+        let unchanged: BTreeSet<_> = actions.iter().filter_map(|(id, actions)| {
+            let [TreeInternalDiff::UnCreate, TreeInternalDiff::Create { parent, position }] = actions.as_slice() else {
+                return None;
+            };
+            let (old_parent, old_position, _) = before.get(id)?;
+            (old_parent == parent && old_position.as_ref() == Some(position)).then_some(*id)
+        }).collect();
+        diff.diff.retain(|item| !unchanged.contains(&item.target));
+        diff
     }
 
     fn checkout(&mut self, to: &VersionVector, to_frontiers: &Frontiers, oplog: &OpLog) {
