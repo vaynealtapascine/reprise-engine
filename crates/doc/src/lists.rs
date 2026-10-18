@@ -846,13 +846,10 @@ impl Document {
     /// only a dangling `list1` (from a hostile peer) can, so scan for one.
     fn may_have_items(&self) -> bool {
         use loro::Container;
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return true;
-        };
-        if roots.contains_key(LISTS) {
+        if self.has_root(LISTS) {
             return true;
         }
-        if roots.contains_key(crate::flow::BREAKS)
+        if self.has_root(crate::flow::BREAKS)
             && let LoroValue::Map(records) = self.break_records().get_value()
         {
             for value in records.values() {

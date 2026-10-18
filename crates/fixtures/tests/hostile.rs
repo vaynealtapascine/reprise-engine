@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 109);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 111);
 }
 
 hostile_tests!(
@@ -1373,3 +1373,5 @@ fn sections_regions_hostile() {
     );
     check(fixture);
 }
+
+hostile_tests!(metadata_depth_1024, metadata_depth_4096);

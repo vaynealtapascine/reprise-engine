@@ -111,7 +111,18 @@ impl Document {
     /// Body-domain alias of `order(Body)`: a node before its children, a
     /// node's children in order. A flow's paragraphs are in text order.
     pub fn document_order(&self) -> Vec<NodeId> {
-        self.order(crate::Domain::Body)
+        let order = self.order(crate::Domain::Body);
+        crate::annotation::charge(order.len());
+        order
+    }
+
+    /// The order cross-host ranges compare positions in: the body, then each
+    /// story. A range never leaves its domain, so within one the order is the
+    /// domain's own; with no stories it is [`Document::document_order`].
+    pub(crate) fn range_order(&self) -> Vec<NodeId> {
+        let order = self.authored_order();
+        crate::annotation::charge(order.len());
+        order
     }
 
     /// The blocks a structural query matches, in document order. The query's

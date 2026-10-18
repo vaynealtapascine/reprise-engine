@@ -238,11 +238,7 @@ impl Document {
     /// The package declares a required feature bit for it (34).
     pub fn has_block_semantics(&self) -> bool {
         use loro::Container;
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return true;
-        };
-        if roots.contains_key(crate::lists::LISTS)
-            && !self.tree(crate::lists::LISTS).nodes().is_empty()
+        if self.has_root(crate::lists::LISTS) && !self.tree(crate::lists::LISTS).nodes().is_empty()
         {
             return true;
         }
@@ -254,7 +250,7 @@ impl Document {
         ];
         let marked = |meta: &LoroMap| keys.iter().any(|k| meta.get(k).is_some());
         let mut visited = 0usize;
-        if roots.contains_key(crate::flow::BREAKS)
+        if self.has_root(crate::flow::BREAKS)
             && let LoroValue::Map(records) = self.break_records().get_value()
         {
             for value in records.values() {
@@ -272,7 +268,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key("content") {
+        {
             let tree = self.tree("content");
             for id in tree.nodes() {
                 visited = visited.saturating_add(1);

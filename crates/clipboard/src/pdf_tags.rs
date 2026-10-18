@@ -653,13 +653,40 @@ impl Builder<'_> {
             });
             if let Some(atom) = atom {
                 let content = Child::Content(Content::whole(run.run.clone()));
-                if let reprise_layout::AtomPaint::Image { alt, .. } = &atom.paint {
-                    out.push(Child::Node(Node::new(
-                        Role::Figure { alt: alt.clone() },
-                        vec![content],
-                    )));
+                let inner = if let reprise_layout::AtomPaint::Image { alt, .. } = &atom.paint {
+                    Child::Node(Node::new(Role::Figure { alt: alt.clone() }, vec![content]))
                 } else {
-                    out.push(content);
+                    content
+                };
+                let bytes = atom.at..atom.at.saturating_add(reprise_doc::text::OBJECT.len_utf8());
+                let rect = self
+                    .layout
+                    .line(run.line)
+                    .and_then(|line| self.layout.frame(line.frame))
+                    .map(|frame| frame.to_page.bounds(&atom.rect));
+                // Atoms are indivisible: note references take precedence, then
+                // the first authored link, as for glyph cuts below.
+                if let Some((i, anchor)) = anchors.iter().enumerate().find(|(i, a)| {
+                    !used[*i] && a.bytes.start < bytes.end && bytes.start < a.bytes.end
+                }) {
+                    used[i] = anchor.bytes.end <= bytes.end;
+                    let link = rect.map(|rect| Link {
+                        rect,
+                        target: anchor.note,
+                        alt: format!("Go to note {}", anchor.note),
+                    });
+                    out.push(Child::Node(Node::new(
+                        Role::Reference { link },
+                        vec![inner],
+                    )));
+                } else if let Some(link) = links
+                    .iter()
+                    .find(|l| l.bytes.start < bytes.end && bytes.start < l.bytes.end)
+                {
+                    let link = rect.and_then(|rect| self.doc_link_rect(rect, atom.text(), link));
+                    out.push(Child::Node(Node::new(Role::Link { link }, vec![inner])));
+                } else {
+                    out.push(inner);
                 }
                 continue;
             }
@@ -778,7 +805,19 @@ impl Builder<'_> {
             ));
             return None;
         };
-        let label = snippet(text.get(link.bytes.clone()).unwrap_or_default());
+        self.doc_link_rect(
+            rect,
+            snippet(text.get(link.bytes.clone()).unwrap_or_default()),
+            link,
+        )
+    }
+
+    fn doc_link_rect(
+        &self,
+        rect: Rect<PageSpace>,
+        label: String,
+        link: &LinkCut,
+    ) -> Option<DocLink> {
         let (to, alt) = match &link.to {
             LinkSpec::Uri(uri) => (
                 LinkTo::Uri(uri.clone()),

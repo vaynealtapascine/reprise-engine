@@ -116,13 +116,34 @@ impl Document {
         let Some(raw) = self.anchor_text(node) else {
             return Ok(());
         };
-        let start = self.shared_byte(node, bytes.start)?;
-        let end = self.shared_byte(node, bytes.end)?;
-        // Only a span that is contiguous in the shared text can be found
-        // again: a view's deletion around hidden markers is several spans.
-        if end < start || end - start != bytes.len() {
-            return Ok(());
+        // Record each visible segment separately. Hidden atom/break markers
+        // survive deletion and provide stable bases for subsequent segments.
+        let text = self.block(node)?.text;
+        let mut at = 0usize;
+        for segment in text.segments()? {
+            let next = at.saturating_add(segment.bytes.len());
+            let a = bytes.start.max(at);
+            let b = bytes.end.min(next);
+            if a < b {
+                self.record_annotation_restore_span(
+                    &raw,
+                    segment.bytes.start.saturating_add(a - at),
+                    segment.bytes.start.saturating_add(b - at),
+                    &ids,
+                )?;
+            }
+            at = next;
         }
+        Ok(())
+    }
+
+    fn record_annotation_restore_span(
+        &self,
+        raw: &LoroText,
+        start: usize,
+        end: usize,
+        ids: &std::collections::BTreeSet<RangeId>,
+    ) -> Result<(), DocError> {
         let (Some(u0), Some(u1)) = (
             raw.convert_pos(start, PosType::Bytes, PosType::Unicode),
             raw.convert_pos(end, PosType::Bytes, PosType::Unicode),
@@ -152,7 +173,7 @@ impl Document {
         };
         let tree = self.tree("ranges");
         let mut writes = Vec::new();
-        for id in ids.into_iter().take(MAX_HINTED) {
+        for &id in ids.iter().take(MAX_HINTED) {
             let Ok(meta) = tree.get_meta(id.0) else {
                 continue;
             };
@@ -226,13 +247,20 @@ impl Document {
             let Ok(Some(policy)) = self.range_policy(RangeId(id)) else {
                 continue;
             };
-            let Some(loro) = self.anchor_text(node) else {
-                continue;
-            };
-            let whole = Text::from_loro(loro.clone());
             let mut hints = read_hints(&raw);
             let mut changed = false;
             for (key, affinity) in [("start", policy.start), ("end", policy.end)] {
+                let host = if key == "end" {
+                    get_str(&meta, "end-node1")
+                        .and_then(|s| NodeId::parse(&s))
+                        .unwrap_or(node)
+                } else {
+                    node
+                };
+                let Some(loro) = self.anchor_text(host) else {
+                    continue;
+                };
+                let whole = Text::from_loro(loro.clone());
                 let Some(stored) = get_str(&meta, key) else {
                     continue;
                 };

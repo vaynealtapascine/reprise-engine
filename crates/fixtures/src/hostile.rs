@@ -163,6 +163,8 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         inline_storm_readable()?,
         inline_fields_with_oscillating_regions()?,
         sections_retained_hostile()?,
+        metadata_depth_1024()?,
+        metadata_depth_4096()?,
     ])
 }
 
@@ -3796,4 +3798,35 @@ pub fn sections_regions_hostile() -> Result<Fixture, DocError> {
             "section.region-slot",
         ],
     ))
+}
+
+/// Deep physical content tree retained under a deleted parent. The root
+/// catalog must stay shallow even when content is hidden; a live sibling
+/// keeps the rendering goldens compact.
+fn metadata_depth(depth: usize, name: &'static str) -> Result<Fixture, DocError> {
+    let doc = document()?;
+    let new = reprise_doc::NewBlock {
+        kind: BlockKind::Paragraph,
+        style: String::new(),
+        text: String::new(),
+        overrides: Style::default(),
+    };
+    // Leaf first: each edit touches only a shallow live ancestor chain.
+    let mut root = doc.insert_block_at(None, 0, &new)?;
+    for _ in 1..depth {
+        let above = doc.insert_block_at(None, 0, &new)?;
+        doc.move_block(root, Some(above), 0)?;
+        root = above;
+    }
+    doc.delete_block(root)?;
+    doc.append_block(BlockKind::Paragraph, "body", "Deep metadata stays bounded.")?;
+    doc.commit();
+    Ok(Fixture::new(name, doc, &[]))
+}
+
+pub fn metadata_depth_1024() -> Result<Fixture, DocError> {
+    metadata_depth(1024, "metadata_depth_1024")
+}
+pub fn metadata_depth_4096() -> Result<Fixture, DocError> {
+    metadata_depth(4096, "metadata_depth_4096")
 }

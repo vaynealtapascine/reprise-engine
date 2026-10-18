@@ -519,6 +519,7 @@ impl Document {
         ids.sort();
         let mut unreadable = 0usize;
         let mut hosts = BTreeMap::new();
+        let mut order = None;
         let mut limited = false;
         for id in ids {
             let Ok(meta) = tree.get_meta(id) else {
@@ -541,7 +542,8 @@ impl Document {
                 unreadable += 1;
                 continue;
             };
-            let state = self.annotation_state(&mut hosts, &meta, data.kind(), &mut limited);
+            let state =
+                self.annotation_state(&mut hosts, &mut order, &meta, data.kind(), &mut limited);
             let points: Vec<(NodeId, Range<usize>)> = match &state {
                 AnnotationState::Active { pieces, .. } => {
                     pieces.iter().map(|p| (p.node, p.bytes.clone())).collect()
@@ -591,10 +593,23 @@ impl Document {
         anchor: &crate::text::Anchor,
     ) -> Option<(NodeId, usize, bool)> {
         use crate::text::Resolved;
-        let host = hosts.entry(node.node).or_insert_with(|| HostContext {
-            flow: self.flow(node.node),
-            text: self.host_text(node.node).map(crate::text::Text::from_loro),
-            live: self.live(&self.tree("content"), node.node),
+        let host = hosts.entry(node.node).or_insert_with(|| {
+            let flow = self.flow(node.node);
+            let intervals = flow.as_ref().map_or_else(Vec::new, |f| {
+                charge(f.paras.len());
+                f.paras
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| f.is_live(p.id))
+                    .map(|(i, p)| (p.region.end.1, i))
+                    .collect()
+            });
+            HostContext {
+                flow,
+                intervals,
+                text: self.host_text(node.node).map(crate::text::Text::from_loro),
+                live: self.live(&self.tree("content"), node.node),
+            }
         });
         let (Some(flow), Some(text)) = (&host.flow, &host.text) else {
             let (node, r) = self.locate(node, anchor)?;
@@ -605,9 +620,13 @@ impl Document {
         }
         let resolved = text.resolve_shared(anchor).ok()?;
         let u = resolved.offset();
-        let para = flow
-            .live()
-            .find(|p| p.region.start.1 <= u && u <= p.region.end.1)?;
+        // Lower bound on inclusive ends preserves the first paragraph at a
+        // shared boundary, including zero-length/hidden paragraph regions.
+        let i = interval_at(&host.intervals, u)?;
+        let para = flow.paras.get(i)?;
+        if u < para.region.start.1 {
+            return None;
+        }
         let byte = |u: usize| {
             text.loro().convert_pos(
                 u,
@@ -635,6 +654,7 @@ impl Document {
     fn annotation_state(
         &self,
         hosts: &mut BTreeMap<loro::TreeID, HostContext>,
+        order: &mut Option<DocOrder>,
         meta: &loro::LoroMap,
         kind: Kind,
         limited: &mut bool,
@@ -655,12 +675,26 @@ impl Document {
         };
         let (Some((start_node, start, live_start)), Some((end_node, end, live_end))) = (
             self.locate_indexed(hosts, node, &start),
-            self.locate_indexed(hosts, node, &end),
+            self.locate_indexed(
+                hosts,
+                get_str(meta, "end-node1")
+                    .and_then(|s| NodeId::parse(&s))
+                    .unwrap_or(node),
+                &end,
+            ),
         ) else {
             return empty(self.is_live(node).then_some(node), 0);
         };
-        let crossed =
-            self.flow_cmp(start_node, end_node).is_gt() || (start_node == end_node && start > end);
+        let cmp = if start_node == end_node {
+            std::cmp::Ordering::Equal
+        } else if start_node.node == end_node.node {
+            self.flow_cmp(start_node, end_node)
+        } else {
+            order
+                .get_or_insert_with(|| DocOrder::read(self))
+                .cmp(start_node, end_node)
+        };
+        let crossed = cmp.is_gt() || (start_node == end_node && start > end);
         let (end_node, end) = if crossed {
             (start_node, start)
         } else {
@@ -674,15 +708,41 @@ impl Document {
                     bytes: start..end,
                 });
             }
+        } else if start_node.node != end_node.node {
+            let order = order.get_or_insert_with(|| DocOrder::read(self));
+            // A start that is not in the order has nothing to cover.
+            let from = order
+                .position
+                .get(&start_node)
+                .copied()
+                .unwrap_or(usize::MAX);
+            for &node in order.order.iter().skip(from) {
+                charge(1);
+                if pieces.len() >= MAX_PIECES {
+                    *limited = true;
+                    break;
+                }
+                if let Ok(block) = self.block(node) {
+                    let a = if node == start_node { start } else { 0 };
+                    let b = if node == end_node {
+                        end
+                    } else {
+                        block.text.len()
+                    };
+                    if a < b {
+                        pieces.push(Piece { node, bytes: a..b });
+                    }
+                }
+                if node == end_node {
+                    break;
+                }
+            }
         } else if let Some(flow) = hosts.get(&start_node.node).and_then(|h| h.flow.clone()) {
-            let mut inside = false;
-            for para in flow.live() {
-                if para.id == start_node {
-                    inside = true;
-                }
-                if !inside {
-                    continue;
-                }
+            let Some(first) = flow.index_of(start_node) else {
+                return empty(Some(start_node), start);
+            };
+            for para in flow.paras.iter().skip(first) {
+                charge(1);
                 if pieces.len() >= MAX_PIECES {
                     *limited = true;
                     break;
@@ -799,6 +859,19 @@ impl Document {
             tree.get_meta(id).is_ok_and(|m| {
                 m.get(KEY).is_some() || m.get(crate::annotation_restore::HINTS).is_some()
             })
+        })
+    }
+
+    /// Retained portable endpoints, including deleted ranges. Older readers
+    /// must refuse them instead of interpreting both ends in the first host.
+    pub fn has_cross_paragraph_ranges(&self) -> bool {
+        if !self.has_ranges_root() {
+            return false;
+        }
+        let tree = self.tree("ranges");
+        tree.nodes().into_iter().any(|id| {
+            tree.get_meta(id)
+                .is_ok_and(|m| m.get_last_editor("end-node1").is_some())
         })
     }
 
@@ -940,8 +1013,11 @@ impl Document {
 
     /// The live record of an annotation, readable or not.
     fn annotation_record(&self, id: AnnotationId) -> Result<loro::LoroMap, AnnotationError> {
+        if !self.has_ranges_root() {
+            return Err(AnnotationError::Missing(id));
+        }
         let tree = self.tree("ranges");
-        if !self.has_ranges_root() || !self.live(&tree, id.0) {
+        if !self.live(&tree, id.0) {
             return Err(AnnotationError::Missing(id));
         }
         let meta = tree.get_meta(id.0)?;
@@ -1047,6 +1123,56 @@ impl Document {
 /// One host's text and flow, read once per index build.
 pub(crate) struct HostContext {
     flow: Option<Arc<crate::flow::HostFlow>>,
+    /// Inclusive scalar end and paragraph index, in flow order.
+    intervals: Vec<(usize, usize)>,
     text: Option<crate::text::Text>,
     live: bool,
+}
+
+/// Ordered endpoint lookup: the first paragraph whose inclusive end reaches `u`.
+fn interval_at(intervals: &[(usize, usize)], u: usize) -> Option<usize> {
+    let at = intervals.partition_point(|(end, _)| {
+        charge(1);
+        *end < u
+    });
+    intervals.get(at).map(|(_, i)| *i)
+}
+
+// Steps taken placing annotation endpoints. Counted in tests only, so the
+// scaling guards pin work rather than wall time, build mode or scheduling.
+#[cfg(test)]
+thread_local! {
+    static STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn charge(n: usize) {
+    STEPS.with(|s| s.set(s.get().saturating_add(n)));
+}
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) fn charge(_: usize) {}
+/// Reads and resets the counter.
+#[cfg(test)]
+pub(crate) fn take_steps() -> usize {
+    STEPS.with(|s| s.replace(0))
+}
+
+/// Document order, read once per index build and only when an annotation
+/// spans two hosts.
+pub(crate) struct DocOrder {
+    order: Vec<NodeId>,
+    position: std::collections::HashMap<NodeId, usize>,
+}
+
+impl DocOrder {
+    fn read(doc: &Document) -> Self {
+        let order = doc.range_order();
+        let position = order.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+        Self { order, position }
+    }
+
+    /// `a` against `b` in document order; a node that is not live sorts first.
+    fn cmp(&self, a: NodeId, b: NodeId) -> std::cmp::Ordering {
+        self.position.get(&a).cmp(&self.position.get(&b))
+    }
 }

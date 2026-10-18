@@ -66,10 +66,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: cargo test -p reprise --test deep_metadata
+        env:
+          REPRISE_DEEP_FIXTURES: target/deep-fixtures
       - run: cargo build --target wasm32-unknown-unknown -p reprise-wasm
+        env:
+          RUSTFLAGS: '-C link-arg=-zstack-size=1048576'
       - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - run: wasm-bindgen target/wasm32-unknown-unknown/debug/reprise_wasm.wasm --target nodejs --out-dir target/wasm-node
-      - run: node crates/reprise-wasm/ts/smoke.cjs target/wasm-node
+      - run: node crates/reprise-wasm/ts/smoke.cjs target/wasm-node target/deep-fixtures
       - run: npx --yes --package typescript@5.9.3 tsc -p crates/reprise-wasm/ts
       - run: npx --yes --package typescript@5.9.3 tsc -p crates/reprise-wasm/ts --noEmit false --module commonjs --moduleResolution node --outDir target/worker-js
       - run: node crates/reprise-wasm/ts/worker-smoke.cjs target/wasm-node target/worker-js/worker.js

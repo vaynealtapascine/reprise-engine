@@ -285,19 +285,13 @@ impl Document {
     /// Presence includes an emptied root's retained undo/sync history. Reads
     /// never create this root, so untouched documents need no feature bit.
     pub fn has_page_setup(&self) -> bool {
-        match self.doc.get_value() {
-            LoroValue::Map(roots) => roots.contains_key(ROOT),
-            _ => true,
-        }
+        self.has_root(ROOT)
     }
 
     pub fn page_setup_patch(&self) -> Result<PageSetupPatch, PageSetupError> {
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return Err(PageSetupError::Unreadable);
-        };
-        match roots.get(ROOT) {
+        match self.doc.get_by_str_path(ROOT) {
             None => return Ok(PageSetupPatch::default()),
-            Some(LoroValue::Container(id)) if id.container_type() == loro::ContainerType::Map => {}
+            Some(ValueOrContainer::Container(loro::Container::Map(_))) => {}
             Some(_) => return Err(PageSetupError::Unreadable),
         }
         let map = self.doc.get_map(ROOT);

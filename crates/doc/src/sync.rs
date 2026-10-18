@@ -68,19 +68,34 @@ impl Features {
     pub const STYLE_IDENTITIES: Features = Features(1 << 4);
     /// Historical paragraph-v1 builtin context, including an empty schema root.
     pub const LEGACY_BUILTINS: Features = Features(1 << 5);
+    /// Retained range endpoints in distinct text hosts.
+    pub const RANGE_ENDPOINTS: Features = Features(1 << 6);
+    /// Explicit per-reference interpretation after historical-context joins.
+    pub const STYLE_REFERENCE_CONTEXTS: Features = Features(1 << 7);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
     pub const SUPPORTED: Features = Features(
-        1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | crate::sections::REQUIRED_SECTIONS,
+        1 | (1 << 2)
+            | (1 << 3)
+            | (1 << 4)
+            | (1 << 5)
+            | (1 << 6)
+            | (1 << 7)
+            | crate::sections::REQUIRED_SECTIONS,
     );
 
-    const NAMES: [(Features, &'static str); 6] = [
+    const NAMES: [(Features, &'static str); 8] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),
         (Features::DOCUMENT_LINEAGE, "document-lineage1"),
         (Features::STYLE_IDENTITIES, "style-identities1"),
         (Features::LEGACY_BUILTINS, "legacy-builtins1"),
+        (Features::RANGE_ENDPOINTS, "range-endpoints1"),
+        (
+            Features::STYLE_REFERENCE_CONTEXTS,
+            "style-reference-contexts2",
+        ),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -295,11 +310,8 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         return Err(SyncError::Format(format));
     }
     let features = Features(u64::from_le_bytes(r.array()?));
-    if features.0 & Features::STYLE_IDENTITIES.0 != 0
-        && features.0 & Features::LEGACY_BUILTINS.0 != 0
-    {
-        return Err(invalid("conflicting style context declarations"));
-    }
+    // Identity metadata can retain historical built-in context. Both flags
+    // are needed to preflight a join before importing the identity root.
     let unknown = features.0 & !Features::SUPPORTED.0;
     if unknown != 0 {
         return Err(SyncError::Feature(unknown));
@@ -318,6 +330,8 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         & !(Features::DOCUMENT_LINEAGE.0
             | Features::STYLE_IDENTITIES.0
             | Features::LEGACY_BUILTINS.0
+            | Features::RANGE_ENDPOINTS.0
+            | Features::STYLE_REFERENCE_CONTEXTS.0
             | crate::sections::REQUIRED_SECTIONS)
         != needed.0
     {
@@ -457,7 +471,20 @@ impl Document {
                     }
                     | if self.has_style_identities() {
                         Features::STYLE_IDENTITIES.0
-                    } else if self.legacy_builtin_context() {
+                    } else {
+                        0
+                    }
+                    | if self.has_style_reference_contexts() {
+                        Features::STYLE_REFERENCE_CONTEXTS.0
+                    } else {
+                        0
+                    }
+                    | if self.has_cross_paragraph_ranges() {
+                        Features::RANGE_ENDPOINTS.0
+                    } else {
+                        0
+                    }
+                    | if self.legacy_builtin_context() {
                         Features::LEGACY_BUILTINS.0
                     } else {
                         0
@@ -481,6 +508,8 @@ impl Document {
                     & (Features::DOCUMENT_LINEAGE.0
                         | Features::STYLE_IDENTITIES.0
                         | Features::LEGACY_BUILTINS.0
+                        | Features::RANGE_ENDPOINTS.0
+                        | Features::STYLE_REFERENCE_CONTEXTS.0
                         | crate::sections::REQUIRED_SECTIONS)),
         );
         write_packet(&header, body)
@@ -503,16 +532,34 @@ impl Document {
     }
 
     fn import_delta(&self, header: &PacketHeader, body: &[u8]) -> Result<ChangeReport, SyncError> {
+        if self.legacy_builtin_context() || header.features.0 & Features::LEGACY_BUILTINS.0 != 0 {
+            self.fork_for_edit()
+                .map_err(|e| SyncError::Store(e.to_string()))?
+                .import_delta_inner(header, body)?;
+        }
+        self.import_delta_inner(header, body)
+    }
+
+    fn import_delta_inner(
+        &self,
+        header: &PacketHeader,
+        body: &[u8],
+    ) -> Result<ChangeReport, SyncError> {
         check_position_strings(body)?;
         let json: JsonSchema =
             serde_json::from_slice(body).map_err(|e| SyncError::Invalid(e.to_string()))?;
         self.preflight_delta(header, &json)?;
-        let adopt_legacy =
-            header.features.0 & Features::LEGACY_BUILTINS.0 != 0 && !self.has_style_identities();
-        if adopt_legacy {
-            self.check_legacy_context_adoption(&header.until)
-                .map_err(|e| SyncError::Store(e.to_string()))?;
-        }
+        let incoming_legacy = header.features.0 & Features::LEGACY_BUILTINS.0 != 0;
+        let legacy_join = incoming_legacy || self.legacy_builtin_context();
+        let own_pins = if legacy_join {
+            self.legacy_join_pins(
+                self.legacy_builtin_context(),
+                self.has_style_reference_contexts(),
+                None,
+            )
+        } else {
+            Vec::new()
+        };
         let (status, mut report) = self.tracked(|| self.doc.import_json_updates(json));
         let status = status.map_err(|e| SyncError::Store(e.to_string()))?;
         if status.pending.is_some() {
@@ -524,8 +571,13 @@ impl Document {
         if header.features.0 & Features::STYLE_IDENTITIES.0 != 0 {
             self.retain_style_identities();
         }
-        if adopt_legacy {
-            self.adopt_legacy_context()
+        if legacy_join {
+            let incoming = self.legacy_join_pins(
+                incoming_legacy,
+                header.features.0 & Features::STYLE_REFERENCE_CONTEXTS.0 != 0,
+                Some(&header.until),
+            );
+            self.apply_legacy_join_pins(incoming.into_iter().chain(own_pins))
                 .map_err(|e| SyncError::Store(e.to_string()))?;
             report.styles = true;
         }
@@ -587,6 +639,18 @@ impl Document {
                             "style identity operations require style-identities1",
                         ));
                     }
+                }
+                if header.features.0 & Features::RANGE_ENDPOINTS.0 == 0
+                    && matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, .. } | JsonMapOp::Delete { key }) if key.as_str() == "end-node1")
+                {
+                    return Err(invalid("range endpoints require range-endpoints1"));
+                }
+                if header.features.0 & Features::STYLE_REFERENCE_CONTEXTS.0 == 0
+                    && matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, .. } | JsonMapOp::Delete { key }) if key.as_str() == "reference-contexts2")
+                {
+                    return Err(invalid(
+                        "reference contexts require style-reference-contexts2",
+                    ));
                 }
                 check_op(&op.content)?;
                 let len = op_len(&op.content);

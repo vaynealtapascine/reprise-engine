@@ -9,8 +9,8 @@ use crate::annotation::OnEmpty;
 use crate::relation::{CopyAction, CopySet, plan_copy};
 use crate::text::{Affinity, Empty, RangePolicy};
 use crate::{
-    BlockKind, DocError, Document, NodeId, RangeId, RangeState, Relation, RelationId,
-    SchemaRegistry, Style, get_str,
+    BlockKind, DocError, Document, NodeId, RangeId, Relation, RelationId, SchemaRegistry, Style,
+    get_str,
 };
 
 pub const FRAGMENT_VERSION: u32 = 1;
@@ -70,11 +70,23 @@ pub struct FragmentRange {
     pub node: NodeId,
     pub bytes: Range<usize>,
     pub policy: RangePolicy,
+    /// Optional last endpoint for a span crossing copied paragraphs. The
+    /// legacy node/bytes describe its first piece and encode identically when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<FragmentEndpoint>,
     /// The annotation this range carries (see `docs/annotations.md`).
     /// Absent from fragments without annotations; older strict readers
     /// refuse a fragment that has one rather than paste a bare range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotation: Option<crate::annotation::AnnotationData>,
+}
+
+/// A copied range's final paragraph-local UTF-8 endpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FragmentEndpoint {
+    pub node: NodeId,
+    pub at: usize,
 }
 
 /// What a copy is for. It decides which annotations come along.
@@ -225,6 +237,21 @@ impl Fragment {
         let mut ranges = BTreeSet::new();
         let mut annotations = 0usize;
         for range in &self.ranges {
+            if let Some(end) = &range.end {
+                let (last, _) = nodes
+                    .get(&end.node)
+                    .ok_or_else(|| FragmentError::Invalid("range end node is absent".into()))?;
+                if !last.text.is_char_boundary(end.at) || end.node == range.node {
+                    return Err(FragmentError::Invalid("range end".into()));
+                }
+                let a = self.blocks.iter().position(|b| b.id == range.node);
+                let b = self.blocks.iter().position(|b| b.id == end.node);
+                if a >= b {
+                    return Err(FragmentError::Invalid(
+                        "range endpoints out of order".into(),
+                    ));
+                }
+            }
             let (block, _) = nodes
                 .get(&range.node)
                 .ok_or_else(|| FragmentError::Invalid("range node is absent".into()))?;
@@ -474,6 +501,7 @@ impl Document {
         let tree = self.tree("ranges");
         let mut ids = tree.nodes();
         ids.sort();
+        let order = self.range_order();
         for id in ids {
             if !self.live(&tree, id) {
                 continue;
@@ -488,31 +516,59 @@ impl Document {
                 continue;
             }
             let node = get_str(&meta, "node").and_then(|n| NodeId::parse(&n));
-            let resolved = self.resolve_range(range_id);
-            let resolved_node = match &resolved {
-                RangeState::Valid { node, .. } | RangeState::Rebound { node, .. } => Some(*node),
-                RangeState::Missing { .. } => None,
-            };
-            if !node.is_some_and(|n| cuts.contains_key(&n))
-                && !resolved_node.is_some_and(|n| cuts.contains_key(&n))
-            {
+            let extent = self.range_extent(range_id);
+            let pieces: Vec<_> = extent.as_ref().map_or_else(Vec::new, |e| {
+                let mut inside = false;
+                order
+                    .iter()
+                    .filter_map(|&n| {
+                        if n == e.start.0 {
+                            inside = true;
+                        }
+                        if !inside {
+                            return None;
+                        }
+                        let is_end = n == e.end.0;
+                        let piece = cuts.get(&n).and_then(|cut| {
+                            let len = self.block(n).ok()?.text.len();
+                            let start = if n == e.start.0 { e.start.1 } else { 0 }.max(cut.start);
+                            let end = if is_end { e.end.1 } else { len }.min(cut.end);
+                            if start < end || (e.start == e.end && start == end) {
+                                Some((
+                                    n,
+                                    start.checked_sub(cut.start)?..end.checked_sub(cut.start)?,
+                                ))
+                            } else {
+                                None
+                            }
+                        });
+                        if is_end {
+                            inside = false;
+                        }
+                        piece
+                    })
+                    .collect()
+            });
+            if pieces.is_empty() {
+                // Still validate selected malformed policies rather than lose data.
+                if node.is_some_and(|n| cuts.contains_key(&n)) {
+                    self.range_policy(range_id).map_err(bad)?;
+                }
                 continue;
             }
-            // Read before resolution: an unreadable policy must refuse the copy,
-            // rather than silently omit the range as missing.
             let authored_policy = self.range_policy(range_id).map_err(bad)?;
-            let (RangeState::Valid { node, bytes } | RangeState::Rebound { node, bytes }) =
-                resolved
-            else {
-                continue;
-            };
-            let Some(cut) = cuts.get(&node) else { continue };
-            // Intersect nonempty ranges; point ranges at either edge belong to the copy.
-            let start = bytes.start.max(cut.start);
-            let end = bytes.end.min(cut.end);
-            if start > end || (start == end && !bytes.is_empty()) {
-                continue;
-            }
+            let (node, bytes) = pieces
+                .first()
+                .cloned()
+                .ok_or_else(|| FragmentError::Invalid("range piece".into()))?;
+            let (start, end) = (bytes.start, bytes.end);
+            let last = pieces
+                .last()
+                .filter(|(n, _)| *n != node)
+                .map(|(node, bytes)| FragmentEndpoint {
+                    node: *node,
+                    at: bytes.end,
+                });
             // Annotations travel with their data; kinds that are not copied
             // and records this engine cannot read are left out and reported.
             let annotation = match get_str(&meta, crate::annotation::KEY) {
@@ -595,8 +651,9 @@ impl Document {
             fragment.ranges.push(FragmentRange {
                 id: range_id,
                 node,
-                bytes: start - cut.start..end - cut.start,
+                bytes: start..end,
                 policy,
+                end: last,
                 annotation,
             });
         }
@@ -731,6 +788,30 @@ impl Document {
         crate::ranges::write_policy(&meta, policy)?;
         self.doc.commit();
         Ok(RangeId(id))
+    }
+
+    /// Attach a staged cross-paragraph endpoint before activating the range.
+    pub fn stage_fragment_range_end(
+        &self,
+        id: RangeId,
+        node: NodeId,
+        at: usize,
+        policy: RangePolicy,
+    ) -> Result<(), DocError> {
+        let text = self
+            .block(node)
+            .map(|b| b.text)
+            .ok()
+            .or_else(|| self.text_of_any(node))
+            .ok_or(DocError::NoNode(node))?;
+        let end = text.anchor(at, policy.end)?;
+        self.doc
+            .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
+        let meta = self.tree("ranges").get_meta(id.0)?;
+        meta.insert("end-node1", node.to_string())?;
+        meta.insert("end", crate::ranges::anchor_value(&end))?;
+        self.doc.commit();
+        Ok(())
     }
 
     pub fn activate_fragment_range(&self, id: RangeId) -> Result<(), DocError> {

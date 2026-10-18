@@ -670,3 +670,185 @@ fn links_inside_table_cells_are_kept() {
         "{html}"
     );
 }
+
+#[test]
+fn pdf_links_over_atoms_in_lists() {
+    let mut counts = Vec::new();
+    for image in [false, true] {
+        let (engine, doc, asset) =
+            reprise_fixtures::inline::page(300, 300, Default::default()).unwrap();
+        let object = if image {
+            reprise_fixtures::inline::image(&asset, 24, 12, "cat")
+        } else {
+            reprise_doc::InlineObject::field("text").with("text", "click")
+        };
+        let p = reprise_fixtures::inline::paragraph(
+            &doc,
+            vec![reprise_fixtures::inline::Part::Object(object)],
+        )
+        .unwrap();
+        let list = doc
+            .create_list(&reprise_doc::ListDefinition::numbered())
+            .unwrap();
+        doc.set_list_item(p, list, 0).unwrap();
+        doc.add_annotation(
+            p,
+            0..3,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://example.com".into(),
+            }),
+        )
+        .unwrap();
+        doc.commit();
+        let layout = engine.layout(&doc);
+        assert_eq!(layout.page_links(&doc, 0).links.len(), 1);
+        let out = PdfWithAssets {
+            assets: &engine.assets,
+        }
+        .export(
+            &doc,
+            Some(&layout),
+            &ExportOptions {
+                source_namespace: "source",
+                schemas: &engine.schemas,
+                fonts: Some(&engine.fonts),
+            },
+        )
+        .unwrap();
+        let report = checker::check(&out.bytes);
+        println!(
+            "image={image}; pdf links={} tagged={} uris={:?}; losses={:?}",
+            report.links, report.tagged_links, report.link_uris, out.losses.notes
+        );
+        assert_eq!(report.links, layout.page_links(&doc, 0).links.len());
+        assert_eq!(report.tagged_links, report.links);
+        assert_eq!(report.link_uris, vec!["https://example.com".to_string()]);
+        counts.push(report.links);
+    }
+    assert_eq!(
+        counts,
+        vec![1, 1],
+        "linked atom must remain clickable in PDF"
+    );
+}
+
+#[test]
+fn copy_preserves_link_across_list_paragraphs_and_field() {
+    use reprise_doc::annotation::{AnnotationState, Kind};
+    use reprise_doc::fragment::CopyBlock;
+    use reprise_doc::{Document, SchemaRegistry};
+    use reprise_edit::Editor;
+    let (_, doc, _) = reprise_fixtures::inline::page(300, 300, Default::default()).unwrap();
+    let p = reprise_fixtures::inline::paragraph(
+        &doc,
+        vec![
+            reprise_fixtures::inline::Part::Text("first second "),
+            reprise_fixtures::inline::Part::Object(reprise_doc::InlineObject::field("page-number")),
+        ],
+    )
+    .unwrap();
+    let link = doc
+        .add_annotation(
+            p,
+            0..16,
+            &AnnotationData::Link(LinkTarget::Url {
+                url: "https://example.com".into(),
+            }),
+        )
+        .unwrap();
+    let q = doc.split_block(p, 6).unwrap();
+    let list = doc
+        .create_list(&reprise_doc::ListDefinition::numbered())
+        .unwrap();
+    doc.set_list_item(p, list, 0).unwrap();
+    doc.set_list_item(q, list, 0).unwrap();
+    doc.commit();
+    println!("source={:?}", doc.annotation(link));
+    let mut counts = Vec::new();
+    for whole in [false, true] {
+        let schemas = SchemaRegistry::builtin();
+        let fragment = if whole {
+            doc.copy_document_fragment("source", &schemas).unwrap()
+        } else {
+            doc.copy_fragment(
+                "source",
+                &[CopyBlock {
+                    node: q,
+                    bytes: None,
+                }],
+                &schemas,
+            )
+            .unwrap()
+        };
+        let mut editor = Editor::new(Document::new(2).unwrap(), schemas);
+        editor.paste(&fragment, None, "destination").unwrap();
+        let annotations = editor.document().annotations_of_kind(Kind::Link);
+        let covered: usize = annotations
+            .annotations
+            .iter()
+            .map(|a| match &a.state {
+                AnnotationState::Active { pieces, .. } => {
+                    pieces.iter().map(|p| p.bytes.len()).sum()
+                }
+                _ => 0,
+            })
+            .sum();
+        println!(
+            "whole={whole}; ranges={:?}; copied={annotations:?}; covered={covered}",
+            fragment.ranges
+        );
+        counts.push(covered);
+    }
+    assert_eq!(
+        counts,
+        vec![10, 16],
+        "every copied linked byte must keep its link"
+    );
+}
+
+#[test]
+fn cross_paragraph_copy_remaps_internal_range_targets() {
+    use reprise_doc::fragment::CopyBlock;
+    let (doc, nodes) = document(&["first second"]);
+    let first = nodes[0];
+    let target = doc.add_range(first, 0..12, RangePolicy::FIXED).unwrap();
+    doc.add_annotation(
+        first,
+        0..12,
+        &AnnotationData::Link(LinkTarget::Range { range: target }),
+    )
+    .unwrap();
+    let last = doc.split_block(first, 6).unwrap();
+    doc.commit();
+    for whole in [false, true] {
+        let schemas = SchemaRegistry::builtin();
+        let fragment = if whole {
+            doc.copy_document_fragment("source", &schemas).unwrap()
+        } else {
+            doc.copy_fragment(
+                "source",
+                &[CopyBlock {
+                    node: last,
+                    bytes: None,
+                }],
+                &schemas,
+            )
+            .unwrap()
+        };
+        let mut editor = Editor::new(Document::new(2).unwrap(), schemas);
+        editor.paste(&fragment, None, "destination").unwrap();
+        let copy = editor.document();
+        let links = copy.annotations_of_kind(Kind::Link);
+        assert_eq!(links.annotations.len(), 1);
+        let AnnotationData::Link(LinkTarget::Range { range }) = links.annotations[0].data else {
+            panic!("internal link lost")
+        };
+        assert_ne!(range, target);
+        let extent = copy.range_extent(range).unwrap();
+        let copied = copy.blocks();
+        assert_eq!(extent.start, (copied[0], 0));
+        assert_eq!(extent.end, (*copied.last().unwrap(), 6));
+        assert_eq!(copied.len(), if whole { 2 } else { 1 });
+        assert!(!extent.rebound);
+    }
+}

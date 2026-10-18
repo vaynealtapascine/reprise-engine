@@ -93,6 +93,13 @@ fn decode(reference: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+#[cfg(test)]
+thread_local! { static REFERENCE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn take_reference_reads() -> usize {
+    REFERENCE_READS.with(|n| n.replace(0))
+}
+
 impl Document {
     fn identity_root(&self) -> Option<ValueOrContainer> {
         use std::sync::atomic::Ordering;
@@ -130,11 +137,18 @@ impl Document {
         self.identity_root().is_some()
     }
 
+    /// Explicit per-reference interpretation after a historical-context join.
+    /// Older global-context readers need a new required feature declaration.
+    pub fn has_style_reference_contexts(&self) -> bool {
+        self.identity_map()
+            .is_some_and(|map| map.get_last_editor("reference-contexts2").is_some())
+    }
+
     pub(crate) fn identity_listing_cut(&self) -> bool {
         self.identity_map().is_some_and(|map| map.len() > MAX_KEYS)
     }
 
-    fn check_identity_keys(&self, keys: &[String]) -> Result<(), DocError> {
+    pub(crate) fn check_identity_keys(&self, keys: &[String]) -> Result<(), DocError> {
         let map = self.identity_map();
         if map.is_none() && self.has_root(ROOT) {
             return Err(DocError::Store("unreadable style identity root".into()));
@@ -170,41 +184,6 @@ impl Document {
         if self.doc.get_by_str_path(ROOT).is_none() {
             self.doc.get_map(ROOT);
         }
-    }
-
-    pub(crate) fn check_legacy_context_adoption(
-        &self,
-        incoming: &[(u64, i32)],
-    ) -> Result<(), DocError> {
-        let mut counters: BTreeMap<u64, i32> = self.version_vector().into_iter().collect();
-        for &(peer, counter) in incoming {
-            counters
-                .entry(peer)
-                .and_modify(|n| *n = (*n).max(counter))
-                .or_insert(counter);
-        }
-        if counters
-            .len()
-            .saturating_add(usize::from(!counters.contains_key(&self.doc.peer_id())))
-            > crate::sync::MAX_VECTOR_ENTRIES
-            || counters.values().fold(1_u64, |sum, n| {
-                sum.saturating_add(u64::try_from(*n).unwrap_or(u64::MAX))
-            }) > crate::persist::MAX_PERSIST_OPS
-        {
-            return Err(DocError::Store(
-                "legacy context adoption exceeds history/vector limit".into(),
-            ));
-        }
-        self.check_identity_keys(&["legacy-builtins1".into()])
-    }
-
-    pub(crate) fn adopt_legacy_context(&self) -> Result<(), DocError> {
-        self.retain_style_identities();
-        self.doc
-            .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
-        self.doc.get_map(ROOT).insert("legacy-builtins1", "1")?;
-        self.doc.commit();
-        Ok(())
     }
 
     pub(crate) fn legacy_builtin_context(&self) -> bool {
@@ -391,10 +370,20 @@ impl Document {
             .map(|_| encode(&self.style_owner(name)))
     }
 
+    pub(crate) fn builtin_reference(&self, owner: &str) -> String {
+        format!("{BUILTIN_PREFIX}{owner}")
+    }
+    pub(crate) fn original_owner_reference(&self, owner: &str) -> String {
+        encode(owner)
+    }
+
     /// The underlying block reference for resolution/copy/incremental keys.
     /// Plain legacy strings bind to their original owner, not a reused alias.
     pub fn style_reference(&self, node: NodeId) -> Option<String> {
-        let raw = get_str(&self.meta_of(node).ok()?, "style")?;
+        self.resolve_style_reference(Self::read_style_reference(&self.meta_of(node).ok()?)?)
+    }
+
+    pub(crate) fn resolve_style_reference(&self, raw: String) -> Option<String> {
         if !self.has_style_identities()
             && !crate::BUILTIN_STYLES.contains(&raw.as_str())
             && !raw.starts_with(ID_PREFIX)
@@ -418,6 +407,22 @@ impl Document {
         )
     }
 
+    pub(crate) fn public_reference(&self, reference: String) -> String {
+        if !reference.starts_with(ID_PREFIX)
+            && !reference.starts_with(BUILTIN_PREFIX)
+            && !self.has_style_identities()
+        {
+            return reference;
+        }
+        self.reference_label(&reference)
+    }
+
+    pub(crate) fn read_style_reference(meta: &LoroMap) -> Option<String> {
+        #[cfg(test)]
+        REFERENCE_READS.with(|n| n.set(n.get().saturating_add(1)));
+        get_str(meta, "style")
+    }
+
     pub(crate) fn reference_label(&self, reference: &str) -> String {
         if let Some(name) = reference.strip_prefix(BUILTIN_PREFIX) {
             return self.owner_label(name);
@@ -436,10 +441,7 @@ impl Document {
             return Ok(name.to_owned());
         }
         let owner = self.style_owner(name);
-        if self
-            .raw_style_record(&owner, true)
-            .is_some_and(|record| record.builtin)
-        {
+        if self.is_builtin_owner(&owner) {
             self.author_style_identities()?;
             return Ok(format!("{BUILTIN_PREFIX}{owner}"));
         }
@@ -553,7 +555,7 @@ impl Document {
         let (owner, builtin) = if let Some(name) = reference.strip_prefix(BUILTIN_PREFIX) {
             (name.to_owned(), true)
         } else if let Some(owner) = decode(reference) {
-            let builtin = self.legacy_builtin_context()
+            let builtin = (self.legacy_builtin_context() && !self.has_style_reference_contexts())
                 || self.identity_map().is_some_and(|map| {
                     get_str(&map, &format!("base/{owner}")).as_deref() == Some("builtin1")
                 });
@@ -568,7 +570,9 @@ impl Document {
             && !parent.starts_with(BUILTIN_PREFIX)
         {
             record.style.parent = Some(
-                if record.builtin && crate::builtin_style(parent).is_some() {
+                if (record.builtin || self.legacy_builtin_context())
+                    && crate::builtin_style(parent).is_some()
+                {
                     format!("{BUILTIN_PREFIX}{parent}")
                 } else if self.has_style_identities()
                     || crate::BUILTIN_STYLES.contains(&parent.as_str())

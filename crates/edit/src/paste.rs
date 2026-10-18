@@ -482,6 +482,16 @@ pub(crate) fn write(
                 )
                 .map_err(store)?;
         }
+        if let Some(end) = &range.end {
+            let node = result
+                .ids
+                .nodes
+                .get(&end.node)
+                .copied()
+                .ok_or_else(|| invalid(FragmentError::Invalid("range end node".into())))?;
+            doc.stage_fragment_range_end(new, node, end.at, range.policy)
+                .map_err(store)?;
+        }
         result.ids.ranges.insert(range.id, new);
     }
     stage_annotations(doc, &fragment, &result, same_namespace)?;
@@ -912,6 +922,16 @@ fn write_into_flow(
             }
             new = doc
                 .stage_fragment_range(node, bytes.clone(), range.policy)
+                .map_err(store)?;
+        }
+        if let Some(end) = &range.end {
+            let node = result
+                .ids
+                .nodes
+                .get(&end.node)
+                .copied()
+                .ok_or_else(|| invalid(FragmentError::Invalid("range end node".into())))?;
+            doc.stage_fragment_range_end(new, node, end.at, range.policy)
                 .map_err(store)?;
         }
         result.ids.ranges.insert(range.id, new);

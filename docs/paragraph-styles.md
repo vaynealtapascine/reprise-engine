@@ -435,3 +435,16 @@ The earlier `document1.id` representation remains readable. Framed sync still
 uses bit 3 and the same ID prefix; package-scoped unmarked historical replicas
 use framed transport and remain unmarked during read/export. No existing
 snapshot will be rewritten to accommodate a counter shift.
+
+
+Historical context joins (review fixes 2) pin built-in and original-owner
+interpretation per retained reference before joining identity metadata. The
+`styles2.reference-contexts2 = "1"` marker opts encoded owner references into
+explicit interpretation: the old global legacy flag no longer changes an
+explicit owner reference into a built-in reference. Existing identity histories
+without this marker keep their earlier global interpretation; their legacy
+encoded built-in references are pinned during migration too. Package bit 21 and
+sync `style-reference-contexts2` (bit 7) require readers that understand this
+change. Migration is preflighted and excluded from user undo. Native/framed,
+both delivery orders, return merges, old encoded references and History/Shallow
+reopen are covered by the genuine pre-fix history regression.

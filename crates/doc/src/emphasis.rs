@@ -6,9 +6,6 @@ impl crate::Document {
     pub fn has_text_emphasis(&self) -> bool {
         use loro::{Container, LoroValue, ValueOrContainer};
         const MAX_RECORDS: usize = 1 << 22;
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return true;
-        };
         let mut visited = 0usize;
         let mut charge = || {
             visited = visited.saturating_add(1);
@@ -27,7 +24,7 @@ impl crate::Document {
         // Only authored style/range roots participate; an unrelated parameter or
         // a named style called "weight" must not change package compatibility.
         for name in ["styles", crate::flow::BREAKS] {
-            if !roots.contains_key(name) {
+            if name != "content" && !self.has_root(name) {
                 continue;
             }
             if let LoroValue::Map(records) = self.doc.get_map(name).get_value() {
@@ -52,7 +49,7 @@ impl crate::Document {
             }
         }
         for name in ["content", "ranges"] {
-            if !roots.contains_key(name) {
+            if name != "content" && !self.has_root(name) {
                 continue;
             }
             let tree = self.tree(name);

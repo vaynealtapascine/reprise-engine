@@ -435,3 +435,28 @@ conflicting declarations. `doc/src/hostile.rs::legacy_document_lineage` keeps
 the foreign-copy fixture's existing operation IDs. `doc/src/lists.rs` registry
 queries stay read-only, and `reprise/tests/legacy_open_concurrent.rs` exercises
 the documented framed transport for unmarked historical packages.
+
+
+## Review fixes 2 (07, 29, 33, 34, 35, 37, 38)
+
+| Crate | Files | Responsibility |
+| --- | --- | --- |
+| `doc` | `src/legacy_join.rs`, `src/style_identity.rs`, `src/style_identity_tests.rs`, `tests/data/review5-legacy.bin` | Pin each replica's historical built-in interpretation at native/framed joins; genuine old-history regression, independent fallback, undo and persistence. |
+| `doc` | `src/annotation.rs`, `src/annotation_restore.rs`, `src/annotation_tests.rs`, `src/flow.rs`, `src/structure.rs` | Ordered host intervals, one document-order lookup per build, work counters in tests; restore visible segments across inactive markers and distinct endpoint hosts. |
+| `doc`, `layout` | `doc/src/lib.rs`, `doc/src/style/store.rs`, `layout/src/incremental.rs` | Read a block and its durable style reference once; detect built-ins without decoding style properties. |
+| `doc`, `edit`, `clipboard` | `doc/src/fragment.rs`, `edit/src/paste.rs`, `clipboard/tests/annotations.rs` | Optional portable final endpoint and one annotation identity across paragraphs; copied internal range IDs; reject non-overlapping pieces before checked clipping arithmetic. |
+| `edit`, `reprise` | `edit/src/plan.rs`, `edit/tests/refusal_atomicity.rs`, `reprise/tests/annotations.rs` | Exhaustive command/step preflight audit; transaction target overlay; missing-ID history purity and matching-revision refusal regressions. |
+| `clipboard` | `src/pdf_tags.rs`, `tests/annotations.rs` | Atom geometry and accessible contents inside PDF Link/Reference tags; authored-versus-emitted link checks. |
+| `fixtures`, `reprise`, `reprise-wasm` | `fixtures/src/hostile.rs`, `fixtures/tests/hostile.rs`, `reprise/tests/deep_metadata.rs`, `reprise-wasm/ts/smoke.cjs`, `.github/workflows/ci.yml` | Default-stack deep metadata/codec tests, compact hidden-depth goldens, actual 1 MiB WASM execution. |
+| `fixtures` | `tests/review_fixes2_performance.rs` | Ignored manual phase probe for repeated, independently timed construction/reads/styles/layout. |
+| vendor | `vendor/loro-internal/REPRISE-PATCH.md` | Pinned MIT Loro 1.16.2 patch rationale and exact changed paths; bounded root inspection, fast snapshots and unchanged tree replay. |
+
+`format/src/features.rs::REQUIRED_RANGE_ENDPOINTS` (bit 20) and
+`doc/src/sync.rs::Features::RANGE_ENDPOINTS` (bit 6) protect retained `end-node1`
+metadata. The format old-reader test and sync downgrade test reject omission of
+the feature before importing history.
+
+`doc/src/style_identity.rs::has_style_reference_contexts` and the join pins retain
+old global encoded-reference meaning until explicit migration; package bit 21
+and sync bit 7 protect the new marker. Format old-reader and packet downgrade
+tests cover both versioned forms.
