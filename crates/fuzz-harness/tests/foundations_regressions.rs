@@ -546,3 +546,54 @@ fn package_bits_follow_the_stored_forms() {
     t.undo().unwrap();
     assert_eq!(copy_of(&mut t, "ffeeddccbbaa99887766554433221101"), 0);
 }
+
+/// `import_copy` keeps every readable annotation, but a link to a block that
+/// no longer exists has nothing to point at in the copy: it is dropped and the
+/// copy says so (`clipboard.annotation-dropped`). A link to a live block is
+/// remapped to the copy's block. (Found as a false alarm of the fuzz's copy
+/// oracle, which now allows exactly this.)
+#[test]
+fn import_copy_drops_a_link_to_a_dead_block_and_says_so() {
+    let ws = Workspace::new();
+    let mut s = session();
+    let source = paragraph(&mut s, "source text here");
+    let target = paragraph(&mut s, "target");
+    apply(
+        &mut s,
+        vec![Command::AddAnnotation {
+            node: source,
+            start: 0,
+            end: 6,
+            annotation: AnnotationPayload::Link {
+                target: LinkDestination::Node {
+                    node: target.clone(),
+                },
+            },
+        }],
+    )
+    .unwrap();
+    let copy_of = |s: &mut DocumentSession, id: &str| {
+        let bytes = s.save().unwrap().data.bytes;
+        ws.import_copy(
+            &Payload::new(ImportCopy {
+                document_id: id.into(),
+                peer_id: "9".into(),
+            }),
+            &bytes,
+        )
+        .unwrap()
+    };
+    let live = copy_of(&mut s, "ffeeddccbbaa99887766554433221100");
+    assert_eq!(state(&live).annotations.len(), 1);
+    assert!(live.diagnostics().data.is_empty());
+    apply(&mut s, vec![Command::DeleteBlock { node: target }]).unwrap();
+    let dead = copy_of(&mut s, "ffeeddccbbaa99887766554433221101");
+    assert!(state(&dead).annotations.is_empty());
+    let codes: Vec<String> = dead
+        .diagnostics()
+        .data
+        .into_iter()
+        .map(|d| d.code)
+        .collect();
+    assert_eq!(codes, ["clipboard.annotation-dropped"]);
+}

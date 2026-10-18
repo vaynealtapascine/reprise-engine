@@ -69,7 +69,16 @@ fn main() {
         return;
     }
     let mut failures = 0;
+    let began = Instant::now();
     for seed in first..first + count {
+        // A soak ends at its timeout; the last of these lines says how far it got.
+        if seed > first && (seed - first).is_multiple_of(100) {
+            println!(
+                "progress: {} scenarios, {failures} failing, {:?}",
+                seed - first,
+                began.elapsed()
+            );
+        }
         let bytes = seed_bytes(seed, len);
         let started = Instant::now();
         let failure = run(mode, &bytes);
@@ -98,5 +107,5 @@ fn main() {
             run(mode, &small).map_or("passes?!".into(), |v| shown(&v))
         );
     }
-    println!("{failures} failing of {count}");
+    println!("{failures} failing of {count} in {:?}", began.elapsed());
 }

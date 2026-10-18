@@ -31,14 +31,14 @@
 mod commands;
 pub mod oracles;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use reprise::{
-    Affinity, AnnotationKind, AnnotationStatus, AssetDeclaration, AssetKind, Batch, Block, Caret,
-    Command, Create, DocumentSession, ExportFormat, FontDeclaration, FontSettings, FontStyle,
-    GenericFamily, ImportCopy, LayoutOptions, Open, Paste, Payload, Selection, State, TextImport,
-    Transaction, Workspace,
+    Affinity, AnnotationKind, AnnotationPayload, AnnotationStatus, AssetDeclaration, AssetKind,
+    Batch, Block, Caret, Command, Create, DocumentSession, ExportFormat, FontDeclaration,
+    FontSettings, FontStyle, GenericFamily, ImportCopy, LayoutOptions, LinkDestination, Open,
+    Paste, Payload, Selection, State, TextImport, Transaction, Workspace,
 };
 
 use crate::codes;
@@ -1366,9 +1366,35 @@ impl World<'_> {
             first_differences(&a, &b)
         );
         // Annotations inside one paragraph come across exactly; a copy never
-        // has more than its source.
-        let (mut from_copy, copied_total) = oracles::annotation_lines(&copied);
-        let (from_source, source_total) = oracles::annotation_lines(&source);
+        // has more than its source. A link to a block or range that is gone
+        // cannot be remapped: the copy drops it and says so
+        // (`clipboard.annotation-dropped`), and only then may it be missing.
+        let dropped = copy
+            .diagnostics()
+            .data
+            .iter()
+            .any(|d| d.code == "clipboard.annotation-dropped");
+        let mut internal = BTreeSet::new();
+        if dropped {
+            for brief in &source.annotations {
+                if let Some(Some(full)) =
+                    call(self.reps[i].s.annotation(&Payload::new(brief.id.clone())))?
+                        .map(|p| p.data)
+                    && matches!(
+                        full.payload,
+                        AnnotationPayload::Link {
+                            target: LinkDestination::Node { .. }
+                                | LinkDestination::Heading { .. }
+                                | LinkDestination::Range { .. }
+                        }
+                    )
+                {
+                    internal.insert(brief.id.clone());
+                }
+            }
+        }
+        let (mut from_copy, copied_total) = oracles::annotation_lines(&copied, &BTreeSet::new());
+        let (from_source, source_total) = oracles::annotation_lines(&source, &internal);
         for line in &from_source {
             let found = from_copy.iter().position(|l| l == line);
             ensure!(

@@ -373,7 +373,10 @@ pub fn shape(state: &State) -> String {
 /// `import_copy`: the lines of those inside one paragraph, and how many there
 /// are in all. One that crosses paragraphs is only counted, because the copy
 /// keeps just its first paragraph's part (Astra 4 R3, known).
-pub fn annotation_lines(state: &State) -> (Vec<String>, usize) {
+///
+/// `skip` names annotations to leave out of the lines: links to a block or
+/// range that is gone, which a copy drops and reports.
+pub fn annotation_lines(state: &State, skip: &BTreeSet<String>) -> (Vec<String>, usize) {
     let block_ord: BTreeMap<&str, usize> = state
         .blocks
         .iter()
@@ -383,7 +386,7 @@ pub fn annotation_lines(state: &State) -> (Vec<String>, usize) {
     let mut lines: Vec<String> = state
         .annotations
         .iter()
-        .filter(|a| a.spans.len() == 1)
+        .filter(|a| a.spans.len() == 1 && !skip.contains(&a.id))
         .map(|a| {
             let span = &a.spans[0];
             format!(
