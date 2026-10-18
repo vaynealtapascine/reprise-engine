@@ -481,6 +481,9 @@ impl World<'_> {
         if commands.len() == 1 && matches!(commands[0], Command::InsertImage { .. }) {
             commands.clear();
         }
+        for _ in 0..commands::enrol_list_targets(&snap, &mut commands, &mut self.input) {
+            self.count("generated:list-enrolment");
+        }
         for _ in 0..commands::exclude_known_shapes(&mut commands) {
             self.count("excluded:astra-4-R1");
         }
@@ -601,6 +604,7 @@ impl World<'_> {
             Err(error) => {
                 documented(&error)?;
                 self.count(format!("refused:{}", error.code()));
+                trace(|| format!("  refused: {error} ({})", error.code()));
                 if let [only] = commands.as_slice() {
                     self.count(format!(
                         "refused-by:{}:{}",

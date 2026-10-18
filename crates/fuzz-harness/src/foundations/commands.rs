@@ -457,28 +457,44 @@ impl<'a> Gen<'a, '_> {
         } else {
             None
         };
-        let levels = (0..self.input.below(4))
-            .map(|_| {
+        // Most definitions are sound (distinct levels, known formats, usable
+        // numbers), so updating and enrolling succeed often; one in six may
+        // carry any bad field, which is refused whole.
+        let hostile = self.input.chance(40);
+        let count = self.input.below(4);
+        let levels = (0..count)
+            .map(|n| {
                 let mut level = ListLevel {
-                    level: [0, 0, 1, 2, 3, 8, 9, 255][self.input.below(8)],
+                    level: n as u8,
                     ..ListLevel::default()
                 };
-                if self.input.chance(200) {
-                    level.format = Some(LIST_FORMATS[self.input.below(LIST_FORMATS.len())].into());
+                if hostile && self.input.chance(100) {
+                    level.level = [0, 9, 255][self.input.below(3)];
                 }
+                // LIST_FORMATS[..8] are the known formats.
+                let formats = if hostile { LIST_FORMATS.len() } else { 8 };
                 if self.input.chance(200) {
-                    level.text = Some(LIST_TEXTS[self.input.below(LIST_TEXTS.len())].into());
+                    level.format = Some(LIST_FORMATS[self.input.below(formats)].into());
                 }
+                let texts = if hostile { LIST_TEXTS.len() } else { 5 };
+                if self.input.chance(200) {
+                    level.text = Some(LIST_TEXTS[self.input.below(texts)].into());
+                }
+                // STARTS[..5] are numbers a counter takes.
+                let starts = if hostile { STARTS.len() } else { 5 };
                 if self.input.chance(80) {
-                    level.start = Some(STARTS[self.input.below(STARTS.len())].into());
+                    level.start = Some(STARTS[self.input.below(starts)].into());
+                }
+                let lengths: &[i32] = if hostile {
+                    &[0, 18 * 1024, -1, i32::MAX, i32::MIN]
+                } else {
+                    &[0, 18 * 1024, 36 * 1024]
+                };
+                if self.input.chance(100) {
+                    level.indent = Some(lengths[self.input.below(lengths.len())]);
                 }
                 if self.input.chance(100) {
-                    level.indent =
-                        Some([0, 18 * 1024, -1, i32::MAX, i32::MIN][self.input.below(5)]);
-                }
-                if self.input.chance(100) {
-                    level.hanging =
-                        Some([0, 18 * 1024, -1, i32::MAX, i32::MIN][self.input.below(5)]);
+                    level.hanging = Some(lengths[self.input.below(lengths.len())]);
                 }
                 if self.input.chance(40) {
                     level.marker = Some(self.text_style());
@@ -694,9 +710,23 @@ impl<'a> Gen<'a, '_> {
             .map_or_else(|| "0@0".to_owned(), |id| (*id).to_owned())
     }
 
-    /// One command, weighted toward the wave-1 vocabulary.
+    /// One command, weighted toward the wave-1 vocabulary. A quarter of the
+    /// time it is drawn evenly from the commands the weights make rare (list
+    /// numbering and removal, style rename and delete, annotation update and
+    /// removal, object update, moves, Enter and Backspace), so a short run
+    /// still attempts every command many times. One byte picks either way.
     pub fn command(&mut self) -> Command {
-        match self.input.below(100) {
+        let slot = if self.input.chance(64) {
+            RARE_SLOTS[self.input.below(RARE_SLOTS.len())]
+        } else {
+            self.input.below(100) as u8
+        };
+        self.command_in(slot)
+    }
+
+    /// The command at percent slot `slot` of the weight table.
+    fn command_in(&mut self, slot: u8) -> Command {
+        match slot {
             0..=9 => {
                 let (b, node) = self.node(Want::Any);
                 let at = self.offset(b);
@@ -814,7 +844,7 @@ impl<'a> Gen<'a, '_> {
                     .state
                     .styles
                     .iter()
-                    .filter(|s| !s.builtin)
+                    .filter(|s| !s.builtin && !s.name.is_empty())
                     .map(|s| s.name.as_str())
                     .collect();
                 let name = match custom.get(self.input.below(custom.len().max(1))) {
@@ -873,7 +903,13 @@ impl<'a> Gen<'a, '_> {
                 value: if self.input.chance(60) {
                     None
                 } else {
-                    Some(STARTS[self.input.below(STARTS.len())].to_owned())
+                    // Mostly numbers a counter takes (STARTS[..5]).
+                    let known = if self.input.chance(160) {
+                        5
+                    } else {
+                        STARTS.len()
+                    };
+                    Some(STARTS[self.input.below(known)].to_owned())
                 },
             },
             64 => Command::ContinueList {
@@ -1258,4 +1294,77 @@ pub fn exclude_known_shapes(commands: &mut [Command]) -> usize {
         }
     }
     changed
+}
+
+/// The weight-table slots of the commands that are rare there: MoveBlock,
+/// RenameStyle, DeleteStyle, UpdateList, DeleteList, the numbering commands
+/// (RemoveListItem to ContinueList), Enter, BackspaceAtStart, UpdateInline,
+/// UpdateAnnotation and RemoveAnnotation.
+const RARE_SLOTS: [u8; 15] = [27, 42, 43, 54, 55, 60, 61, 62, 63, 64, 65, 68, 80, 90, 93];
+
+/// A numbering command aimed at a paragraph that is not a list item is
+/// refused. Most of the time give it a list first: a new list, and the
+/// paragraph enrolled in it, ahead of the command in the same transaction
+/// (`ListRef::New` reaches the list before it has an ID). Returns how many
+/// commands it added.
+pub fn enrol_list_targets(
+    snap: &Snap,
+    commands: &mut Vec<Command>,
+    input: &mut Input<'_>,
+) -> usize {
+    let listed = |node: &str| {
+        snap.state
+            .blocks
+            .iter()
+            .any(|b| b.id == node && b.list.is_some())
+    };
+    let mut out = Vec::with_capacity(commands.len() + 2);
+    let mut creates = 0u32;
+    let mut enrolled: Vec<String> = Vec::new();
+    let mut added = 0;
+    for command in commands.drain(..) {
+        let target = match &command {
+            Command::RemoveListItem { node }
+            | Command::SetListLevel { node, .. }
+            | Command::IndentListItem { node, .. }
+            | Command::RestartList { node, .. }
+            | Command::ContinueList { node } => Some(node.clone()),
+            _ => None,
+        };
+        if let Some(node) = target
+            && !listed(&node)
+            && !enrolled.contains(&node)
+            && snap.state.blocks.iter().any(|b| b.id == node)
+            && input.chance(220)
+        {
+            out.push(Command::CreateList {
+                definition: ListDefinition {
+                    base: None,
+                    levels: (0..3)
+                        .map(|level| ListLevel {
+                            level,
+                            format: Some(
+                                ["decimal", "lower-alpha", "bullet"][usize::from(level)].into(),
+                            ),
+                            ..ListLevel::default()
+                        })
+                        .collect(),
+                },
+            });
+            out.push(Command::SetListItem {
+                node: node.clone(),
+                list: ListRef::New { index: creates },
+                level: 0,
+            });
+            creates += 1;
+            enrolled.push(node);
+            added += 2;
+        }
+        if matches!(command, Command::CreateList { .. }) {
+            creates += 1;
+        }
+        out.push(command);
+    }
+    *commands = out;
+    added
 }

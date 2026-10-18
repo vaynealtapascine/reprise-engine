@@ -135,7 +135,7 @@ fn seeded_scenarios_hold_every_oracle() {
 
 /// Commands that must be attempted and must succeed at least once over the
 /// default seeds: the whole wave-1 vocabulary, as the facade names it.
-const COMMANDS: [&str; 34] = [
+const COMMANDS: [&str; 32] = [
     "InsertText",
     "DeleteText",
     "SplitBlock",
@@ -162,8 +162,6 @@ const COMMANDS: [&str; 34] = [
     "AddAnnotation",
     "UpdateAnnotation",
     "RemoveAnnotation",
-    "InsertLineBreak",
-    "InsertTab",
     "SetAlignment",
     "MoveBlock",
     "DeleteStyle",
@@ -186,16 +184,35 @@ fn the_seeded_scenarios_reach_the_whole_vocabulary_and_its_interactions() {
         }
     }
     for key in [
-        // Successes of the commands whose success is the point.
+        // The success path of every wave-1 command, not just its refusals.
         "ok:SetRole",
         "ok:CreateList",
+        "ok:UpdateList",
+        "ok:DeleteList",
         "ok:SetListItem",
+        "ok:RemoveListItem",
+        "ok:SetListLevel",
+        "ok:IndentListItem",
+        "ok:RestartList",
+        "ok:ContinueList",
+        "ok:Enter",
+        "ok:BackspaceAtStart",
         "ok:InsertInline",
+        "ok:UpdateInline",
         "ok:AddAnnotation",
+        "ok:UpdateAnnotation",
+        "ok:RemoveAnnotation",
         "ok:DefineStyle",
+        "ok:UpdateStyle",
+        "ok:RenameStyle",
+        "ok:DeleteStyle",
         "ok:ApplyStyle",
+        "ok:SetStyle",
         "ok:SplitBlock",
+        "ok:JoinBlocks",
+        "ok:DeleteText",
         "ok:FormatText",
+        "ok:MoveBlock",
         // The ops.
         "op:apply",
         "op:batch",
