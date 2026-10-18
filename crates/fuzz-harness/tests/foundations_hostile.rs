@@ -517,6 +517,8 @@ fn still_editable(s: &mut DocumentSession, case: &str) {
 fn run_case(ws: &Workspace, case: &str, packet: &Payload<SyncPacket>) -> Outcome {
     let mut s = victim(ws);
     let before = operations(&s);
+    // A second receiver holds the document from a snapshot, not live.
+    let snapshot_before = s.save().ok().map(|p| p.data.bytes);
     match s.sync_import(packet) {
         Err(error) => {
             assert_ne!(
@@ -581,6 +583,50 @@ fn run_case(ws: &Workspace, case: &str, packet: &Payload<SyncPacket>) -> Outcome
                             seen.pages, again.pages,
                             "{case}: reopening redrew the pages"
                         );
+                    }
+                }
+            }
+            // The same packet into a replica that opened a snapshot of the
+            // victim: same operations, so the same document. (A root of
+            // another type under a document root's name once made the two read
+            // different records.)
+            if let Some(bytes) = &snapshot_before {
+                let opened = ws.open(
+                    &Payload::new(Open {
+                        peer_id: "2".into(),
+                    }),
+                    bytes,
+                );
+                if let Some(mut second) =
+                    tolerated(opened, case, "open the snapshot", &mut Vec::new())
+                {
+                    match second.sync_import(packet) {
+                        Ok(_) => {
+                            let other = observe(&mut second, case);
+                            let base_missing = seen
+                                .state
+                                .as_ref()
+                                .is_some_and(|s| !s.styles.iter().any(|n| n.name.is_empty()));
+                            if let (Some(a), Some(b)) = (&seen.state, &other.state) {
+                                let (a, b) = (oracles::authored(a), oracles::authored(b));
+                                assert!(
+                                    a == b || base_missing,
+                                    "{case}: a replica that opened a snapshot reads the packet differently:\n{}",
+                                    reprise_fuzz_harness::foundations::describe_difference(&a, &b)
+                                );
+                            }
+                            if seen.refused.is_empty() && other.refused.is_empty() && !base_missing
+                            {
+                                assert_eq!(
+                                    seen.pages, other.pages,
+                                    "{case}: a replica that opened a snapshot draws the packet differently"
+                                );
+                            }
+                        }
+                        Err(error) => panic!(
+                            "{case}: a replica that opened a snapshot refused ({}) a packet the live one accepted",
+                            error.code()
+                        ),
                     }
                 }
             }
