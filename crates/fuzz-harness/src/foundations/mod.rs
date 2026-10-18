@@ -142,9 +142,6 @@ struct Replica {
     inline_ids: std::collections::BTreeSet<String>,
     /// An inline atom was removed or deactivated here at some point.
     retired: bool,
-    /// Text was deleted (or moved) while an annotation existed: some
-    /// annotation endpoint may sit on a tombstone (fuzz-2 `tombstoned-endpoint`).
-    tombstoned: bool,
 }
 
 struct Clip {
@@ -355,7 +352,6 @@ impl World<'_> {
             old_revision: state.revision.clone(),
             inline_ids: inline_ids(&state),
             retired: false,
-            tombstoned: false,
         });
         Ok(self.reps.len() - 1)
     }
@@ -569,22 +565,6 @@ impl World<'_> {
                     self.count(format!("ok:{}", command_name(c)));
                     note_flags(&mut self.reps[i].may, c);
                 }
-                if !before.annotations.is_empty()
-                    && commands.iter().any(|c| {
-                        matches!(
-                            c,
-                            Command::DeleteText { .. }
-                                | Command::DeleteBlock { .. }
-                                | Command::JoinBlocks { .. }
-                                | Command::BackspaceAtStart { .. }
-                                | Command::MoveBlock { .. }
-                                | Command::SplitBlock { .. }
-                                | Command::Enter { .. }
-                        )
-                    })
-                {
-                    self.reps[i].tombstoned = true;
-                }
                 // An object made and deleted inside one transaction is never seen
                 // in a state, yet leaves a hidden marker (the shape of Astra 4 R4).
                 if commands
@@ -768,22 +748,11 @@ impl World<'_> {
                 && b.annotations.iter().all(|x| a.annotations.contains(x));
             let resurrected = a.annotations.len() < b.annotations.len()
                 && a.annotations.iter().all(|x| b.annotations.contains(x));
-            // The same annotations, with spans or status changed: an endpoint
-            // that an earlier delete left on a tombstone was not restored.
-            let shifted = self.reps[i].tombstoned
-                && a.annotations.len() == b.annotations.len()
-                && a.annotations
-                    .iter()
-                    .zip(&b.annotations)
-                    .all(|(x, y)| x.id == y.id);
             if lost {
                 known.push("known:fuzz2-annotation-redo");
                 a.annotations = b.annotations.clone();
             } else if resurrected {
                 known.push("known:fuzz2-link-resurrected");
-                a.annotations = b.annotations.clone();
-            } else if shifted {
-                known.push("known:fuzz2-tombstoned-endpoint");
                 a.annotations = b.annotations.clone();
             } else if self.reps[i].retired {
                 known.push("known:astra-4-R4");
@@ -1055,16 +1024,13 @@ impl World<'_> {
         }
         let mut may = Flags::default();
         let mut retired = false;
-        let mut tombstoned = false;
         for &k in group {
             may.merge(self.reps[k].may);
             retired |= self.reps[k].retired;
-            tombstoned |= self.reps[k].tombstoned;
         }
         for &k in group {
             self.reps[k].may = may;
             self.reps[k].retired = retired;
-            self.reps[k].tombstoned = tombstoned;
             self.reps[k].trail.clear();
             self.reps[k].redo.clear();
         }

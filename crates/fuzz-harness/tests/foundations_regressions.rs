@@ -652,12 +652,11 @@ fn a_link_removed_with_its_text_is_not_brought_back_by_a_later_undo() {
     );
 }
 
-/// fuzz-2 `tombstoned-endpoint`: a comment whose start text was deleted comes
+/// fuzz-2 `tombstoned-endpoint` (fixed in `annotation_restore.rs`): a comment whose start text was deleted comes
 /// back orphaned at the end of the paragraph after undoing the move-by-copy of
 /// the flow paragraph that holds it. Without the earlier delete (or with a
 /// delete that doesn't reach the start of the range) undo restores it.
 #[test]
-#[ignore = "fuzz-2: tombstoned-endpoint, see report"]
 fn undoing_a_move_keeps_a_comment_whose_start_was_deleted() {
     let mut s = session();
     let node = paragraph(&mut s, "alpha beta gamma delta");
@@ -717,14 +716,13 @@ fn undoing_a_move_keeps_a_comment_whose_start_was_deleted() {
     );
 }
 
-/// fuzz-2 `tombstoned-endpoint`, without the move: delete the start of a
+/// fuzz-2 `tombstoned-endpoint` (fixed), without the move: delete the start of a
 /// comment's range, then delete all that is left of its text, then undo. The
 /// comment comes back orphaned at the end of the paragraph instead of over its
 /// text. The restore hint of the second delete needs the range's start
 /// anchor, which the first delete had already left a tombstone. (Seed 5002 of
 /// the default scenarios, minimised.)
 #[test]
-#[ignore = "fuzz-2: tombstoned-endpoint, see report"]
 fn undoing_a_delete_of_all_the_text_restores_a_comment_whose_start_was_deleted() {
     let mut s = session();
     let node = paragraph(&mut s, "alpha beta gamma delta");
@@ -764,12 +762,11 @@ fn undoing_a_delete_of_all_the_text_restores_a_comment_whose_start_was_deleted()
     assert_eq!(after, before, "undo changed the comment");
 }
 
-/// fuzz-2 `tombstoned-endpoint`, the shifting form: a link ends and a comment
+/// fuzz-2 `tombstoned-endpoint` (fixed), the shifting form: a link ends and a comment
 /// starts at the same offset, left there by an earlier delete. Deleting a span
 /// that covers that offset and undoing it moves both ends to the end of the
 /// restored text. (Seed 5002 of the default scenarios.)
 #[test]
-#[ignore = "fuzz-2: tombstoned-endpoint, see report"]
 fn undoing_a_delete_across_an_earlier_delete_point_keeps_both_annotations_in_place() {
     let mut s = session();
     let node = paragraph(&mut s, "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ");
