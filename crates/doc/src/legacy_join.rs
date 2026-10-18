@@ -21,20 +21,33 @@ pub(crate) struct Pin {
 }
 
 impl Document {
-    pub(crate) fn legacy_join_pins(&self, legacy: bool, until: Option<&[(u64, i32)]>) -> Vec<Pin> {
+    pub(crate) fn legacy_join_pins(
+        &self,
+        legacy: bool,
+        explicit: bool,
+        until: Option<&[(u64, i32)]>,
+    ) -> Vec<Pin> {
         let covered =
             |peer, counter| until.is_none_or(|v| v.iter().any(|(p, n)| *p == peer && counter < *n));
         let mut pins = Vec::new();
         let mut pin = |place, raw: Option<String>| {
-            let Some(raw) = raw.filter(|s| crate::BUILTIN_STYLES.contains(&s.as_str())) else {
+            let Some(raw) = raw else {
                 return;
             };
-            let builtin = legacy && self.raw_style_record(&raw, true).is_some_and(|r| r.builtin);
-            let reference = if builtin {
-                self.builtin_reference(&raw)
-            } else {
-                self.original_owner_reference(&raw)
+            let Some(owner) = crate::BUILTIN_STYLES.iter().find(|name| {
+                raw == **name || (legacy && !explicit && raw == self.original_owner_reference(name))
+            }) else {
+                return;
             };
+            let builtin = legacy;
+            let reference = if builtin {
+                self.builtin_reference(owner)
+            } else {
+                self.original_owner_reference(owner)
+            };
+            if reference == raw {
+                return;
+            }
             pins.push(Pin {
                 place,
                 raw,
@@ -124,10 +137,18 @@ impl Document {
         }
         // The entire join and these writes have already run on an isolated
         // same-peer preflight. Bounds include the added migration operations.
+        let context_write = !self.has_style_reference_contexts();
+        if context_write {
+            self.check_identity_keys(&["reference-contexts2".into()])?;
+        }
         let count = self.version_vector().iter().fold(0u64, |n, (_, c)| {
             n.saturating_add(u64::try_from(*c).unwrap_or(u64::MAX))
         });
-        if count.saturating_add(writes.len() as u64) > crate::persist::MAX_PERSIST_OPS {
+        if count
+            .saturating_add(writes.len() as u64)
+            .saturating_add(u64::from(context_write))
+            > crate::persist::MAX_PERSIST_OPS
+        {
             return Err(DocError::Store(
                 "legacy reference migration exceeds history limit".into(),
             ));
@@ -135,6 +156,11 @@ impl Document {
         self.retain_style_identities();
         self.doc
             .set_next_commit_origin(crate::lifecycle::STAGE_ORIGIN);
+        if context_write {
+            self.doc
+                .get_map(crate::style_identity::ROOT)
+                .insert("reference-contexts2", "1")?;
+        }
         for (map, key, reference) in writes {
             map.insert(&key, reference)?;
         }

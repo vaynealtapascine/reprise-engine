@@ -659,3 +659,33 @@ fn range_endpoint_packets_require_their_feature_before_merging() {
     assert_eq!(b.range_extent(range), a.range_extent(range));
     assert!(b.has_cross_paragraph_ranges());
 }
+
+#[test]
+fn explicit_style_context_packets_refuse_downgrading_before_import() {
+    let legacy = Document::import(include_bytes!("../tests/data/review5-legacy.bin"), 11).unwrap();
+    let a = Document::new(2).unwrap();
+    a.define_named_style("NewPeerStyle", &Style::default())
+        .unwrap();
+    a.commit();
+    a.merge(&legacy).unwrap();
+    assert!(a.has_style_reference_contexts());
+    let packet = a.export_snapshot_packet().unwrap();
+    let (mut header, body) = read_header(&packet).unwrap();
+    assert_ne!(header.features.0 & Features::STYLE_REFERENCE_CONTEXTS.0, 0);
+    header.features.0 &= !Features::STYLE_REFERENCE_CONTEXTS.0;
+    let b = Document::new(3).unwrap();
+    let before = b.try_export(crate::PersistenceMode::History).unwrap();
+    assert!(b.import_packet(&repack(&header, body)).is_err());
+    assert_eq!(
+        before,
+        b.try_export(crate::PersistenceMode::History).unwrap()
+    );
+    b.import_packet(&packet).unwrap();
+    assert!(b.has_style_reference_contexts());
+    assert_eq!(
+        b.computed_style(NodeId::parse("2@1").unwrap())
+            .unwrap()
+            .size,
+        reprise_geom::Length::from_pt(20)
+    );
+}

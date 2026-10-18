@@ -70,12 +70,14 @@ impl Features {
     pub const LEGACY_BUILTINS: Features = Features(1 << 5);
     /// Retained range endpoints in distinct text hosts.
     pub const RANGE_ENDPOINTS: Features = Features(1 << 6);
+    /// Explicit per-reference interpretation after historical-context joins.
+    pub const STYLE_REFERENCE_CONTEXTS: Features = Features(1 << 7);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
     pub const SUPPORTED: Features =
-        Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6));
+        Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7));
 
-    const NAMES: [(Features, &'static str); 7] = [
+    const NAMES: [(Features, &'static str); 8] = [
         (Features::DELTA_JSON, "delta-json"),
         (Features::SNAPSHOT_LORO_1_16, "snapshot-loro-1.16"),
         (Features::SNAPSHOT_JSON, "snapshot-json"),
@@ -83,6 +85,10 @@ impl Features {
         (Features::STYLE_IDENTITIES, "style-identities1"),
         (Features::LEGACY_BUILTINS, "legacy-builtins1"),
         (Features::RANGE_ENDPOINTS, "range-endpoints1"),
+        (
+            Features::STYLE_REFERENCE_CONTEXTS,
+            "style-reference-contexts2",
+        ),
     ];
 
     /// The names of the known bits that are set, in bit order. Unknown bits
@@ -317,7 +323,8 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         & !(Features::DOCUMENT_LINEAGE.0
             | Features::STYLE_IDENTITIES.0
             | Features::LEGACY_BUILTINS.0
-            | Features::RANGE_ENDPOINTS.0)
+            | Features::RANGE_ENDPOINTS.0
+            | Features::STYLE_REFERENCE_CONTEXTS.0)
         != needed.0
     {
         return Err(invalid("packet features don't match its kind"));
@@ -454,6 +461,11 @@ impl Document {
                     } else {
                         0
                     }
+                    | if self.has_style_reference_contexts() {
+                        Features::STYLE_REFERENCE_CONTEXTS.0
+                    } else {
+                        0
+                    }
                     | if self.has_cross_paragraph_ranges() {
                         Features::RANGE_ENDPOINTS.0
                     } else {
@@ -483,7 +495,8 @@ impl Document {
                     & (Features::DOCUMENT_LINEAGE.0
                         | Features::STYLE_IDENTITIES.0
                         | Features::LEGACY_BUILTINS.0
-                        | Features::RANGE_ENDPOINTS.0)),
+                        | Features::RANGE_ENDPOINTS.0
+                        | Features::STYLE_REFERENCE_CONTEXTS.0)),
         );
         write_packet(&header, body)
     }
@@ -525,7 +538,11 @@ impl Document {
         let incoming_legacy = header.features.0 & Features::LEGACY_BUILTINS.0 != 0;
         let legacy_join = incoming_legacy || self.legacy_builtin_context();
         let own_pins = if legacy_join {
-            self.legacy_join_pins(self.legacy_builtin_context(), None)
+            self.legacy_join_pins(
+                self.legacy_builtin_context(),
+                self.has_style_reference_contexts(),
+                None,
+            )
         } else {
             Vec::new()
         };
@@ -541,7 +558,11 @@ impl Document {
             self.retain_style_identities();
         }
         if legacy_join {
-            let incoming = self.legacy_join_pins(incoming_legacy, Some(&header.until));
+            let incoming = self.legacy_join_pins(
+                incoming_legacy,
+                header.features.0 & Features::STYLE_REFERENCE_CONTEXTS.0 != 0,
+                Some(&header.until),
+            );
             self.apply_legacy_join_pins(incoming.into_iter().chain(own_pins))
                 .map_err(|e| SyncError::Store(e.to_string()))?;
             report.styles = true;
@@ -609,6 +630,13 @@ impl Document {
                     && matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, .. } | JsonMapOp::Delete { key }) if key.as_str() == "end-node1")
                 {
                     return Err(invalid("range endpoints require range-endpoints1"));
+                }
+                if header.features.0 & Features::STYLE_REFERENCE_CONTEXTS.0 == 0
+                    && matches!(&op.content, JsonOpContent::Map(JsonMapOp::Insert { key, .. } | JsonMapOp::Delete { key }) if key.as_str() == "reference-contexts2")
+                {
+                    return Err(invalid(
+                        "reference contexts require style-reference-contexts2",
+                    ));
                 }
                 check_op(&op.content)?;
                 let len = op_len(&op.content);

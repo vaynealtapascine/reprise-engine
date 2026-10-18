@@ -341,3 +341,15 @@ styles and old marked paragraph-style interpretation remain authoritative.
 `styles2.clock/<peer>` stores a nonnegative scalar style-allocation floor. Whole
 copy transfer advances it by the source's operation high-water counter; future
 allocations add their local counter to the floor. It is not a sync causal vector.
+
+
+### Review-fixes-2 required extensions
+
+| Required bit | Meaning |
+| --- | --- |
+| 20 | `range-endpoints1`: retained `end-node1` endpoints in distinct shared text hosts. Older readers would truncate them. |
+| 21 | `style-reference-contexts2`: explicit owner interpretation after historical-context joins, marked in `styles2.reference-contexts2`. Older identity readers would apply global legacy context to unrelated owner references. |
+
+Bit 19 is left unallocated by this stream. Both declarations include retired
+records and survive ordinary deletion/undo; documents without these forms keep
+their earlier feature masks. See the review-fixes-2 report's contract proposals.

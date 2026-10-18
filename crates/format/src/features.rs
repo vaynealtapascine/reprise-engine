@@ -45,6 +45,8 @@ pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
 pub const REQUIRED_STYLE_IDENTITIES: u64 = 1 << 18;
 /// Retained portable range endpoints in distinct text hosts.
 pub const REQUIRED_RANGE_ENDPOINTS: u64 = 1 << 20;
+/// Explicit per-reference interpretation at historical style-context joins.
+pub const REQUIRED_STYLE_REFERENCE_CONTEXTS: u64 = 1 << 21;
 /// Required bits this version understands. Any other required bit refuses.
 pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_TEXT_FORMATTING
@@ -56,7 +58,8 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_INLINE_OBJECTS
     | REQUIRED_ANNOTATIONS
     | REQUIRED_STYLE_IDENTITIES
-    | REQUIRED_RANGE_ENDPOINTS;
+    | REQUIRED_RANGE_ENDPOINTS
+    | REQUIRED_STYLE_REFERENCE_CONTEXTS;
 /// Optional bits this version sets and clears itself.
 pub const KNOWN_OPTIONAL: u64 = OPTIONAL_TABLE_HEADERS;
 
@@ -69,6 +72,9 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if document.has_style_identities() {
         flags.required |= REQUIRED_STYLE_IDENTITIES;
+    }
+    if document.has_style_reference_contexts() {
+        flags.required |= REQUIRED_STYLE_REFERENCE_CONTEXTS;
     }
     if document.has_cross_paragraph_ranges() {
         flags.required |= REQUIRED_RANGE_ENDPOINTS;
@@ -291,5 +297,37 @@ mod endpoint_tests {
             );
             Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod reference_context_tests {
+    use super::*;
+    #[test]
+    fn old_style_identity_readers_refuse_explicit_join_contexts() {
+        use crate::container::{Container, Limits};
+        let legacy = Document::import(
+            include_bytes!("../../doc/tests/data/review5-legacy.bin"),
+            11,
+        )
+        .unwrap();
+        let receiver = Document::new(2).unwrap();
+        receiver
+            .define_named_style("NewPeerStyle", &reprise_doc::Style::default())
+            .unwrap();
+        receiver.commit();
+        receiver.merge(&legacy).unwrap();
+        let bytes = crate::Package::new(
+            &receiver,
+            crate::DocumentId([8; 16]),
+            reprise_doc::PersistenceMode::History,
+        )
+        .unwrap()
+        .save()
+        .unwrap();
+        assert!(
+            matches!(Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED & !REQUIRED_STYLE_REFERENCE_CONTEXTS), Err(crate::FormatError::RequiredFeatures(bits)) if bits == REQUIRED_STYLE_REFERENCE_CONTEXTS)
+        );
+        Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED).unwrap();
     }
 }

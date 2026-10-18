@@ -514,12 +514,20 @@ impl Document {
         // so the binary update encoding is trusted here (see `sync`).
         let legacy_join = self.legacy_builtin_context() || other.legacy_builtin_context();
         let own_pins = if legacy_join {
-            self.legacy_join_pins(self.legacy_builtin_context(), None)
+            self.legacy_join_pins(
+                self.legacy_builtin_context(),
+                self.has_style_reference_contexts(),
+                None,
+            )
         } else {
             Vec::new()
         };
         let incoming_pins = if legacy_join {
-            other.legacy_join_pins(other.legacy_builtin_context(), None)
+            other.legacy_join_pins(
+                other.legacy_builtin_context(),
+                other.has_style_reference_contexts(),
+                None,
+            )
         } else {
             Vec::new()
         };

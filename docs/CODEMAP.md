@@ -427,3 +427,8 @@ the documented framed transport for unmarked historical packages.
 `doc/src/sync.rs::Features::RANGE_ENDPOINTS` (bit 6) protect retained `end-node1`
 metadata. The format old-reader test and sync downgrade test reject omission of
 the feature before importing history.
+
+`doc/src/style_identity.rs::has_style_reference_contexts` and the join pins retain
+old global encoded-reference meaning until explicit migration; package bit 21
+and sync bit 7 protect the new marker. Format old-reader and packet downgrade
+tests cover both versioned forms.

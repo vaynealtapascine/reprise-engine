@@ -137,11 +137,18 @@ impl Document {
         self.identity_root().is_some()
     }
 
+    /// Explicit per-reference interpretation after a historical-context join.
+    /// Older global-context readers need a new required feature declaration.
+    pub fn has_style_reference_contexts(&self) -> bool {
+        self.identity_map()
+            .is_some_and(|map| get_str(&map, "reference-contexts2").as_deref() == Some("1"))
+    }
+
     pub(crate) fn identity_listing_cut(&self) -> bool {
         self.identity_map().is_some_and(|map| map.len() > MAX_KEYS)
     }
 
-    fn check_identity_keys(&self, keys: &[String]) -> Result<(), DocError> {
+    pub(crate) fn check_identity_keys(&self, keys: &[String]) -> Result<(), DocError> {
         let map = self.identity_map();
         if map.is_none() && self.has_root(ROOT) {
             return Err(DocError::Store("unreadable style identity root".into()));
@@ -548,9 +555,10 @@ impl Document {
         let (owner, builtin) = if let Some(name) = reference.strip_prefix(BUILTIN_PREFIX) {
             (name.to_owned(), true)
         } else if let Some(owner) = decode(reference) {
-            let builtin = self.identity_map().is_some_and(|map| {
-                get_str(&map, &format!("base/{owner}")).as_deref() == Some("builtin1")
-            });
+            let builtin = (self.legacy_builtin_context() && !self.has_style_reference_contexts())
+                || self.identity_map().is_some_and(|map| {
+                    get_str(&map, &format!("base/{owner}")).as_deref() == Some("builtin1")
+                });
             (owner, builtin)
         } else {
             (self.style_owner(reference), true)

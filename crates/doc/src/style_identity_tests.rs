@@ -586,7 +586,22 @@ fn historical_builtin_join_preserves_each_sides_context_and_undo() {
                 let child = old
                     .append_block(BlockKind::Paragraph, "Child", "child")
                     .unwrap();
+                let encoded = if marked_identity {
+                    let node = old
+                        .append_block(BlockKind::Paragraph, "Heading 1", "encoded legacy")
+                        .unwrap();
+                    old.meta_of(node)
+                        .unwrap()
+                        .insert("style", old.original_owner_reference("Heading 1"))
+                        .unwrap();
+                    Some(node)
+                } else {
+                    None
+                };
                 old.commit();
+                if let Some(node) = encoded {
+                    assert_eq!(old.computed_style(node).unwrap().size, Length::from_pt(20));
+                }
                 assert_eq!(
                     old.computed_style(heading).unwrap().size,
                     Length::from_pt(20)
@@ -641,6 +656,9 @@ fn historical_builtin_join_preserves_each_sides_context_and_undo() {
                 );
                 assert!(undo.redo().unwrap());
                 for doc in [&old, &receiver] {
+                    if let Some(node) = encoded {
+                        assert_eq!(doc.computed_style(node).unwrap().size, Length::from_pt(20));
+                    }
                     assert_eq!(
                         doc.computed_style(heading).unwrap().size,
                         Length::from_pt(20)
@@ -652,6 +670,12 @@ fn historical_builtin_join_preserves_each_sides_context_and_undo() {
                     );
                     for mode in [PersistenceMode::History, PersistenceMode::Shallow] {
                         let reopen = Document::import(&doc.try_export(mode).unwrap(), 20).unwrap();
+                        if let Some(node) = encoded {
+                            assert_eq!(
+                                reopen.computed_style(node).unwrap().size,
+                                Length::from_pt(20)
+                            );
+                        }
                         assert_eq!(
                             reopen.computed_style(heading).unwrap().size,
                             Length::from_pt(20)
