@@ -80,6 +80,65 @@ Changed file groups are mapped in `docs/CODEMAP.md`. Shared edits include root C
 
 Engine main `0d8d296` was merged with `--no-ff`; the merge completed without conflicts. The code map auto-merged, retaining both documentation streams. No production code arrived from main. The final commit list is appended with the gate results.
 
+## Files touched and prior implementation
+
+The vendor directory contains the unchanged pinned upstream crate plus the four behavioral patches documented above and one unused-import cleanup. Outside that directory, the branch changes these files relative to merged main:
+
+```text
+.github/workflows/ci.yml
+Cargo.lock
+Cargo.toml
+crates/clipboard/src/html.rs
+crates/clipboard/src/pdf_tags.rs
+crates/clipboard/tests/annotations.rs
+crates/doc/src/annotation.rs
+crates/doc/src/annotation_restore.rs
+crates/doc/src/annotation_tests.rs
+crates/doc/src/emphasis.rs
+crates/doc/src/flow.rs
+crates/doc/src/formatting.rs
+crates/doc/src/fragment.rs
+crates/doc/src/legacy_join.rs
+crates/doc/src/lib.rs
+crates/doc/src/lists.rs
+crates/doc/src/marks.rs
+crates/doc/src/page_setup.rs
+crates/doc/src/page_setup/fragment.rs
+crates/doc/src/roles.rs
+crates/doc/src/structure.rs
+crates/doc/src/style.rs
+crates/doc/src/style/store.rs
+crates/doc/src/style_graph.rs
+crates/doc/src/style_identity.rs
+crates/doc/src/style_identity_tests.rs
+crates/doc/src/sync.rs
+crates/doc/src/sync_tests.rs
+crates/doc/tests/data/review5-legacy.bin
+crates/edit/src/paste.rs
+crates/edit/src/plan.rs
+crates/edit/tests/refusal_atomicity.rs
+crates/fixtures/src/hostile.rs
+crates/fixtures/tests/hostile.rs
+crates/fixtures/tests/review_fixes2_performance.rs
+crates/fixtures/tests/snapshots/hostile__content_metadata_depth_1024.snap
+crates/fixtures/tests/snapshots/hostile__content_metadata_depth_4096.snap
+crates/fixtures/tests/snapshots/hostile__metadata_depth_1024.snap
+crates/fixtures/tests/snapshots/hostile__metadata_depth_4096.snap
+crates/format/SPEC.md
+crates/format/src/features.rs
+crates/layout/src/incremental.rs
+crates/reprise-wasm/ts/smoke.cjs
+crates/reprise/tests/annotations.rs
+crates/reprise/tests/deep_metadata.rs
+docs/CODEMAP.md
+docs/annotations.md
+docs/collaboration.md
+docs/paragraph-styles.md
+docs/review-fixes-2-report.md
+```
+
+The earlier implementation's annotation overlay/trials, portable endpoint shape, segmented hint design, PDF atom wrapping and interval lookup are retained. This continuation completed and validated the depth codec/fixtures, added shared document-order work accounting, fixed distinct-host restore, completed context-safe legacy joins and undo, and removed the measured style read/authoring overhead. The source and test additions are within the requested cross-crate repair; the root manifest/lock, CI, feature declarations and code map are the necessary shared integration edits.
+
 ## Known limits and hand-off
 
 History snapshots, metadata queries and physical hidden-depth fixtures are covered at 4,096 levels. State has its existing 1,024 live-depth limit. A fully live deep tree still incurs repeated ancestor walks in existing readers/layout; the 4,096 live fixture tests the History codec, while State/save/WASM use hidden chains. Shallow snapshots still recursively build nested tree values and are outside this patch's depth guarantee. These are explicit remaining depth/complexity limits, not claims of an unrestricted deep document model. The vendor patch should be removed only after verifying equivalent upstream behavior.
@@ -108,4 +167,12 @@ Negative-control logs on G:, each original restored afterward:
 
 Assertion controls exit 101. The valid stack-abort control propagated exit 127 through the Windows timeout wrapper. An earlier R2 control had a line-ending compile error; it is discarded, not counted as evidence. The corrected control compiled successfully and produced the stack-abort evidence above.
 
-The full gate is running after the main merge. Final commands, exit codes and verbatim tails follow below when complete.
+The full gate is running after the main merge. Type generation, 1 MiB WASM build, both wasm-bindgen targets (0.2.129), strict TypeScript and worker compilation (tsc 5.3.2), executable Node/worker smoke including both deep packages, formatting, Clippy with warnings denied, and the nine-crate WASM check plus fuzz harness have passed. Generated declarations are unchanged. The full native workspace run remains in progress; final commands, exit codes and verbatim tails follow below when complete.
+
+
+A final compatibility audit found that deleting a version-marker scalar must not
+clear its required declaration while the corresponding operations remain in
+history. Commit `b5bb750` uses Loro's retained last-editor metadata for both new
+features and preserves the style declaration in fresh graph copies. The new
+History/Shallow/framed regression and rerun of the full gate are pending; earlier
+gate results above apply to the preceding source checkpoint.
