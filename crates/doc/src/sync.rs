@@ -293,11 +293,8 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
         return Err(SyncError::Format(format));
     }
     let features = Features(u64::from_le_bytes(r.array()?));
-    if features.0 & Features::STYLE_IDENTITIES.0 != 0
-        && features.0 & Features::LEGACY_BUILTINS.0 != 0
-    {
-        return Err(invalid("conflicting style context declarations"));
-    }
+    // Identity metadata can retain historical built-in context. Both flags
+    // are needed to preflight a join before importing the identity root.
     let unknown = features.0 & !Features::SUPPORTED.0;
     if unknown != 0 {
         return Err(SyncError::Feature(unknown));

@@ -12,22 +12,38 @@ fn phase_timing() {
         let t = Instant::now();
         let doc = Document::new(1).unwrap();
         spike::define_styles(&doc).unwrap();
-        for _ in 0..n { doc.append_block(BlockKind::Paragraph, "body", "a tiny paragraph").unwrap(); }
+        for _ in 0..n {
+            doc.append_block(BlockKind::Paragraph, "body", "a tiny paragraph")
+                .unwrap();
+        }
         doc.commit();
         println!("paragraphs {n} construct {:?}", t.elapsed());
         let nodes = doc.blocks();
         let t = Instant::now();
-        for _ in 0..10 { for &node in &nodes { black_box(doc.block(node).unwrap()); } }
+        for _ in 0..10 {
+            for &node in &nodes {
+                black_box(doc.block(node).unwrap());
+            }
+        }
         println!("paragraphs {n} block10 {:?}", t.elapsed());
         let t = Instant::now();
-        for _ in 0..3 { for &node in &nodes { black_box(doc.computed_style(node).unwrap()); } }
+        for _ in 0..3 {
+            for &node in &nodes {
+                black_box(doc.computed_style(node).unwrap());
+            }
+        }
         println!("paragraphs {n} styles3 {:?}", t.elapsed());
         let e = engine();
         let t = Instant::now();
         let mut session = LayoutSession::new(&e);
         let mut job = session.start(&doc, Viewport::Pages(0..1));
         let mut complete = false;
-        for _ in 0..10000 { if job.step(16).unwrap().complete { complete = true; break; } }
+        for _ in 0..10000 {
+            if job.step(16).unwrap().complete {
+                complete = true;
+                break;
+            }
+        }
         assert!(complete);
         println!("paragraphs {n} layout {:?}", t.elapsed());
     }

@@ -568,99 +568,111 @@ fn historical_builtin_join_preserves_each_sides_context_and_undo() {
     let heading = crate::NodeId::parse("2@1").unwrap();
     for framed in [false, true] {
         for reverse in [false, true] {
-            let old = Document::import(bytes, 11).unwrap();
-            // A parent reference has the same historical interpretation.
-            old.doc
-                .get_map("styles1")
-                .insert("parent/Child", "Heading 1")
-                .unwrap();
-            old.doc
-                .get_map("styles1")
-                .insert("state/Child", "defined")
-                .unwrap();
-            let child = old
-                .append_block(BlockKind::Paragraph, "Child", "child")
-                .unwrap();
-            old.commit();
-            assert_eq!(
-                old.computed_style(heading).unwrap().size,
-                Length::from_pt(20)
-            );
-            assert_eq!(old.computed_style(child).unwrap().size, Length::from_pt(20));
-            let receiver = Document::new(2).unwrap();
-            let unmarked = receiver
-                .append_block(BlockKind::Paragraph, "", "unmarked")
-                .unwrap();
-            receiver
-                .meta_of(unmarked)
-                .unwrap()
-                .insert("style", "Heading 1")
-                .unwrap();
-            receiver
-                .define_named_style("NewPeerStyle", &Style::default())
-                .unwrap();
-            receiver.commit();
-            assert_eq!(
-                receiver.computed_style(unmarked).unwrap().size,
-                Length::from_pt(10)
-            );
-            let mut undo = receiver.undo_stack();
-            receiver
-                .block(unmarked)
-                .unwrap()
-                .text
-                .insert(8, "!")
-                .unwrap();
-            receiver.commit_step();
-            let deliver = |to: &Document, from: &Document| {
-                if framed {
-                    to.import_packet(&from.export_snapshot_packet().unwrap())
+            for marked_identity in [false, true] {
+                let old = Document::import(bytes, 11).unwrap();
+                if marked_identity {
+                    old.define_named_style("LegacyPeerStyle", &Style::default())
                         .unwrap();
-                } else {
-                    to.merge(from).unwrap();
                 }
-            };
-            if reverse {
-                deliver(&old, &receiver);
-                deliver(&receiver, &old);
-            } else {
-                deliver(&receiver, &old);
-                deliver(&old, &receiver);
-            }
-            deliver(&receiver, &old);
-            deliver(&old, &receiver);
-            for doc in [&old, &receiver] {
+                // A parent reference has the same historical interpretation.
+                old.doc
+                    .get_map("styles1")
+                    .insert("parent/Child", "Heading 1")
+                    .unwrap();
+                old.doc
+                    .get_map("styles1")
+                    .insert("state/Child", "defined")
+                    .unwrap();
+                let child = old
+                    .append_block(BlockKind::Paragraph, "Child", "child")
+                    .unwrap();
+                old.commit();
                 assert_eq!(
-                    doc.computed_style(heading).unwrap().size,
+                    old.computed_style(heading).unwrap().size,
                     Length::from_pt(20)
                 );
-                assert_eq!(doc.computed_style(child).unwrap().size, Length::from_pt(20));
+                assert_eq!(old.computed_style(child).unwrap().size, Length::from_pt(20));
+                let receiver = Document::new(2).unwrap();
+                let unmarked = receiver
+                    .append_block(BlockKind::Paragraph, "", "unmarked")
+                    .unwrap();
+                receiver
+                    .meta_of(unmarked)
+                    .unwrap()
+                    .insert("style", "Heading 1")
+                    .unwrap();
+                receiver
+                    .define_named_style("NewPeerStyle", &Style::default())
+                    .unwrap();
+                receiver.commit();
                 assert_eq!(
-                    doc.computed_style(unmarked).unwrap().size,
+                    receiver.computed_style(unmarked).unwrap().size,
                     Length::from_pt(10)
                 );
-                for mode in [PersistenceMode::History, PersistenceMode::Shallow] {
-                    let reopen = Document::import(&doc.try_export(mode).unwrap(), 20).unwrap();
+                let mut undo = receiver.undo_stack();
+                receiver
+                    .block(unmarked)
+                    .unwrap()
+                    .text
+                    .insert(8, "!")
+                    .unwrap();
+                receiver.commit_step();
+                let deliver = |to: &Document, from: &Document| {
+                    if framed {
+                        to.import_packet(&from.export_snapshot_packet().unwrap())
+                            .unwrap();
+                    } else {
+                        to.merge(from).unwrap();
+                    }
+                };
+                if reverse {
+                    deliver(&old, &receiver);
+                    deliver(&receiver, &old);
+                } else {
+                    deliver(&receiver, &old);
+                    deliver(&old, &receiver);
+                }
+                deliver(&receiver, &old);
+                deliver(&old, &receiver);
+                assert!(undo.undo().unwrap());
+                assert_eq!(
+                    receiver.block(unmarked).unwrap().text.to_string(),
+                    "unmarked"
+                );
+                assert!(undo.redo().unwrap());
+                for doc in [&old, &receiver] {
                     assert_eq!(
-                        reopen.computed_style(heading).unwrap().size,
+                        doc.computed_style(heading).unwrap().size,
                         Length::from_pt(20)
                     );
+                    assert_eq!(doc.computed_style(child).unwrap().size, Length::from_pt(20));
                     assert_eq!(
-                        reopen.computed_style(unmarked).unwrap().size,
+                        doc.computed_style(unmarked).unwrap().size,
                         Length::from_pt(10)
                     );
+                    for mode in [PersistenceMode::History, PersistenceMode::Shallow] {
+                        let reopen = Document::import(&doc.try_export(mode).unwrap(), 20).unwrap();
+                        assert_eq!(
+                            reopen.computed_style(heading).unwrap().size,
+                            Length::from_pt(20)
+                        );
+                        assert_eq!(
+                            reopen.computed_style(unmarked).unwrap().size,
+                            Length::from_pt(10)
+                        );
+                    }
                 }
+                assert!(undo.undo().unwrap());
+                assert_eq!(
+                    receiver.block(unmarked).unwrap().text.to_string(),
+                    "unmarked"
+                );
+                assert_eq!(
+                    receiver.computed_style(heading).unwrap().size,
+                    Length::from_pt(20)
+                );
+                assert!(!undo.undo().unwrap());
             }
-            assert!(undo.undo().unwrap());
-            assert_eq!(
-                receiver.block(unmarked).unwrap().text.to_string(),
-                "unmarked"
-            );
-            assert_eq!(
-                receiver.computed_style(heading).unwrap().size,
-                Length::from_pt(20)
-            );
-            assert!(!undo.undo().unwrap());
         }
     }
 }
