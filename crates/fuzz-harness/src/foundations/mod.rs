@@ -1540,10 +1540,10 @@ impl World<'_> {
                 if let Some(target) = call(s.field_target(&Payload::new(reprise::FieldTarget {
                     node: block.id.clone(),
                     at: entry.at,
-                })))? {
-                    if self.targets.len() < 6 {
-                        self.targets.push(target.data);
-                    }
+                })))?
+                    && self.targets.len() < 6
+                {
+                    self.targets.push(target.data);
                 }
             }
         }

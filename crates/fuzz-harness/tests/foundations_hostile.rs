@@ -635,6 +635,9 @@ fn run_case(ws: &Workspace, case: &str, packet: &Payload<SyncPacket>) -> Outcome
     }
 }
 
+/// A raw write into the attacker's store.
+type Write = Box<dyn Fn(&reprise_doc::Document)>;
+
 enum Outcome {
     Refused(String),
     Accepted(Vec<String>),
@@ -712,7 +715,7 @@ fn named_attacks_are_survived() {
         .clone();
     let long = "x".repeat(40_000);
     let deep = "[".repeat(5_000);
-    let attacks: Vec<(&str, Box<dyn Fn(&reprise_doc::Document)>)> = vec![
+    let attacks: Vec<(&str, Write)> = vec![
         (
             "inline: version a string",
             Box::new({
@@ -1068,11 +1071,11 @@ fn named_attacks_are_survived() {
             "the victim must hold {must}, or an attack on it proves nothing: {held:?}"
         );
     }
-    let attacks: Vec<(String, Box<dyn Fn(&reprise_doc::Document)>)> = attacks
+    let attacks: Vec<(String, Write)> = attacks
         .into_iter()
         .map(|(name, write)| (name.to_owned(), write))
         .chain(shadows.into_iter().map(|(name, root, kind)| {
-            let write: Box<dyn Fn(&reprise_doc::Document)> = Box::new(move |d| {
+            let write: Write = Box::new(move |d| {
                 let _ = write_shadow_root(d, &root, kind);
             });
             (name, write)
