@@ -11,14 +11,14 @@ Decisions 07 and 29: annotation refusals preserve history and undo; segmented re
 | Finding | Fix | Regression | Negative control |
 | --- | --- | --- | --- |
 | R1 / N1, blocker | Model target overlay and exhaustive command/step trial selection. | `annotation_target_deletions_are_atomic_in_additions_and_updates`; matching-revision facade refusal retains redo. | Base `plan.rs` makes the history/revision/undo assertion fail (exit 101). |
-| R2, blocker | Shared bounded named-root check; vendored root emptiness and iterative history codecs. | Native `deep_metadata`, depths 1,024/4,096; hidden hostile goldens; executable 1 MiB WASM smoke. | Pending final result. |
-| R3 | Add optional final portable endpoint; remap it with one range/comment identity. | Clipboard selected-later/whole-copy coverage 10/16 bytes; facade import-copy link and comment coverage. | Pending final result. |
-| R4 | One restore hint per visible segment; each endpoint restores in its own host. | `undo_annotations_after_deleted_atom` repeats undo/redo and merges a concurrent payload edit; copied-end regression. | Copied-end regression failed before its fix (0..4 rebound versus 0..3); hidden-marker control pending. |
-| R5 | Wrap atom Figure/text inside Link/Reference with placed rectangle and contents. | `pdf_links_over_atoms_in_lists`: authored rectangle count must equal emitted/tagged PDF links, image and field. | Pending final result. |
-| R6 | Inclusive end interval vector once per host, binary endpoint lookup, one cached document order for cross-host spans. | Work-count tests for 32/256 paragraphs and 40/240 hosts; existing boundary/hidden-segment parity test. | Pending final result. |
+| R2, blocker | Shared bounded named-root check; vendored root emptiness and iterative history codecs. | Native `deep_metadata`, depths 1,024/4,096; hidden hostile goldens; executable 1 MiB WASM smoke. | Verified by targeted reversal; see negative-control logs below. |
+| R3 | Add optional final portable endpoint; remap it with one range/comment identity. | Clipboard selected-later/whole-copy coverage 10/16 bytes; facade import-copy link and comment coverage. | Verified by targeted reversal; see negative-control logs below. |
+| R4 | One restore hint per visible segment; each endpoint restores in its own host. | `undo_annotations_after_deleted_atom` repeats undo/redo and merges a concurrent payload edit; copied-end regression. | Both verified: omitting gap hints moves 1..3 to rebound 2..4; the copied-end regression failed before its fix (0..4 rebound versus 0..3). |
+| R5 | Wrap atom Figure/text inside Link/Reference with placed rectangle and contents. | `pdf_links_over_atoms_in_lists`: authored rectangle count must equal emitted/tagged PDF links, image and field. | Verified by targeted reversal; see negative-control logs below. |
+| R6 | Inclusive end interval vector once per host, binary endpoint lookup, one cached document order for cross-host spans. | Work-count tests for 32/256 paragraphs and 40/240 hosts; existing boundary/hidden-segment parity test. | Verified by targeted reversal; see negative-control logs below. |
 | N2 | Check ranges-root presence before acquiring its creating tree handle. | Missing remove/update compares exported History bytes, revision and undo/redo. | Getter-before-guard control fails history assertion (exit 101). |
-| N3 | Pin each side's historical built-ins or original-owner fallback before identity metadata can erase context; preflight migration and exclude it from undo. | Genuine pre-fix history, both delivery orders, native/framed, source return merge, History/Shallow reopen, unrelated fallback and pending text undo/redo. | Pending final result. |
-| Astra-5 performance | Cheap built-in ownership predicate; carry the already-read reference through block/style/layout input reads. | Authoring performs zero full property-record reads; computed styles read each block reference once; repeated manual phase probe. | Pending work-count control. |
+| N3 | Pin each side's historical built-ins or original-owner fallback before identity metadata can erase context; preflight migration and exclude it from undo. | Genuine pre-fix history, both delivery orders, native/framed, source return merge, History/Shallow reopen, unrelated fallback and pending text undo/redo. | Verified by targeted reversal; see negative-control logs below. |
+| Astra-5 performance | Cheap built-in ownership predicate; carry the already-read reference through block/style/layout input reads. | Authoring performs zero full property-record reads; computed styles read each block reference once; repeated manual phase probe. | Verified: restoring property resolution gives 100 record reads versus 0; duplicate lookup gives 200 reference reads versus 100. |
 
 ## Performance evidence
 
@@ -51,7 +51,7 @@ A smaller pure Reprise fix is sufficient for map-root checks, but not the comple
 
 ## Public API and contract proposal
 
-Additive APIs: `FragmentEndpoint`, `FragmentRange.end`, `Document::stage_fragment_range_end`, and `Document::block_with_style_reference`. No new diagnostic codes. No facade DTO fields or command variants are intentionally added.
+Additive APIs: `FragmentEndpoint`, `FragmentRange.end`, `Document::stage_fragment_range_end`, `Document::block_with_style_reference`, `Document::has_cross_paragraph_ranges`, and `Document::has_style_reference_contexts`. No new diagnostic codes. No facade DTO fields or command variants are intentionally added.
 
 The brief explicitly permits the portable endpoint addition. Exact type proposal:
 
@@ -66,17 +66,19 @@ pub struct FragmentRange {
 
 Proposed contracts wording: `FragmentRange.node/bytes` remains the first-piece compatibility view. An absent `end` encodes byte-identically to existing fragment JSON. A present `end` names the final copied paragraph and its UTF-8 endpoint; all intermediate selected paragraphs belong to the same retained range identity. Validation and paste remap both endpoints and internal links that target the range. Older strict fragment readers refuse the additional field. This affects native clipboard producers/consumers and document-copy callers; it adds no layout-coordinate storage.
 
-Required package/sync feature allocation for retained endpoint metadata is awaiting the orchestrator's response. The stored key is `end-node1`; older range readers otherwise silently ignore it. Packet identity and historical built-in declarations can coexist; this is needed to preflight joins of historical identity roots.
+The implemented allocation is package bit 20 / sync bit 6 (`range-endpoints1`) for retained `end-node1`. Explicit style-context migration requires package bit 21 / sync bit 7 (`style-reference-contexts2`), marked by `styles2.reference-contexts2 = "1"`. Bit 19 remains free for sections. New readers preserve the old global interpretation of encoded owner references until migration; migration pins the historical built-ins and then opts owner references into explicit interpretation. Older readers must refuse the new declaration. Unknown required bits already refuse at the existing package/packet boundary; tests also strip each new sync declaration and verify byte-identical history on refusal.
+
+Exact replacement proposed for the final frozen historical-context paragraph in `docs/contracts.md`: `Required sync feature legacy-builtins1 (bit 5) declares the sender's historical built-in interpretation and may coexist with style-identities1 (bit 4). A receiver pins each side's affected retained references during isolated preflight, then publishes those migration operations outside user undo. Existing unrelated unmarked references retain their original-owner fallback. The reference-contexts2 marker opts encoded owner references into explicit interpretation; package bit 21 and sync bit 7 require aware readers. Old identity histories without the marker retain their earlier interpretation.` The earlier wording excluded receivers with identities and prohibited combined declarations; that is exactly the policy that N3's authorized repair needs to replace. The frozen contract file is left for the orchestrator's dedicated contract update; this report makes the behavioral extension explicit.
 
 ## Dependencies and snapshots
 
-No new dependency/version. The existing Loro 1.16.2 internal crate is vendored under its MIT license, compatible with AGPL-3.0-or-later. New development tests use existing workspace dependencies. Four new deep hostile goldens will be recorded and inspected; existing snapshots must remain unchanged.
+No new dependency/version. The existing Loro 1.16.2 internal crate is vendored under its MIT license, compatible with AGPL-3.0-or-later. New development tests use existing workspace dependencies. Four added goldens were recorded and inspected: `hostile__metadata_depth_1024.snap` and `hostile__metadata_depth_4096.snap` show only the live sibling paragraph, one page, no relations and no diagnostics; their content-only counterparts show that same glyph display. The hidden physical chains produce different retained revision counters/IDs but do not add visible content. No existing snapshot is modified or removed (`git diff --name-status 4d99028 -- '**/snapshots/*'`).
 
 ## Files, commits and merge
 
-Changed file groups are mapped in `docs/CODEMAP.md`. Shared edits include root Cargo manifest/lock (vendor patch), CI (mandatory deep WASM execution), feature inspection, layout inputs, and the code map; these are needed for the requested cross-crate fixes. No `PROGRESS.md` edits, push or other branch merge.
+Changed file groups are mapped in `docs/CODEMAP.md`. Shared edits include root Cargo manifest/lock (vendor patch), CI (mandatory deep WASM execution), feature inspection, layout inputs, and the code map; these are needed for the requested cross-crate fixes. No direct `PROGRESS.md` edits, push or other branch merge; its main-branch documentation changes arrived through the authorized merge.
 
-Final commit list and merge evidence will be inserted after merging authorized main `0d8d296`.
+Engine main `0d8d296` was merged with `--no-ff`; the merge completed without conflicts. The code map auto-merged, retaining both documentation streams. No production code arrived from main. The final commit list is appended with the gate results.
 
 ## Known limits and hand-off
 
@@ -84,4 +86,26 @@ History snapshots, metadata queries and physical hidden-depth fixtures are cover
 
 ## Verification
 
-Final gate commands, exit codes and verbatim tails will be inserted here after execution.
+Targeted restored-source runs: all 315 document unit tests passed in 36.62 s; all 25 format unit tests passed in 0.34 s; all 17 clipboard annotation tests passed in 3.58 s. Both deep hostile layouts passed in 1.69 s; the all-fixture content-display check passed in 9.89 s and recorded only the two missing content goldens.
+
+Negative-control logs on G:, each original restored afterward:
+
+| Control | Result |
+| --- | --- |
+| `fixes2-negative-R1.log` | Base `plan.rs`: history/revision/undo refusal assertion fails. |
+| `fixes2-negative-N2.log` | Getter before existence guard: history/refusal assertion fails. |
+| `fixes2-negative-R3.log` | Final endpoint omitted: copied link coverage `[10, 6]`, expected `[10, 16]`. |
+| `fixes2-negative-R4.log` | Contiguity early return restored: span is rebound `2..4`, expected `1..3`. |
+| `fixes2-negative-R5.log` | Atom annotation shortcut restored: zero links, expected one. |
+| `fixes2-negative-R6.log` | Linear endpoint lookup: 2,592 steps for 32 paragraphs / 40 annotations, budget 592. |
+| `fixes2-negative-N3.log` | Pin collection disabled: 10 pt, expected 20 pt. |
+| `fixes2-n3-encoded-before.log` | Old encoded-reference context regression before versioning: 10 pt, expected 20 pt. |
+| `fixes2-n3-phase.log` | Before the fourth vendor patch, the first concurrent join consumes pending text undo. |
+| `fixes2-r4-cross-before.log` | Copied endpoint restored in wrong host: rebound `0..4`, expected `0..3`. |
+| `fixes2-negative-perf-author.log` | Full-property built-in predicate: 100 reads, expected zero. |
+| `fixes2-negative-perf-reference.log` | Duplicate lookup: 200 reads, expected 100. |
+| `fixes2-negative-R2-valid.log` | Unpatched tree emptiness: `STATUS_STACK_OVERFLOW` at the 1,024 live metadata case, process status `0xc00000fd`. |
+
+Assertion controls exit 101. The valid stack-abort control propagated exit 127 through the Windows timeout wrapper. An earlier R2 control had a line-ending compile error; it is discarded, not counted as evidence. The corrected control compiled successfully and produced the stack-abort evidence above.
+
+The full gate is running after the main merge. Final commands, exit codes and verbatim tails follow below when complete.
