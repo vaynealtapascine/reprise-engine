@@ -279,6 +279,16 @@ fn victim(ws: &Workspace) -> DocumentSession {
                 at: None,
                 alignment: Some(Alignment::End),
             },
+            // A patch of a direct paragraph property (`para1`): `clear` selects patching.
+            Command::SetStyle {
+                node: ids[4].clone(),
+                style: Style {
+                    indent_start: Some("6pt".into()),
+                    space_after: Some("3pt".into()),
+                    ..Style::default()
+                },
+                clear: Some(vec![]),
+            },
             Command::SplitBlock {
                 node: ids[4].clone(),
                 at: 30,
@@ -1070,6 +1080,7 @@ fn run_named_attacks(shadows_only: bool) {
         "breaks1",
         "marks1",
         "page-setup1",
+        "para1",
     ] {
         assert!(
             held.iter().any(|h| h.starts_with(&format!("{must}:"))),
