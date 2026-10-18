@@ -292,7 +292,6 @@ fn deleted_bold_text_is_bold_again_after_undo() {
 /// Fuzz seed: `FOUNDATIONS=1 explore 31 1 300` (default generator, before the
 /// shape was excluded).
 #[test]
-#[ignore = "known: astra-4 R1"]
 fn a_refused_batch_after_a_deletion_leaves_the_document_alone() {
     let mut s = session();
     let source = paragraph(&mut s, "source text");
@@ -324,7 +323,6 @@ fn a_refused_batch_after_a_deletion_leaves_the_document_alone() {
 /// annotation's target is dead after the move) and `UpdateAnnotation`.
 /// Fuzz seed 31 of the default scenarios.
 #[test]
-#[ignore = "known: astra-4 R1"]
 fn a_refused_batch_after_a_move_leaves_the_document_alone() {
     let mut s = session();
     let first = paragraph(&mut s, "first paragraph");
@@ -373,12 +371,13 @@ fn a_refused_batch_after_a_move_leaves_the_document_alone() {
     assert_eq!(operations(&s), before.0);
 }
 
-/// Astra 4 R4 as the fuzz reaches it: an annotation over a paragraph that
-/// holds an active inline object comes back without one of its pieces after
-/// undoing a copying join that retired the object (the join must name the
-/// later paragraph first; a forward join is fine).
+/// fuzz-2 `join-atom-undo` (Astra 4 R4 does not cover it; this is still open on
+/// main): a link that crosses two paragraphs comes back without its first piece
+/// after undoing a copying join that retired an active inline object. The join
+/// must name the later paragraph first (a forward join is fine), and the object
+/// must be active when it goes.
 #[test]
-#[ignore = "known: astra-4 R4"]
+#[ignore = "fuzz-2: join-atom-undo, see report"]
 fn undoing_a_join_that_retires_an_atom_keeps_the_whole_link() {
     let mut s = session();
     let first = paragraph(&mut s, "alpha beta gamma delta");
@@ -809,4 +808,68 @@ fn undoing_a_delete_across_an_earlier_delete_point_keeps_both_annotations_in_pla
     .unwrap();
     s.undo().unwrap();
     assert_eq!(spans(&s), before, "undo moved the annotations' ends");
+}
+
+/// Astra 4 R4 (fixed on main by review fixes 2): a deleted inline object leaves
+/// a hidden marker in the shared text, so a later visible delete across it is
+/// several spans. Undoing it must put a link and a comment over "bc" back
+/// where they were, not on "cd".
+#[test]
+fn undoing_a_delete_across_a_hidden_marker_restores_a_link_and_a_comment() {
+    let mut s = session();
+    let node = paragraph(&mut s, "abcdef");
+    apply(
+        &mut s,
+        vec![Command::InsertInline {
+            node: node.clone(),
+            at: 2,
+            object: field(),
+        }],
+    )
+    .unwrap();
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node: node.clone(),
+            start: 2,
+            end: 5,
+        }],
+    )
+    .unwrap();
+    assert_eq!(state(&s).blocks[0].text, "abcdef", "the object is gone");
+    apply(
+        &mut s,
+        vec![
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 1,
+                end: 3,
+                annotation: link("https://a.example/"),
+            },
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 1,
+                end: 3,
+                annotation: AnnotationPayload::Comment { thread: "t".into() },
+            },
+        ],
+    )
+    .unwrap();
+    let before = state(&s).annotations;
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node,
+            start: 0,
+            end: 4,
+        }],
+    )
+    .unwrap();
+    s.undo().unwrap();
+    assert_eq!(state(&s).blocks[0].text, "abcdef");
+    assert_eq!(
+        state(&s).annotations,
+        before,
+        "undo rebound the annotations"
+    );
 }

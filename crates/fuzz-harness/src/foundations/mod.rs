@@ -484,9 +484,6 @@ impl World<'_> {
         for _ in 0..commands::enrol_list_targets(&snap, &mut commands, &mut self.input) {
             self.count("generated:list-enrolment");
         }
-        for _ in 0..commands::exclude_known_shapes(&mut commands) {
-            self.count("excluded:astra-4-R1");
-        }
         let expectation = if batch { self.input.u8() } else { 0 };
         let expected = match expectation {
             0..=119 => None,
