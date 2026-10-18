@@ -800,3 +800,50 @@ fn copy_preserves_link_across_list_paragraphs_and_field() {
         "every copied linked byte must keep its link"
     );
 }
+
+#[test]
+fn cross_paragraph_copy_remaps_internal_range_targets() {
+    use reprise_doc::fragment::CopyBlock;
+    let (doc, nodes) = document(&["first second"]);
+    let first = nodes[0];
+    let target = doc.add_range(first, 0..12, RangePolicy::FIXED).unwrap();
+    doc.add_annotation(
+        first,
+        0..12,
+        &AnnotationData::Link(LinkTarget::Range { range: target }),
+    )
+    .unwrap();
+    let last = doc.split_block(first, 6).unwrap();
+    doc.commit();
+    for whole in [false, true] {
+        let schemas = SchemaRegistry::builtin();
+        let fragment = if whole {
+            doc.copy_document_fragment("source", &schemas).unwrap()
+        } else {
+            doc.copy_fragment(
+                "source",
+                &[CopyBlock {
+                    node: last,
+                    bytes: None,
+                }],
+                &schemas,
+            )
+            .unwrap()
+        };
+        let mut editor = Editor::new(Document::new(2).unwrap(), schemas);
+        editor.paste(&fragment, None, "destination").unwrap();
+        let copy = editor.document();
+        let links = copy.annotations_of_kind(Kind::Link);
+        assert_eq!(links.annotations.len(), 1);
+        let AnnotationData::Link(LinkTarget::Range { range }) = links.annotations[0].data else {
+            panic!("internal link lost")
+        };
+        assert_ne!(range, target);
+        let extent = copy.range_extent(range).unwrap();
+        let copied = copy.blocks();
+        assert_eq!(extent.start, (copied[0], 0));
+        assert_eq!(extent.end, (*copied.last().unwrap(), 6));
+        assert_eq!(copied.len(), if whole { 2 } else { 1 });
+        assert!(!extent.rebound);
+    }
+}
