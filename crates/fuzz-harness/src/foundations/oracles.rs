@@ -300,7 +300,7 @@ pub fn bits_match(bytes: &[u8], state: &State, may: Flags) -> R {
 /// document, so a document and its `import_copy` (which has new IDs) compare
 /// equal when they hold the same content.
 ///
-/// Annotations that cross paragraphs are compared by kind only: a copy
+/// Annotations are compared in `annotation_lines`, not here.
 /// truncates them to their first paragraph (Astra 4 R3, known).
 pub fn shape(state: &State) -> String {
     let mut out = String::new();
@@ -370,9 +370,10 @@ pub fn shape(state: &State) -> String {
 }
 
 /// The annotations of `state` by place, for comparing a document with its
-/// `import_copy`: the lines of those inside one paragraph, and how many there
-/// are in all. One that crosses paragraphs is only counted, because the copy
-/// keeps just its first paragraph's part (Astra 4 R3, known).
+/// `import_copy`: one line per annotation (kind, status, thread, and every
+/// span as paragraph ordinal and byte range), and how many there are in all.
+/// A copy keeps the whole extent of an annotation that crosses paragraphs
+/// (Astra 4 R3, fixed on main), so those are compared like any other.
 ///
 /// `skip` names annotations to leave out of the lines: links to a block or
 /// range that is gone, which a copy drops and reports.
@@ -386,20 +387,29 @@ pub fn annotation_lines(state: &State, skip: &BTreeSet<String>) -> (Vec<String>,
     let mut lines: Vec<String> = state
         .annotations
         .iter()
-        .filter(|a| a.spans.len() == 1 && !skip.contains(&a.id))
+        .filter(|a| !skip.contains(&a.id))
         .map(|a| {
-            let span = &a.spans[0];
+            let spans: Vec<String> = a
+                .spans
+                .iter()
+                .map(|span| {
+                    format!(
+                        "{}:{}..{}",
+                        block_ord
+                            .get(span.node.as_str())
+                            .copied()
+                            .unwrap_or(usize::MAX),
+                        span.start,
+                        span.end
+                    )
+                })
+                .collect();
             format!(
-                "{:?} {:?} {:?} {}:{}..{}",
+                "{:?} {:?} {:?} {}",
                 a.kind,
                 a.status,
                 a.thread,
-                block_ord
-                    .get(span.node.as_str())
-                    .copied()
-                    .unwrap_or(usize::MAX),
-                span.start,
-                span.end
+                spans.join(";")
             )
         })
         .collect();
