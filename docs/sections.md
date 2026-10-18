@@ -1107,9 +1107,27 @@ resource limits, not a second budget:
 
 -   at most 16,384 boundaries;
 -   at most 64 property keys per boundary or context, each value at most 2 KiB;
--   at most 256 stories.
+-   at most **16,384 distinct transferred stories**, counted across the whole
+    envelope and each once, however many references it has. Bound, running-only
+    and orphan stories all count. (The first draft's 256 was too few: the frames
+    design threads one story through each chain, and needs thousands. Orchestrator
+    decision, Stage B part 3.)
 
-A malformed envelope is refused **before any mutation**.
+Anything over a limit, these or the fragment's own aggregate size, block and
+resource limits, is refused **before any mutation** and never truncated: a
+paste with `Reason::CopyLimit`, naming the limit (code `clipboard.limit`); a
+copy with the fragment's limit error. A malformed envelope is refused before
+any mutation too.
+
+**As built.** A binding is `none`, `story` (a label of the table) or `raw` (a
+value that names no live story, kept as it was); each story entry also carries
+its `source` ID, which is how a paste into the document it came from refers to
+it. A copy of the **whole body** (copy-all, `import_copy`, or a selection that
+happens to cover it) is `complete`; any other is `partial`. Only a body copy
+has an envelope: a copy inside a story has content, not a place. Story content
+is carried as ordinary fragment blocks and ranges, and pasted by the same
+code as the body's, so annotations, lists, formatting, images and inline
+objects in a story need nothing of their own.
 
 **Which boundaries are copied.**
 
@@ -1334,7 +1352,7 @@ order.
 | Balance trials | 24 per band per pass | Shallowest fit found, Info `section.balance-approx` past 2²⁴ |
 | Story read | 4,096 blocks, 1 MiB | Rest omitted, Error |
 | Sections | Not capped | `new-page` sections are bounded by the page limit, and continuous ones by the band limit. Resolution is one linear scan. |
-| Envelope | §14 | Refused before mutation |
+| Envelope | §14: 16,384 records, 64 keys of 2 KiB, 16,384 distinct stories | Refused before mutation, `Reason::CopyLimit` |
 | Field passes | 16, shared | `layout.field-unsettled` |
 
 **New codes** (severity per 37: Info means as asked, Warning means differs,

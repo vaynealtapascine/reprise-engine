@@ -1228,8 +1228,8 @@ serialise byte-identically.
 -   **Editing** (`reprise-edit`).
     -   Commands: `InsertBreak`, `RemoveBreak`, `SetSection`, `CreateStory`,
         `SetRegion`, `CreateRegion`, `DeleteStory`.
-    -   Errors: `Reason::BreakExists(NodeId)` and `Reason::CrossDomain {
-        first: NodeId, second: NodeId }`.
+    -   Errors: `Reason::BreakExists(NodeId)`, `Reason::CrossDomain {
+        first: NodeId, second: NodeId }` and `Reason::CopyLimit(&'static str)`.
 
     Every command works inside a transaction, respects `expected_revision`,
     and validates before staging. A refused command writes no root and adds no
@@ -1242,11 +1242,27 @@ serialise byte-identically.
         `active`, `break`, `start`, raw current-lifetime props and bindings),
         `context`, `geometry`, `stories` and `dropped`.
     -   Bounds: 16,384 boundaries; 64 keys per record, each value at most
-        2 KiB; 256 stories. These count within the fragment's existing
-        aggregate limits.
-    -   A malformed envelope is refused with `clipboard.invalid` before any
-        mutation. Older strict readers refuse the field rather than ignore it.
-        Paste mints fresh lifetimes; lifetimes never travel.
+        2 KiB; **16,384 distinct transferred stories**, counted across the
+        whole envelope, each once however many references it has (bound,
+        running-only and orphan stories all count). The first draft's 256 is
+        replaced: the frames design needs room for thousands of chains
+        (orchestrator decision, Stage B part 3). These count within the
+        fragment's existing aggregate limits (size, blocks, resources), which
+        still apply.
+    -   Anything over a limit is refused before any mutation and never
+        truncated: a paste with `Reason::CopyLimit(name)` (code
+        `clipboard.limit`), naming the limit (`section boundaries`,
+        `section keys`, `section value`, `transferred stories`, or an
+        aggregate one); a copy with `FragmentError::Limit(name)`. A malformed
+        envelope is refused with `clipboard.invalid` before any mutation.
+        Older strict readers refuse the field rather than ignore it. Paste
+        mints fresh lifetimes; lifetimes never travel.
+    -   A binding is `{"t":"none"}`, `{"t":"story","label":…}` or
+        `{"t":"raw","value":…}` (a value that names no live story, kept as it
+        was). Each story entry also carries its `source` (its ID in the document
+        it was copied from), so a paste into that document refers to it
+        instead of copying it. `Pasted.stories` maps each source story to the
+        story the paste used.
 -   **Display** (`reprise-display`). An optional `artifact_kinds` map, from an
     artifact run to `Header | Footer | Watermark`, sits beside the unchanged
     artifact run list. Backends that ignore it draw exactly as before.
