@@ -110,7 +110,6 @@ Codes in use:
 | --- | --- |
 | roles / lists | `role.unknown`, `list.definition-missing`, `list.definition-unreadable`, `list.definition-cycle`, `list.level-clamped`, `list.format-unknown`, `list.counter-range`, `list.limit` |
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
-| font / shape | `font.fallback`, `font.missing`, `shape.bad-style-run` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit`, `compose.line-height-limit` |
 | layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.paragraph-context`, `layout.annotation-revision`, `layout.inline-orphan-marker`, `layout.inline-orphan-record`, `layout.inline-kind`, `layout.field-unsettled`, `layout.field-target` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
@@ -1007,6 +1006,11 @@ Native, WASM and the reference worker expose identical additive sync, stable
 selection, tracked undo/redo and presence APIs. Native sessions can select scoped
 layout workers with `set_layout_threads`; output and work budgets are invariant.
 Existing `Caret`, `Selection` and v1 signatures are unchanged.
+A delta is Loro's JSON change schema, and every count, counter, Lamport timestamp,
+peer, tree target and text position (at its causal version) is checked before the
+store sees it; remote operations are not checked semantically. Readers normalise them
+deterministically, and `Document::audit` reports `collab.*` findings. Stable selections
+and presence (a versioned payload inside the awareness bytes) are additive types.
 The reference worker's local `edit` and `image` responses now use `edited`,
 carrying both `Applied` (created IDs and selection effects) and current `State`.
 
