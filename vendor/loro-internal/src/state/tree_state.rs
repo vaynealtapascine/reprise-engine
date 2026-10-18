@@ -851,8 +851,14 @@ impl TreeState {
     }
 
     fn _bfs_all_nodes(&self, root: TreeParentId, ans: &mut Vec<TreeNode>) {
-        let children = self.children.get(&root);
-        if let Some(children) = children {
+        // An explicit stack in place of recursion per tree level, visiting
+        // parents in the same order, so a deep valid tree cannot exhaust the
+        // thread stack while a snapshot is encoded.
+        let mut parents = vec![root];
+        while let Some(root) = parents.pop() {
+            let Some(children) = self.children.get(&root) else {
+                continue;
+            };
             for (index, (position, target)) in children.iter().enumerate() {
                 ans.push(TreeNode {
                     id: *target,
@@ -863,9 +869,9 @@ impl TreeState {
                 });
             }
 
-            for (_, id) in children.iter() {
-                self._bfs_all_nodes(TreeParentId::Node(*id), ans);
-            }
+            let first = parents.len();
+            parents.extend(children.iter().map(|(_, id)| TreeParentId::Node(*id)));
+            parents[first..].reverse();
         }
     }
 

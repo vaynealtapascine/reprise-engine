@@ -685,10 +685,11 @@ impl ContainerWrapper {
                 )
             }
             ContainerType::Tree => {
-                let mut state = TreeState::decode_snapshot_fast(idx, (LoroValue::Null, b), ctx)?;
-                let value = state.get_value();
+                let state = TreeState::decode_snapshot_fast(idx, (LoroValue::Null, b), ctx)?;
                 decoded_state = Some(State::TreeState(Box::new(state)));
-                (LazyDecodedValue::Value(value), value_offset)
+                // `decode_value` keeps the decoded state and drops this value,
+                // so building it was only a recursion per tree level.
+                (LazyDecodedValue::Value(LoroValue::Null), value_offset)
             }
             #[cfg(feature = "counter")]
             ContainerType::Counter => {
