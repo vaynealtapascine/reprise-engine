@@ -52,6 +52,10 @@ pub(crate) struct Composed {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Item {
     inputs: Option<crate::incremental::Inputs>,
+    /// Floats, footnotes and relation-placed blocks are not laid out in a
+    /// story. Whether an image is one depends on the relations that own it,
+    /// which are no part of its inputs, so the verdict is part of the key.
+    unsupported: bool,
     /// For a table: its declared role (columns) and every row, cell and cell
     /// block under it, in document order. A table is composed from all of it,
     /// and none of it is in the container block's own inputs.
@@ -156,6 +160,7 @@ struct Memo {
     entries: BTreeMap<NodeId, Vec<Entry>>,
     /// Valid within one job: the document cannot change under it.
     digests: BTreeMap<NodeId, Rc<Digest>>,
+    classes: Option<Rc<Classes>>,
     compositions: usize,
     reused: usize,
     /// Compositions a stepped flow had to make itself, because the look-ahead
@@ -189,6 +194,34 @@ pub(crate) struct Request<'a> {
     pub page_size: (Length, Length),
     /// The label of `page`, which is not in the snapshot yet.
     pub label: &'a str,
+}
+
+/// How the document's relations classify blocks: read once per job, when a story
+/// first holds an image.
+#[derive(Debug, Default)]
+pub(crate) struct Classes {
+    /// Owners of floats and notes.
+    owners: std::collections::BTreeSet<NodeId>,
+    /// Blocks placed by following a line.
+    followers: std::collections::BTreeSet<NodeId>,
+}
+
+impl Classes {
+    fn of(engine: &Engine, doc: &Document) -> Self {
+        Self {
+            owners: crate::regions::owners(engine, doc),
+            followers: doc
+                .relations()
+                .into_iter()
+                .filter_map(|(_, r)| {
+                    let r = r.ok()?;
+                    (r.schema == reprise_doc::relation::builtin::FOLLOW)
+                        .then_some(r.owner)
+                        .flatten()
+                })
+                .collect(),
+        }
+    }
 }
 
 /// A [`Request`] that owns its data: what a look-ahead is asked to make.
@@ -264,7 +297,13 @@ impl DigestBuild {
         self.done
     }
     /// Reads at most `blocks` more blocks; returns how many it read.
-    pub fn step(&mut self, doc: &Document, blocks: usize) -> usize {
+    pub fn step(
+        &mut self,
+        shared: &Shared,
+        engine: &Engine,
+        doc: &Document,
+        blocks: usize,
+    ) -> usize {
         let mut read = 0;
         while read < blocks && !self.done {
             let Some(&node) = self.all.get(self.at) else {
@@ -281,6 +320,14 @@ impl DigestBuild {
             }
             self.text = self.text.saturating_add(bytes);
             self.nodes.push(node);
+            let unsupported = match doc.block(node).map(|b| b.kind) {
+                Ok(BlockKind::Annotation) => true,
+                Ok(BlockKind::Image) => {
+                    let classes = shared.classes(engine, doc);
+                    classes.owners.contains(&node) || classes.followers.contains(&node)
+                }
+                _ => false,
+            };
             let table = match doc.table_role(node) {
                 Ok(Some(role @ reprise_doc::TableRole::Table(_))) => Some(Table {
                     role: Some(role),
@@ -290,6 +337,7 @@ impl DigestBuild {
             };
             self.items.push(Item {
                 inputs: crate::incremental::Inputs::read(doc, node),
+                unsupported,
                 table,
             });
             self.at = self.at.saturating_add(1);
@@ -315,6 +363,7 @@ impl Shared {
     pub fn begin_job(&self) {
         let mut memo = self.memo.borrow_mut();
         memo.digests.clear();
+        memo.classes = None;
         memo.compositions = 0;
         memo.reused = 0;
         memo.inline = 0;
@@ -330,13 +379,23 @@ impl Shared {
         (m.compositions, m.reused)
     }
 
-    fn digest(&self, doc: &Document, story: NodeId) -> Rc<Digest> {
+    fn digest(&self, engine: &Engine, doc: &Document, story: NodeId) -> Rc<Digest> {
         if let Some(d) = self.ready_digest(story) {
             return d;
         }
         let mut build = DigestBuild::new(doc, story);
-        build.step(doc, usize::MAX);
+        build.step(self, engine, doc, usize::MAX);
         self.set_digest(build)
+    }
+
+    /// The relations' classification of blocks, read once per job.
+    fn classes(&self, engine: &Engine, doc: &Document) -> Rc<Classes> {
+        if let Some(c) = self.memo.borrow().classes.clone() {
+            return c;
+        }
+        let classes = Rc::new(Classes::of(engine, doc));
+        self.memo.borrow_mut().classes = Some(classes.clone());
+        classes
     }
 
     /// The story's digest, when this job has made it.
@@ -426,7 +485,7 @@ impl Shared {
     /// stepped flow, for which making a composition here means its look-ahead
     /// was incomplete.
     pub fn compose_counted(&self, request: &Request<'_>, stepped: bool) -> Rc<Composed> {
-        let digest = self.digest(request.doc, request.story);
+        let digest = self.digest(request.engine, request.doc, request.story);
         let key = Key::of(&digest, &request.want());
         if let Some(composed) = self.find(&key, request) {
             self.memo.borrow_mut().reused += 1;
@@ -489,7 +548,6 @@ pub(crate) struct StoryRun {
     scratch: LayoutSnapshot,
     cursor: Option<Cursor>,
     trace: crate::inline::Trace,
-    owners: std::collections::BTreeSet<NodeId>,
     next: usize,
     unsupported: Vec<NodeId>,
     clipped: bool,
@@ -560,7 +618,6 @@ impl StoryRun {
             scratch,
             cursor: Some(cursor),
             trace,
-            owners: crate::regions::owners(engine, doc),
             next: 0,
             unsupported: Vec::new(),
             clipped,
@@ -585,8 +642,13 @@ impl StoryRun {
         let mut start = None;
         if !cursor.busy() {
             while let Some(&node) = self.digest.nodes.get(self.next) {
+                let unsupported = self
+                    .digest
+                    .items
+                    .get(self.next)
+                    .is_some_and(|i| i.unsupported);
                 self.next = self.next.saturating_add(1);
-                if is_unsupported(doc, node, &self.owners) {
+                if unsupported {
                     self.unsupported.push(node);
                     continue;
                 }
@@ -685,26 +747,6 @@ fn still_valid(entry: &Entry, request: &Request<'_>) -> bool {
         let _ = entry.page;
         request.plan.fields.get(&key) == was.as_ref()
     })
-}
-
-/// Floats, footnotes and relation-placed blocks are not laid out in a story.
-fn is_unsupported(
-    doc: &Document,
-    node: NodeId,
-    owners: &std::collections::BTreeSet<NodeId>,
-) -> bool {
-    match doc.block(node).map(|b| b.kind) {
-        Ok(BlockKind::Annotation) => true,
-        Ok(BlockKind::Image) => {
-            owners.contains(&node)
-                || doc.relations().iter().any(|(_, r)| {
-                    r.as_ref().is_ok_and(|r| {
-                        r.owner == Some(node) && r.schema == reprise_doc::relation::builtin::FOLLOW
-                    })
-                })
-        }
-        _ => false,
-    }
 }
 
 /// A snapshot holding only the running frame, as page 0.

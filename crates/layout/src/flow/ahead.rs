@@ -69,7 +69,7 @@ impl Ahead {
                 let build = self
                     .digest
                     .get_or_insert_with(|| DigestBuild::new(doc, *story));
-                let read = build.step(doc, DIGEST_CHUNK);
+                let read = build.step(shared, engine, doc, DIGEST_CHUNK);
                 let done = build.is_done();
                 if let Some(e) = evaluation {
                     e.work(|w| {
