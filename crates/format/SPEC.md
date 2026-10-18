@@ -86,6 +86,17 @@ recomputed, except where a section below says history keeps it.
 `OPTIONAL_TABLE_HEADERS`. A package that sets a required bit outside `KNOWN_REQUIRED`,
 bits 17, 19, 22 and 23 included, is `RequiredFeatures`.
 
+### Reserved root names
+
+Readers ignore a root map they don't know, and report changes under it only as
+`ChangeReport.other`. These names are reserved for work in progress, so no other
+stream may use them:
+
+| Root | Reserved for | Capability |
+| --- | --- | --- |
+| `quarantine1` | The replay quarantine (slice X in `docs/frames-and-canvas.md` on `ws/frames`) | Required bit 23 and sync bit 8, set while the root is retained |
+| `steps1` | Slice X's undo guard commits: local-undo bookkeeping that no reader interprets | None: ignorable |
+
 ## Sections
 
 Each record has a 52-byte header followed by exactly its declared payload:
