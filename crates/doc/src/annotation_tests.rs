@@ -627,3 +627,25 @@ fn undo_restores_copied_annotation_end_in_its_own_host() {
         assert!(undo.redo().unwrap());
     }
 }
+
+/// R3: annotations outside a partial copy are clipped before byte subtraction.
+#[test]
+fn partial_copy_omits_annotations_outside_the_selected_bytes() {
+    for (annotated, selected) in [(0..2, 4..6), (4..6, 0..2), (0..2, 2..4)] {
+        let (doc, node) = doc("abcdef");
+        doc.add_annotation(node, annotated, &url("https://example.com"))
+            .unwrap();
+        doc.commit();
+        let fragment = doc
+            .copy_fragment(
+                "source",
+                &[crate::fragment::CopyBlock {
+                    node,
+                    bytes: Some(selected),
+                }],
+                &crate::SchemaRegistry::builtin(),
+            )
+            .unwrap();
+        assert!(fragment.ranges.is_empty());
+    }
+}

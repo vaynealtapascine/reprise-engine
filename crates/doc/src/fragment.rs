@@ -533,8 +533,14 @@ impl Document {
                             let len = self.block(n).ok()?.text.len();
                             let start = if n == e.start.0 { e.start.1 } else { 0 }.max(cut.start);
                             let end = if is_end { e.end.1 } else { len }.min(cut.end);
-                            (start < end || (e.start == e.end && start == end))
-                                .then_some((n, start - cut.start..end - cut.start))
+                            if start < end || (e.start == e.end && start == end) {
+                                Some((
+                                    n,
+                                    start.checked_sub(cut.start)?..end.checked_sub(cut.start)?,
+                                ))
+                            } else {
+                                None
+                            }
                         });
                         if is_end {
                             inside = false;
