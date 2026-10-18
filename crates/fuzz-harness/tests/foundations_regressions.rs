@@ -652,12 +652,12 @@ fn a_link_removed_with_its_text_is_not_brought_back_by_a_later_undo() {
     );
 }
 
-/// fuzz-2 `move-undo-orphan`: a comment whose start text was deleted comes
+/// fuzz-2 `tombstoned-endpoint`: a comment whose start text was deleted comes
 /// back orphaned at the end of the paragraph after undoing the move-by-copy of
 /// the flow paragraph that holds it. Without the earlier delete (or with a
 /// delete that doesn't reach the start of the range) undo restores it.
 #[test]
-#[ignore = "fuzz-2: move-undo-orphan, see report"]
+#[ignore = "fuzz-2: tombstoned-endpoint, see report"]
 fn undoing_a_move_keeps_a_comment_whose_start_was_deleted() {
     let mut s = session();
     let node = paragraph(&mut s, "alpha beta gamma delta");
@@ -715,4 +715,101 @@ fn undoing_a_move_keeps_a_comment_whose_start_was_deleted() {
             .map(|x| (x.start, x.end))
             .collect::<Vec<_>>()
     );
+}
+
+/// fuzz-2 `tombstoned-endpoint`, without the move: delete the start of a
+/// comment's range, then delete all that is left of its text, then undo. The
+/// comment comes back orphaned at the end of the paragraph instead of over its
+/// text. The restore hint of the second delete needs the range's start
+/// anchor, which the first delete had already left a tombstone. (Seed 5002 of
+/// the default scenarios, minimised.)
+#[test]
+#[ignore = "fuzz-2: tombstoned-endpoint, see report"]
+fn undoing_a_delete_of_all_the_text_restores_a_comment_whose_start_was_deleted() {
+    let mut s = session();
+    let node = paragraph(&mut s, "alpha beta gamma delta");
+    apply(
+        &mut s,
+        vec![Command::AddAnnotation {
+            node: node.clone(),
+            start: 0,
+            end: 13,
+            annotation: AnnotationPayload::Comment { thread: "t".into() },
+        }],
+    )
+    .unwrap();
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node: node.clone(),
+            start: 0,
+            end: 6,
+        }],
+    )
+    .unwrap();
+    let before = state(&s).annotations;
+    assert_eq!(before[0].status, AnnotationStatus::Active);
+    let len = state(&s).blocks[0].text.len() as u32;
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node,
+            start: 0,
+            end: len,
+        }],
+    )
+    .unwrap();
+    s.undo().unwrap();
+    let after = state(&s).annotations;
+    assert_eq!(after, before, "undo changed the comment");
+}
+
+/// fuzz-2 `tombstoned-endpoint`, the shifting form: a link ends and a comment
+/// starts at the same offset, left there by an earlier delete. Deleting a span
+/// that covers that offset and undoing it moves both ends to the end of the
+/// restored text. (Seed 5002 of the default scenarios.)
+#[test]
+#[ignore = "fuzz-2: tombstoned-endpoint, see report"]
+fn undoing_a_delete_across_an_earlier_delete_point_keeps_both_annotations_in_place() {
+    let mut s = session();
+    let node = paragraph(&mut s, "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ");
+    apply(
+        &mut s,
+        vec![
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 0,
+                end: 19,
+                annotation: link("https://a.example/"),
+            },
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 15,
+                end: 39,
+                annotation: AnnotationPayload::Comment { thread: "t".into() },
+            },
+            Command::DeleteText {
+                node: node.clone(),
+                start: 15,
+                end: 19,
+            },
+        ],
+    )
+    .unwrap();
+    let before = spans(&s);
+    assert_eq!(
+        before.iter().map(|p| (p[0].1, p[0].2)).collect::<Vec<_>>(),
+        [(0, 15), (15, 35)]
+    );
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node,
+            start: 15,
+            end: 31,
+        }],
+    )
+    .unwrap();
+    s.undo().unwrap();
+    assert_eq!(spans(&s), before, "undo moved the annotations' ends");
 }
