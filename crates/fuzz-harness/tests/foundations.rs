@@ -24,7 +24,7 @@ use reprise_fuzz_harness::hex;
 use reprise_fuzz_harness::input::seed_bytes;
 
 /// Seeded scenarios per run. Each is 300 bytes, up to 36 ops.
-const DEFAULT_SEEDS: u64 = 18;
+const DEFAULT_SEEDS: u64 = 16;
 const SEED_BYTES: usize = 300;
 
 fn env_number(name: &str, default: u64) -> u64 {

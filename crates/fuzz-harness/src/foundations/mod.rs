@@ -1261,7 +1261,16 @@ impl World<'_> {
             let clip = self.clip.as_ref().expect("checked");
             (clip.bytes.clone(), clip.may, None)
         };
-        let j = self.pick();
+        // A quarter of the time paste into a document made by import_copy (another
+        // lineage), when there is one: the clipboard crosses a namespace.
+        let foreign: Vec<usize> = (0..self.reps.len())
+            .filter(|&k| self.reps[k].lineage != self.reps[i].lineage)
+            .collect();
+        let j = if !foreign.is_empty() && self.input.chance(64) {
+            foreign[self.input.below(foreign.len())]
+        } else {
+            self.pick()
+        };
         let target_before = self.state(j)?;
         let target_bytes = self.bytes(j)?;
         let at = if self.input.chance(160) && !target_before.blocks.is_empty() {

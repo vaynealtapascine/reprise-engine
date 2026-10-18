@@ -1009,7 +1009,7 @@ impl<'a> Gen<'a, '_> {
         let new_list = |g: &mut Self| Command::CreateList {
             definition: g.list_definition(),
         };
-        match self.input.below(11) {
+        match self.input.below(12) {
             // An atom inside a link.
             0 => vec![
                 Command::AddAnnotation {
@@ -1177,8 +1177,8 @@ impl<'a> Gen<'a, '_> {
             // A list's life: make it, enrol the paragraph, then one of the
             // numbering commands, in one batch (a `New` reference reaches the
             // list before it has an ID).
-            9 => {
-                let act = match self.input.below(6) {
+            9 | 10 => {
+                let act = match self.input.below(8) {
                     0 => Command::RestartList {
                         node: node.clone(),
                         value: Some(STARTS[self.input.below(4)].to_owned()),
@@ -1192,10 +1192,11 @@ impl<'a> Gen<'a, '_> {
                         node: node.clone(),
                         by: 1,
                     },
-                    4 => Command::DeleteList {
+                    4 | 5 => Command::DeleteList {
                         list: ListRef::New { index: 0 },
                     },
-                    _ => Command::RemoveListItem { node: node.clone() },
+                    6 => Command::RemoveListItem { node: node.clone() },
+                    _ => Command::ContinueList { node: node.clone() },
                 };
                 vec![
                     new_list(self),

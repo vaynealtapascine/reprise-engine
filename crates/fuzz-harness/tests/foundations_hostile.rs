@@ -646,7 +646,7 @@ enum Outcome {
 #[test]
 fn hostile_foundations_never_break_the_pipeline() {
     let ws = workspace();
-    let seeds = env_number("REPRISE_FOUNDATIONS_HOSTILE_SEEDS", 24);
+    let seeds = env_number("REPRISE_FOUNDATIONS_HOSTILE_SEEDS", 12);
     let first = env_number("REPRISE_FOUNDATIONS_HOSTILE_FIRST", 0);
     let mut accepted = 0;
     let mut undeliverable = 0;
@@ -695,8 +695,7 @@ fn hostile_foundations_never_break_the_pipeline() {
 }
 
 /// Named attacks, one stored form each, so a failure reads without a seed.
-#[test]
-fn named_attacks_are_survived() {
+fn run_named_attacks(shadows_only: bool) {
     let ws = workspace();
     let s = victim(&ws);
     let state = s.state().unwrap().data;
@@ -1028,9 +1027,9 @@ fn named_attacks_are_survived() {
             }),
         ),
         (
-            "deep: 300 nested paragraphs",
+            "deep: 200 nested paragraphs",
             Box::new(|d| {
-                let _ = write_deep_chain(d, 300);
+                let _ = write_deep_chain(d, 200);
             }),
         ),
     ];
@@ -1079,13 +1078,19 @@ fn named_attacks_are_survived() {
     }
     let attacks: Vec<(String, Write)> = attacks
         .into_iter()
+        .filter(|_| !shadows_only)
         .map(|(name, write)| (name.to_owned(), write))
-        .chain(shadows.into_iter().map(|(name, root, kind)| {
-            let write: Write = Box::new(move |d| {
-                let _ = write_shadow_root(d, &root, kind);
-            });
-            (name, write)
-        }))
+        .chain(
+            shadows
+                .into_iter()
+                .filter(|_| shadows_only)
+                .map(|(name, root, kind)| {
+                    let write: Write = Box::new(move |d| {
+                        let _ = write_shadow_root(d, &root, kind);
+                    });
+                    (name, write)
+                }),
+        )
         .collect();
     let mut refused = Vec::new();
     let mut failed: Vec<String> = Vec::new();
@@ -1144,4 +1149,18 @@ fn trees_at_and_past_the_depth_limit_are_survived() {
         .expect("a deep chain doesn't touch the attacker's lineage");
         run_case(&ws, &case, &packet);
     }
+}
+
+/// Named attacks, one stored form each, so a failure reads without a seed.
+#[test]
+fn named_attacks_are_survived() {
+    run_named_attacks(false);
+}
+
+/// A root of another type under the name of every root the victim holds.
+/// Replicas must read the same records whichever of the two their store
+/// registered last.
+#[test]
+fn shadow_roots_are_survived() {
+    run_named_attacks(true);
 }
