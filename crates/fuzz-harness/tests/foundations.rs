@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use reprise_fuzz_harness::foundations::{Report, run_foundations, run_foundations_twice};
 use reprise_fuzz_harness::hex;
@@ -106,11 +107,29 @@ fn random_run(first: u64, count: u64) -> (Vec<String>, BTreeMap<String, usize>) 
     (failures, totals)
 }
 
+type Totals = BTreeMap<String, usize>;
+
+/// The default seeds, run once for the whole test binary: the seeded test and
+/// the coverage guard both read it, so the scenarios run a single time.
+fn default_run() -> &'static (Vec<String>, Totals) {
+    static RUN: OnceLock<(Vec<String>, Totals)> = OnceLock::new();
+    RUN.get_or_init(|| random_run(0, DEFAULT_SEEDS))
+}
+
 #[test]
 fn seeded_scenarios_hold_every_oracle() {
-    let first = env_number("REPRISE_FOUNDATIONS_FIRST", 0);
-    let count = env_number("REPRISE_FOUNDATIONS_SEEDS", DEFAULT_SEEDS);
-    let (failures, _) = random_run(first, count);
+    // `REPRISE_FOUNDATIONS_*` widen or move the range; without them this is
+    // the default run the coverage guard shares.
+    let (failures, _) = if std::env::var_os("REPRISE_FOUNDATIONS_SEEDS").is_some()
+        || std::env::var_os("REPRISE_FOUNDATIONS_FIRST").is_some()
+    {
+        random_run(
+            env_number("REPRISE_FOUNDATIONS_FIRST", 0),
+            env_number("REPRISE_FOUNDATIONS_SEEDS", DEFAULT_SEEDS),
+        )
+    } else {
+        default_run().clone()
+    };
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
@@ -157,7 +176,7 @@ const COMMANDS: [&str; 34] = [
 fn the_seeded_scenarios_reach_the_whole_vocabulary_and_its_interactions() {
     // The coverage guard runs the default seeds (not the widened ones) so it
     // is a fixed bar.
-    let (failures, totals) = random_run(0, DEFAULT_SEEDS);
+    let (failures, totals) = default_run();
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
     let n = |key: &str| totals.get(key).copied().unwrap_or(0);
     let mut missing = Vec::new();

@@ -424,3 +424,125 @@ fn undoing_a_join_that_retires_an_atom_keeps_the_whole_link() {
     s.undo().unwrap();
     assert_eq!(spans(&s), before, "undo lost a piece of the link");
 }
+
+// ---------------------------------------------------------------------------
+// The package bits, pinned.
+
+fn required_bits(s: &mut DocumentSession) -> u64 {
+    use reprise_format::{Container, Limits};
+    let bytes = s.save().unwrap().data.bytes;
+    Container::decode(&bytes, Limits::default())
+        .unwrap()
+        .0
+        .header
+        .features
+        .required
+}
+
+/// What each wave-1 stored form does to the required bits: 14 for roles and
+/// lists (set while any paragraph metadata *holds* `role1`, `list1`,
+/// `level1` or `restart1`, or the `lists` tree has a node: docs/
+/// roles-and-lists.md), 15 for inline objects and 16 for annotations (any
+/// record, live or not), 18 for style identities. A document that never used
+/// a feature carries none of them, and a duplicate (`import_copy`) is judged
+/// by its live content because its history starts fresh.
+#[test]
+fn package_bits_follow_the_stored_forms() {
+    use reprise_format::features::{
+        REQUIRED_ANNOTATIONS, REQUIRED_BLOCK_SEMANTICS, REQUIRED_INLINE_OBJECTS,
+        REQUIRED_PARAGRAPH_STYLES, REQUIRED_STYLE_IDENTITIES,
+    };
+    let wave1 = REQUIRED_BLOCK_SEMANTICS
+        | REQUIRED_INLINE_OBJECTS
+        | REQUIRED_ANNOTATIONS
+        | REQUIRED_PARAGRAPH_STYLES
+        | REQUIRED_STYLE_IDENTITIES;
+    let mut s = session();
+    assert_eq!(required_bits(&mut s) & wave1, 0, "a new document");
+    let node = paragraph(&mut s, "alpha beta gamma");
+    assert_eq!(required_bits(&mut s) & wave1, 0, "plain text");
+
+    apply(
+        &mut s,
+        vec![Command::SetRole {
+            node: node.clone(),
+            role: BlockRole::Heading1,
+        }],
+    )
+    .unwrap();
+    assert_eq!(required_bits(&mut s) & wave1, REQUIRED_BLOCK_SEMANTICS);
+    s.undo().unwrap();
+    assert_eq!(
+        required_bits(&mut s) & wave1,
+        0,
+        "no paragraph holds a role any more"
+    );
+
+    apply(
+        &mut s,
+        vec![Command::InsertInline {
+            node: node.clone(),
+            at: 0,
+            object: field(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(required_bits(&mut s) & wave1, REQUIRED_INLINE_OBJECTS);
+    apply(
+        &mut s,
+        vec![Command::AddAnnotation {
+            node: node.clone(),
+            start: 3,
+            end: 8,
+            annotation: AnnotationPayload::Comment { thread: "t".into() },
+        }],
+    )
+    .unwrap();
+    assert_eq!(
+        required_bits(&mut s) & wave1,
+        REQUIRED_INLINE_OBJECTS | REQUIRED_ANNOTATIONS
+    );
+    apply(
+        &mut s,
+        vec![Command::DefineStyle {
+            name: "S0".into(),
+            parent: None,
+            style: Style::default(),
+        }],
+    )
+    .unwrap();
+    let all = REQUIRED_INLINE_OBJECTS
+        | REQUIRED_ANNOTATIONS
+        | REQUIRED_PARAGRAPH_STYLES
+        | REQUIRED_STYLE_IDENTITIES;
+    assert_eq!(required_bits(&mut s) & wave1, all);
+
+    // A duplicate declares what its live content needs.
+    let copy_of = |s: &mut DocumentSession, id: &str| {
+        let bytes = s.save().unwrap().data.bytes;
+        let mut copy = Workspace::new()
+            .import_copy(
+                &Payload::new(ImportCopy {
+                    document_id: id.into(),
+                    peer_id: "9".into(),
+                }),
+                &bytes,
+            )
+            .unwrap();
+        required_bits(&mut copy) & wave1
+    };
+    assert_eq!(copy_of(&mut s, "ffeeddccbbaa99887766554433221100"), all);
+    // A history that used a feature and undid it has nothing to copy.
+    let mut t = session();
+    let n = paragraph(&mut t, "alpha beta");
+    apply(
+        &mut t,
+        vec![Command::SetRole {
+            node: n,
+            role: BlockRole::Heading2,
+        }],
+    )
+    .unwrap();
+    t.undo().unwrap();
+    assert_eq!(copy_of(&mut t, "ffeeddccbbaa99887766554433221101"), 0);
+}
