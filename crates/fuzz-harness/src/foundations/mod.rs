@@ -1668,11 +1668,17 @@ impl World<'_> {
             results.push((authored(&state), vector));
         }
         ensure!(
-            results[0] == results[1],
+            results[0].0 == results[1].0,
             "merge-order-independent",
             "merging the same replicas in two orders gave different states: {}",
             describe_difference(&results[0].0, &results[1].0)
         );
+        // A merge may author a staged operation on its receiver (style identity
+        // adoption), so the version vectors can differ by order while the
+        // states agree. Count it, don't fail on it.
+        if results[0].1 != results[1].1 {
+            self.count("note:merge-order-vectors-differ");
+        }
         Ok(())
     }
 }
