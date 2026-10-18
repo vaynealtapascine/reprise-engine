@@ -387,7 +387,8 @@ pub fn annotation_lines(state: &State, skip: &BTreeSet<String>) -> (Vec<String>,
     let mut lines: Vec<String> = state
         .annotations
         .iter()
-        .filter(|a| !skip.contains(&a.id))
+        // An orphan whose block is gone has no span to anchor in a copy.
+        .filter(|a| !skip.contains(&a.id) && !a.spans.is_empty())
         .map(|a| {
             let spans: Vec<String> = a
                 .spans
