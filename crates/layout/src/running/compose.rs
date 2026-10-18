@@ -48,11 +48,76 @@ pub(crate) struct Composed {
     pub reads: Reads,
 }
 
+/// What one top-level block of a story is composed from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Item {
+    inputs: Option<crate::incremental::Inputs>,
+    /// For a table: its declared role (columns) and every row, cell and cell
+    /// block under it, in document order. A table is composed from all of it,
+    /// and none of it is in the container block's own inputs.
+    table: Option<Table>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Table {
+    role: Option<reprise_doc::TableRole>,
+    parts: Vec<Part>,
+}
+
+/// One node under a table: where it sits, what table role it declares (spans,
+/// header flags, columns) and what its own content is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Part {
+    node: NodeId,
+    parent: NodeId,
+    role: Option<reprise_doc::TableRole>,
+    /// The role record is there but unreadable.
+    malformed: bool,
+    inputs: Option<crate::incremental::Inputs>,
+}
+
+/// The table role of `node` as the digest keeps it.
+fn role_of_node(doc: &Document, node: NodeId) -> (Option<reprise_doc::TableRole>, bool) {
+    match doc.table_role(node) {
+        Ok(role) => (role, false),
+        Err(_) => (None, true),
+    }
+}
+
+/// A table's rows (depth 0), their cells (1) and the cells' blocks (2), the
+/// levels the table layout reads. Anything at a level that does not declare
+/// the role expected there is kept, and not entered.
+fn table_parts(doc: &Document, table: NodeId) -> Vec<Part> {
+    use reprise_doc::TableRole;
+    fn level(doc: &Document, parent: NodeId, depth: usize, out: &mut Vec<Part>) {
+        for node in doc.children_of(parent) {
+            let (role, malformed) = role_of_node(doc, node);
+            let enter = matches!(
+                (depth, &role),
+                (0, Some(TableRole::Row(_))) | (1, Some(TableRole::Cell(_)))
+            );
+            out.push(Part {
+                node,
+                parent,
+                role,
+                malformed,
+                inputs: crate::incremental::Inputs::read(doc, node),
+            });
+            if enter {
+                level(doc, node, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    level(doc, table, 0, &mut out);
+    out
+}
+
 /// Everything a story's blocks are composed from, read once per layout.
 #[derive(Debug)]
 pub(crate) struct Digest {
     nodes: Vec<NodeId>,
-    inputs: Vec<(NodeId, Option<crate::incremental::Inputs>)>,
+    items: Vec<Item>,
     /// Blocks past the read caps, which are not composed.
     omitted: bool,
 }
@@ -66,7 +131,7 @@ impl PartialEq for DigestRef {
         Rc::ptr_eq(&self.0, &other.0)
             || (self.0.nodes == other.0.nodes
                 && self.0.omitted == other.0.omitted
-                && self.0.inputs == other.0.inputs)
+                && self.0.items == other.0.items)
     }
 }
 
@@ -173,7 +238,7 @@ pub(crate) struct DigestBuild {
     all: Vec<NodeId>,
     at: usize,
     nodes: Vec<NodeId>,
-    inputs: Vec<(NodeId, Option<crate::incremental::Inputs>)>,
+    items: Vec<Item>,
     text: usize,
     omitted: bool,
     done: bool,
@@ -186,7 +251,7 @@ impl DigestBuild {
             all: doc.top(Domain::Story(story)),
             at: 0,
             nodes: Vec::new(),
-            inputs: Vec::new(),
+            items: Vec::new(),
             text: 0,
             omitted: false,
             done: false,
@@ -216,8 +281,17 @@ impl DigestBuild {
             }
             self.text = self.text.saturating_add(bytes);
             self.nodes.push(node);
-            self.inputs
-                .push((node, crate::incremental::Inputs::read(doc, node)));
+            let table = match doc.table_role(node) {
+                Ok(Some(role @ reprise_doc::TableRole::Table(_))) => Some(Table {
+                    role: Some(role),
+                    parts: table_parts(doc, node),
+                }),
+                _ => None,
+            };
+            self.items.push(Item {
+                inputs: crate::incremental::Inputs::read(doc, node),
+                table,
+            });
             self.at = self.at.saturating_add(1);
             read += 1;
         }
@@ -229,7 +303,7 @@ impl DigestBuild {
     fn finish(self) -> Digest {
         Digest {
             nodes: self.nodes,
-            inputs: self.inputs,
+            items: self.items,
             omitted: self.omitted,
         }
     }

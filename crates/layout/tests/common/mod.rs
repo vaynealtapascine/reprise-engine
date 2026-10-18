@@ -2,10 +2,12 @@
 #![allow(dead_code)]
 use reprise_doc::sections::SectionId;
 use reprise_doc::{
-    BlockKind, Dim, Document, FrameRole, FrameTemplate, LengthExpr, NewBlock, NodeId, Style,
+    BlockKind, Column, ColumnWidth, Dim, Document, FrameRole, FrameTemplate, LengthExpr, NewBlock,
+    NodeId, Style, TableColumns,
 };
 use reprise_font::{Face, FontStore};
 use reprise_geom::Length;
+use reprise_layout::incremental::LayoutSession;
 use reprise_layout::{Engine, LayoutSnapshot};
 use serde_json::json;
 
@@ -82,4 +84,89 @@ pub fn running_text(s: &LayoutSnapshot, node: NodeId) -> Vec<String> {
         .filter(|b| b.node == node)
         .map(|b| b.text.clone())
         .collect()
+}
+
+/// A running header holding a table of `rows` rows of two cells, each with one
+/// paragraph, and a body paragraph so the document has a page.
+pub struct Grid {
+    pub table: NodeId,
+    pub rows: Vec<NodeId>,
+    pub cells: Vec<Vec<NodeId>>,
+    pub blocks: Vec<Vec<NodeId>>,
+}
+
+pub fn two_columns(widths: [ColumnWidth; 2]) -> TableColumns {
+    TableColumns {
+        columns: widths.into_iter().map(|width| Column { width }).collect(),
+    }
+}
+
+pub fn grid(doc: &Document, rows: usize) -> Grid {
+    let story = doc.create_story(&[]).unwrap();
+    let table = doc
+        .append_table(two_columns([ColumnWidth::Content, ColumnWidth::Content]))
+        .unwrap();
+    let mut g = Grid {
+        table,
+        rows: Vec::new(),
+        cells: Vec::new(),
+        blocks: Vec::new(),
+    };
+    for r in 0..rows {
+        add_row(doc, &mut g, r);
+    }
+    doc.move_block(table, Some(story), 0).unwrap();
+    bind_header(doc, story);
+    block(doc, "body");
+    g
+}
+
+pub fn add_row(doc: &Document, g: &mut Grid, r: usize) {
+    let row = doc.append_table_row(g.table, false).unwrap();
+    let mut cells = Vec::new();
+    let mut blocks = Vec::new();
+    for c in 0..2u32 {
+        let cell = doc.append_table_cell(row, c).unwrap();
+        let text = format!("r{r}c{c}");
+        blocks.push(
+            doc.append_cell_block(cell, BlockKind::Paragraph, "s", &text)
+                .unwrap(),
+        );
+        cells.push(cell);
+    }
+    g.rows.push(row);
+    g.cells.push(cells);
+    g.blocks.push(blocks);
+}
+
+/// Lays out in a session, makes `edit`, commits, and lays out again in the same
+/// session, so the second layout can reuse the memo of the first. Returns the
+/// layouts before and after (incremental) and a full layout of the edited
+/// document.
+pub fn edited(
+    engine: &Engine,
+    doc: &Document,
+    edit: impl FnOnce(),
+) -> (LayoutSnapshot, LayoutSnapshot, LayoutSnapshot) {
+    let mut session = LayoutSession::new(engine);
+    let before = session.layout(doc).unwrap();
+    assert_eq!(before, engine.layout(doc), "the first layout is the same");
+    edit();
+    doc.commit();
+    let after = session.layout(doc).unwrap();
+    let full = engine.layout(doc);
+    (before, after, full)
+}
+
+/// The edit must show in the layout (or the test proves nothing), and the
+/// session must show it too.
+pub fn assert_invalidated(
+    what: &str,
+    (before, after, full): (LayoutSnapshot, LayoutSnapshot, LayoutSnapshot),
+) {
+    assert!(before != full, "{what}: the edit changes the layout");
+    assert!(
+        after == full,
+        "{what}: the session reused a stale running table"
+    );
 }
