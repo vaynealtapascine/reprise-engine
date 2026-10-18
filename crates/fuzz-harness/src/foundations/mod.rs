@@ -142,6 +142,9 @@ struct Replica {
     inline_ids: std::collections::BTreeSet<String>,
     /// An inline atom was removed or deactivated here at some point.
     retired: bool,
+    /// Text was deleted or moved while an annotation existed, so a restore
+    /// hint may be involved in an undo (the annotation-undo faults).
+    deleted_under_annotation: bool,
 }
 
 struct Clip {
@@ -352,6 +355,7 @@ impl World<'_> {
             old_revision: state.revision.clone(),
             inline_ids: inline_ids(&state),
             retired: false,
+            deleted_under_annotation: false,
         });
         Ok(self.reps.len() - 1)
     }
@@ -562,6 +566,22 @@ impl World<'_> {
                     self.count(format!("ok:{}", command_name(c)));
                     note_flags(&mut self.reps[i].may, c);
                 }
+                if !before.annotations.is_empty()
+                    && commands.iter().any(|c| {
+                        matches!(
+                            c,
+                            Command::DeleteText { .. }
+                                | Command::DeleteBlock { .. }
+                                | Command::JoinBlocks { .. }
+                                | Command::BackspaceAtStart { .. }
+                                | Command::MoveBlock { .. }
+                                | Command::SplitBlock { .. }
+                                | Command::Enter { .. }
+                        )
+                    })
+                {
+                    self.reps[i].deleted_under_annotation = true;
+                }
                 // An object made and deleted inside one transaction is never seen
                 // in a state, yet leaves a hidden marker (the shape of Astra 4 R4).
                 if commands
@@ -741,10 +761,29 @@ impl World<'_> {
             }
         }
         if a.annotations != b.annotations {
-            let lost = b.annotations.len() < a.annotations.len()
-                && b.annotations.iter().all(|x| a.annotations.contains(x));
+            // Annotations or spans that are gone after the step: every one that
+            // remains is one that was there, or the same one with some spans
+            // missing (fuzz-2 `annotation-redo`, in a paste or a typed link).
+            let part_of = |y: &reprise::AnnotationBrief, x: &reprise::AnnotationBrief| {
+                y == x
+                    || (y.id == x.id
+                        && y.kind == x.kind
+                        && y.status == x.status
+                        && y.thread == x.thread
+                        && y.spans.len() < x.spans.len()
+                        && y.spans.iter().all(|s| x.spans.contains(s)))
+            };
+            let lost = b.annotations.len() <= a.annotations.len()
+                && b.annotations
+                    .iter()
+                    .all(|y| a.annotations.iter().any(|x| part_of(y, x)));
             let resurrected = a.annotations.len() < b.annotations.len()
                 && a.annotations.iter().all(|x| b.annotations.contains(x));
+            let same_ids = a.annotations.len() == b.annotations.len()
+                && a.annotations
+                    .iter()
+                    .zip(&b.annotations)
+                    .all(|(x, y)| x.id == y.id);
             if lost {
                 known.push("known:fuzz2-annotation-redo");
                 a.annotations = b.annotations.clone();
@@ -752,7 +791,18 @@ impl World<'_> {
                 known.push("known:fuzz2-link-resurrected");
                 a.annotations = b.annotations.clone();
             } else if self.reps[i].retired {
-                known.push("known:astra-4-R4");
+                known.push("known:fuzz2-join-atom-undo");
+                a.annotations = b.annotations.clone();
+            } else if self.reps[i].deleted_under_annotation {
+                // The rest of the restore-hint faults (text inserted and
+                // deleted in one step; a delete block beside a concurrent
+                // edit): the same annotations, moved, trimmed or stretched.
+                // Counted, and listed in the report, but not told apart here.
+                known.push(if same_ids {
+                    "known:fuzz2-annotation-undo-drift"
+                } else {
+                    "known:fuzz2-annotation-undo-other"
+                });
                 a.annotations = b.annotations.clone();
             }
         }
@@ -764,6 +814,14 @@ impl World<'_> {
             self.reps[i].redo.clear();
             return Ok(());
         }
+        // A different set of blocks is a failure of its own kind, so a shrinker
+        // that chases one name stays on it.
+        let blocks = |s: &State| s.blocks.iter().map(|b| b.id.clone()).collect::<Vec<_>>();
+        let oracle = match (oracle, blocks(want) == blocks(got)) {
+            ("undo-restores-state", false) => "undo-restores-block-ids",
+            ("redo-restores-state", false) => "redo-restores-block-ids",
+            (other, _) => other,
+        };
         Err(violation(oracle, describe_difference(want, got)))
     }
 
@@ -1021,13 +1079,16 @@ impl World<'_> {
         }
         let mut may = Flags::default();
         let mut retired = false;
+        let mut deleted = false;
         for &k in group {
             may.merge(self.reps[k].may);
             retired |= self.reps[k].retired;
+            deleted |= self.reps[k].deleted_under_annotation;
         }
         for &k in group {
             self.reps[k].may = may;
             self.reps[k].retired = retired;
+            self.reps[k].deleted_under_annotation = deleted;
             self.reps[k].trail.clear();
             self.reps[k].redo.clear();
         }

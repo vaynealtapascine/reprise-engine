@@ -873,3 +873,62 @@ fn undoing_a_delete_across_a_hidden_marker_restores_a_link_and_a_comment() {
         "undo rebound the annotations"
     );
 }
+
+/// fuzz-2 `insert-in-deleted-span`: one transaction types into annotated text
+/// and then deletes a span that contains what it typed. Undoing the step
+/// brings the text back but not the link, and the comment's start moves. The
+/// restore hint describes the deleted span, but the same undo deletes the
+/// typed characters again, so what is left no longer matches it. Deleting the
+/// same span in a step of its own is restored exactly.
+/// (Seed 200278 of the default scenarios, minimised.)
+#[test]
+#[ignore = "fuzz-2: insert-in-deleted-span, see report"]
+fn undoing_a_step_that_types_then_deletes_over_it_restores_the_annotations() {
+    let mut s = session();
+    let node = paragraph(&mut s, "abcdefghijklmnopqrstuvwxyz0123456789");
+    apply(
+        &mut s,
+        vec![
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 0,
+                end: 10,
+                annotation: link("https://a.example/"),
+            },
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 8,
+                end: 20,
+                annotation: AnnotationPayload::Comment { thread: "t".into() },
+            },
+        ],
+    )
+    .unwrap();
+    let before = state(&s).annotations;
+    apply(
+        &mut s,
+        vec![
+            Command::InsertText {
+                node: node.clone(),
+                at: 12,
+                text: "XY".into(),
+            },
+            Command::DeleteText {
+                node,
+                start: 0,
+                end: 14,
+            },
+        ],
+    )
+    .unwrap();
+    s.undo().unwrap();
+    assert_eq!(
+        state(&s).blocks[0].text,
+        "abcdefghijklmnopqrstuvwxyz0123456789"
+    );
+    assert_eq!(
+        state(&s).annotations,
+        before,
+        "undo lost or moved annotations"
+    );
+}
