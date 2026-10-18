@@ -597,3 +597,122 @@ fn import_copy_drops_a_link_to_a_dead_block_and_says_so() {
         .collect();
     assert_eq!(codes, ["clipboard.annotation-dropped"]);
 }
+
+/// fuzz-2 `link-resurrected`: a link whose text was deleted is gone, and stays
+/// gone until that delete is undone. Undoing a *later* delete of the same text,
+/// typed again, brings it back: the restore hint recorded by the first delete
+/// is still on the annotation, and the re-typed characters match its digest and
+/// were created after it.
+#[test]
+#[ignore = "fuzz-2: link-resurrected, see report"]
+fn a_link_removed_with_its_text_is_not_brought_back_by_a_later_undo() {
+    let mut s = session();
+    let node = paragraph(&mut s, "alpha beta gamma delta");
+    apply(
+        &mut s,
+        vec![
+            Command::AddAnnotation {
+                node: node.clone(),
+                start: 0,
+                end: 5,
+                annotation: link("https://a.example/"),
+            },
+            Command::DeleteText {
+                node: node.clone(),
+                start: 0,
+                end: 5,
+            },
+        ],
+    )
+    .unwrap();
+    assert!(spans(&s).is_empty(), "deleting its text removed the link");
+    apply(
+        &mut s,
+        vec![Command::InsertText {
+            node: node.clone(),
+            at: 0,
+            text: "alpha".into(),
+        }],
+    )
+    .unwrap();
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node,
+            start: 0,
+            end: 5,
+        }],
+    )
+    .unwrap();
+    s.undo().unwrap();
+    assert_eq!(state(&s).blocks[0].text, "alpha beta gamma delta");
+    assert!(
+        spans(&s).is_empty(),
+        "undo brought back a link it never took"
+    );
+}
+
+/// fuzz-2 `move-undo-orphan`: a comment whose start text was deleted comes
+/// back orphaned at the end of the paragraph after undoing the move-by-copy of
+/// the flow paragraph that holds it. Without the earlier delete (or with a
+/// delete that doesn't reach the start of the range) undo restores it.
+#[test]
+#[ignore = "fuzz-2: move-undo-orphan, see report"]
+fn undoing_a_move_keeps_a_comment_whose_start_was_deleted() {
+    let mut s = session();
+    let node = paragraph(&mut s, "alpha beta gamma delta");
+    apply(
+        &mut s,
+        vec![Command::AddAnnotation {
+            node: node.clone(),
+            start: 0,
+            end: 13,
+            annotation: AnnotationPayload::Comment { thread: "t".into() },
+        }],
+    )
+    .unwrap();
+    apply(
+        &mut s,
+        vec![Command::DeleteText {
+            node: node.clone(),
+            start: 0,
+            end: 6,
+        }],
+    )
+    .unwrap();
+    let split = apply(&mut s, vec![Command::SplitBlock { node, at: 0 }]).unwrap();
+    let Effect::Split { new: second, .. } = split.effects[0].clone() else {
+        panic!("expected a split");
+    };
+    let before = state(&s).annotations;
+    apply(
+        &mut s,
+        vec![Command::MoveBlock {
+            node: second,
+            parent: None,
+            index: 0,
+        }],
+    )
+    .unwrap();
+    assert_eq!(state(&s).annotations.len(), 1);
+    s.undo().unwrap();
+    let after = state(&s).annotations;
+    assert_eq!(after.len(), before.len());
+    assert_eq!(
+        after[0].status,
+        AnnotationStatus::Active,
+        "undo orphaned the comment: {after:?}"
+    );
+    assert_eq!(
+        after[0]
+            .spans
+            .iter()
+            .map(|x| (x.start, x.end))
+            .collect::<Vec<_>>(),
+        before[0]
+            .spans
+            .iter()
+            .map(|x| (x.start, x.end))
+            .collect::<Vec<_>>()
+    );
+}

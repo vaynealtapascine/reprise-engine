@@ -142,6 +142,9 @@ struct Replica {
     inline_ids: std::collections::BTreeSet<String>,
     /// An inline atom was removed or deactivated here at some point.
     retired: bool,
+    /// A `MoveBlock` succeeded in this lineage (the shape of fuzz-2
+    /// `move-undo-orphan`).
+    moved: bool,
 }
 
 struct Clip {
@@ -352,6 +355,7 @@ impl World<'_> {
             old_revision: state.revision.clone(),
             inline_ids: inline_ids(&state),
             retired: false,
+            moved: false,
         });
         Ok(self.reps.len() - 1)
     }
@@ -565,6 +569,12 @@ impl World<'_> {
                     self.count(format!("ok:{}", command_name(c)));
                     note_flags(&mut self.reps[i].may, c);
                 }
+                if commands
+                    .iter()
+                    .any(|c| matches!(c, Command::MoveBlock { .. }))
+                {
+                    self.reps[i].moved = true;
+                }
                 // An object made and deleted inside one transaction is never seen
                 // in a state, yet leaves a hidden marker (the shape of Astra 4 R4).
                 if commands
@@ -746,8 +756,24 @@ impl World<'_> {
         if a.annotations != b.annotations {
             let lost = b.annotations.len() < a.annotations.len()
                 && b.annotations.iter().all(|x| a.annotations.contains(x));
+            let resurrected = a.annotations.len() < b.annotations.len()
+                && a.annotations.iter().all(|x| b.annotations.contains(x));
+            // The same annotations, some Active before and Orphaned after.
+            let orphaned = a.annotations.len() == b.annotations.len()
+                && a.annotations.iter().zip(&b.annotations).all(|(x, y)| {
+                    x == y
+                        || (x.id == y.id
+                            && x.status == AnnotationStatus::Active
+                            && y.status == AnnotationStatus::Orphaned)
+                });
             if lost {
                 known.push("known:fuzz2-annotation-redo");
+                a.annotations = b.annotations.clone();
+            } else if resurrected {
+                known.push("known:fuzz2-link-resurrected");
+                a.annotations = b.annotations.clone();
+            } else if self.reps[i].moved && orphaned {
+                known.push("known:fuzz2-move-undo-orphan");
                 a.annotations = b.annotations.clone();
             } else if self.reps[i].retired {
                 known.push("known:astra-4-R4");
@@ -1019,13 +1045,16 @@ impl World<'_> {
         }
         let mut may = Flags::default();
         let mut retired = false;
+        let mut moved = false;
         for &k in group {
             may.merge(self.reps[k].may);
             retired |= self.reps[k].retired;
+            moved |= self.reps[k].moved;
         }
         for &k in group {
             self.reps[k].may = may;
             self.reps[k].retired = retired;
+            self.reps[k].moved = moved;
             self.reps[k].trail.clear();
             self.reps[k].redo.clear();
         }
