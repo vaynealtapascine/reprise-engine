@@ -231,7 +231,6 @@ masked a difference; a generator exclusion says how often a shape was kept out.
 | fuzz-2 `annotation-redo` | an annotation created in the same step as the text it covers is gone after undo then redo | `known:fuzz2-annotation-redo`; ignored regression |
 | fuzz-2 `format-undo` | formatted text that was deleted comes back unformatted after undo | `known:fuzz2-format-undo`; ignored regression |
 | fuzz-2 `link-resurrected` | a link removed along with its text comes back when a later delete of the same re-typed text is undone | `known:fuzz2-link-resurrected` (a strict superset of annotations after undo); ignored regression |
-| fuzz-2 `tombstoned-endpoint` | an annotation endpoint that an earlier delete left on a tombstone is not restored when a later delete covering that point is undone: the comment comes back orphaned at the paragraph's end (also through the move-by-copy of the flow paragraph that holds it), or a link's end and a comment's start at the same offset both land at the end of the restored text | `known:fuzz2-tombstoned-endpoint` (the same annotations with changed spans or status, in a lineage that deleted text while an annotation existed); three ignored regressions |
 
 ### The hostile peer
 
@@ -373,6 +372,13 @@ Fixed:
     (`flow.rs`, `inline.rs`, `style_identity.rs`); `a_root_of_another_type_under_the_*`
     in `inline_tests.rs` and `style_identity_tests.rs` fail without it, and the
     hostile test's shadow attacks fail without it too.
+-   `tombstoned-endpoint` (`annotation_restore.rs`): an annotation endpoint that an
+    earlier delete had left on a tombstone was never given a restore hint, so
+    undoing a later delete over it could not put it back: a comment came back
+    orphaned at the paragraph's end, or a link's end and a comment's start at the
+    same offset both landed at the end of the restored text. The hint now also
+    records the place of a tombstoned end inside the span. Three regressions in
+    `tests/foundations_regressions.rs`.
 
 Open, each with a minimal `#[ignore]`d regression in
 `tests/foundations_regressions.rs` and a suggested fix in the final report:
@@ -382,8 +388,6 @@ Open, each with a minimal `#[ignore]`d regression in
 -   `format-undo`: deleted bold text comes back unformatted after undo.
 -   `link-resurrected`: a link removed with its text comes back when a later
     delete of the re-typed text is undone.
--   `tombstoned-endpoint`: an annotation endpoint left on a tombstone by an
-    earlier delete is not restored when a later delete over it is undone.
 
 Pinned as designed (not faults), each with a test or an oracle that knows it:
 
