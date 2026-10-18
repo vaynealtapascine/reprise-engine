@@ -190,6 +190,9 @@ pub struct StepWork {
     pub region_units: usize,
     pub region_blocks: usize,
     pub digest_blocks: usize,
+    /// Child IDs a digest looked at, kept or not: the enumeration work, which
+    /// is bounded by the story's read budget, not by the story's size.
+    pub digest_inspected: usize,
 }
 impl StepWork {
     /// Adds `other`'s work to this one's.
@@ -212,6 +215,7 @@ impl StepWork {
         self.region_units = self.region_units.saturating_add(other.region_units);
         self.region_blocks = self.region_blocks.saturating_add(other.region_blocks);
         self.digest_blocks = self.digest_blocks.saturating_add(other.digest_blocks);
+        self.digest_inspected = self.digest_inspected.saturating_add(other.digest_inspected);
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

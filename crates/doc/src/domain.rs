@@ -10,6 +10,21 @@ pub enum Domain {
     Story(NodeId),
 }
 
+/// Where a bounded read of one parent's children has got to (see
+/// [`Document::top_reader`]).
+#[derive(Clone, Debug, Default)]
+pub struct ChildReader {
+    ids: std::sync::Arc<Vec<TreeID>>,
+    at: usize,
+}
+
+impl ChildReader {
+    /// Child IDs not looked at yet.
+    pub fn remaining(&self) -> usize {
+        self.ids.len().saturating_sub(self.at)
+    }
+}
+
 impl Document {
     /// Isolated validation replica with identical operation-ID allocation.
     ///
@@ -69,6 +84,63 @@ impl Document {
             return Vec::new();
         }
         self.content_children(TreeParentId::Node(node.node))
+    }
+
+    /// A resumable, bounded read of the live blocks at the top of `domain`
+    /// (see [`Document::top`]). Only the raw list of child IDs is copied up
+    /// front; a child is looked at when a read reaches it, so reading a prefix
+    /// of a huge domain costs the prefix.
+    pub fn top_reader(&self, domain: Domain) -> ChildReader {
+        let parent = match domain {
+            Domain::Body => TreeParentId::Root,
+            Domain::Story(id)
+                if !id.is_break() && self.is_live(id) && self.is_story_node(id.node) =>
+            {
+                TreeParentId::Node(id.node)
+            }
+            Domain::Story(_) => return ChildReader::default(),
+        };
+        self.reader(parent)
+    }
+
+    /// As [`Document::top_reader`], for the children of `node` (see
+    /// [`Document::children_of`]).
+    pub fn children_reader(&self, node: NodeId) -> ChildReader {
+        if node.is_break() || !self.is_live(node) {
+            return ChildReader::default();
+        }
+        self.reader(TreeParentId::Node(node.node))
+    }
+
+    fn reader(&self, parent: TreeParentId) -> ChildReader {
+        ChildReader {
+            ids: std::sync::Arc::new(self.tree("content").children(parent).unwrap_or_default()),
+            at: 0,
+        }
+    }
+
+    /// Looks at the next at most `inspect` child IDs of `reader` and appends
+    /// the live blocks they stand for to `out` (a flow host stands for all its
+    /// paragraphs). Returns true once the reader is exhausted. Every call looks
+    /// at one ID at least, so a loop of reads ends.
+    pub fn read_children(
+        &self,
+        reader: &mut ChildReader,
+        inspect: usize,
+        out: &mut Vec<NodeId>,
+    ) -> bool {
+        let tree = self.tree("content");
+        let end = reader
+            .at
+            .saturating_add(inspect.max(1))
+            .min(reader.ids.len());
+        for &node in reader.ids.get(reader.at..end).unwrap_or_default() {
+            if self.live(&tree, node) && !self.is_story_node(node) && !self.is_embedded(node) {
+                self.expand(node, 0, out);
+            }
+        }
+        reader.at = end;
+        end >= reader.ids.len()
     }
 
     fn content_children(&self, parent: TreeParentId) -> Vec<NodeId> {

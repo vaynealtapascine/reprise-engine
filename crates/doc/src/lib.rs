@@ -29,7 +29,7 @@ mod annotation_restore;
 mod annotation_tests;
 mod changes;
 mod domain;
-pub use domain::Domain;
+pub use domain::{ChildReader, Domain};
 pub mod codes;
 pub mod context;
 mod edit;

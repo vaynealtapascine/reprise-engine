@@ -17,10 +17,10 @@ use crate::pages::FrameSource;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
 use crate::{BlockLayout, Diagnostic, Engine, LayoutSnapshot, PageLayout, TemplateSource};
-use reprise_doc::{BlockKind, Document, Domain, FrameRole, NodeId};
+use reprise_doc::{BlockKind, ChildReader, Document, Domain, FrameRole, NodeId};
 use reprise_geom::{Length, Matrix};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -86,35 +86,6 @@ fn role_of_node(doc: &Document, node: NodeId) -> (Option<reprise_doc::TableRole>
         Ok(role) => (role, false),
         Err(_) => (None, true),
     }
-}
-
-/// A table's rows (depth 0), their cells (1) and the cells' blocks (2), the
-/// levels the table layout reads. Anything at a level that does not declare
-/// the role expected there is kept, and not entered.
-fn table_parts(doc: &Document, table: NodeId) -> Vec<Part> {
-    use reprise_doc::TableRole;
-    fn level(doc: &Document, parent: NodeId, depth: usize, out: &mut Vec<Part>) {
-        for node in doc.children_of(parent) {
-            let (role, malformed) = role_of_node(doc, node);
-            let enter = matches!(
-                (depth, &role),
-                (0, Some(TableRole::Row(_))) | (1, Some(TableRole::Cell(_)))
-            );
-            out.push(Part {
-                node,
-                parent,
-                role,
-                malformed,
-                inputs: crate::incremental::Inputs::read(doc, node),
-            });
-            if enter {
-                level(doc, node, depth + 1, out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    level(doc, table, 0, &mut out);
-    out
 }
 
 /// Everything a story's blocks are composed from, read once per layout.
@@ -264,28 +235,65 @@ pub(crate) enum Need {
 /// Blocks of a story read per look-ahead unit when its digest is made.
 pub(crate) const DIGEST_CHUNK: usize = 64;
 
-/// A story digest being made, a bounded number of blocks at a time.
+/// A story digest being made, a bounded amount of work at a time.
+///
+/// The story is read through a [`ChildReader`], so a story of a million blocks
+/// costs what the read budget costs: the digest stops at the 4,096th block or
+/// the 1 MiB of text. A table is part of the same budget, every row, cell and
+/// cell block of it counting as a block and every cell's text as text: it is
+/// read whole or, if it would take the story past a limit, not at all (the
+/// story is cut before it, like any block past a limit). So a table's cells are
+/// charged before any of them is prepared for composition.
 #[derive(Clone, Debug)]
 pub(crate) struct DigestBuild {
     story: NodeId,
-    all: Vec<NodeId>,
-    at: usize,
+    top: ChildReader,
+    top_done: bool,
+    /// Top-level blocks read and not taken yet.
+    queue: VecDeque<NodeId>,
     nodes: Vec<NodeId>,
     items: Vec<Item>,
+    /// Blocks and bytes of text taken so far, tables' parts included.
+    blocks: usize,
     text: usize,
+    /// The table being read.
+    walk: Option<Walk>,
     omitted: bool,
     done: bool,
+}
+
+/// A table being read, level by level: its rows, then each row's cells, then
+/// each cell's blocks.
+#[derive(Clone, Debug)]
+struct Walk {
+    node: NodeId,
+    item: Item,
+    levels: Vec<Level>,
+    /// What the table has taken, the container included.
+    blocks: usize,
+    text: usize,
+}
+
+#[derive(Clone, Debug)]
+struct Level {
+    parent: NodeId,
+    /// 0: the table's rows, 1: a row's cells, 2: a cell's blocks.
+    depth: usize,
+    reader: ChildReader,
 }
 
 impl DigestBuild {
     pub fn new(doc: &Document, story: NodeId) -> Self {
         Self {
             story,
-            all: doc.top(Domain::Story(story)),
-            at: 0,
+            top: doc.top_reader(Domain::Story(story)),
+            top_done: false,
+            queue: VecDeque::new(),
             nodes: Vec::new(),
             items: Vec::new(),
+            blocks: 0,
             text: 0,
+            walk: None,
             omitted: false,
             done: false,
         }
@@ -296,58 +304,166 @@ impl DigestBuild {
     pub fn is_done(&self) -> bool {
         self.done
     }
-    /// Reads at most `blocks` more blocks; returns how many it read.
+
+    /// Looks at up to `units` more child IDs. Returns the blocks it took and the
+    /// IDs it looked at, so a caller can charge and count them.
     pub fn step(
         &mut self,
         shared: &Shared,
         engine: &Engine,
         doc: &Document,
-        blocks: usize,
-    ) -> usize {
-        let mut read = 0;
-        while read < blocks && !self.done {
-            let Some(&node) = self.all.get(self.at) else {
-                self.done = true;
-                break;
-            };
-            let bytes = doc.block(node).map_or(0, |b| b.text.len());
-            if self.nodes.len() >= MAX_STORY_BLOCKS
-                || self.text.saturating_add(bytes) > MAX_STORY_TEXT
-            {
-                self.omitted = true;
-                self.done = true;
-                break;
+        units: usize,
+    ) -> (usize, usize) {
+        let (mut read, mut looked) = (0usize, 0usize);
+        while looked < units && !self.done {
+            let room = units.saturating_sub(looked);
+            if self.walk.is_some() {
+                let (took, saw) = self.walk_step(doc, room);
+                read = read.saturating_add(took);
+                looked = looked.saturating_add(saw);
+                continue;
             }
-            self.text = self.text.saturating_add(bytes);
-            self.nodes.push(node);
-            let unsupported = match doc.block(node).map(|b| b.kind) {
-                Ok(BlockKind::Annotation) => true,
-                Ok(BlockKind::Image) => {
-                    let classes = shared.classes(engine, doc);
-                    classes.owners.contains(&node) || classes.followers.contains(&node)
+            let Some(node) = self.queue.pop_front() else {
+                if self.top_done {
+                    self.done = true;
+                    break;
                 }
-                _ => false,
+                let mut out = Vec::new();
+                let before = self.top.remaining();
+                self.top_done = doc.read_children(&mut self.top, room, &mut out);
+                looked = looked.saturating_add(before.saturating_sub(self.top.remaining()));
+                self.queue.extend(out);
+                continue;
             };
-            let table = match doc.table_role(node) {
-                Ok(Some(role @ reprise_doc::TableRole::Table(_))) => Some(Table {
-                    role: Some(role),
-                    parts: table_parts(doc, node),
-                }),
-                _ => None,
-            };
-            self.items.push(Item {
-                inputs: crate::incremental::Inputs::read(doc, node),
-                unsupported,
-                table,
-            });
-            self.at = self.at.saturating_add(1);
-            read += 1;
+            read = read.saturating_add(self.take(shared, engine, doc, node));
         }
-        if self.at >= self.all.len() {
+        if self.top_done && self.queue.is_empty() && self.walk.is_none() {
             self.done = true;
         }
-        read
+        (read, looked)
     }
+
+    /// Takes the next top-level block, or cuts the story before it. Returns the
+    /// blocks taken now (a table is taken when it has been read).
+    fn take(&mut self, shared: &Shared, engine: &Engine, doc: &Document, node: NodeId) -> usize {
+        let bytes = doc.block(node).map_or(0, |b| b.text.len());
+        if self.blocks >= MAX_STORY_BLOCKS || self.text.saturating_add(bytes) > MAX_STORY_TEXT {
+            self.cut();
+            return 0;
+        }
+        let unsupported = match doc.block(node).map(|b| b.kind) {
+            Ok(BlockKind::Annotation) => true,
+            Ok(BlockKind::Image) => {
+                let classes = shared.classes(engine, doc);
+                classes.owners.contains(&node) || classes.followers.contains(&node)
+            }
+            _ => false,
+        };
+        let inputs = crate::incremental::Inputs::read(doc, node);
+        if let Ok(Some(role @ reprise_doc::TableRole::Table(_))) = doc.table_role(node) {
+            self.walk = Some(Walk {
+                node,
+                item: Item {
+                    inputs,
+                    unsupported,
+                    table: Some(Table {
+                        role: Some(role),
+                        parts: Vec::new(),
+                    }),
+                },
+                levels: vec![Level {
+                    parent: node,
+                    depth: 0,
+                    reader: doc.children_reader(node),
+                }],
+                blocks: 1,
+                text: bytes,
+            });
+            return 0;
+        }
+        self.nodes.push(node);
+        self.items.push(Item {
+            inputs,
+            unsupported,
+            table: None,
+        });
+        self.blocks = self.blocks.saturating_add(1);
+        self.text = self.text.saturating_add(bytes);
+        1
+    }
+
+    /// Reads on in the table being read, looking at up to `room` child IDs.
+    fn walk_step(&mut self, doc: &Document, room: usize) -> (usize, usize) {
+        use reprise_doc::TableRole;
+        let Some(mut walk) = self.walk.take() else {
+            return (0, 0);
+        };
+        let Some(level) = walk.levels.last_mut() else {
+            // Every level is read: the table is taken whole.
+            let taken = walk.blocks;
+            self.nodes.push(walk.node);
+            self.items.push(walk.item);
+            self.blocks = self.blocks.saturating_add(walk.blocks);
+            self.text = self.text.saturating_add(walk.text);
+            return (taken, 0);
+        };
+        let (parent, depth) = (level.parent, level.depth);
+        let mut out = Vec::new();
+        let before = level.reader.remaining();
+        let exhausted = doc.read_children(&mut level.reader, room, &mut out);
+        let saw = before.saturating_sub(level.reader.remaining());
+        if exhausted {
+            walk.levels.pop();
+        }
+        let mut deeper = Vec::new();
+        for node in out {
+            let bytes = doc.block(node).map_or(0, |b| b.text.len());
+            if self.blocks.saturating_add(walk.blocks) >= MAX_STORY_BLOCKS
+                || self.text.saturating_add(walk.text).saturating_add(bytes) > MAX_STORY_TEXT
+            {
+                // The table does not fit what is left of the story: the story
+                // is cut before it, and none of its cells is ever prepared.
+                self.cut();
+                return (0, saw);
+            }
+            walk.blocks = walk.blocks.saturating_add(1);
+            walk.text = walk.text.saturating_add(bytes);
+            let (role, malformed) = role_of_node(doc, node);
+            let enter = matches!(
+                (depth, &role),
+                (0, Some(TableRole::Row(_))) | (1, Some(TableRole::Cell(_)))
+            );
+            if enter {
+                deeper.push(Level {
+                    parent: node,
+                    depth: depth + 1,
+                    reader: doc.children_reader(node),
+                });
+            }
+            if let Some(table) = walk.item.table.as_mut() {
+                table.parts.push(Part {
+                    node,
+                    parent,
+                    role,
+                    malformed,
+                    inputs: crate::incremental::Inputs::read(doc, node),
+                });
+            }
+        }
+        // The first row's cells before the second row.
+        walk.levels.extend(deeper.into_iter().rev());
+        self.walk = Some(walk);
+        (0, saw)
+    }
+
+    /// The story is cut here: what is past a read limit is not composed.
+    fn cut(&mut self) {
+        self.omitted = true;
+        self.done = true;
+        self.walk = None;
+        self.queue.clear();
+    }
+
     fn finish(self) -> Digest {
         Digest {
             nodes: self.nodes,
