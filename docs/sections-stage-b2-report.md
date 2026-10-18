@@ -414,17 +414,26 @@ the `validation_fork` change.
 The brief's reference times on idle main, debug: `incremental.rs` about 235 s,
 `incremental_fuzz.rs` about 52 s, `incremental_steps` about 40 s.
 
-| Suite (wall seconds) | Before merging 0d8d296 (isolated, 85% load) | Merged head, isolated | Merged head inside the full gate |
-| --- | --- | --- | --- |
-| `incremental` | 218 | 454 | 407 |
-| `incremental_fuzz` | 25 | 46 | 41 |
-| `incremental_steps` | 50 | 100 (89 on a rerun) | 68 |
+Other agents were building on this machine during every run here (CPU 46-100%,
+and the G: disk queue near 15 earlier on), so wall times are not comparable with
+the idle reference: the same unchanged layout unit tests took 57 s alone and
+322 s inside the gate. So main `0d8d296` was exported with `git archive`, built
+in its own target, and its three test binaries were run back-to-back with this
+head's, same machine, same minutes (`F:/reprise-target/b2-logs/ab.txt`; all six
+runs passed):
 
-Other agents were building on this machine for all of these runs, with the CPU
-at 82-100% and the G: disk queue near 15 earlier on. The same unchanged
-layout unit tests took 57 s alone and 322 s inside the gate, so wall times here
-move by up to a factor of five with load. CPU time is steadier: on the rerun
-`incremental_fuzz` used 50 s of CPU (wall 74 s) and `incremental_steps` used
-198 s (its tests run in parallel; wall 89 s). A same-load baseline of main
-`0d8d296` built from a source export is being measured; its result is the
-paragraph below, and until it is there these numbers are not a finding either way.
+| Suite | main 0d8d296 wall / CPU | sections 71adaba wall / CPU | Difference |
+| --- | --- | --- | --- |
+| `incremental` (15 tests) | 439.8 s / 510.9 s | 462.7 s / 563.1 s | +5% wall, +10% CPU |
+| `incremental_fuzz` (1) | 39.5 s / 37.6 s | 46.1 s / 44.5 s | +17% wall, +18% CPU |
+| `incremental_steps` (5) | 79.6 s / 177.2 s | 87.1 s / 199.2 s | +9% wall, +12% CPU |
+
+Under this load main itself takes 440 s for `incremental`, not 235 s, so the
+idle references cannot be used directly. Against main in the same conditions
+this head is 5-17% slower in these three suites and nowhere near several times
+slower. The likely cost is the read recording on every memoised transition
+(frame address, provenance and field values per read), which replaces cloning
+the whole plan into the key, for every document with feedback; the regions
+outcome check adds to it only for a document with running regions.
+Earlier isolated runs of this tree at lower load (before the second merge)
+gave 218 s, 25 s and 50 s wall. I did not bisect the 5-17%.
