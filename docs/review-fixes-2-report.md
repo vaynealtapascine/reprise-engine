@@ -4,7 +4,7 @@ Verification is in progress. This checkpoint records implemented changes and mea
 
 ## Summary
 
-Decisions 07 and 29: annotation refusals preserve history and undo; segmented restore hints retain annotation identity through undo. Decisions 33 and 35: copied annotations retain both endpoints, and atom PDF links retain geometry and tags. Decisions 34 and 37: bounded root discovery and deep history codecs avoid native/WASM stack exhaustion. Decision 38: ordered index lookups and work-count guards preserve deterministic output while removing repeated scans.
+Decisions 07 and 29: annotation refusals preserve history and undo; segmented restore hints retain annotation identity through undo. Decisions 33 and 35: copied annotations retain both endpoints, and atom PDF links retain geometry and tags. Decisions 34 and 37: bounded root discovery and deep history codecs avoid native/WASM stack exhaustion. Decision 08: explicit per-reference context preserves historical style meaning through identity joins, while cheap ownership checks avoid decoding properties during authoring. Decision 38: ordered index lookups and work-count guards preserve deterministic output while removing repeated scans.
 
 ## Findings
 
@@ -12,7 +12,7 @@ Decisions 07 and 29: annotation refusals preserve history and undo; segmented re
 | --- | --- | --- | --- |
 | R1 / N1, blocker | Model target overlay and exhaustive command/step trial selection. | `annotation_target_deletions_are_atomic_in_additions_and_updates`; matching-revision facade refusal retains redo. | Base `plan.rs` makes the history/revision/undo assertion fail (exit 101). |
 | R2, blocker | Shared bounded named-root check; vendored root emptiness and iterative history codecs. | Native `deep_metadata`, depths 1,024/4,096; hidden hostile goldens; executable 1 MiB WASM smoke. | Verified by targeted reversal; see negative-control logs below. |
-| R3 | Add optional final portable endpoint; remap it with one range/comment identity. | Clipboard selected-later/whole-copy coverage 10/16 bytes; facade import-copy link and comment coverage. | Verified by targeted reversal; see negative-control logs below. |
+| R3 | Add optional final portable endpoint; remap it with one range/comment identity. | Clipboard selected-later/whole-copy coverage 10/16 bytes; facade import-copy link and comment coverage; disjoint and boundary-touching partial-copy slices. | Verified by targeted reversal; see negative-control logs below. |
 | R4 | One restore hint per visible segment; each endpoint restores in its own host. | `undo_annotations_after_deleted_atom` repeats undo/redo and merges a concurrent payload edit; copied-end regression. | Both verified: omitting gap hints moves 1..3 to rebound 2..4; the copied-end regression failed before its fix (0..4 rebound versus 0..3). |
 | R5 | Wrap atom Figure/text inside Link/Reference with placed rectangle and contents. | `pdf_links_over_atoms_in_lists`: authored rectangle count must equal emitted/tagged PDF links, image and field. | Verified by targeted reversal; see negative-control logs below. |
 | R6 | Inclusive end interval vector once per host, binary endpoint lookup, one cached document order for cross-host spans. | Work-count tests for 32/256 paragraphs and 40/240 hosts; existing boundary/hidden-segment parity test. | Verified by targeted reversal; see negative-control logs below. |
@@ -66,7 +66,7 @@ pub struct FragmentRange {
 
 Proposed contracts wording: `FragmentRange.node/bytes` remains the first-piece compatibility view. An absent `end` encodes byte-identically to existing fragment JSON. A present `end` names the final copied paragraph and its UTF-8 endpoint; all intermediate selected paragraphs belong to the same retained range identity. Validation and paste remap both endpoints and internal links that target the range. Older strict fragment readers refuse the additional field. This affects native clipboard producers/consumers and document-copy callers; it adds no layout-coordinate storage.
 
-The implemented allocation is package bit 20 / sync bit 6 (`range-endpoints1`) for retained `end-node1`. Explicit style-context migration requires package bit 21 / sync bit 7 (`style-reference-contexts2`), marked by `styles2.reference-contexts2 = "1"`. Bit 19 remains free for sections. New readers preserve the old global interpretation of encoded owner references until migration; migration pins the historical built-ins and then opts owner references into explicit interpretation. Older readers must refuse the new declaration. Unknown required bits already refuse at the existing package/packet boundary; tests also strip each new sync declaration and verify byte-identical history on refusal.
+The user-approved allocation is package bit 20 / sync bit 6 (`range-endpoints1`) for retained `end-node1`. Explicit style-context migration requires package bit 21 / sync bit 7 (`style-reference-contexts2`), marked by `styles2.reference-contexts2 = "1"`. Bit 19 remains free for sections. New readers preserve the old global interpretation of encoded owner references until migration; migration pins the historical built-ins and then opts owner references into explicit interpretation. Older readers must refuse the new declaration. Unknown required bits already refuse at the existing package/packet boundary; tests also strip each new sync declaration and verify byte-identical history on refusal.
 
 Exact replacement proposed for the final frozen historical-context paragraph in `docs/contracts.md`: `Required sync feature legacy-builtins1 (bit 5) declares the sender's historical built-in interpretation and may coexist with style-identities1 (bit 4). A receiver pins each side's affected retained references during isolated preflight, then publishes those migration operations outside user undo. Existing unrelated unmarked references retain their original-owner fallback. The reference-contexts2 marker opts encoded owner references into explicit interpretation; package bit 21 and sync bit 7 require aware readers. Old identity histories without the marker retain their earlier interpretation.` The earlier wording excluded receivers with identities and prohibited combined declarations; that is exactly the policy that N3's authorized repair needs to replace. The frozen contract file is left for the orchestrator's dedicated contract update; this report makes the behavioral extension explicit.
 
@@ -141,7 +141,7 @@ The earlier implementation's annotation overlay/trials, portable endpoint shape,
 
 ## Known limits and hand-off
 
-History snapshots, metadata queries and physical hidden-depth fixtures are covered at 4,096 levels. State has its existing 1,024 live-depth limit. A fully live deep tree still incurs repeated ancestor walks in existing readers/layout; the 4,096 live fixture tests the History codec, while State/save/WASM use hidden chains. Shallow snapshots still recursively build nested tree values and are outside this patch's depth guarantee. These are explicit remaining depth/complexity limits, not claims of an unrestricted deep document model. The vendor patch should be removed only after verifying equivalent upstream behavior.
+History snapshots, metadata queries and physical hidden-depth fixtures are covered at 4,096 levels. State has its existing 1,024 live-depth limit. A fully live deep tree still incurs repeated ancestor walks in existing readers/layout; the 4,096 live fixture tests the History codec, while State/save/WASM use hidden chains. Shallow snapshots still recursively build nested tree values and are outside this patch's depth guarantee. These are explicit remaining depth/complexity limits, not claims of an unrestricted deep document model. The vendor patch should be removed only after verifying equivalent upstream behavior. The parallel sections stream must add its command variants to the exhaustive trial selector and use the shared bounded root check; package bit 19 is left available for it.
 
 ## Verification
 
@@ -153,6 +153,7 @@ Negative-control logs on G:, each original restored afterward:
 | --- | --- |
 | `fixes2-negative-R1.log` | Base `plan.rs`: history/revision/undo refusal assertion fails. |
 | `fixes2-negative-N2.log` | Getter before existence guard: history/refusal assertion fails. |
+| `fixes2-negative-copy-clipping.log` | Eager clipping subtraction panics on a disjoint partial copy; fixed by rejecting non-overlap before checked subtraction. |
 | `fixes2-negative-R3.log` | Final endpoint omitted: copied link coverage `[10, 6]`, expected `[10, 16]`. |
 | `fixes2-negative-R4.log` | Contiguity early return restored: span is rebound `2..4`, expected `1..3`. |
 | `fixes2-negative-R5.log` | Atom annotation shortcut restored: zero links, expected one. |
@@ -167,12 +168,65 @@ Negative-control logs on G:, each original restored afterward:
 
 Assertion controls exit 101. The valid stack-abort control propagated exit 127 through the Windows timeout wrapper. An earlier R2 control had a line-ending compile error; it is discarded, not counted as evidence. The corrected control compiled successfully and produced the stack-abort evidence above.
 
-The full gate is running after the main merge. Type generation, 1 MiB WASM build, both wasm-bindgen targets (0.2.129), strict TypeScript and worker compilation (tsc 5.3.2), executable Node/worker smoke including both deep packages, formatting, Clippy with warnings denied, and the nine-crate WASM check plus fuzz harness have passed. Generated declarations are unchanged. The full native workspace run remains in progress; final commands, exit codes and verbatim tails follow below when complete.
+The first complete post-marker gate passed every generation, WASM, TypeScript,
+smoke, formatting and Clippy step. Its workspace run found three failing
+cross-crate fuzz oracles with the same new R3 defect: eager `then_some`
+subtracted an annotation's earlier endpoint from a later partial-copy start even
+when the overlap predicate was false. All other targets passed. Logs are
+retained as `G:/tmp/fixes2-gate-preclip-*.log`, and this failed run is not counted
+as a successful final gate. Commit `670b460` rejects non-overlap before checked
+subtraction; its focused regression reproduced the original runtime overflow
+(exit 101). The focused regression passes, and all five cross-crate tests pass (`G:/tmp/fixes2-corpus-fixed.log`, 57.80 s). The full gate is being rerun after this correction with the compiler-cache wrapper disabled; output remains in the assigned G: target directories.
 
 
 A final compatibility audit found that deleting a version-marker scalar must not
 clear its required declaration while the corresponding operations remain in
 history. Commit `b5bb750` uses Loro's retained last-editor metadata for both new
 features and preserves the style declaration in fresh graph copies. The new
-History/Shallow/framed regression and rerun of the full gate are pending; earlier
-gate results above apply to the preceding source checkpoint.
+`deleted_version_markers_keep_their_declarations_and_round_trip` regression passes
+for History/Shallow reopen, framed sync and fresh graph copies. Reverting the
+retained-metadata check makes it fail (exit 101,
+`G:/tmp/fixes2-negative-retained-marker.log`). The full gate is being rerun against
+the committed production source after the clipping correction, `670b460`.
+
+
+## Validated commit boundary
+
+The final gate targets production HEAD `670b460`, after the authorized merge of
+main `0d8d296`. Only this report is edited while that source is checked. The
+following is `git log --oneline main..670b460`; documentation-only checkpoint/finalization commits may
+follow this list.
+
+```text
+670b460 fix(clipboard): clip annotation pieces before subtracting byte offsets
+bbaea45 docs: checkpoint complete file inventory and retained-marker follow-up
+b5bb750 fix(format): retain new format declarations after marker deletion
+b2f7a28 docs: record negative controls and versioned compatibility proposals
+17a09aa style(loro): format the isolated tree replay patch
+0625eca fix(styles): version explicit context migration and retain old encoded references
+d748da3 test(fixtures): record hidden 1024 and 4096 depth goldens
+ca9f190 fix(format): require endpoint-aware readers for portable cross-host ranges
+5b3dc6f Merge engine main documentation before review fixes verification
+3788e2a test(clipboard): keep internal range targets across copied paragraphs
+25ec2ca docs: checkpoint review fixes evidence and remaining verification
+4e3fda0 test(wasm): run deep metadata packages with a 1 MiB stack in CI
+40c9ede fix(doc): restore copied range ends in their own text host
+280183f test(styles): cover historical identity roots and undo across joins
+d68f7cd fix(loro): preserve pending undo through unchanged tree replay
+10b59e2 perf(styles): avoid property resolution during authoring and duplicate reference reads
+d2b985a test(perf): retain repeatable review phase measurements
+624b304 perf(doc): build cross-host annotation order once and count index work
+c9fd96c test(doc): bound deep fixture construction and exercise history round trips
+1322076 fix(loro): bound deep tree snapshot traversal and decoding
+fcb3a97 test(edit): read the nested export content bytes in the matching-revision refusal test
+25bf3d1 fix(styles): pin historical references before joining identity metadata
+b87c4f4 test(edit): cover matching revision annotation refusal and retained redo
+d3f5fb5 fix(edit): exhaustively select preflight and keep missing annotation reads pure
+9d8ffa0 test(doc): exercise metadata on 1024 and 4096 deep trees
+9478c4b fix(doc): bound root discovery independently of tree depth
+d818990 fix(clipboard): retain cross-paragraph annotation endpoints
+b52a88a fix(pdf): retain authored links around inline atoms
+3f5e0a7 perf(doc): resolve annotation endpoints with ordered host intervals
+573e29e fix(doc): retain annotation restore hints across hidden marker gaps
+d8eb32e fix(edit): preflight annotation writes against transaction targets
+```
