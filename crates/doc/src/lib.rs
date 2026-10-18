@@ -613,6 +613,23 @@ impl Document {
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
+        let (mut block, reference) = self.block_parts(id)?;
+        block.style = reference.map(|r| self.public_reference(r));
+        Ok(block)
+    }
+
+    /// Read a block and its opaque resolution reference from the same metadata
+    /// lookup. Layout consumers can keep identity without fetching it again.
+    pub fn block_with_style_reference(
+        &self,
+        id: NodeId,
+    ) -> Result<(Block, Option<String>), DocError> {
+        let (mut block, raw) = self.block_parts(id)?;
+        block.style = raw.clone().map(|r| self.public_reference(r));
+        Ok((block, raw.and_then(|r| self.resolve_style_reference(r))))
+    }
+
+    fn block_parts(&self, id: NodeId) -> Result<(Block, Option<String>), DocError> {
         if !self.is_live(id) {
             return Err(DocError::NoNode(id));
         }
@@ -637,13 +654,16 @@ impl Document {
         };
         self.read_mark_patches(id, &mut overrides);
         self.read_para_patches(id, &mut overrides);
-        Ok(Block {
-            id,
-            kind,
-            style: get_str(&meta, "style").map(|reference| self.reference_label(&reference)),
-            overrides: self.public_style(overrides),
-            text,
-        })
+        Ok((
+            Block {
+                id,
+                kind,
+                style: None,
+                overrides: self.public_style(overrides),
+                text,
+            },
+            Self::read_style_reference(&meta),
+        ))
     }
 
     /// Sets the name of a block's style. Does not commit.
@@ -721,7 +741,8 @@ impl Document {
 
     /// Stage 1 (08): the layers of a block's style, as authored.
     pub fn specified_style(&self, id: NodeId) -> Result<Specified, DocError> {
-        Ok(style::specify(self, &self.block(id)?))
+        let (block, reference) = self.block_with_style_reference(id)?;
+        Ok(style::specify_parts(self, reference, &block.overrides))
     }
 
     /// Creates a persistent range over part of a block's text.

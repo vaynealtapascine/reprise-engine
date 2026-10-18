@@ -664,3 +664,43 @@ fn historical_builtin_join_preserves_each_sides_context_and_undo() {
         }
     }
 }
+
+#[test]
+fn ordinary_authoring_does_not_resolve_style_properties_to_detect_builtins() {
+    for identities in [false, true] {
+        let doc = Document::new(1).unwrap();
+        if identities {
+            doc.define_named_style("body", &Style::default()).unwrap();
+        } else {
+            doc.define_style("body", &Style::default()).unwrap();
+        }
+        doc.commit();
+        crate::style::take_record_reads();
+        for _ in 0..100 {
+            doc.append_block(BlockKind::Paragraph, "body", "text")
+                .unwrap();
+        }
+        assert_eq!(
+            crate::style::take_record_reads(),
+            0,
+            "authoring inspected full style records only to decide whether the name is builtin"
+        );
+    }
+}
+
+#[test]
+fn style_resolution_reads_each_block_reference_once() {
+    let doc = Document::new(1).unwrap();
+    let node = doc
+        .append_block(BlockKind::Paragraph, "Heading 1", "heading")
+        .unwrap();
+    doc.commit();
+    crate::style_identity::take_reference_reads();
+    for _ in 0..100 {
+        assert_eq!(doc.computed_style(node).unwrap().size, Length::from_pt(20));
+    }
+    assert_eq!(crate::style_identity::take_reference_reads(), 100);
+    let (block, reference) = doc.block_with_style_reference(node).unwrap();
+    assert_eq!(block.style.as_deref(), Some("Heading 1"));
+    assert_eq!(reference, doc.style_reference(node));
+}

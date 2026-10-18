@@ -132,6 +132,13 @@ fn nested_map(map: &LoroMap, key: &str) -> Option<LoroMap> {
     }
 }
 
+#[cfg(test)]
+thread_local! { static RECORD_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn take_record_reads() -> usize {
+    RECORD_READS.with(|n| n.replace(0))
+}
+
 impl Document {
     /// Whether a root exists, without creating it. Presence includes an
     /// emptied root, whose operations stay in history.
@@ -163,7 +170,20 @@ impl Document {
         Some(record)
     }
 
+    /// Whether this owner's base is builtin, without decoding its properties.
+    pub(crate) fn is_builtin_owner(&self, name: &str) -> bool {
+        super::BUILTIN_STYLES.contains(&name)
+            && self.nested_style(name).is_none()
+            && self
+                .flat_styles()
+                .and_then(|map| get_str(&map, &key("state", name)))
+                .as_deref()
+                != Some("defined")
+    }
+
     pub(crate) fn raw_style_record(&self, name: &str, allow_builtin: bool) -> Option<StyleRecord> {
+        #[cfg(test)]
+        RECORD_READS.with(|n| n.set(n.get().saturating_add(1)));
         let nested = self.nested_style(name);
         let flat = self.flat_styles();
         let state = flat.as_ref().and_then(|m| get_str(m, &key("state", name)));

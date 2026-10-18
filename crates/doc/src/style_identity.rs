@@ -93,6 +93,13 @@ fn decode(reference: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+#[cfg(test)]
+thread_local! { static REFERENCE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn take_reference_reads() -> usize {
+    REFERENCE_READS.with(|n| n.replace(0))
+}
+
 impl Document {
     fn identity_root(&self) -> Option<ValueOrContainer> {
         use std::sync::atomic::Ordering;
@@ -366,7 +373,10 @@ impl Document {
     /// The underlying block reference for resolution/copy/incremental keys.
     /// Plain legacy strings bind to their original owner, not a reused alias.
     pub fn style_reference(&self, node: NodeId) -> Option<String> {
-        let raw = get_str(&self.meta_of(node).ok()?, "style")?;
+        self.resolve_style_reference(Self::read_style_reference(&self.meta_of(node).ok()?)?)
+    }
+
+    pub(crate) fn resolve_style_reference(&self, raw: String) -> Option<String> {
         if !self.has_style_identities()
             && !crate::BUILTIN_STYLES.contains(&raw.as_str())
             && !raw.starts_with(ID_PREFIX)
@@ -390,6 +400,22 @@ impl Document {
         )
     }
 
+    pub(crate) fn public_reference(&self, reference: String) -> String {
+        if !reference.starts_with(ID_PREFIX)
+            && !reference.starts_with(BUILTIN_PREFIX)
+            && !self.has_style_identities()
+        {
+            return reference;
+        }
+        self.reference_label(&reference)
+    }
+
+    pub(crate) fn read_style_reference(meta: &LoroMap) -> Option<String> {
+        #[cfg(test)]
+        REFERENCE_READS.with(|n| n.set(n.get().saturating_add(1)));
+        get_str(meta, "style")
+    }
+
     pub(crate) fn reference_label(&self, reference: &str) -> String {
         if let Some(name) = reference.strip_prefix(BUILTIN_PREFIX) {
             return self.owner_label(name);
@@ -408,10 +434,7 @@ impl Document {
             return Ok(name.to_owned());
         }
         let owner = self.style_owner(name);
-        if self
-            .raw_style_record(&owner, true)
-            .is_some_and(|record| record.builtin)
-        {
+        if self.is_builtin_owner(&owner) {
             self.author_style_identities()?;
             return Ok(format!("{BUILTIN_PREFIX}{owner}"));
         }
