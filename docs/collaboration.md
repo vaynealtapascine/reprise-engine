@@ -552,6 +552,9 @@ that already has stable identities keeps its own interpretation. Native merge
 applies the same adoption policy.
 
 
+**Reserved:** required sync bit 8 (`replay-quarantine1`) for the replay quarantine
+(slice X in the frames design, with package bit 23). No sender may set it yet.
+
 Review-fixes-2 packet extensions: required bit 6 (`range-endpoints1`) declares
 retained distinct-host range endpoints; bit 7 (`style-reference-contexts2`)
 declares explicit interpretation after historical-context migration. Each
