@@ -1,6 +1,6 @@
 # Review fixes 2
 
-Verification is in progress. This checkpoint records implemented changes and measured evidence; the final gate results will replace this paragraph.
+All required checks pass on production source `670b460`, after merging main `0d8d296`. The final native workspace run passed 1,367 tests across 142 result groups, with zero failures and two intentional ignores. Final status includes a successful workspace retry after a Windows incremental-cache write error; details and verbatim command tails are below.
 
 ## Summary
 
@@ -13,7 +13,7 @@ Decisions 07 and 29: annotation refusals preserve history and undo; segmented re
 | R1 / N1, blocker | Model target overlay and exhaustive command/step trial selection. | `annotation_target_deletions_are_atomic_in_additions_and_updates`; matching-revision facade refusal retains redo. | Base `plan.rs` makes the history/revision/undo assertion fail (exit 101). |
 | R2, blocker | Shared bounded named-root check; vendored root emptiness and iterative history codecs. | Native `deep_metadata`, depths 1,024/4,096; hidden hostile goldens; executable 1 MiB WASM smoke. | Verified by targeted reversal; see negative-control logs below. |
 | R3 | Add optional final portable endpoint; remap it with one range/comment identity. | Clipboard selected-later/whole-copy coverage 10/16 bytes; facade import-copy link and comment coverage; disjoint and boundary-touching partial-copy slices. | Verified by targeted reversal; see negative-control logs below. |
-| R4 | One restore hint per visible segment; each endpoint restores in its own host. | `undo_annotations_after_deleted_atom` repeats undo/redo and merges a concurrent payload edit; copied-end regression. | Both verified: omitting gap hints moves 1..3 to rebound 2..4; the copied-end regression failed before its fix (0..4 rebound versus 0..3). |
+| R4 | Record hints over visible endpoint segments; each endpoint restores in its own host. | `undo_annotations_after_deleted_atom` repeats undo/redo and merges a concurrent payload edit; copied-end regression. | Both verified: omitting gap hints moves 1..3 to rebound 2..4; the copied-end regression failed before its fix (0..4 rebound versus 0..3). |
 | R5 | Wrap atom Figure/text inside Link/Reference with placed rectangle and contents. | `pdf_links_over_atoms_in_lists`: authored rectangle count must equal emitted/tagged PDF links, image and field. | Verified by targeted reversal; see negative-control logs below. |
 | R6 | Inclusive end interval vector once per host, binary endpoint lookup, one cached document order for cross-host spans. | Work-count tests for 32/256 paragraphs and 40/240 hosts; existing boundary/hidden-segment parity test. | Verified by targeted reversal; see negative-control logs below. |
 | N2 | Check ranges-root presence before acquiring its creating tree handle. | Missing remove/update compares exported History bytes, revision and undo/redo. | Getter-before-guard control fails history assertion (exit 101). |
@@ -24,14 +24,14 @@ Decisions 07 and 29: annotation refusals preserve history and undo; segmented re
 
 Debug phase timings in seconds at 10,000 paragraphs; minimum of three runs for each column. Construction is excluded from the other phases. `block10` reads 100,000 blocks; `styles3` computes 30,000 styles. The retained ignored test uses the review's phase source. The control is the review's separately compiled `4131ec8` executable; before/after executables were copied out before subsequent builds could replace them.
 
-| Phase | 4131ec8 control | This branch before style optimization | After style optimization |
+| Phase | 4131ec8 control | This branch before style optimization | Final source `670b460` |
 | --- | ---: | ---: | ---: |
-| Construct | 1.4075641 | 2.3231422 | 1.0175484 |
-| Block reads | 4.4938257 | 4.3008137 | 2.8411226 |
-| Styles | 5.1902428 | 5.2805529 | 3.6036930 |
-| Layout | 32.5084644 | 28.4993678 | 21.5989138 |
+| Construct | 1.4075641 | 2.3231422 | 1.0885279 |
+| Block reads | 4.4938257 | 4.3008137 | 3.5081820 |
+| Styles | 5.1902428 | 5.2805529 | 4.3389564 |
+| Layout | 32.5084644 | 28.4993678 | 26.2608948 |
 
-Logs: `G:/tmp/fixes2-perf-{baseline,before,after}-{1,2,3}.log`. Other agents share CPU; these are local debug measurements, not release or WASM latency claims. Phase and logical-work instrumentation identified unnecessary property resolution during ordinary authoring and duplicate metadata lookup during style/layout input reads. No sampled CPU profile was collected. The original 2.3–2.6× read regression did not reproduce after the root fixes; the remaining construction slowdown did. The deterministic work guards establish the removed work independently of wall-clock noise.
+Logs: `G:/tmp/fixes2-perf-{baseline,before}-{1,2,3}.log` and `G:/tmp/fixes2-perf-final-{1,2,3}.log`. The final column was freshly rebuilt after the full check and run three times from the separate `G:/reprise-target/eng-fixes2/perf-final.exe`; SHA-256 `65ac51b744439f5187b33ffe6bc9a17ef0e2a5c4407b908d9c2d6701bb70c71d`. Per-run values and minima are retained in `G:/reprise-target/eng-fixes2/perf-final-minima.json`. Other agents share CPU; these are local debug measurements, not release or WASM latency claims. Phase and logical-work instrumentation identified unnecessary property resolution during ordinary authoring and duplicate metadata lookup during style/layout input reads. No sampled CPU profile was collected. The original 2.3–2.6× read regression did not reproduce after the root fixes; the remaining construction slowdown did. The deterministic work guards establish the removed work independently of wall-clock noise.
 
 ## Preflight command audit
 
@@ -143,6 +143,8 @@ The earlier implementation's annotation overlay/trials, portable endpoint shape,
 
 History snapshots, metadata queries and physical hidden-depth fixtures are covered at 4,096 levels. State has its existing 1,024 live-depth limit. A fully live deep tree still incurs repeated ancestor walks in existing readers/layout; the 4,096 live fixture tests the History codec, while State/save/WASM use hidden chains. Shallow snapshots still recursively build nested tree values and are outside this patch's depth guarantee. These are explicit remaining depth/complexity limits, not claims of an unrestricted deep document model. The vendor patch should be removed only after verifying equivalent upstream behavior. The parallel sections stream must add its command variants to the exhaustive trial selector and use the shared bounded root check; package bit 19 is left available for it.
 
+Restore-hint safety limits remain eight hints per range, 16 KiB of serialized hints, and 4,096 affected ranges per hint pass. Identity/lineage and digest mismatches do not authorize reattachment; this fix does not relax those bounds.
+
 ## Verification
 
 Targeted restored-source runs: all 315 document unit tests passed in 36.62 s; all 25 format unit tests passed in 0.34 s; all 17 clipboard annotation tests passed in 3.58 s. Both deep hostile layouts passed in 1.69 s; the all-fixture content-display check passed in 9.89 s and recorded only the two missing content goldens.
@@ -176,7 +178,7 @@ when the overlap predicate was false. All other targets passed. Logs are
 retained as `G:/tmp/fixes2-gate-preclip-*.log`, and this failed run is not counted
 as a successful final gate. Commit `670b460` rejects non-overlap before checked
 subtraction; its focused regression reproduced the original runtime overflow
-(exit 101). The focused regression passes, and all five cross-crate tests pass (`G:/tmp/fixes2-corpus-fixed.log`, 57.80 s). The full gate is being rerun after this correction with the compiler-cache wrapper disabled; output remains in the assigned G: target directories.
+(exit 101). The focused regression passes, and all five cross-crate tests pass (`G:/tmp/fixes2-corpus-fixed.log`, 57.80 s). All required checks subsequently passed with the compiler-cache wrapper disabled; output remained in the assigned G: target directories.
 
 
 A final compatibility audit found that deleting a version-marker scalar must not
@@ -186,18 +188,19 @@ features and preserves the style declaration in fresh graph copies. The new
 `deleted_version_markers_keep_their_declarations_and_round_trip` regression passes
 for History/Shallow reopen, framed sync and fresh graph copies. Reverting the
 retained-metadata check makes it fail (exit 101,
-`G:/tmp/fixes2-negative-retained-marker.log`). The full gate is being rerun against
-the committed production source after the clipping correction, `670b460`.
+`G:/tmp/fixes2-negative-retained-marker.log`). The completed checks cover the committed production source after the clipping
+correction, `670b460`.
 
 
 ## Validated commit boundary
 
-The final gate targets production HEAD `670b460`, after the authorized merge of
-main `0d8d296`. Only this report is edited while that source is checked. The
-following is `git log --oneline main..670b460`; documentation-only checkpoint/finalization commits may
-follow this list.
+Production source is `670b460`, after the authorized merge of main `0d8d296`.
+Documentation checkpoint `3c01727` and this finalization change no executable
+source. The following is `git log --oneline main..3c01727`; the final report-only
+commit follows this list.
 
 ```text
+3c01727 docs: checkpoint final-source clipping regression and corpus evidence
 670b460 fix(clipboard): clip annotation pieces before subtracting byte offsets
 bbaea45 docs: checkpoint complete file inventory and retained-marker follow-up
 b5bb750 fix(format): retain new format declarations after marker deletion
@@ -230,3 +233,92 @@ b52a88a fix(pdf): retain authored links around inline atoms
 573e29e fix(doc): retain annotation restore hints across hidden marker gaps
 d8eb32e fix(edit): preflight annotation writes against transaction targets
 ```
+
+## Completed full check
+
+All commands below completed with exit 0 on Windows/MSVC and Node WASM.
+`TMP=TEMP=G:/tmp`, `RUSTC_WRAPPER` was empty, native output was
+`G:/reprise-target/eng-fixes2`, and WASM output was
+`G:/reprise-target/eng-fixes2-wasm`. In the commands, `T` and `W` name those
+two output directories. Each step used the timeout shown; logs are
+`G:/tmp/fixes2-gate-<step>.log`.
+
+| Step | Timeout (s) | Command | Exit |
+| --- | ---: | --- | ---: |
+| types | 900 | `cargo run -q -p reprise --example generate_types` | 0 |
+| deep-native | 900 | `env REPRISE_DEEP_FIXTURES=$T/deep-fixtures cargo test -p reprise --test deep_metadata` | 0 |
+| wasm-build | 1800 | `env RUSTFLAGS='-C link-arg=-zstack-size=1048576' CARGO_TARGET_DIR=$W cargo build --target wasm32-unknown-unknown -p reprise-wasm` | 0 |
+| bindgen-web | 300 | `wasm-bindgen $W/wasm32-unknown-unknown/debug/reprise_wasm.wasm --target web --typescript --out-dir $T/pkg-web` | 0 |
+| bindgen-node | 300 | `wasm-bindgen $W/wasm32-unknown-unknown/debug/reprise_wasm.wasm --target nodejs --typescript --out-dir $T/pkg-node` | 0 |
+| tsc | 180 | `tsc -p crates/reprise-wasm/ts/tsconfig.json` | 0 |
+| tsc-worker | 180 | `tsc -p crates/reprise-wasm/ts/tsconfig.json --noEmit false --module commonjs --moduleResolution node --outDir $T/worker-cjs` | 0 |
+| smoke | 900 | `node crates/reprise-wasm/ts/smoke.cjs $T/pkg-node $T/deep-fixtures` | 0 |
+| worker-smoke | 300 | `node crates/reprise-wasm/ts/worker-smoke.cjs $T/pkg-node $T/worker-cjs/worker.js` | 0 |
+| fmt-write | 180 | `cargo fmt --all` | 0 |
+| fmt | 180 | `cargo fmt --all -- --check` | 0 |
+| clippy | 1800 | `cargo clippy --workspace --all-targets -- -D warnings` | 0 |
+| wasm-check | 1800 | `env RUSTFLAGS='-C link-arg=-zstack-size=1048576' CARGO_TARGET_DIR=$W cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm -p reprise-fuzz-harness` | 0 |
+| workspace | 3600 | `cargo test --workspace --no-fail-fast` | 0 |
+
+The web declaration was copied back as required; both generated declaration
+files remain unchanged. Node smoke executed the 1,024/4,096 packages in the
+1 MiB-stack build, and worker smoke passed. No existing snapshot changed.
+
+The first native build on this source encountered Windows error 3 while writing
+`images` incremental dependency/query-cache files. Its log and result summary
+are preserved as `G:/tmp/fixes2-gate-cache-failure-workspace.log` and
+`fixes2-gate-cache-failure-results.txt`. The failed cache directory was absent
+after compiler exit. Retrying the same workspace command with unchanged source
+succeeded; the final result summary records that retry. This is separate from
+the earlier R3 source failure, which is documented above.
+
+The final workspace total is 1,367 passed, zero failed, two ignored, in 142 result
+groups. The ignored tests are `export_geometry_previews` (writes inspection
+artifacts) and `phase_timing` (run separately for the performance measurements).
+Linux/macOS, release/WASM timing, sampled CPU profiling and the upstream Loro
+crate's own full suite were not run here.
+
+Verbatim tails of the four required commands:
+
+`cargo fmt --all`: output empty, exit 0.
+
+`cargo clippy --workspace --all-targets -- -D warnings`:
+
+```text
+    Checking reprise v0.1.0 (F:\reprise-wt\eng-fixes2\crates\reprise)
+    Checking reprise-fuzz-harness v0.0.0 (F:\reprise-wt\eng-fixes2\crates\fuzz-harness)
+    Checking reprise-wasm v0.1.0 (F:\reprise-wt\eng-fixes2\crates\reprise-wasm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 59.87s
+```
+
+`cargo test --workspace --no-fail-fast`:
+
+```text
+
+   Doc-tests reprise_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+```
+
+`cargo check --target wasm32-unknown-unknown (full crate list above)`:
+
+```text
+    Checking reprise v0.1.0 (F:\reprise-wt\eng-fixes2\crates\reprise)
+    Checking reprise-fuzz-harness v0.0.0 (F:\reprise-wt\eng-fixes2\crates\fuzz-harness)
+    Checking reprise-wasm v0.1.0 (F:\reprise-wt\eng-fixes2\crates\reprise-wasm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 50.59s
+```
+
+Native fixture/incremental elapsed times from this run (single-run evidence;
+not isolated performance ratios):
+
+| Binary | Result |
+| --- | --- |
+| `Running tests\refusal_atomicity.rs` | test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 40.67s |
+| `Running tests\hostile.rs` | test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.41s |
+| `Running tests\incremental.rs` | test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 236.75s |
+| `Running tests\incremental_fuzz.rs` | test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.46s |
+| `Running tests\incremental_steps.rs` | test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 45.28s |
