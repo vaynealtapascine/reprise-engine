@@ -336,3 +336,21 @@ mod reference_context_tests {
         Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED).unwrap();
     }
 }
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// SPEC.md's registry: bits 17 (sections) and 20 and 21 are assigned,
+    /// 19 and 22 are reserved for frames and no reader may assign them a
+    /// meaning, so a package that sets either is refused.
+    #[test]
+    fn known_required_holds_the_assigned_bits_and_neither_reserved_one() {
+        let assigned: u64 = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21]
+            .iter()
+            .fold(0, |mask, bit| mask | (1 << bit));
+        assert_eq!(KNOWN_REQUIRED, assigned);
+        assert_eq!(REQUIRED_SECTIONS, 1 << 17);
+        assert_eq!(KNOWN_REQUIRED & ((1 << 19) | (1 << 22)), 0);
+    }
+}
