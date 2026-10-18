@@ -3533,27 +3533,20 @@ pub fn inline_fields_with_oscillating_regions() -> Result<Fixture, DocError> {
 /// keeps the rendering goldens compact.
 fn metadata_depth(depth: usize, name: &'static str) -> Result<Fixture, DocError> {
     let doc = document()?;
-    let mut parent = None;
-    let mut root = None;
-    for _ in 0..depth {
-        let node = doc.insert_block_at(
-            parent,
-            0,
-            &reprise_doc::NewBlock {
-                kind: BlockKind::Paragraph,
-                style: String::new(),
-                text: String::new(),
-                overrides: Style::default(),
-            },
-        )?;
-        if root.is_none() {
-            root = Some(node);
-        }
-        parent = Some(node);
+    let new = reprise_doc::NewBlock {
+        kind: BlockKind::Paragraph,
+        style: String::new(),
+        text: String::new(),
+        overrides: Style::default(),
+    };
+    // Leaf first: each edit touches only a shallow live ancestor chain.
+    let mut root = doc.insert_block_at(None, 0, &new)?;
+    for _ in 1..depth {
+        let above = doc.insert_block_at(None, 0, &new)?;
+        doc.move_block(root, Some(above), 0)?;
+        root = above;
     }
-    if let Some(root) = root {
-        doc.delete_block(root)?;
-    }
+    doc.delete_block(root)?;
     doc.append_block(BlockKind::Paragraph, "body", "Deep metadata stays bounded.")?;
     doc.commit();
     Ok(Fixture::new(name, doc, &[]))
