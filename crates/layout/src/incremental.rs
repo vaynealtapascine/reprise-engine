@@ -155,6 +155,9 @@ pub struct WorkCounters {
     /// Running-region compositions the flow made itself because the look-ahead
     /// had not: zero when the scheduling units cover every page (sections §11).
     pub running_inline: usize,
+    /// Deep comparisons of a story's digest with a cached one (the pointer
+    /// fast path is not one).
+    pub running_digest_compares: usize,
 }
 /// The work one [`LayoutJob::step`] did, as counters (never time). Hosts and
 /// tests use it to check the per-step bounds in `docs/incremental.md`.
@@ -1282,6 +1285,7 @@ impl<'engine> LayoutSession<'engine> {
         let running = self.evaluation.running();
         (counters.running_compositions, counters.running_reused) = running.counts();
         counters.running_inline = running.inline_count();
+        counters.running_digest_compares = running.digest_compares();
         counters
     }
     /// Lends the session an executor for pure preparation tasks (see

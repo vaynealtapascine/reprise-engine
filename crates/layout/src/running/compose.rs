@@ -97,26 +97,44 @@ pub(crate) struct Digest {
     omitted: bool,
 }
 
-/// A digest compared by identity first: pages of one layout share it.
+impl Digest {
+    /// Whether two digests hold the same inputs. Reads all of both.
+    fn same_as(&self, other: &Digest) -> bool {
+        self.nodes == other.nodes && self.omitted == other.omitted && self.items == other.items
+    }
+}
+
+/// A digest compared by identity first: pages of one layout share it. Entries
+/// of an earlier job hold that job's digest; [`Shared::find`] swaps in the
+/// current job's the first time the two are found equal, so each cached
+/// composition costs one comparison of contents per job.
 #[derive(Clone, Debug)]
 pub(crate) struct DigestRef(Rc<Digest>);
 impl Eq for DigestRef {}
 impl PartialEq for DigestRef {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-            || (self.0.nodes == other.0.nodes
-                && self.0.omitted == other.0.omitted
-                && self.0.items == other.0.items)
+        Rc::ptr_eq(&self.0, &other.0) || self.0.same_as(&other.0)
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct Key {
-    digest: DigestRef,
     slot: SlotId,
     width: Length,
     depth: Length,
     page: (Length, Length),
+    /// Last: the fields above are cheap to compare, this one is not.
+    digest: DigestRef,
+}
+
+impl Key {
+    /// Everything but the digest.
+    fn same_request(&self, other: &Key) -> bool {
+        self.slot == other.slot
+            && self.width == other.width
+            && self.depth == other.depth
+            && self.page == other.page
+    }
 }
 
 #[derive(Clone)]
@@ -132,6 +150,8 @@ struct Memo {
     /// Valid within one job: the document cannot change under it.
     digests: BTreeMap<NodeId, Rc<Digest>>,
     classes: Option<Rc<Classes>>,
+    /// Digests compared by contents this job: the pointer fast path is not one.
+    compares: usize,
     compositions: usize,
     reused: usize,
     /// Compositions a stepped flow had to make itself, because the look-ahead
@@ -480,6 +500,7 @@ impl Shared {
         let mut memo = self.memo.borrow_mut();
         memo.digests.clear();
         memo.classes = None;
+        memo.compares = 0;
         memo.compositions = 0;
         memo.reused = 0;
         memo.inline = 0;
@@ -488,6 +509,10 @@ impl Shared {
     pub fn clear(&self) {
         *self.memo.borrow_mut() = Memo::default();
         self.prepared.clear();
+    }
+    /// Digests compared by contents since the job began, for `WorkCounters`.
+    pub fn digest_compares(&self) -> usize {
+        self.memo.borrow().compares
     }
     /// Compositions made and reused, for tests and `WorkCounters`.
     pub fn counts(&self) -> (usize, usize) {
@@ -527,16 +552,43 @@ impl Shared {
         digest
     }
 
+    /// The cached composition for `key`, if what it read still holds.
+    ///
+    /// The cheap parts of a key are compared before its digest. An entry of an
+    /// earlier job whose digest has the same contents as this job's takes this
+    /// job's digest in place, so the pages after the first find it by pointer
+    /// and the contents are never compared twice; one whose digest differs can
+    /// not serve this job and is dropped.
     fn find(&self, key: &Key, request: &Request<'_>) -> Option<Rc<Composed>> {
-        self.memo
-            .borrow()
-            .entries
-            .get(&request.story)
-            .and_then(|v| {
-                v.iter()
-                    .find(|e| e.key == *key && still_valid(e, request))
-                    .map(|e| e.composed.clone())
-            })
+        let mut memo = self.memo.borrow_mut();
+        let Memo {
+            entries, compares, ..
+        } = &mut *memo;
+        let list = entries.get_mut(&request.story)?;
+        let mut found = None;
+        let mut stale = Vec::new();
+        for (i, entry) in list.iter_mut().enumerate() {
+            if !entry.key.same_request(key) {
+                continue;
+            }
+            if !Rc::ptr_eq(&entry.key.digest.0, &key.digest.0) {
+                *compares = compares.saturating_add(1);
+                if entry.key.digest.0.same_as(&key.digest.0) {
+                    entry.key.digest = key.digest.clone();
+                } else {
+                    stale.push(i);
+                    continue;
+                }
+            }
+            if still_valid(entry, request) {
+                found = Some(entry.composed.clone());
+                break;
+            }
+        }
+        for i in stale.into_iter().rev() {
+            list.remove(i);
+        }
+        found
     }
 
     fn store(&self, key: Key, story: NodeId, page: usize, composed: Rc<Composed>) {
@@ -642,11 +694,11 @@ impl Shared {
 impl Key {
     fn of(digest: &Rc<Digest>, want: &Want) -> Self {
         Key {
-            digest: DigestRef(digest.clone()),
             slot: want.slot,
             width: want.width,
             depth: want.depth,
             page: want.page_size,
+            digest: DigestRef(digest.clone()),
         }
     }
 }
