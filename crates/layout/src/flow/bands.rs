@@ -228,72 +228,87 @@ impl Cursor {
                 1,
             );
         }
+        let start = self.queued_node.take().or(start);
+        // A stepped job makes a page's regions before the unit that makes the
+        // page, in units of their own (`flow/ahead.rs`).
+        if self.regions() {
+            match self.gate(engine, doc, plan, snapshot, evaluation, start, allowance) {
+                ahead::Gate::Proceed => {}
+                ahead::Gate::Working(units) => {
+                    self.queued_node = start;
+                    return (self, units);
+                }
+                ahead::Gate::FirstPage => {
+                    let mut flow = self.restore(engine, doc, template, snapshot, plan, evaluation);
+                    flow.first_pending = false;
+                    flow.new_page();
+                    let mut cursor = flow.cursor();
+                    cursor.queued_node = start;
+                    return (cursor, 1);
+                }
+            }
+        }
         if self.band_start.is_none() {
             self.checkpoint(snapshot);
         }
-        let start = self.queued_node.take().or(start);
-        if self.active.is_none()
-            && let Some(node) = start
-            && self.boundary_node != Some(node)
-            && self
-                .section_table
-                .as_ref()
-                .is_some_and(|s| s.enabled && s.starts.contains_key(&node))
+        if let Some(node) = start
+            && self.starts_a_transition(node)
         {
             self.queued_node = Some(node);
-            if !self.open_band
-                && self.continuous(node).is_some()
-                && let Some(previous) = self.previous
-                && doc
-                    .specified_style(previous)
-                    .is_ok_and(|s| s.compute(&engine.functions).keep_with_next)
-            {
-                snapshot.diagnostics.push(Diagnostic::new(
-                    Severity::Warning,
-                    codes::KEEP_UNSATISFIED,
-                    Subject::Node(previous),
-                    "manual boundary overrides keep-with-next",
-                ));
-            }
-            if !self.open_band
-                && let Some(section) = self.continuous(node)
-            {
-                let bands = snapshot
-                    .sections
-                    .as_ref()
-                    .and_then(|s| s.pages.get(self.page))
-                    .map_or(0, |p| p.bands.len());
-                if self.compatible(section, snapshot) && bands < MAX_BANDS {
-                    let mut measurable = true;
-                    if let Some(checkpoint) = self.band_start.clone() {
-                        let extent = checkpoint
-                            .cursor
-                            .band_axis(&checkpoint.header)
-                            .and_then(|axis| checkpoint.cursor.band_extent(&axis));
-                        measurable = extent.is_some();
-                        let full = extent.unwrap_or_default();
-                        if full > Length::ZERO
-                            && fit(
-                                snapshot,
-                                &checkpoint,
-                                full,
-                                (checkpoint.diagnostics, checkpoint.blocks),
-                            )
-                        {
-                            self.balance = Some(Box::new(Balance {
-                                checkpoint,
-                                nodes: Arc::new(std::mem::take(&mut self.band_nodes)),
-                                endpoint: node,
-                                lo: 1,
-                                hi: full.0,
-                                trials: 0,
-                                kept: None,
-                                trial: None,
-                            }));
-                            return (self, 1);
+            if self.pre_done != Some(node) {
+                if !self.open_band
+                    && self.continuous(node).is_some()
+                    && let Some(previous) = self.previous
+                    && doc
+                        .specified_style(previous)
+                        .is_ok_and(|s| s.compute(&engine.functions).keep_with_next)
+                {
+                    snapshot.diagnostics.push(Diagnostic::new(
+                        Severity::Warning,
+                        codes::KEEP_UNSATISFIED,
+                        Subject::Node(previous),
+                        "manual boundary overrides keep-with-next",
+                    ));
+                }
+                if !self.open_band
+                    && let Some(section) = self.continuous(node)
+                {
+                    let bands = snapshot
+                        .sections
+                        .as_ref()
+                        .and_then(|s| s.pages.get(self.page))
+                        .map_or(0, |p| p.bands.len());
+                    if self.compatible(section, snapshot) && bands < MAX_BANDS {
+                        let mut measurable = true;
+                        if let Some(checkpoint) = self.band_start.clone() {
+                            let extent = checkpoint
+                                .cursor
+                                .band_axis(&checkpoint.header)
+                                .and_then(|axis| checkpoint.cursor.band_extent(&axis));
+                            measurable = extent.is_some();
+                            let full = extent.unwrap_or_default();
+                            if full > Length::ZERO
+                                && fit(
+                                    snapshot,
+                                    &checkpoint,
+                                    full,
+                                    (checkpoint.diagnostics, checkpoint.blocks),
+                                )
+                            {
+                                self.balance = Some(Box::new(Balance {
+                                    checkpoint,
+                                    nodes: Arc::new(std::mem::take(&mut self.band_nodes)),
+                                    endpoint: node,
+                                    lo: 1,
+                                    hi: full.0,
+                                    trials: 0,
+                                    kept: None,
+                                    trial: None,
+                                }));
+                                return (self, 1);
+                            }
                         }
-                    }
-                    snapshot.diagnostics.push(crate::sections::diagnostic(
+                        snapshot.diagnostics.push(crate::sections::diagnostic(
                         section.id(),
                         "start",
                         "section.continuous-new-page",
@@ -304,30 +319,46 @@ impl Cursor {
                             "a frame of the band is rotated, scaled or flipped against its block axis; not balanced, kept at full depth"
                         },
                     ));
-                } else {
-                    snapshot.diagnostics.push(crate::sections::diagnostic(
-                        section.id(),
-                        "start",
-                        if bands >= MAX_BANDS {
-                            "section.band-limit"
-                        } else {
-                            "section.continuous-new-page"
-                        },
-                        Severity::Warning,
-                        if bands >= MAX_BANDS {
-                            "at most 32 bands share one page"
-                        } else {
-                            "page size, writing mode or template differs from the page owner"
-                        },
-                    ));
+                    } else {
+                        snapshot.diagnostics.push(crate::sections::diagnostic(
+                            section.id(),
+                            "start",
+                            if bands >= MAX_BANDS {
+                                "section.band-limit"
+                            } else {
+                                "section.continuous-new-page"
+                            },
+                            Severity::Warning,
+                            if bands >= MAX_BANDS {
+                                "at most 32 bands share one page"
+                            } else {
+                                "page size, writing mode or template differs from the page owner"
+                            },
+                        ));
+                    }
                 }
+            }
+            // The page this start makes first needs its regions.
+            if self.regions()
+                && let Some(probe) = self.transition_probe(snapshot, node)
+                && let ahead::Looked::Working(units) =
+                    self.look(engine, doc, plan, snapshot, evaluation, allowance, probe)
+            {
+                self.pre_done = Some(node);
+                return (self, units);
             }
             let before = (self.page, self.band, self.section);
             let checkpoint = self.band_start.take();
             let nodes = std::mem::take(&mut self.band_nodes);
             let mut flow = self.restore(engine, doc, template, snapshot, plan, evaluation);
+            flow.pre_done = None;
             flow.transition(doc, node);
+            let split = flow.split;
             let mut cursor = flow.cursor();
+            if split {
+                // Only the filler is made; the start goes on next unit.
+                cursor.pre_done = Some(node);
+            }
             cursor.queued_node = Some(node);
             if before != (cursor.page, cursor.band, cursor.section) {
                 cursor.checkpoint(snapshot);
@@ -348,6 +379,17 @@ impl Cursor {
         );
         cursor.band_start = checkpoint;
         cursor.band_nodes = nodes;
+        if let Some(need) = cursor.wanted.take() {
+            // The block could not start without the regions of a page: wait
+            // for them. It starts again, from the top, once they are made.
+            if cursor.stall.as_ref() == Some(&need) {
+                cursor.no_wait = true;
+            } else {
+                cursor.ahead = Some(Box::new(ahead::Ahead::new(need)));
+            }
+        } else {
+            cursor.no_wait = false;
+        }
         if before != (cursor.page, cursor.band) {
             cursor.checkpoint(snapshot);
         }

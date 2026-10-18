@@ -152,6 +152,9 @@ pub struct WorkCounters {
     /// Running-region compositions made, and reused from the running memo.
     pub running_compositions: usize,
     pub running_reused: usize,
+    /// Running-region compositions the flow made itself because the look-ahead
+    /// had not: zero when the scheduling units cover every page (sections §11).
+    pub running_inline: usize,
 }
 /// The work one [`LayoutJob::step`] did, as counters (never time). Hosts and
 /// tests use it to check the per-step bounds in `docs/incremental.md`.
@@ -180,6 +183,36 @@ pub struct StepWork {
     pub relations: usize,
     /// Paragraphs prepared speculatively ahead of the cursor.
     pub prefetched: usize,
+    /// Pages the flow made.
+    pub pages_made: usize,
+    /// Running-region look-ahead: units charged, story blocks started, and
+    /// story blocks read to make a digest.
+    pub region_units: usize,
+    pub region_blocks: usize,
+    pub digest_blocks: usize,
+}
+impl StepWork {
+    /// Adds `other`'s work to this one's.
+    pub(crate) fn absorb(&mut self, other: &StepWork) {
+        self.units = self.units.saturating_add(other.units);
+        self.adapter_requests = self.adapter_requests.saturating_add(other.adapter_requests);
+        self.shaped_bytes = self.shaped_bytes.saturating_add(other.shaped_bytes);
+        self.largest_request = self.largest_request.max(other.largest_request);
+        self.composer_calls = self.composer_calls.saturating_add(other.composer_calls);
+        self.composed_lines = self.composed_lines.saturating_add(other.composed_lines);
+        self.scanned_bytes = self.scanned_bytes.saturating_add(other.scanned_bytes);
+        self.largest_scan = self.largest_scan.max(other.largest_scan);
+        self.table_rows = self.table_rows.saturating_add(other.table_rows);
+        self.region_placements = self
+            .region_placements
+            .saturating_add(other.region_placements);
+        self.relations = self.relations.saturating_add(other.relations);
+        self.prefetched = self.prefetched.saturating_add(other.prefetched);
+        self.pages_made = self.pages_made.saturating_add(other.pages_made);
+        self.region_units = self.region_units.saturating_add(other.region_units);
+        self.region_blocks = self.region_blocks.saturating_add(other.region_blocks);
+        self.digest_blocks = self.digest_blocks.saturating_add(other.digest_blocks);
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Inputs {
@@ -593,6 +626,10 @@ impl Evaluation {
     pub(crate) fn work(&self, f: impl FnOnce(&mut StepWork)) {
         f(&mut self.cache.borrow_mut().work);
     }
+    /// The work counted since the last call, which starts again from zero.
+    pub(crate) fn take_work(&self) -> StepWork {
+        std::mem::take(&mut self.cache.borrow_mut().work)
+    }
     pub(crate) fn scanned(&self, bytes: usize) {
         self.work(|w| {
             w.scanned_bytes = w.scanned_bytes.saturating_add(bytes);
@@ -927,6 +964,7 @@ impl Evaluation {
             },
         );
     }
+    #[allow(clippy::too_many_arguments)]
     fn allocate(
         &self,
         engine: &Engine,
@@ -935,6 +973,7 @@ impl Evaluation {
         snapshot: &LayoutSnapshot,
         sections: &crate::sections::Table,
         previous: &Plan,
+        collect: Option<&RefCell<Vec<crate::running::compose::Need>>>,
     ) -> Plan {
         let mut key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
         key.fields = previous.fields.clone();
@@ -948,10 +987,6 @@ impl Evaluation {
         {
             return plan;
         }
-        {
-            let mut cache = self.cache.borrow_mut();
-            cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
-        }
         let running = self.running();
         let plan = crate::regions::allocate_with_sections(
             engine,
@@ -962,8 +997,16 @@ impl Evaluation {
             sections,
             previous,
             &running,
+            collect,
         );
+        // Regions the memo lacked: this plan was made without them, and is
+        // neither kept nor counted. The look-ahead makes them and it is run
+        // again.
+        if collect.is_some_and(|c| !c.borrow().is_empty()) {
+            return plan;
+        }
         let mut cache = self.cache.borrow_mut();
+        cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
         if cache.regions.len() >= 16 {
             cache.regions.remove(0);
         }
@@ -1103,6 +1146,10 @@ impl Evaluation {
     }
 }
 
+/// Times a region allocation is run for nothing but to find the regions of
+/// the pages it makes, before it composes them itself.
+const MAX_REGION_ROUNDS: usize = 64;
+
 /// Short paragraphs prepared together, speculatively, at a block start (one
 /// current block plus up to this many minus one following blocks).
 pub const PREFETCH_BLOCKS: usize = 8;
@@ -1228,8 +1275,9 @@ impl<'engine> LayoutSession<'engine> {
     }
     pub fn counters(&self) -> WorkCounters {
         let mut counters = self.evaluation.cache.borrow().counters.clone();
-        (counters.running_compositions, counters.running_reused) =
-            self.evaluation.running().counts();
+        let running = self.evaluation.running();
+        (counters.running_compositions, counters.running_reused) = running.counts();
+        counters.running_inline = running.inline_count();
         counters
     }
     /// Lends the session an executor for pure preparation tasks (see
@@ -1294,6 +1342,9 @@ pub struct LayoutJob<'job, 'engine> {
     pass: Pass,
     cancelled: bool,
     terminal: Rc<Cell<Option<JobError>>>,
+    /// The regions of a page the allocation made, being made (sections §11).
+    region_ahead: Option<Box<crate::flow::ahead::Ahead>>,
+    region_rounds: usize,
 }
 impl<'job, 'engine> LayoutJob<'job, 'engine> {
     fn new(
@@ -1331,7 +1382,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         base.diagnostics.extend(sections.diagnostics.clone());
         let mut snapshot = base.clone();
         let plan = Plan::default();
-        let cursor = Cursor::new_with_sections(
+        let cursor = Cursor::new_stepped(
             engine,
             doc,
             &template,
@@ -1363,6 +1414,8 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             pass: Pass::Flow,
             cancelled: false,
             terminal: Rc::new(Cell::new(None)),
+            region_ahead: None,
+            region_rounds: 0,
         }
     }
     pub fn revision(&self) -> &Revision {
@@ -1411,6 +1464,8 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         let was_ready = self.viewport_ready();
         let mut used = 0usize;
         self.session.evaluation.cache.borrow_mut().work = StepWork::default();
+        // What the stories' own preparation did is counted with the step.
+        self.session.evaluation.running().take_work();
         while used < budget && self.pass != Pass::Complete {
             let engine = self.session.engine;
             let mut charged = 1usize;
@@ -1442,16 +1497,32 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             self.cursor = Some(cursor);
                             charged = units;
                         }
-                    } else {
-                        if let Some(cursor) = self.cursor.take() {
-                            self.pending = cursor.finish(
-                                engine,
-                                self.doc,
-                                &self.template,
-                                &mut self.snapshot,
-                                &self.plan,
-                            );
+                    } else if let Some(cursor) = self.cursor.take() {
+                        // The pages the plan asks for, past the last the
+                        // text reached: one a unit, regions first.
+                        match cursor.finish_unit(
+                            engine,
+                            self.doc,
+                            &self.template,
+                            &mut self.snapshot,
+                            &self.plan,
+                            Some(&self.session.evaluation),
+                            budget.saturating_sub(used),
+                        ) {
+                            Ok((cursor, units)) => {
+                                self.cursor = Some(cursor);
+                                charged = units;
+                            }
+                            Err(pending) => {
+                                self.pending = pending;
+                                self.pass = if self.active {
+                                    Pass::RegionFeedback
+                                } else {
+                                    Pass::Relations
+                                };
+                            }
                         }
+                    } else {
                         self.pass = if self.active {
                             Pass::RegionFeedback
                         } else {
@@ -1460,6 +1531,31 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                     }
                 }
                 Pass::RegionFeedback => {
+                    if let Some(mut ahead) = self.region_ahead.take() {
+                        // The regions of a page the allocation made: a unit
+                        // at a time, then the allocation is run again.
+                        let running = self.session.evaluation.running();
+                        let (units, done) = ahead.step(
+                            &running,
+                            engine,
+                            self.doc,
+                            &self.plan,
+                            Some(&self.session.evaluation),
+                            budget.saturating_sub(used),
+                        );
+                        charged = units.max(1);
+                        if !done {
+                            self.region_ahead = Some(ahead);
+                        }
+                        used = used.saturating_add(charged);
+                        {
+                            let mut cache = self.session.evaluation.cache.borrow_mut();
+                            cache.counters.units = cache.counters.units.saturating_add(charged);
+                            cache.work.units = cache.work.units.saturating_add(charged);
+                        }
+                        continue;
+                    }
+                    let collected = RefCell::new(Vec::new());
                     let next = self.session.evaluation.allocate(
                         engine,
                         self.doc,
@@ -1467,14 +1563,27 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &self.snapshot,
                         &self.sections,
                         &self.plan,
+                        (self.region_rounds < MAX_REGION_ROUNDS).then_some(&collected),
                     );
+                    if let Some(need) = collected.into_inner().into_iter().next() {
+                        self.region_rounds = self.region_rounds.saturating_add(1);
+                        self.region_ahead = Some(Box::new(crate::flow::ahead::Ahead::new(need)));
+                        used = used.saturating_add(charged);
+                        {
+                            let mut cache = self.session.evaluation.cache.borrow_mut();
+                            cache.counters.units = cache.counters.units.saturating_add(charged);
+                            cache.work.units = cache.work.units.saturating_add(charged);
+                        }
+                        continue;
+                    }
+                    self.region_rounds = 0;
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
                     if outcome == crate::regions::Feedback::Continue {
                         self.history.push(std::mem::replace(&mut self.plan, next));
                         self.iteration = self.iteration.saturating_add(1);
                         self.snapshot = self.base.clone();
-                        self.cursor = Some(Cursor::new_with_sections(
+                        self.cursor = Some(Cursor::new_stepped(
                             engine,
                             self.doc,
                             &self.template,
@@ -1572,6 +1681,10 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             if !was_ready && self.viewport_ready() {
                 break;
             }
+        }
+        {
+            let running = self.session.evaluation.running().take_work();
+            self.session.evaluation.work(|w| w.absorb(&running));
         }
         self.current()?;
         Ok(Step {
@@ -1839,6 +1952,8 @@ pub struct LayoutContinuation {
     pass: Pass,
     cancelled: bool,
     terminal: Rc<Cell<Option<JobError>>>,
+    region_ahead: Option<Box<crate::flow::ahead::Ahead>>,
+    region_rounds: usize,
 }
 impl<'engine> LayoutSession<'engine> {
     pub fn from_cache(engine: &'engine Engine, cache: LayoutCache) -> Self {
@@ -1885,6 +2000,8 @@ impl<'engine> LayoutSession<'engine> {
             pass: state.pass,
             cancelled: state.cancelled,
             terminal: state.terminal,
+            region_ahead: state.region_ahead,
+            region_rounds: state.region_rounds,
         })
     }
 }
@@ -1911,6 +2028,8 @@ impl LayoutJob<'_, '_> {
             pass: self.pass,
             cancelled: self.cancelled,
             terminal: self.terminal,
+            region_ahead: self.region_ahead,
+            region_rounds: self.region_rounds,
         }
     }
 }

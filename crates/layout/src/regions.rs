@@ -195,7 +195,7 @@ pub(crate) fn run(
             return snapshot;
         }
         let next = allocate_with_sections(
-            engine, doc, template, &snapshot, None, &sections, &plan, &running,
+            engine, doc, template, &snapshot, None, &sections, &plan, &running, None,
         );
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
@@ -295,6 +295,7 @@ pub(crate) fn allocate(
         &sections,
         &previous,
         &crate::running::compose::Shared::default(),
+        None,
     )
 }
 
@@ -308,6 +309,7 @@ pub(crate) fn allocate_with_sections(
     sections: &crate::sections::Table,
     previous: &Plan,
     running: &crate::running::compose::Shared,
+    collect: Option<&std::cell::RefCell<Vec<crate::running::compose::Need>>>,
 ) -> Plan {
     let fields = &previous.fields;
     let ctx = (sections.enabled && sections.running.any()).then_some(crate::running::attach::Ctx {
@@ -316,6 +318,8 @@ pub(crate) fn allocate_with_sections(
         plan: previous,
         shared: running,
         filler_regions: false,
+        stepped: evaluation.is_some(),
+        collect,
     });
     let mut scratch = flowed.clone();
     let mut out = Plan::default();

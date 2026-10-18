@@ -26,6 +26,7 @@ use reprise_shape::{
     reorder_line, visual_order,
 };
 
+pub(crate) mod ahead;
 pub(crate) mod bands;
 mod keeps;
 pub(crate) mod paragraph;
@@ -136,6 +137,22 @@ pub(crate) struct Cursor {
     running: Option<std::rc::Rc<crate::running::compose::Shared>>,
     /// Set for the cursor that composes a running region's story.
     fields: Option<FieldContext>,
+    /// The cursor of a stepped job: the regions of a page are made by the
+    /// look-ahead, a unit at a time, before the unit that makes the page.
+    stepped: bool,
+    /// A stepped job has not made the first page yet: its regions come first.
+    first_pending: bool,
+    /// The look-ahead in progress (`flow/ahead.rs`).
+    ahead: Option<Box<ahead::Ahead>>,
+    /// The section start whose pre-transition work is done and which is only
+    /// waiting for its pages' regions.
+    pre_done: Option<NodeId>,
+    /// What the unit just run could not go on without; the caller makes it.
+    wanted: Option<crate::running::compose::Need>,
+    /// The last thing the look-ahead made. Asked for again at once, it was
+    /// made and cannot be found: the flow stops waiting and goes without.
+    stall: Option<crate::running::compose::Need>,
+    no_wait: bool,
 }
 
 /// The field environment of a cursor that composes something other than the
@@ -158,6 +175,7 @@ fn running_ctx<'x>(
     engine: &'x Engine,
     doc: &'x Document,
     plan: &'x Plan,
+    stepped: bool,
 ) -> Option<crate::running::attach::Ctx<'x>> {
     let shared = running.as_deref()?;
     (table.enabled && table.running.any()).then_some(crate::running::attach::Ctx {
@@ -166,6 +184,8 @@ fn running_ctx<'x>(
         plan,
         shared,
         filler_regions: false,
+        stepped,
+        collect: None,
     })
 }
 
@@ -258,6 +278,12 @@ impl TableStep {
 /// Rows a table prepares in one unit, at most.
 pub const TABLE_ROW_GROUP: usize = 16;
 
+/// The most pages a memoised transition may have made for a stepped job to
+/// wait for the look-ahead to make their regions. Past it the transition is
+/// redone, so the compositions it needs (three slots a page at most, of which
+/// the memo keeps sixteen a story) are always there together.
+const MAX_WAITED_PAGES: usize = 5;
+
 impl Cursor {
     pub(crate) fn new_with_sections(
         engine: &Engine,
@@ -278,6 +304,32 @@ impl Cursor {
             crate::pages::FrameSource::Paged,
             Some(sections),
             Some(running),
+            false,
+        )
+    }
+    /// As [`Self::new_with_sections`], for a stepped job: when the document
+    /// has running regions, making the first page waits for its regions, which
+    /// the look-ahead makes under the job's budget like any other unit.
+    pub(crate) fn new_stepped(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        sections: std::sync::Arc<crate::sections::Table>,
+        running: std::rc::Rc<crate::running::compose::Shared>,
+    ) -> Self {
+        Self::new_source(
+            engine,
+            doc,
+            template,
+            snapshot,
+            plan,
+            reprise_doc::Domain::Body,
+            crate::pages::FrameSource::Paged,
+            Some(sections),
+            Some(running),
+            true,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -294,7 +346,7 @@ impl Cursor {
         let sections = (domain == reprise_doc::Domain::Body)
             .then(|| crate::sections::Table::resolve(engine, doc, template));
         Self::new_source(
-            engine, doc, template, snapshot, plan, domain, source, sections, None,
+            engine, doc, template, snapshot, plan, domain, source, sections, None, false,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -308,6 +360,7 @@ impl Cursor {
         source: crate::pages::FrameSource,
         section_table: Option<std::sync::Arc<crate::sections::Table>>,
         running: Option<std::rc::Rc<crate::running::compose::Shared>>,
+        stepped: bool,
     ) -> Self {
         let section = section_table.as_ref().map_or(0, |s| s.initial);
         let template = section_table
@@ -370,10 +423,28 @@ impl Cursor {
             boundary_node: None,
             band: 0,
             open_band: false,
+            stepped,
+            first_pending: false,
+            wanted: Default::default(),
+            split: false,
+            ahead: None,
+            pre_done: None,
+            stall: None,
+            no_wait: false,
         };
-        // Even an empty document gets a page.
+        // Even an empty document gets a page. A stepped job with running
+        // regions makes it when its regions are ready.
         if flow.source.can_page() {
-            flow.new_page();
+            if stepped
+                && flow
+                    .section_table
+                    .as_ref()
+                    .is_some_and(|t| t.enabled && t.running.any())
+            {
+                flow.first_pending = true;
+            } else {
+                flow.new_page();
+            }
         } else {
             flow.page = flow
                 .source
@@ -421,7 +492,10 @@ impl Cursor {
     }
     /// A block is in progress.
     pub(crate) fn busy(&self) -> bool {
-        self.active.is_some() || self.balance.is_some() || self.queued_node.is_some()
+        self.active.is_some()
+            || self.balance.is_some()
+            || self.queued_node.is_some()
+            || self.ahead.is_some()
     }
     /// The lines a paragraph in progress has placed so far.
     pub(crate) fn in_progress(&self) -> Option<BlockLayout> {
@@ -552,6 +626,14 @@ impl Cursor {
             boundary_node: self.boundary_node,
             band: self.band,
             open_band: self.open_band,
+            stepped: self.stepped,
+            first_pending: self.first_pending,
+            wanted: Default::default(),
+            split: false,
+            ahead: self.ahead,
+            pre_done: self.pre_done,
+            stall: self.stall,
+            no_wait: self.no_wait,
         }
     }
 }
@@ -611,6 +693,18 @@ pub(crate) struct Flow<'a> {
     boundary_node: Option<NodeId>,
     band: usize,
     open_band: bool,
+    /// As [`Cursor::stepped`].
+    stepped: bool,
+    first_pending: bool,
+    /// What a stepped unit found missing and stopped for.
+    wanted: std::cell::RefCell<Option<crate::running::compose::Need>>,
+    /// A section start made its parity filler and stops there; the content
+    /// page is the next unit's, so the look-ahead can make its regions.
+    split: bool,
+    ahead: Option<Box<ahead::Ahead>>,
+    pre_done: Option<NodeId>,
+    stall: Option<crate::running::compose::Need>,
+    no_wait: bool,
 }
 
 impl Flow<'_> {
@@ -727,8 +821,9 @@ impl Flow<'_> {
                 if parity.is_some_and(|parity| {
                     (self.snapshot.pages.len().saturating_add(1) % 2) != parity
                 }) && table.sections.get(self.section).is_some()
+                {
                     // The filler policy is the requesting (incoming) section's.
-                    && self
+                    if self
                         .open_page(
                             &table,
                             self.section,
@@ -736,9 +831,20 @@ impl Flow<'_> {
                             section.filler_running,
                         )
                         .is_none()
-                {
-                    self.page_limit();
-                    return;
+                    {
+                        self.page_limit();
+                        return;
+                    }
+                    if self.stepped && table.running.any() {
+                        // One page a unit: the content page that follows has
+                        // its own regions, and its number is the filler's plus
+                        // one, so the look-ahead makes them once the filler is
+                        // there. The start is processed again from the top;
+                        // the parity now agrees, so no second filler is made.
+                        self.boundary_node = None;
+                        self.split = true;
+                        return;
+                    }
                 }
                 self.section = next;
                 self.template = section.template.clone();
@@ -957,6 +1063,13 @@ impl Flow<'_> {
             open_band: self.open_band,
             running: self.running,
             fields: self.fields,
+            stepped: self.stepped,
+            first_pending: self.first_pending,
+            ahead: self.ahead,
+            pre_done: self.pre_done,
+            wanted: self.wanted.into_inner(),
+            stall: self.stall,
+            no_wait: self.no_wait,
         }
     }
 
@@ -993,13 +1106,37 @@ impl Flow<'_> {
         let first_owned = crate::running::attach::first_owned(self.snapshot, section.id(), kind);
         let crate::pages::Numbering { label, .. } =
             crate::pages::PageFactory::next_label(table, section, kind, self.snapshot);
-        let ctx = running_ctx(&self.running, table, self.engine, self.doc, self.plan).map(|c| {
-            crate::running::attach::Ctx {
-                filler_regions,
-                ..c
-            }
+        let ctx = running_ctx(
+            &self.running,
+            table,
+            self.engine,
+            self.doc,
+            self.plan,
+            self.stepped,
+        )
+        .map(|c| crate::running::attach::Ctx {
+            filler_regions,
+            ..c
         });
         let regions = ctx.as_ref().and_then(|ctx| {
+            // A stepped job has had the look-ahead make this page's regions:
+            // they come from the memo. A page it did not foresee is made the
+            // slow way, and counted (`running_inline`).
+            if ctx.stepped
+                && let Ok(ready) = crate::running::attach::prepare_ready(
+                    ctx,
+                    table,
+                    index,
+                    section,
+                    page,
+                    kind,
+                    first_owned,
+                    &label,
+                    true,
+                )
+            {
+                return ready;
+            }
             crate::running::attach::prepare(
                 ctx,
                 table,
@@ -1025,7 +1162,7 @@ impl Flow<'_> {
                 outcome: regions.as_ref().map(|r| r.outcome()),
             });
         }
-        crate::pages::PageFactory::push_prepared(
+        let made = crate::pages::PageFactory::push_prepared(
             self.engine,
             table,
             section,
@@ -1033,7 +1170,18 @@ impl Flow<'_> {
             self.snapshot,
             first_owned,
             regions,
-        )
+        );
+        if made.is_some() {
+            self.made_page();
+        }
+        made
+    }
+
+    /// Counts a page made, for the step's work.
+    fn made_page(&self) {
+        if let Some(evaluation) = self.evaluation {
+            evaluation.work(|w| w.pages_made = w.pages_made.saturating_add(1));
+        }
     }
 
     /// Makes the next page from the template, unless the limit is reached.
@@ -1047,7 +1195,12 @@ impl Flow<'_> {
             page_template = self.open_page(&table, self.section, crate::PageKind::Content, false);
             page_template.is_some()
         } else {
-            crate::pages::PageFactory::push(self.engine, &self.template, self.snapshot)
+            let pushed =
+                crate::pages::PageFactory::push(self.engine, &self.template, self.snapshot);
+            if pushed {
+                self.made_page();
+            }
+            pushed
         };
         if !pushed {
             return false;
@@ -1553,7 +1706,32 @@ impl Flow<'_> {
                 let Some(table) = self.section_table.as_ref() else {
                     return false;
                 };
-                match running_ctx(&self.running, table, self.engine, self.doc, self.plan) {
+                match running_ctx(
+                    &self.running,
+                    table,
+                    self.engine,
+                    self.doc,
+                    self.plan,
+                    self.stepped,
+                ) {
+                    Some(ctx) if ctx.stepped => {
+                        match crate::running::attach::outcome_ready(&ctx, table, spec) {
+                            Ok(now) => now.as_ref() == Some(outcome),
+                            Err(need) => {
+                                // The regions of this page are not made yet.
+                                // A transition that spans many pages is not
+                                // worth waiting for: it is simply redone.
+                                let pages = reads
+                                    .iter()
+                                    .filter(|r| matches!(r, crate::reads::PlanRead::Regions { .. }))
+                                    .count();
+                                if !self.no_wait && pages <= MAX_WAITED_PAGES {
+                                    self.wanted.borrow_mut().get_or_insert(need);
+                                }
+                                false
+                            }
+                        }
+                    }
                     Some(ctx) => {
                         crate::running::attach::outcome_of(&ctx, table, spec).as_ref()
                             == Some(outcome)
@@ -1653,7 +1831,14 @@ impl Flow<'_> {
         let Some(table) = self.section_table.clone() else {
             return;
         };
-        let Some(ctx) = running_ctx(&self.running, &table, self.engine, self.doc, self.plan) else {
+        let Some(ctx) = running_ctx(
+            &self.running,
+            &table,
+            self.engine,
+            self.doc,
+            self.plan,
+            self.stepped,
+        ) else {
             return;
         };
         for page in from..self.snapshot.pages.len() {

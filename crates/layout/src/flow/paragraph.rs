@@ -118,7 +118,6 @@ impl Flow<'_> {
     ) -> usize {
         let mut used = 1;
         if !p.started {
-            p.started = true;
             if let Some(evaluation) = self.evaluation.filter(|_| {
                 // A running region is memoised as a whole, by what it read.
                 self.source.single_index().is_none()
@@ -134,12 +133,21 @@ impl Flow<'_> {
                     evaluation.flow_hit(p.node, &key, &|reads| self.reads_hold(reads), self.engine)
                     && self.apply_delta(delta)
                 {
+                    self.wanted.take();
+                    p.started = true;
                     p.finished = true;
+                    return used;
+                }
+                // A stepped job found a memoised transition it can only judge
+                // once the regions of a page it made are: the block has not
+                // started, and starts again when the look-ahead has made them.
+                if self.wanted.borrow().is_some() {
                     return used;
                 }
                 p.memo = Some((key, self.mark()));
                 self.record_from(Vec::new());
             }
+            p.started = true;
             p.ctx = self.paragraph_context();
             p.after = After::Initial;
             self.start_preparation(doc, p);

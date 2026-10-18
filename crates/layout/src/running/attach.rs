@@ -6,7 +6,7 @@
 //! stories, so the factory can do it when it makes the page, and a replay can
 //! do it again and get the same answer.
 
-use super::compose::{self, Composed, Request, Shared};
+use super::compose::{self, Composed, Need, Request, Shared};
 use super::{Budget, PageFacts, Region, SLOTS, SlotId, Variant, role_of, select};
 use crate::regions::Plan;
 use crate::sections::{Section, Table};
@@ -28,6 +28,24 @@ pub(crate) struct Ctx<'a> {
     pub shared: &'a Shared,
     /// Whether a filler page made now shows the owner's regions: the policy
     /// of the section whose start requested it, not of the page's owner.
+    pub filler_regions: bool,
+    /// The caller is a stepped flow: its compositions are made by the
+    /// look-ahead, one unit at a time, before the page that needs them.
+    pub stepped: bool,
+    /// A region allocation that can't stop in the middle collects what the
+    /// memo lacks instead of composing it, so the look-ahead can make it and
+    /// the allocation be run again. What it then plans is thrown away.
+    pub collect: Option<&'a std::cell::RefCell<Vec<Need>>>,
+}
+
+/// A page that is about to be made, as far as its regions are concerned: the
+/// rest (its index, label and whether it is the owner's first) is a function
+/// of the pages made so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PageProbe {
+    /// Index of the owning section in the table.
+    pub section: usize,
+    pub kind: PageKind,
     pub filler_regions: bool,
 }
 
@@ -105,7 +123,8 @@ fn subject_of(section: SectionId) -> Subject {
 
 /// Composes the regions of a page that `section` (index `index` in `table`)
 /// owns. `page` is its 0-based physical index; `first_owned` says whether it
-/// is the section's first content page.
+/// is the section's first content page. A story the memo lacks is composed
+/// here, whole.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     ctx: &Ctx<'_>,
@@ -117,13 +136,109 @@ pub(crate) fn prepare(
     first_owned: bool,
     label: &str,
 ) -> Option<PageRegions> {
-    let bindings = table.running.of(index)?;
+    build(
+        ctx,
+        table,
+        index,
+        section,
+        page,
+        kind,
+        first_owned,
+        label,
+        |request| match ctx.collect {
+            Some(collect) => ctx.shared.lookup(request, false).inspect_err(|need| {
+                collect.borrow_mut().push(need.clone());
+            }),
+            None => Ok(ctx.shared.compose_counted(request, ctx.stepped)),
+        },
+    )
+    .ok()
+    .flatten()
+}
+
+/// As [`prepare`], from the memo alone: what is missing is the `Err`, for the
+/// look-ahead to make. `count` says whether memo hits count as reuse.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_ready(
+    ctx: &Ctx<'_>,
+    table: &Table,
+    index: usize,
+    section: &Section,
+    page: usize,
+    kind: PageKind,
+    first_owned: bool,
+    label: &str,
+    count: bool,
+) -> Result<Option<PageRegions>, Need> {
+    build(
+        ctx,
+        table,
+        index,
+        section,
+        page,
+        kind,
+        first_owned,
+        label,
+        |request| ctx.shared.lookup(request, count),
+    )
+}
+
+/// What `probe`'s page still needs before it can be made from the memo alone.
+pub(crate) fn probe(
+    ctx: &Ctx<'_>,
+    table: &Table,
+    probe: PageProbe,
+    snapshot: &LayoutSnapshot,
+) -> Result<(), Need> {
+    let Some(section) = table.sections.get(probe.section) else {
+        return Ok(());
+    };
+    let page = snapshot.pages.len();
+    // A page past the limit is never made, so its regions are never needed.
+    if page >= ctx.engine.flow.max_pages.max(1) as usize {
+        return Ok(());
+    }
+    let first_owned = first_owned(snapshot, section.id(), probe.kind);
+    let label = crate::pages::PageFactory::next_label(table, section, probe.kind, snapshot).label;
+    let ctx = Ctx {
+        filler_regions: probe.filler_regions,
+        ..*ctx
+    };
+    prepare_ready(
+        &ctx,
+        table,
+        probe.section,
+        section,
+        page,
+        probe.kind,
+        first_owned,
+        &label,
+        false,
+    )
+    .map(|_| ())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build(
+    ctx: &Ctx<'_>,
+    table: &Table,
+    index: usize,
+    section: &Section,
+    page: usize,
+    kind: PageKind,
+    first_owned: bool,
+    label: &str,
+    mut fetch: impl FnMut(&Request<'_>) -> Result<Rc<Composed>, Need>,
+) -> Result<Option<PageRegions>, Need> {
+    let Some(bindings) = table.running.of(index) else {
+        return Ok(None);
+    };
     if !table.running.any() {
-        return None;
+        return Ok(None);
     }
     let filler = kind == PageKind::Filler;
     if filler && !ctx.filler_regions {
-        return None;
+        return Ok(None);
     }
     let facts = PageFacts {
         index: page,
@@ -171,7 +286,7 @@ pub(crate) fn prepare(
             Region::FooterBand => (inline, budget.footer_cap(top)),
             Region::Page => (width, height),
         };
-        let composed = ctx.shared.compose(&Request {
+        let composed = fetch(&Request {
             engine: ctx.engine,
             doc: ctx.doc,
             plan: ctx.plan,
@@ -183,7 +298,7 @@ pub(crate) fn prepare(
             depth: cap,
             page_size: (width, height),
             label,
-        });
+        })?;
         let used = composed.used.min(cap);
         let mut capped = false;
         let depth = match spec.region {
@@ -268,18 +383,55 @@ pub(crate) fn prepare(
         .flatten()
         .map(Arc::new);
     if parts.is_empty() && notes.is_empty() && template.is_none() {
-        return None;
+        return Ok(None);
     }
-    Some(PageRegions {
+    Ok(Some(PageRegions {
         template,
         reserve,
         parts,
         notes,
-    })
+    }))
 }
 
 fn length(v: i64) -> Length {
     super::length(v)
+}
+
+/// What `spec`'s regions come to from the memo alone, for a stepped flow
+/// checking a transition's reads: `Err` is what the look-ahead has yet to make.
+/// The outer `None` is as for [`outcome_of`].
+pub(crate) fn outcome_ready(
+    ctx: &Ctx<'_>,
+    table: &Table,
+    spec: &PageSpec,
+) -> Result<Option<Option<Outcome>>, Need> {
+    let Some(section) = table.get(spec.section) else {
+        return Ok(None);
+    };
+    if section.life() != spec.life {
+        return Ok(None);
+    }
+    let Some(&index) = table.by_id.get(&spec.section) else {
+        return Ok(None);
+    };
+    let ctx = Ctx {
+        filler_regions: spec.filler_regions,
+        ..*ctx
+    };
+    Ok(Some(
+        prepare_ready(
+            &ctx,
+            table,
+            index,
+            section,
+            spec.page,
+            spec.kind,
+            spec.first_owned,
+            &spec.label,
+            true,
+        )?
+        .map(|r| r.outcome()),
+    ))
 }
 
 /// Composes the regions of `spec` again, for a transition that read them. The

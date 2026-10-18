@@ -1005,6 +1005,34 @@ promised unconditionally.
 No unit contains a whole story or a whole search. A budget of 1 still makes
 progress. Cancellation and staleness gates are unchanged.
 
+**As built (S7c): the look-ahead.** A page is made by one unit, and its
+regions are made by units of their own *before* it (`flow/ahead.rs`), the way
+S5's balance trials are. Before any unit that can make a page, the cursor asks
+the running memo for that page's regions; if one is missing a small machine
+makes it, and the unit that makes the page only finds it in the memo.
+
+-   **What can make a page.** A block unit moves past the last frame of its
+    page at most once; a page break, a column break at the last column, and a
+    section start make one; a section start with a parity filler makes two, so
+    the filler is one unit and the content page (whose label is the filler's
+    plus one) is the next. `finish` makes the pages the plan asks for one
+    unit each. The first page waits for its regions too, so `LayoutJob::new`
+    composes nothing, and an empty body still gets its page.
+-   **The machine.** For one missing item at a time: the story's digest, read
+    64 blocks a unit; then the composition, which is the ordinary flow over the
+    story's blocks with the one-frame source, one flow unit at a time (the
+    synchronous path runs the same machine to the end, so the two cannot
+    differ); then the memo entry. A budget of 1 charges one such unit a step.
+-   **Memoised transitions.** A replayed transition is judged by what the
+    regions of the pages it made come to, which needs those regions. A block
+    that finds one missing does not start; the machine makes it and the block
+    starts again. A transition that made more than eight pages is redone
+    instead of waited for.
+-   **Counts.** `StepWork` has `pages_made`, `region_units`, `region_blocks`
+    and `digest_blocks`; `WorkCounters::running_inline` counts regions the
+    flow had to make itself because the look-ahead had not, and is zero in
+    every test.
+
 **Partial publication.** A page is **publishable** only when all its bands are
 committed and its running instances composed. `partial()` cuts before the
 first page that isn't. It drops every frame, rule, band, running instance,

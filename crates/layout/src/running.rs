@@ -26,6 +26,8 @@ mod incremental_tests;
 #[cfg(test)]
 mod layout_tests;
 #[cfg(test)]
+mod stepped_tests;
+#[cfg(test)]
 mod tests;
 
 /// The most blocks of one story read per layout (sections §9).
