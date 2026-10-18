@@ -970,6 +970,18 @@ impl World<'_> {
             self.reps[i].s.redo()
         })?;
         let after = self.state(i)?;
+        trace(|| {
+            let ids = |s: &State| s.blocks.iter().map(|b| b.id.clone()).collect::<Vec<_>>();
+            format!(
+                "  {} -> {:?}: blocks {:?} -> {:?}; trail {} redo {}",
+                if undo { "undo" } else { "redo" },
+                stepped.as_ref().map(|d| d.data),
+                ids(&before),
+                ids(&after),
+                self.reps[i].trail.len(),
+                self.reps[i].redo.len()
+            )
+        });
         if !stepped.is_some_and(|d| d.data) {
             ensure!(
                 authored(&before) == authored(&after),
@@ -978,16 +990,18 @@ impl World<'_> {
             );
             return Ok(());
         }
-        // The replica's own trail predicts the state.
+        // The replica's own trail predicts the state. Every successful undo
+        // or redo moves a step between the stacks, whether or not the model
+        // knew the state it leads to (undo can step past what this scenario
+        // did, into the seed document's own steps): the state it left is
+        // exactly what the opposite move must restore.
         let rep = &mut self.reps[i];
         let predicted = if undo {
-            rep.trail
-                .pop()
-                .inspect(|_| rep.redo.push(authored(&before)))
+            rep.redo.push(authored(&before));
+            rep.trail.pop()
         } else {
-            rep.redo
-                .pop()
-                .inspect(|_| rep.trail.push(authored(&before)))
+            rep.trail.push(authored(&before));
+            rep.redo.pop()
         };
         if let Some(expected) = predicted
             && authored(&after) != expected
@@ -1459,13 +1473,22 @@ impl World<'_> {
         let (mut from_copy, copied_total) = oracles::annotation_lines(&copied, &BTreeSet::new());
         let (from_source, source_total) = oracles::annotation_lines(&source, &internal);
         for line in &from_source {
-            let found = from_copy.iter().position(|l| l == line);
+            let exact = from_copy
+                .iter()
+                .position(|l| oracles::relate(l, line) == Some(true));
+            let wider = from_copy
+                .iter()
+                .position(|l| oracles::relate(l, line) == Some(false));
             ensure!(
-                found.is_some(),
+                exact.is_some() || wider.is_some(),
                 "import-copy-keeps-annotations",
                 "import_copy lost the annotation `{line}`; the copy has {from_copy:?}"
             );
-            if let Some(at) = found {
+            if let Some(at) = exact {
+                from_copy.remove(at);
+            } else if let Some(at) = wider {
+                // The copy covers more than the source does.
+                self.count("known:fuzz2-copy-extends-annotation");
                 from_copy.remove(at);
             }
         }

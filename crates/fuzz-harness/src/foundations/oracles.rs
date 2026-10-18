@@ -416,3 +416,23 @@ pub fn annotation_lines(state: &State, skip: &BTreeSet<String>) -> (Vec<String>,
     lines.sort();
     (lines, state.annotations.len())
 }
+
+/// How one annotation line of a copy relates to one of its source (see
+/// [`annotation_lines`]): `Some(true)` if they are the same, `Some(false)` if
+/// the copy's has the same kind, status and thread and every span of the
+/// source's plus more, `None` otherwise. A copy that covers more than its
+/// source is a fault (fuzz-2 `copy-extends-annotation`); one that covers less
+/// is a loss.
+pub fn relate(copy: &str, source: &str) -> Option<bool> {
+    if copy == source {
+        return Some(true);
+    }
+    let (copy_head, copy_spans) = copy.rsplit_once(' ')?;
+    let (source_head, source_spans) = source.rsplit_once(' ')?;
+    if copy_head != source_head {
+        return None;
+    }
+    let copy_spans: BTreeSet<&str> = copy_spans.split(';').collect();
+    let source_spans: BTreeSet<&str> = source_spans.split(';').collect();
+    source_spans.is_subset(&copy_spans).then_some(false)
+}

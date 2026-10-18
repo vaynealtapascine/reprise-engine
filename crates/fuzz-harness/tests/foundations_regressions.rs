@@ -932,3 +932,30 @@ fn undoing_a_step_that_types_then_deletes_over_it_restores_the_annotations() {
         "undo lost or moved annotations"
     );
 }
+
+/// fuzz-2 `copy-extends-annotation` (not minimised past a scenario): after a
+/// flow split and a move-by-copy of the paragraph that holds a comment and a
+/// link, `import_copy` gives both a span over an unrelated paragraph that the
+/// source's `State` does not list. The copy must cover no more than its source.
+/// The bytes are a scenario of `reprise_fuzz_harness::foundations` as the
+/// generators stood at the commit that added this test (seed 100632 of the
+/// soak, shrunk); a later change to a generator changes what they mean.
+#[test]
+#[ignore = "fuzz-2: copy-extends-annotation, see report"]
+fn an_import_copy_covers_no_more_than_its_source() {
+    let bytes: Vec<u8> = "00b2002f0000bb000000007d00cbc20000f5740000d14c000000008bd668c800ce0000000000000000000000fa00000000000000000000006d3000bb8d0000fe96c9e20000150000d000000098000000ad44cb00006e00f0d8140000006e000000005673004517d32d6200c200dd00000065000000da00695900dd0000f2000000000000000000006e00d6fee3"
+        .as_bytes()
+        .chunks(2)
+        .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
+        .collect();
+    let report = reprise_fuzz_harness::foundations::run_foundations(&bytes).unwrap();
+    assert_eq!(
+        report
+            .counts
+            .get("known:fuzz2-copy-extends-annotation")
+            .copied()
+            .unwrap_or(0),
+        0,
+        "an import_copy gave an annotation more extent than its source has"
+    );
+}
