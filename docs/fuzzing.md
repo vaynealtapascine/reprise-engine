@@ -207,7 +207,7 @@ or removed).
 | `incremental-equals-reference`, `reopen-identical`, `package-bits-stable` | the live session (laid out incrementally across every edit) draws exactly what a session reopened from its package draws, and reads the same state; saving the reopened package declares the same bits |
 | `package-bit-missing`, `package-bit-spurious` | bits 14, 15, 16 are set when roles/lists, objects or annotations are live, and only when the scenario could have written them; 18 only when a style op ran; saving a reopened package keeps the bits (`package_bits_follow_the_stored_forms` pins the exact rules) |
 | `sync-accepts-replica`, `peers-converge`, `peers-converge-layout`, `merge-order-independent` | a replica accepts a snapshot of another replica of its lineage (only `bindings.limit` may refuse); replicas that exchange all updates reach one vector, one state and one layout; the same saves merged in two orders reach the same state |
-| `import-copy-keeps-content`, `import-copy-keeps-annotations`, `import-copy-independent`, `import-copy-leaves-source` | a copy has the same content with new identities, the same annotations that sit in one paragraph and no more than the source's, refuses its source's updates, and leaves the source untouched |
+| `import-copy-keeps-content`, `import-copy-keeps-annotations`, `import-copy-independent`, `import-copy-leaves-source` | a copy has the same content with new identities, every annotation over its whole extent (a link to a block that is gone may be dropped, and says so) and no more than the source's, refuses its source's updates, and leaves the source untouched |
 | `paste-keeps-atoms`, `paste-drops-comments`, `paste-keeps-annotations` | a paste adds exactly the objects of the copied range, no comment (they are not copied), and removes nothing |
 | `reading-order-ranges`, `outline-valid`, `page-links-are-links`, `annotation-matches-brief`, `diagnostics-for-filters` | the queries agree with `State` |
 | `foundations-repeatable`, `export-repeatable` | the whole scenario run twice gives an identical transcript (states, pages, saved packages, exports); exporting twice gives the same bytes |
@@ -221,25 +221,32 @@ operations). `package_bits_follow_the_stored_forms` and
 
 Faults whose fix is not this branch's are counted, not hidden, so a run goes on
 to find new bugs. A `known:` count in the run's report says how often one
-masked a difference; a generator exclusion says how often a shape was kept out.
+masked a difference. Each has a minimal `#[ignore]`d regression in
+`tests/foundations_regressions.rs`. Astra 4 R1 to R4 are closed on main (review
+fixes 2): the scenario no longer keeps the R1 shape out, compares an
+`import_copy`'s annotations over their whole extent, and R4's own shape is a
+passing regression.
 
 | Id | Shape | Handling |
 | --- | --- | --- |
-| Astra 4 R1 | a refused batch publishes the commands before it when an annotation's internal link target was deleted, moved or joined away earlier in the transaction | `exclude_known_shapes` turns such a link into a comment (`excluded:astra-4-R1`); `#[ignore = "known: astra-4 R1"]` regressions |
-| Astra 4 R3 | a cross-paragraph annotation is cut to its first paragraph on copy and `import_copy` | `import_copy` is compared exactly only for annotations inside one paragraph |
-| Astra 4 R4 | an annotation over text next to a retired inline object comes back rebound after undo | counted as `known:astra-4-R4` when only annotations differ and an object was retired in the lineage |
-| fuzz-2 `annotation-redo` | an annotation created in the same step as the text it covers is gone after undo then redo | `known:fuzz2-annotation-redo`; ignored regression |
-| fuzz-2 `format-undo` | formatted text that was deleted comes back unformatted after undo | `known:fuzz2-format-undo`; ignored regression |
-| fuzz-2 `link-resurrected` | a link removed along with its text comes back when a later delete of the same re-typed text is undone | `known:fuzz2-link-resurrected` (a strict superset of annotations after undo); ignored regression |
+| fuzz-2 `annotation-redo` | an annotation created in the same step as the text it covers is gone, or loses a span, after undo then redo (a paste's links too) | `known:fuzz2-annotation-redo` |
+| fuzz-2 `link-resurrected` | a link removed along with its text comes back when a later delete of the same re-typed text is undone | `known:fuzz2-link-resurrected` (a strict superset of annotations after undo) |
+| fuzz-2 `format-undo` | formatted text that was deleted comes back unformatted after undo | `known:fuzz2-format-undo` (only formatting differs) |
+| fuzz-2 `join-atom-undo` | a link crossing two paragraphs loses its first piece when a copying join that retired an active inline object is undone | `known:fuzz2-join-atom-undo` (annotation-only difference in a lineage that retired an object) |
+| fuzz-2 `insert-in-deleted-span` | a step that types into annotated text and then deletes a span containing it: undo restores the text but loses a link and moves a comment | counted with the rest below |
+| the rest of the restore-hint faults | the same annotations moved, trimmed or stretched after undo or redo, or an annotation gone, in a lineage that deleted text while annotations existed | `known:fuzz2-annotation-undo-drift` (same IDs) or `-other`; one design weakness behind them, see the report |
 
 ### The hostile peer
 
 `reprise_doc::hostile::scribble_foundations` (feature `hostile-peer`) writes
 seeded raw operations into a fork of the victim; the packet that carries them
 is the only way they reach it, as for a remote peer. It is a separate entry
-point from `scribble`, so the older seeded run is unchanged. New tree nodes go
-under the root, never deep: a 1,024-deep tree overflows the stack in
-`list_numbering` and `has_block_semantics` (Astra 4 R2).
+point from `scribble`, so the older seeded run is unchanged. The random attacks keep
+trees shallow; `write_deep_chain` writes a chain of nested paragraphs: 300 levels
+run with the named attacks, and 1,000 and 1,030 levels (the limit is 1,024) in an
+ignored slow test, because the engine's cost is quadratic in depth (`state()` takes
+0.18 s, 0.67 s and 2.6 s at 125, 250 and 500 levels in a debug build). Astra 4 R2,
+the stack overflow at this depth, is fixed on main.
 
 | Stored form | Attack |
 | --- | --- |
@@ -380,6 +387,15 @@ Fixed:
     records the place of a tombstoned end inside the span. Three regressions in
     `tests/foundations_regressions.rs`.
 
+Closed on main by review fixes 2, which this branch merged: Astra 4 R1 (a
+refused batch published the commands before it), R2 (deep trees overflowed the
+stack in `list_numbering` and `has_block_semantics`; the hostile peer now writes
+trees 1,000 and 1,030 levels deep), R3 (a cross-paragraph annotation was cut to
+its first paragraph on copy and `import_copy`) and R4 (a delete across a hidden
+marker; its own shape is a passing regression). My `tombstoned-endpoint` change
+is not covered by their R4 change: disabling it makes its three regressions fail
+on merged main.
+
 Open, each with a minimal `#[ignore]`d regression in
 `tests/foundations_regressions.rs` and a suggested fix in the final report:
 
@@ -388,6 +404,10 @@ Open, each with a minimal `#[ignore]`d regression in
 -   `format-undo`: deleted bold text comes back unformatted after undo.
 -   `link-resurrected`: a link removed with its text comes back when a later
     delete of the re-typed text is undone.
+-   `join-atom-undo`: a link crossing two paragraphs loses its first piece when
+    a copying join that retired an active inline object is undone.
+-   `insert-in-deleted-span`: a step that types into annotated text and then
+    deletes a span containing it loses a link and moves a comment on undo.
 
 Pinned as designed (not faults), each with a test or an oracle that knows it:
 
