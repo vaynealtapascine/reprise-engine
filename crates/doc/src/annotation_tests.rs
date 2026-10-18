@@ -601,3 +601,29 @@ fn cross_host_annotations_read_the_document_order_once() {
         }
     }
 }
+
+#[test]
+fn undo_restores_copied_annotation_end_in_its_own_host() {
+    let (doc, first) = doc("first");
+    let last = doc.append_block(BlockKind::Paragraph, "", "abcd").unwrap();
+    let id = doc
+        .add_annotation(first, 1..3, &comment("one-thread"))
+        .unwrap();
+    doc.stage_fragment_range_end(
+        crate::RangeId(id.0),
+        last,
+        3,
+        doc.range_policy(crate::RangeId(id.0)).unwrap().unwrap(),
+    )
+    .unwrap();
+    doc.commit();
+    let before = doc.annotation(id).unwrap();
+    let mut undo = doc.undo_stack();
+    doc.delete_text(last, 0..4).unwrap();
+    doc.commit_step();
+    for _ in 0..3 {
+        assert!(undo.undo().unwrap());
+        assert_eq!(doc.annotation(id).unwrap(), before);
+        assert!(undo.redo().unwrap());
+    }
+}

@@ -247,13 +247,20 @@ impl Document {
             let Ok(Some(policy)) = self.range_policy(RangeId(id)) else {
                 continue;
             };
-            let Some(loro) = self.anchor_text(node) else {
-                continue;
-            };
-            let whole = Text::from_loro(loro.clone());
             let mut hints = read_hints(&raw);
             let mut changed = false;
             for (key, affinity) in [("start", policy.start), ("end", policy.end)] {
+                let host = if key == "end" {
+                    get_str(&meta, "end-node1")
+                        .and_then(|s| NodeId::parse(&s))
+                        .unwrap_or(node)
+                } else {
+                    node
+                };
+                let Some(loro) = self.anchor_text(host) else {
+                    continue;
+                };
+                let whole = Text::from_loro(loro.clone());
                 let Some(stored) = get_str(&meta, key) else {
                     continue;
                 };
