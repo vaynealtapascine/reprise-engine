@@ -575,9 +575,7 @@ fn cross_host_annotations_read_the_document_order_once() {
         doc.commit();
         let ids: Vec<_> = (0..ANNOTATIONS)
             .map(|i| {
-                let id = doc
-                    .add_annotation(nodes[i], 1..3, &comment("t"))
-                    .unwrap();
+                let id = doc.add_annotation(nodes[i], 1..3, &comment("t")).unwrap();
                 doc.stage_fragment_range_end(
                     crate::RangeId(id.0),
                     nodes[i + 1],

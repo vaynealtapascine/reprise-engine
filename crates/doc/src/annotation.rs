@@ -711,7 +711,11 @@ impl Document {
         } else if start_node.node != end_node.node {
             let order = order.get_or_insert_with(|| DocOrder::read(self));
             // A start that is not in the order has nothing to cover.
-            let from = order.position.get(&start_node).copied().unwrap_or(usize::MAX);
+            let from = order
+                .position
+                .get(&start_node)
+                .copied()
+                .unwrap_or(usize::MAX);
             for &node in order.order.iter().skip(from) {
                 charge(1);
                 if pieces.len() >= MAX_PIECES {

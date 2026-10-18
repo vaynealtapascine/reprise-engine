@@ -91,7 +91,8 @@ impl HostFlow {
 
     /// The live paragraphs in text order.
     pub(crate) fn live(&self) -> impl Iterator<Item = &Para> {
-        let live = self.paras
+        let live = self
+            .paras
             .iter()
             .enumerate()
             .filter(|(i, _)| *i > 0 || self.head_live)
