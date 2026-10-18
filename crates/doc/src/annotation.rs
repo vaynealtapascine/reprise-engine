@@ -519,6 +519,7 @@ impl Document {
         ids.sort();
         let mut unreadable = 0usize;
         let mut hosts = BTreeMap::new();
+        let mut order = None;
         let mut limited = false;
         for id in ids {
             let Ok(meta) = tree.get_meta(id) else {
@@ -541,7 +542,8 @@ impl Document {
                 unreadable += 1;
                 continue;
             };
-            let state = self.annotation_state(&mut hosts, &meta, data.kind(), &mut limited);
+            let state =
+                self.annotation_state(&mut hosts, &mut order, &meta, data.kind(), &mut limited);
             let points: Vec<(NodeId, Range<usize>)> = match &state {
                 AnnotationState::Active { pieces, .. } => {
                     pieces.iter().map(|p| (p.node, p.bytes.clone())).collect()
@@ -594,6 +596,7 @@ impl Document {
         let host = hosts.entry(node.node).or_insert_with(|| {
             let flow = self.flow(node.node);
             let intervals = flow.as_ref().map_or_else(Vec::new, |f| {
+                charge(f.paras.len());
                 f.paras
                     .iter()
                     .enumerate()
@@ -619,7 +622,7 @@ impl Document {
         let u = resolved.offset();
         // Lower bound on inclusive ends preserves the first paragraph at a
         // shared boundary, including zero-length/hidden paragraph regions.
-        let i = interval_at(&host.intervals, u, &mut || {})?;
+        let i = interval_at(&host.intervals, u)?;
         let para = flow.paras.get(i)?;
         if u < para.region.start.1 {
             return None;
@@ -651,6 +654,7 @@ impl Document {
     fn annotation_state(
         &self,
         hosts: &mut BTreeMap<loro::TreeID, HostContext>,
+        order: &mut Option<DocOrder>,
         meta: &loro::LoroMap,
         kind: Kind,
         limited: &mut bool,
@@ -681,8 +685,16 @@ impl Document {
         ) else {
             return empty(self.is_live(node).then_some(node), 0);
         };
-        let crossed = self.range_node_cmp(start_node, end_node).is_gt()
-            || (start_node == end_node && start > end);
+        let cmp = if start_node == end_node {
+            std::cmp::Ordering::Equal
+        } else if start_node.node == end_node.node {
+            self.flow_cmp(start_node, end_node)
+        } else {
+            order
+                .get_or_insert_with(|| DocOrder::read(self))
+                .cmp(start_node, end_node)
+        };
+        let crossed = cmp.is_gt() || (start_node == end_node && start > end);
         let (end_node, end) = if crossed {
             (start_node, start)
         } else {
@@ -697,15 +709,11 @@ impl Document {
                 });
             }
         } else if start_node.node != end_node.node {
-            let order = self.document_order();
-            let mut inside = false;
-            for node in order {
-                if node == start_node {
-                    inside = true;
-                }
-                if !inside {
-                    continue;
-                }
+            let order = order.get_or_insert_with(|| DocOrder::read(self));
+            // A start that is not in the order has nothing to cover.
+            let from = order.position.get(&start_node).copied().unwrap_or(usize::MAX);
+            for &node in order.order.iter().skip(from) {
+                charge(1);
                 if pieces.len() >= MAX_PIECES {
                     *limited = true;
                     break;
@@ -730,6 +738,7 @@ impl Document {
                 return empty(Some(start_node), start);
             };
             for para in flow.paras.iter().skip(first) {
+                charge(1);
                 if pieces.len() >= MAX_PIECES {
                     *limited = true;
                     break;
@@ -1103,31 +1112,50 @@ pub(crate) struct HostContext {
     live: bool,
 }
 
-/// Ordered endpoint lookup. `charge` makes the comparison bound testable without
-/// depending on scheduler, build mode or fixture-construction time.
-fn interval_at(intervals: &[(usize, usize)], u: usize, charge: &mut impl FnMut()) -> Option<usize> {
+/// Ordered endpoint lookup: the first paragraph whose inclusive end reaches `u`.
+fn interval_at(intervals: &[(usize, usize)], u: usize) -> Option<usize> {
     let at = intervals.partition_point(|(end, _)| {
-        charge();
+        charge(1);
         *end < u
     });
     intervals.get(at).map(|(_, i)| *i)
 }
 
+// Steps taken placing annotation endpoints. Counted in tests only, so the
+// scaling guards pin work rather than wall time, build mode or scheduling.
 #[cfg(test)]
-#[test]
-fn interval_lookup_scales_logarithmically_and_keeps_boundary_order() {
-    for paragraphs in [1usize, 100, 1000, 4096] {
-        let intervals: Vec<_> = (0..paragraphs).map(|i| (i * 2 + 2, i)).collect();
-        let mut work = 0usize;
-        for _ in 0..500 {
-            assert_eq!(
-                interval_at(&intervals, paragraphs * 2 - 1, &mut || work += 1),
-                Some(paragraphs - 1)
-            );
-        }
-        assert!(work <= 500 * (paragraphs.ilog2() as usize + 2));
+thread_local! {
+    static STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn charge(n: usize) {
+    STEPS.with(|s| s.set(s.get().saturating_add(n)));
+}
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) fn charge(_: usize) {}
+/// Reads and resets the counter.
+#[cfg(test)]
+pub(crate) fn take_steps() -> usize {
+    STEPS.with(|s| s.replace(0))
+}
+
+/// Document order, read once per index build and only when an annotation
+/// spans two hosts.
+pub(crate) struct DocOrder {
+    order: Vec<NodeId>,
+    position: std::collections::HashMap<NodeId, usize>,
+}
+
+impl DocOrder {
+    fn read(doc: &Document) -> Self {
+        let order = doc.document_order();
+        let position = order.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+        Self { order, position }
     }
-    let intervals = [(2, 0), (2, 1), (4, 2)];
-    assert_eq!(interval_at(&intervals, 2, &mut || {}), Some(0));
-    assert_eq!(interval_at(&intervals, 3, &mut || {}), Some(2));
+
+    /// `a` against `b` in document order; a node that is not live sorts first.
+    fn cmp(&self, a: NodeId, b: NodeId) -> std::cmp::Ordering {
+        self.position.get(&a).cmp(&self.position.get(&b))
+    }
 }

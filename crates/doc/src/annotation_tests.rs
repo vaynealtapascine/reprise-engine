@@ -513,3 +513,93 @@ fn undo_annotations_after_deleted_atom() {
     assert_eq!(doc.annotation(comment).unwrap().data, changed);
     assert_eq!(doc.annotation(comment).unwrap().state, before_comment.state);
 }
+
+/// `paragraphs` paragraphs of "ab" in one flow, and the last paragraph.
+fn flow_of(paragraphs: usize) -> (Document, NodeId, NodeId) {
+    let (doc, head) = doc(&"ab".repeat(paragraphs));
+    let mut tail = head;
+    for _ in 1..paragraphs {
+        tail = doc.split_block(tail, 2).unwrap();
+    }
+    doc.commit();
+    (doc, head, tail)
+}
+
+/// Steps the next annotation index build takes (see `annotation::charge`): the
+/// flows are read first so only endpoint placement is counted.
+fn index_steps(doc: &Document, hosts: &[NodeId]) -> usize {
+    for host in hosts {
+        let _ = doc.flow(host.node);
+    }
+    take_steps();
+    let _ = doc.annotation_index();
+    take_steps()
+}
+
+/// R6: endpoint placement costs the paragraphs once per host plus a binary
+/// search per endpoint. A scan per endpoint would cost paragraphs x annotations.
+#[test]
+fn endpoint_placement_does_not_scan_the_flow_per_annotation() {
+    const ANNOTATIONS: usize = 40;
+    for paragraphs in [32usize, 256] {
+        let (doc, head, tail) = flow_of(paragraphs);
+        let ids: Vec<_> = (0..ANNOTATIONS)
+            .map(|i| {
+                let (s, e) = [(0, 1), (1, 2), (0, 2)][i % 3];
+                doc.add_annotation(tail, s..e, &comment("t")).unwrap()
+            })
+            .collect();
+        doc.commit();
+        let steps = index_steps(&doc, &[head]);
+        let budget = paragraphs + 2 * ANNOTATIONS * (paragraphs.ilog2() as usize + 2);
+        assert!(
+            steps <= budget,
+            "{paragraphs} paragraphs, {ANNOTATIONS} annotations: {steps} steps (budget {budget})"
+        );
+        for id in ids {
+            assert_eq!(pieces(&doc, id).first().map(|(n, _)| *n), Some(tail));
+        }
+    }
+}
+
+/// R6, across hosts: an annotation from one top-level paragraph into the next
+/// is placed from one document order read per build, not one per annotation.
+#[test]
+fn cross_host_annotations_read_the_document_order_once() {
+    const ANNOTATIONS: usize = 30;
+    for hosts in [40usize, 240] {
+        let doc = Document::new(1).unwrap();
+        let nodes: Vec<_> = (0..hosts)
+            .map(|_| doc.append_block(BlockKind::Paragraph, "", "abcd").unwrap())
+            .collect();
+        doc.commit();
+        let ids: Vec<_> = (0..ANNOTATIONS)
+            .map(|i| {
+                let id = doc
+                    .add_annotation(nodes[i], 1..3, &comment("t"))
+                    .unwrap();
+                doc.stage_fragment_range_end(
+                    crate::RangeId(id.0),
+                    nodes[i + 1],
+                    2,
+                    RangePolicy::FIXED,
+                )
+                .unwrap();
+                id
+            })
+            .collect();
+        doc.commit();
+        let steps = index_steps(&doc, &nodes);
+        let budget = 2 * hosts + 8 * ANNOTATIONS;
+        assert!(
+            steps <= budget,
+            "{hosts} hosts, {ANNOTATIONS} annotations: {steps} steps (budget {budget})"
+        );
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(
+                pieces(&doc, *id),
+                vec![(nodes[i], 1..4), (nodes[i + 1], 0..2)]
+            );
+        }
+    }
+}
