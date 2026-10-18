@@ -1562,10 +1562,12 @@ pub(crate) struct PositionKey {
     pages: usize,
     frames: usize,
     fills: Vec<Fill>,
-    section: Option<(reprise_doc::sections::SectionId, String)>,
-    /// The current section's page-number format: labels of the pages the
-    /// transition makes (and numbers it composes) come from it.
-    numbering: Option<String>,
+    /// What the current section comes to (identity, lifetime, numbering,
+    /// geometry, start and the rest): the pages a transition makes, their
+    /// labels and the numbers it composes all come from it.
+    section: Option<std::sync::Arc<crate::sections::SectionKey>>,
+    /// The first section's restart, which numbers the document's first page.
+    first_restart: Option<i64>,
     owner: Option<(reprise_doc::sections::SectionId, i64)>,
 }
 #[derive(Clone)]
@@ -1613,13 +1615,13 @@ impl Flow<'_> {
                 .as_ref()
                 .filter(|s| s.enabled)
                 .and_then(|s| s.sections.get(self.section))
-                .map(|s| (s.id(), s.life().into())),
-            numbering: self
+                .map(|s| s.key()),
+            first_restart: self
                 .section_table
                 .as_ref()
                 .filter(|s| s.enabled)
-                .and_then(|s| s.sections.get(self.section))
-                .map(|s| s.format.clone()),
+                .and_then(|s| s.sections.first())
+                .and_then(|s| s.restart),
             owner: self
                 .snapshot
                 .sections

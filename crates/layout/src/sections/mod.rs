@@ -44,10 +44,59 @@ pub(crate) struct Section {
     /// `region.first` and `region.even`: the section's variant switches.
     pub region_first: bool,
     pub region_even: bool,
+    key: std::sync::OnceLock<Arc<SectionKey>>,
+}
+
+/// Everything a flow transition can read of a section, resolved: an edit to any
+/// property that changes it, in this section or in one it inherits from, changes
+/// the key, even when the section keeps its identity and lifetime. A
+/// continuous section's numbering restart, for one, is read only when its first
+/// content page is made, which may be pages after the section starts.
+///
+/// Region bindings are left out. What they come to for a page is a read of its
+/// own (the regions outcome of the pages a transition made), so rebinding a
+/// header to a story of the same height still reuses the body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SectionKey {
+    id: SectionId,
+    life: String,
+    start: Start,
+    restart: Option<i64>,
+    format: String,
+    filler_running: bool,
+    mode: String,
+    region_first: bool,
+    region_even: bool,
+    /// The resolved geometry, columns, direction, writing mode, distances and
+    /// numbering the section reports as its state.
+    state: Value,
+    rules: Vec<Rect<PageSpace>>,
+    template: Arc<ResolvedTemplate>,
 }
 impl Section {
     pub fn id(&self) -> SectionId {
         self.view.id
+    }
+    /// What a transition reads of this section, made once.
+    pub fn key(&self) -> Arc<SectionKey> {
+        self.key
+            .get_or_init(|| {
+                Arc::new(SectionKey {
+                    id: self.view.id,
+                    life: self.view.life.clone(),
+                    start: self.start,
+                    restart: self.restart,
+                    format: self.format.clone(),
+                    filler_running: self.filler_running,
+                    mode: self.mode.clone(),
+                    region_first: self.region_first,
+                    region_even: self.region_even,
+                    state: self.state(),
+                    rules: self.rules.clone(),
+                    template: self.template.clone(),
+                })
+            })
+            .clone()
     }
     pub fn life(&self) -> &str {
         &self.view.life
@@ -444,6 +493,7 @@ impl Table {
                 mode,
                 region_first,
                 region_even,
+                key: std::sync::OnceLock::new(),
             });
         }
         let starts: BTreeMap<_, _> = doc
