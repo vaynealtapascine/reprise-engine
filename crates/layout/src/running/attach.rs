@@ -563,11 +563,16 @@ impl PageRegions {
     }
 }
 
-/// `template` with its main frames limited to the physical band
-/// `top..bottom` of a page `height` high. Only frames whose block axis is the
-/// page's vertical (horizontal text) or whose inline axis is (vertical text)
+/// `template` with its main frames and its notes area limited to the physical
+/// band `top..bottom` of a page `height` high. Only frames whose block axis is
+/// the page's vertical (horizontal text) or whose inline axis is (vertical text)
 /// are limited: a rotated, mirrored or shaped spatial frame keeps its authored
 /// geometry, and the region simply paints over it.
+///
+/// The notes area is cut like the body: notes are allocated inside the body
+/// that remains after the running reservation (sections §9), so they are
+/// bottom-aligned above a footer and start below a header, and reflow when the
+/// area is smaller, rather than being painted over by the region.
 pub(crate) fn cut(
     template: &ResolvedTemplate,
     height: Length,
@@ -579,7 +584,7 @@ pub(crate) fn cut(
     let mut out = template.clone();
     let mut changed = false;
     for frame in &mut out.frames {
-        if frame.role != FrameRole::Flow(MAIN_FLOW.into()) {
+        if frame.role != FrameRole::Flow(MAIN_FLOW.into()) && frame.role != FrameRole::Notes {
             continue;
         }
         let m = frame.to_page();
