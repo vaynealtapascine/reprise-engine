@@ -48,6 +48,14 @@ fn on_boundary(text: &str, at: u32) -> bool {
 
 /// Structural invariants of a `State` that hold whatever produced it.
 pub fn state_is_coherent(state: &State) -> R {
+    state_is_coherent_except(state, &BTreeSet::new())
+}
+
+/// [`state_is_coherent`], except that the atom rule is not asked of the blocks
+/// in `non_hosts`: nodes that are containers, not flow hosts (`reprise_doc::
+/// hostile::non_hosts`), whose stored text `docs/inline.md` doesn't govern.
+/// Every other rule still applies to them.
+pub fn state_is_coherent_except(state: &State, non_hosts: &BTreeSet<String>) -> R {
     let ids: BTreeSet<&str> = state.blocks.iter().map(|b| b.id.as_str()).collect();
     ensure!(
         ids.len() == state.blocks.len(),
@@ -90,7 +98,7 @@ pub fn state_is_coherent(state: &State) -> R {
             .collect();
         let entries: Vec<usize> = b.inline.iter().map(|e| e.at as usize).collect();
         ensure!(
-            atoms == entries,
+            atoms == entries || non_hosts.contains(&b.id),
             "inline-matches-text",
             "block {} ({:?}, parent {:?}): U+FFFC at {atoms:?} but inline entries at {entries:?}",
             b.id,

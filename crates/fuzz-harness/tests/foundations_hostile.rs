@@ -23,6 +23,7 @@ use std::collections::BTreeSet;
 use reprise::*;
 use reprise_doc::hostile::{
     Rng, dump_inline_records, scribble, scribble_foundations, write_node_entry, write_root_string,
+    write_shadow_root,
 };
 use reprise_fuzz_harness::codes;
 use reprise_fuzz_harness::foundations::oracles;
@@ -267,6 +268,29 @@ fn victim(ws: &Workspace) -> DocumentSession {
             },
         ],
     );
+    // The older stored forms too, so that an attack on their roots has
+    // something to hide: a direct alignment (`marks1`), a flow break
+    // (`breaks1`) and a page setup (`page-setup1`).
+    tx(
+        &mut s,
+        vec![
+            Command::SetAlignment {
+                node: ids[0].clone(),
+                at: None,
+                alignment: Some(Alignment::End),
+            },
+            Command::SplitBlock {
+                node: ids[4].clone(),
+                at: 30,
+            },
+            Command::SetPageSetup {
+                setup: PageSetupPatch {
+                    width: Some(612 * 1024),
+                    ..PageSetupPatch::default()
+                },
+            },
+        ],
+    );
     s
 }
 
@@ -356,6 +380,24 @@ fn tolerated<T>(result: Result<T>, case: &str, what: &str, refused: &mut Vec<Str
     }
 }
 
+/// The nodes of `s` that are containers, not flow hosts: `docs/inline.md`'s
+/// rule about atoms doesn't cover their stored text (see
+/// `reprise_doc::hostile::non_hosts`).
+fn non_hosts(s: &DocumentSession) -> BTreeSet<String> {
+    let Ok(snapshot) = s.sync_export(&Payload::new(SyncRequest { since: None })) else {
+        return BTreeSet::new();
+    };
+    let reader = reprise_doc::Document::new(77).unwrap();
+    reader.bind_document_lineage(DOC).unwrap();
+    reader.commit();
+    match reader.import_packet(&snapshot.data.content.bytes) {
+        Ok(_) => reprise_doc::hostile::non_hosts(&reader)
+            .into_iter()
+            .collect(),
+        Err(_) => BTreeSet::new(),
+    }
+}
+
 struct Seen {
     state: Option<State>,
     pages: Vec<String>,
@@ -383,7 +425,8 @@ fn observe(s: &mut DocumentSession, case: &str) -> Seen {
     let mut refused = Vec::new();
     let state = tolerated(s.state(), case, "state", &mut refused).map(|p| p.data);
     if let Some(state) = &state {
-        oracles::state_is_coherent(state).unwrap_or_else(|v| panic!("{case}: {v}"));
+        oracles::state_is_coherent_except(state, &non_hosts(s))
+            .unwrap_or_else(|v| panic!("{case}: {v}"));
         oracles::documented_diagnostics(state).unwrap_or_else(|v| panic!("{case}: {v}"));
     }
     let mut pages = Vec::new();
@@ -936,27 +979,90 @@ fn named_attacks_are_survived() {
             }),
         ),
     ];
+    // A root is identified by name and type, so a peer can add one of another
+    // type under a document root's name. Replicas must still read the same
+    // records, whichever of the two their store registered last.
+    let held = {
+        let snapshot = s
+            .sync_export(&Payload::new(SyncRequest { since: None }))
+            .unwrap();
+        let reader = reprise_doc::Document::new(77).unwrap();
+        reader.bind_document_lineage(DOC).unwrap();
+        reader.commit();
+        reader.import_packet(&snapshot.data.content.bytes).unwrap();
+        reprise_doc::hostile::held_roots(&reader)
+    };
+    println!("the victim holds {held:?}");
+    let mut shadows: Vec<(String, String, &'static str)> = Vec::new();
+    for entry in &held {
+        // `name:Type`, where the name may itself hold a colon.
+        let (root, kind) = entry.rsplit_once(':').unwrap();
+        for shadow in if kind == "Tree" {
+            vec!["text", "map"]
+        } else {
+            vec!["text"]
+        } {
+            shadows.push((
+                format!("shadow: a {shadow} root named {root}"),
+                root.to_owned(),
+                shadow,
+            ));
+        }
+    }
+    for must in [
+        "inline1",
+        "ranges",
+        "lists",
+        "breaks1",
+        "marks1",
+        "page-setup1",
+    ] {
+        assert!(
+            held.iter().any(|h| h.starts_with(&format!("{must}:"))),
+            "the victim must hold {must}, or an attack on it proves nothing: {held:?}"
+        );
+    }
+    let attacks: Vec<(String, Box<dyn Fn(&reprise_doc::Document)>)> = attacks
+        .into_iter()
+        .map(|(name, write)| (name.to_owned(), write))
+        .chain(shadows.into_iter().map(|(name, root, kind)| {
+            let write: Box<dyn Fn(&reprise_doc::Document)> = Box::new(move |d| {
+                let _ = write_shadow_root(d, &root, kind);
+            });
+            (name, write)
+        }))
+        .collect();
     let mut refused = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
     let mut undeliverable: Vec<String> = Vec::new();
     for (name, write) in &attacks {
         let Some(packet) = attack(&s, |d| write(d)) else {
-            undeliverable.push((*name).to_owned());
+            undeliverable.push(name.clone());
             continue;
         };
-        match run_case(&ws, name, &packet) {
-            Outcome::Refused(code) => refused.push(format!("{name}: {code}")),
-            Outcome::Accepted(_) => {}
+        // Every attack runs, so one run lists everything that fails.
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_case(&ws, name, &packet)
+        }));
+        match run {
+            Ok(Outcome::Refused(code)) => refused.push(format!("{name}: {code}")),
+            Ok(Outcome::Accepted(_)) => {}
+            Err(_) => failed.push(name.clone()),
         }
     }
     println!(
         "refused outright: {refused:#?}
 undeliverable: {undeliverable:#?}"
     );
-    // Only the identity attack corrupts the attacker's own store.
+    assert!(
+        failed.is_empty(),
+        "attacks that broke the pipeline: {failed:#?}"
+    );
+    // Only the attacks on the identity root corrupt the attacker's own store.
     assert!(
         undeliverable
             .iter()
-            .all(|name| name.starts_with("identity")),
+            .all(|name| name.starts_with("identity") || name.contains("named document1")),
         "attacks that couldn't be framed: {undeliverable:?}"
     );
 }

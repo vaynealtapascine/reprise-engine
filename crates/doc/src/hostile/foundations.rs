@@ -17,6 +17,7 @@ use loro::{Container, LoroMap, LoroTree, LoroValue, TreeID, TreeParentId, ValueO
 
 use super::{Rng, nodes, texts, value};
 use crate::Document;
+use crate::flow::is_host_meta;
 
 const ENVELOPES: &[&str] = &[
     r#"{"version":1,"kind":"link","payload":{"type":"url","url":"https://example.com/x"}}"#,
@@ -660,6 +661,58 @@ pub fn dump_inline_records(doc: &Document) -> Vec<String> {
             let key = k.to_string();
             let value = map.get(&key).map(|v| v.get_deep_value());
             format!("{key} => {value:?}")
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Content nodes that are not flow hosts, as `counter@peer`: a table and its
+/// rows and cells carry a `table1` record and are containers. Their stored
+/// text is not a paragraph view, so the rule about atoms in `docs/inline.md`
+/// ("a U+FFFC character in a host is visible exactly when ...") does not
+/// cover it; a peer that writes `table1` onto a paragraph leaves its text
+/// raw in `State`. A test that checks that rule exempts these nodes and only
+/// these.
+pub fn non_hosts(doc: &Document) -> Vec<String> {
+    let tree = doc.doc.get_tree("content");
+    nodes(&tree)
+        .into_iter()
+        .filter(|id| tree.get_meta(*id).is_ok_and(|meta| !is_host_meta(&meta)))
+        .map(|id| id.to_string())
+        .collect()
+}
+
+/// Writes a root container of kind `shadow` (`text`, `map` or `tree`) under
+/// the name `root`, as a peer can: a root is identified by its name *and* its
+/// type, so this leaves the document's own `root` alone and adds a second
+/// container that a lookup by name alone may resolve to instead. Commits.
+pub fn write_shadow_root(doc: &Document, root: &str, shadow: &str) -> loro::LoroResult<()> {
+    match shadow {
+        "text" => doc.doc.get_text(root).insert(0, "shadow")?,
+        "map" => doc.doc.get_map(root).insert("shadow", 1)?,
+        _ => {
+            doc.doc.get_tree(root).create(None)?;
+        }
+    }
+    doc.commit();
+    Ok(())
+}
+
+/// The root containers `doc` holds, by name with their type, sorted: what an
+/// attack on a root can actually reach. A shadow of a root a document lacks
+/// proves nothing, so a test that shadows roots checks them against this.
+pub fn held_roots(doc: &Document) -> Vec<String> {
+    let LoroValue::Map(roots) = doc.doc.get_value() else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = roots
+        .iter()
+        .filter_map(|(name, id)| match id {
+            LoroValue::Container(loro::ContainerID::Root { container_type, .. }) => {
+                Some(format!("{name}:{container_type:?}"))
+            }
+            _ => None,
         })
         .collect();
     out.sort();
