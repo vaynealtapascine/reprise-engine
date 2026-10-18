@@ -141,7 +141,7 @@ impl Document {
     /// Older global-context readers need a new required feature declaration.
     pub fn has_style_reference_contexts(&self) -> bool {
         self.identity_map()
-            .is_some_and(|map| get_str(&map, "reference-contexts2").as_deref() == Some("1"))
+            .is_some_and(|map| map.get_last_editor("reference-contexts2").is_some())
     }
 
     pub(crate) fn identity_listing_cut(&self) -> bool {

@@ -871,7 +871,7 @@ impl Document {
         let tree = self.tree("ranges");
         tree.nodes().into_iter().any(|id| {
             tree.get_meta(id)
-                .is_ok_and(|m| m.get("end-node1").is_some())
+                .is_ok_and(|m| m.get_last_editor("end-node1").is_some())
         })
     }
 

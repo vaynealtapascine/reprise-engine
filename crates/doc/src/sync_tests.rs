@@ -689,3 +689,46 @@ fn explicit_style_context_packets_refuse_downgrading_before_import() {
         reprise_geom::Length::from_pt(20)
     );
 }
+
+#[test]
+fn deleted_version_markers_keep_their_declarations_and_round_trip() {
+    let legacy = Document::import(include_bytes!("../tests/data/review5-legacy.bin"), 11).unwrap();
+    let a = Document::new(2).unwrap();
+    a.define_named_style("NewPeerStyle", &Style::default())
+        .unwrap();
+    a.commit();
+    a.merge(&legacy).unwrap();
+    a.doc
+        .get_map(crate::style_identity::ROOT)
+        .delete("reference-contexts2")
+        .unwrap();
+    let first = a.append_block(BlockKind::Paragraph, "", "first").unwrap();
+    let last = a.append_block(BlockKind::Paragraph, "", "last").unwrap();
+    let policy = crate::text::RangePolicy::FIXED;
+    let range = a.add_range(first, 1..3, policy).unwrap();
+    a.stage_fragment_range_end(range, last, 2, policy).unwrap();
+    a.tree("ranges")
+        .get_meta(range.0)
+        .unwrap()
+        .delete("end-node1")
+        .unwrap();
+    a.commit();
+    for mode in [
+        crate::PersistenceMode::History,
+        crate::PersistenceMode::Shallow,
+    ] {
+        let reopened = Document::import(&a.try_export(mode).unwrap(), 5).unwrap();
+        assert!(reopened.has_style_reference_contexts());
+        assert!(reopened.has_cross_paragraph_ranges());
+    }
+    let packet = a.export_snapshot_packet().unwrap();
+    let (header, _) = read_header(&packet).unwrap();
+    assert_ne!(header.features.0 & Features::RANGE_ENDPOINTS.0, 0);
+    assert_ne!(header.features.0 & Features::STYLE_REFERENCE_CONTEXTS.0, 0);
+    let b = Document::new(3).unwrap();
+    b.import_packet(&packet).unwrap();
+    let graph = a.authored_style_graph().unwrap();
+    let copy = Document::new(4).unwrap();
+    copy.restore_authored_style_graph(&graph).unwrap();
+    assert!(copy.has_style_reference_contexts());
+}
