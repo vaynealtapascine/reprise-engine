@@ -125,6 +125,7 @@ impl Document {
                 stack.extend(kids);
             }
         }
+        crate::annotation::charge(order.len());
         order
     }
 

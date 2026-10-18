@@ -215,6 +215,8 @@ pub(crate) enum Created {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Plan {
     pub paste: Option<crate::paste::Prepared>,
+    /// Command-level exhaustive audit; steps additionally cover implicit writes.
+    trial_command: bool,
     /// The blocks the transaction creates, in command order. Staged ones are
     /// staged first; steps name them by index.
     pub created: Vec<Created>,
@@ -233,6 +235,9 @@ impl Plan {
     /// Explicit formatting counts are fully modelled. Structural copies can
     /// also write reset/copy actions; exercise those on the resulting state.
     pub(crate) fn needs_trial(&self, doc: &Document) -> Result<bool, DocError> {
+        if self.trial_command {
+            return Ok(true);
+        }
         if self.created.iter().any(|created| match created {
             Created::Staged(block) => {
                 doc.style_record(&block.style).is_some_and(|r| r.builtin)
@@ -265,7 +270,10 @@ impl Plan {
                 | Step::RemoveListItem { .. }
                 | Step::SetListRestart { .. }
                 | Step::InsertInline { .. }
-                | Step::UpdateInline { .. } => return Ok(true),
+                | Step::UpdateInline { .. }
+                | Step::AddAnnotation { .. }
+                | Step::UpdateAnnotation { .. }
+                | Step::RemoveAnnotation { .. } => return Ok(true),
                 Step::SetAlignment {
                     alignment: reprise_doc::marks::Alignment::Justify,
                     ..
@@ -308,7 +316,25 @@ impl Plan {
                     }
                     continue;
                 }
-                _ => continue,
+                Step::SetPageSetup(_)
+                | Step::SetAlignment { .. }
+                | Step::SetTabs { .. }
+                | Step::AlignLine { .. }
+                | Step::PinLine { .. }
+                | Step::FormatText { .. }
+                | Step::InsertText { .. }
+                | Step::DeleteText { .. }
+                | Step::Place { .. }
+                | Step::Delete { .. }
+                | Step::Move { .. }
+                | Step::SetOverrides { .. }
+                | Step::AddRelation { .. }
+                | Step::RemoveRelation { .. }
+                | Step::SetRole { .. }
+                | Step::SetStyleName { .. }
+                | Step::PatchOverrides { .. }
+                | Step::ClearAlignment { .. }
+                | Step::ClearLineAlignment { .. } => continue,
             };
             if explicit || doc.text_format_capacity(*node)?.0 != 0 {
                 return Ok(true);
@@ -447,10 +473,62 @@ pub(crate) fn plan(
         inlines: BTreeMap::new(),
     };
     for (i, command) in commands.iter().enumerate() {
+        model.plan.trial_command |= command_needs_trial(command);
         model.run(command).map_err(|r| EditError::at(i, r))?;
         model.plan.step_commands.resize(model.plan.steps.len(), i);
     }
     Ok(model.plan)
+}
+
+/// No wildcard: adding a command requires an explicit publication decision.
+/// The model-only commands below validate their direct writes; structural
+/// formatting transfers are selected separately by Plan::needs_trial.
+fn command_needs_trial(command: &Command) -> bool {
+    match command {
+        Command::Paste { .. }
+        | Command::SetPageSetup { .. }
+        | Command::SwapPageOrientation { .. }
+        | Command::SetAlignment { .. }
+        | Command::SetTabStops { .. }
+        | Command::AddAnchor { .. }
+        | Command::ClearAlignment { .. }
+        | Command::DefineStyle { .. }
+        | Command::PatchStyle { .. }
+        | Command::RenameStyle { .. }
+        | Command::DeleteStyle { .. }
+        | Command::SetStyleName { .. }
+        | Command::SetStyleOverride { .. }
+        | Command::PatchOverrides { .. }
+        | Command::SetRole { .. }
+        | Command::CreateList { .. }
+        | Command::UpdateList { .. }
+        | Command::DeleteList { .. }
+        | Command::SetListItem { .. }
+        | Command::RemoveListItem { .. }
+        | Command::SetListLevel { .. }
+        | Command::IndentListItem { .. }
+        | Command::RestartList { .. }
+        | Command::ContinueList { .. }
+        | Command::AddAnnotation { .. }
+        | Command::UpdateAnnotation { .. }
+        | Command::RemoveAnnotation { .. }
+        | Command::InsertInline { .. }
+        | Command::UpdateInline { .. } => true,
+        Command::InsertText { .. }
+        | Command::DeleteText { .. }
+        | Command::InsertLineBreak { .. }
+        | Command::InsertTab { .. }
+        | Command::FormatText { .. }
+        | Command::InsertBlock { .. }
+        | Command::DeleteBlock { .. }
+        | Command::MoveBlock { .. }
+        | Command::SplitBlock { .. }
+        | Command::JoinBlocks { .. }
+        | Command::AddRelation { .. }
+        | Command::RemoveRelation { .. }
+        | Command::Enter { .. }
+        | Command::BackspaceAtStart { .. } => false,
+    }
 }
 
 fn check_text_size(len: usize) -> Result<(), Reason> {
@@ -889,6 +967,7 @@ impl Model<'_> {
             Command::AddAnnotation { node, range, data } => self.add_annotation(*node, range, data),
             Command::UpdateAnnotation { id, data } => {
                 self.annotation_unremoved(*id)?;
+                self.annotation_target(data)?;
                 self.doc
                     .check_annotation_update(*id, data)
                     .map_err(Reason::from)?;
@@ -1075,6 +1154,7 @@ impl Model<'_> {
             .iter()
             .filter(|s| matches!(s, Step::AddAnnotation { .. }))
             .count();
+        self.annotation_target(data)?;
         // The document checks the payload, its targets and capacity; the
         // span was checked against the text as this transaction leaves it.
         self.doc
@@ -1085,6 +1165,38 @@ impl Model<'_> {
             range: range.clone(),
             data: data.clone(),
         });
+        Ok(())
+    }
+
+    /// Overlay structural and annotation deletions on the document's checks.
+    /// Text-anchor changes (including split/join and empty-range policies) are
+    /// exercised by the shared isolated preflight before publication.
+    fn annotation_target(
+        &self,
+        data: &reprise_doc::annotation::AnnotationData,
+    ) -> Result<(), Reason> {
+        use reprise_doc::annotation::{AnnotationData, AnnotationError, LinkTarget};
+        let live = match data {
+            AnnotationData::Link(LinkTarget::Node { node } | LinkTarget::Heading { node }) => {
+                self.live(*node)?
+            }
+            AnnotationData::Link(LinkTarget::Range { range }) => {
+                self.annotation_unremoved(*range)?;
+                match self.doc.resolve_range(*range) {
+                    RangeState::Valid { node, .. } | RangeState::Rebound { node, .. } => {
+                        self.live(node)?
+                    }
+                    RangeState::Missing { .. } => false,
+                }
+            }
+            _ => true,
+        };
+        if !live {
+            return Err(AnnotationError::Payload(
+                "link target is not live in the transaction".into(),
+            )
+            .into());
+        }
         Ok(())
     }
 

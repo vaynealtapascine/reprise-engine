@@ -550,3 +550,14 @@ a staging commit excluded from user undo. This changes the receiver revision
 and declares package bit 18; its change report marks styles dirty. A receiver
 that already has stable identities keeps its own interpretation. Native merge
 applies the same adoption policy.
+
+
+Review-fixes-2 packet extensions: required bit 6 (`range-endpoints1`) declares
+retained distinct-host range endpoints; bit 7 (`style-reference-contexts2`)
+declares explicit interpretation after historical-context migration. Each
+corresponding metadata operation is refused before import if its declaration is
+missing. Bits 4 and 5 may occur together for an identity root retaining legacy
+context; the sender must declare both so receivers can preflight migration
+before importing. The migration pins each side's references instead of applying
+one source's context to unrelated unmarked references. The exact replacement of
+the earlier frozen context wording is proposed in the review-fixes-2 report.

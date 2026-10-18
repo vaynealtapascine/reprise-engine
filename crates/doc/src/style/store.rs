@@ -132,6 +132,13 @@ fn nested_map(map: &LoroMap, key: &str) -> Option<LoroMap> {
     }
 }
 
+#[cfg(test)]
+thread_local! { static RECORD_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn take_record_reads() -> usize {
+    RECORD_READS.with(|n| n.replace(0))
+}
+
 impl Document {
     /// Whether a root exists, without creating it. Presence includes an
     /// emptied root, whose operations stay in history.
@@ -181,7 +188,20 @@ impl Document {
         Some(record)
     }
 
+    /// Whether this owner's base is builtin, without decoding its properties.
+    pub(crate) fn is_builtin_owner(&self, name: &str) -> bool {
+        super::BUILTIN_STYLES.contains(&name)
+            && self.nested_style(name).is_none()
+            && self
+                .flat_styles()
+                .and_then(|map| get_str(&map, &key("state", name)))
+                .as_deref()
+                != Some("defined")
+    }
+
     pub(crate) fn raw_style_record(&self, name: &str, allow_builtin: bool) -> Option<StyleRecord> {
+        #[cfg(test)]
+        RECORD_READS.with(|n| n.set(n.get().saturating_add(1)));
         let nested = self.nested_style(name);
         let flat = self.flat_styles();
         let state = flat.as_ref().and_then(|m| get_str(m, &key("state", name)));
@@ -578,11 +598,8 @@ impl Document {
             PARAGRAPH_KEYS.iter().any(|k| map.get(k).is_some())
                 || get_str(map, "alignment").as_deref() == Some("justify")
         };
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return true;
-        };
         let mut visited = 0usize;
-        if roots.contains_key("styles") {
+        if self.has_root("styles") {
             let styles = self.doc.get_map("styles");
             for name in styles.keys() {
                 visited += 1;
@@ -596,7 +613,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key(crate::marks::PATCHES) {
+        if self.has_root(crate::marks::PATCHES) {
             let marks = self.doc.get_map(crate::marks::PATCHES);
             for k in marks.keys() {
                 visited += 1;
@@ -608,7 +625,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key(crate::flow::BREAKS)
+        if self.has_root(crate::flow::BREAKS)
             && let LoroValue::Map(records) = self.doc.get_map(crate::flow::BREAKS).get_value()
         {
             for value in records.values() {
@@ -627,7 +644,7 @@ impl Document {
                 }
             }
         }
-        if roots.contains_key("content") {
+        {
             let tree = self.doc.get_tree("content");
             for id in tree.nodes() {
                 visited += 1;

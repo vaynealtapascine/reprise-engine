@@ -60,12 +60,9 @@ fn read(raw: &str) -> Result<BTreeMap<String, LoroValue>, DocError> {
 
 impl Document {
     fn native_page_map(&self) -> Result<Option<LoroMap>, DocError> {
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return Err(invalid());
-        };
-        match roots.get(ROOT) {
+        match self.doc.get_by_str_path(ROOT) {
             None => Ok(None),
-            Some(LoroValue::Container(id)) if id.container_type() == loro::ContainerType::Map => {
+            Some(ValueOrContainer::Container(loro::Container::Map(_))) => {
                 let map = self.doc.get_map(ROOT);
                 if map.len() > MAX_PROPERTIES {
                     return Err(invalid());

@@ -76,10 +76,14 @@ recomputed, except where a section below says history keeps it.
 | 16 | `REQUIRED_ANNOTATIONS` | required | Links and comment anchors |
 | 17 | none | none | **Reserved** for sections (work in progress); no constant is defined and no reader may assign it another meaning |
 | 18 | `REQUIRED_STYLE_IDENTITIES` | required | Durable style owners (`styles2`) |
+| 19 | none | none | **Reserved** for frames: chains (design on `ws/frames`); no constant is defined and no reader may assign it another meaning |
+| 20 | `REQUIRED_RANGE_ENDPOINTS` | required | Retained cross-paragraph range endpoints (`end-node1`) in distinct text hosts |
+| 21 | `REQUIRED_STYLE_REFERENCE_CONTEXTS` | required | Explicit style-reference interpretation (`styles2.reference-contexts2`) |
+| 22 | none | none | **Reserved** for frames: canvas mode (design on `ws/frames`); no constant is defined and no reader may assign it another meaning |
 
 `KNOWN_REQUIRED` is the union of every required constant above; `KNOWN_OPTIONAL` is
 `OPTIONAL_TABLE_HEADERS`. A package that sets a required bit outside `KNOWN_REQUIRED`,
-bit 17 included, is `RequiredFeatures`.
+bits 17, 19 and 22 included, is `RequiredFeatures`.
 
 ## Sections
 
@@ -341,3 +345,15 @@ styles and old marked paragraph-style interpretation remain authoritative.
 `styles2.clock/<peer>` stores a nonnegative scalar style-allocation floor. Whole
 copy transfer advances it by the source's operation high-water counter; future
 allocations add their local counter to the floor. It is not a sync causal vector.
+
+
+### Review-fixes-2 required extensions
+
+| Required bit | Meaning |
+| --- | --- |
+| 20 | `range-endpoints1`: retained `end-node1` endpoints in distinct shared text hosts. Older readers would truncate them. |
+| 21 | `style-reference-contexts2`: explicit owner interpretation after historical-context joins, marked in `styles2.reference-contexts2`. Older identity readers would apply global legacy context to unrelated owner references. |
+
+Bits 19 and 22 are reserved for frames (chains and canvas). Both declarations include retired
+records and survive ordinary deletion/undo; documents without these forms keep
+their earlier feature masks. See the review-fixes-2 report's contract proposals.

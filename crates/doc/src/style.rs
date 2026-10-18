@@ -86,7 +86,7 @@ use crate::expr::{
     length_node,
 };
 use crate::function::FunctionRegistry;
-use crate::{Block, Document, get_str};
+use crate::{Document, get_str};
 
 /// A length as authored: a literal or relative to the font size (17).
 ///
@@ -997,10 +997,6 @@ pub struct Specified {
     pub notes: Vec<Note>,
 }
 
-pub(crate) fn specify(doc: &Document, block: &Block) -> Specified {
-    specify_parts(doc, doc.style_reference(block.id), &block.overrides)
-}
-
 /// Stage 1 for a style name and direct overrides, without a block: what
 /// every block with these two inputs resolves (cached per style by hosts).
 pub fn specify_parts(doc: &Document, style: Option<String>, overrides: &Style) -> Specified {
@@ -1820,6 +1816,8 @@ impl fmt::Display for StageExplanation {
 
 mod builtin;
 mod store;
+#[cfg(test)]
+pub(crate) use store::take_record_reads;
 
 pub use builtin::{BUILTIN_STYLES, builtin_style};
 pub use store::{

@@ -796,3 +796,134 @@ fn links_leave_the_reading_order_ranges_whole() {
         assert_eq!(at as usize, block.text.len());
     }
 }
+
+#[test]
+fn import_copy_keeps_cross_paragraph_annotation() {
+    use reprise_doc::annotation::{AnnotationData, CommentAnchor, LinkTarget};
+    use reprise_doc::{BlockKind as BK, Document, InlineObject, ListDefinition};
+    let doc = Document::new(1).unwrap();
+    let p = doc
+        .append_block(BK::Paragraph, "", "first second ")
+        .unwrap();
+    doc.insert_inline(p, 13, &InlineObject::field("page-number"))
+        .unwrap();
+    doc.add_annotation(
+        p,
+        0..16,
+        &AnnotationData::Link(LinkTarget::Url {
+            url: "https://example.com".into(),
+        }),
+    )
+    .unwrap();
+    doc.add_annotation(
+        p,
+        0..16,
+        &AnnotationData::Comment(CommentAnchor {
+            thread: "thread".into(),
+        }),
+    )
+    .unwrap();
+    let q = doc.split_block(p, 6).unwrap();
+    let list = doc.create_list(&ListDefinition::numbered()).unwrap();
+    doc.set_list_item(p, list, 0).unwrap();
+    doc.set_list_item(q, list, 0).unwrap();
+    doc.commit();
+    let bytes = reprise_format::Package::new(
+        &doc,
+        reprise_format::DocumentId([1; 16]),
+        reprise_doc::PersistenceMode::History,
+    )
+    .unwrap()
+    .save()
+    .unwrap();
+    let copy = Workspace::new()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: "ffeeddccbbaa99887766554433221100".into(),
+                peer_id: "2".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let state = copy.state().unwrap().data;
+    let counts: Vec<u32> = state
+        .annotations
+        .iter()
+        .map(|a| a.spans.iter().map(|p| p.end - p.start).sum())
+        .collect();
+    println!(
+        "copy annotations={:?}; blocks={:?}",
+        state.annotations,
+        state
+            .blocks
+            .iter()
+            .map(|b| (&b.text, &b.list, b.inline.len()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(counts, vec![16, 16]);
+}
+
+#[test]
+fn matching_revision_annotation_refusals_keep_content_history_and_redo() {
+    for update in [false, true] {
+        for kind in 0..3 {
+            let mut s = session("1");
+            let source = paragraph(&mut s, "source");
+            let target = paragraph(&mut s, "target");
+            let range = apply(&mut s, vec![add(&target, 0, 6, thread("target-thread"))])
+                .annotations[0]
+                .clone();
+            let link = apply(&mut s, vec![add(&source, 0, 6, url("https://example.com"))])
+                .annotations[0]
+                .clone();
+            for text in ["!", "?"] {
+                apply(
+                    &mut s,
+                    vec![Command::InsertText {
+                        node: source.clone(),
+                        at: 6,
+                        text: text.into(),
+                    }],
+                );
+            }
+            s.undo().unwrap();
+            let before = s.state().unwrap().data;
+            assert!(before.can_undo && before.can_redo);
+            let bytes = s.export_updates().unwrap().data.content.bytes;
+            let target_ref = match kind {
+                0 => LinkDestination::Node {
+                    node: target.clone(),
+                },
+                1 => LinkDestination::Heading {
+                    node: target.clone(),
+                },
+                _ => LinkDestination::Range {
+                    range: range.clone(),
+                },
+            };
+            let annotation = AnnotationPayload::Link { target: target_ref };
+            let write = if update {
+                Command::UpdateAnnotation {
+                    id: link,
+                    annotation,
+                }
+            } else {
+                add(&source, 0, 6, annotation)
+            };
+            assert!(
+                s.batch(&Payload::new(Batch {
+                    commands: vec![Command::DeleteBlock { node: target }, write],
+                    expected_revision: Some(before.revision.clone()),
+                    selection: None,
+                }))
+                .is_err()
+            );
+            assert_eq!(s.export_updates().unwrap().data.content.bytes, bytes);
+            assert_eq!(
+                serde_json::to_value(s.state().unwrap().data).unwrap(),
+                serde_json::to_value(before).unwrap()
+            );
+            s.redo().unwrap();
+        }
+    }
+}

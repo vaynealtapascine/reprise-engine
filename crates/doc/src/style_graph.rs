@@ -1,7 +1,7 @@
 //! A bounded transfer of authored style roots, independent of clipboard appearance.
 use std::collections::BTreeMap;
 
-use loro::{Container, ContainerType, LoroMap, LoroValue, ValueOrContainer};
+use loro::{Container, LoroMap, LoroValue, ValueOrContainer};
 
 use crate::{DocError, Document};
 
@@ -94,12 +94,9 @@ fn properties(map: &LoroMap, budget: &mut Budget) -> Result<BTreeMap<String, Lor
 
 impl Document {
     fn style_graph_root(&self, name: &str) -> Result<Option<LoroMap>, DocError> {
-        let LoroValue::Map(roots) = self.doc.get_value() else {
-            return Err(invalid());
-        };
-        match roots.get(name) {
+        match self.doc.get_by_str_path(name) {
             None => Ok(None),
-            Some(LoroValue::Container(id)) if id.container_type() == ContainerType::Map => {
+            Some(ValueOrContainer::Container(loro::Container::Map(_))) => {
                 Ok(Some(self.doc.get_map(name)))
             }
             Some(_) => Err(invalid()),
@@ -131,10 +128,24 @@ impl Document {
             .style_graph_root("styles1")?
             .map(|root| properties(&root, &mut budget))
             .transpose()?;
-        let identities = self
+        let mut identities = self
             .style_graph_root(crate::style_identity::ROOT)?
             .map(|root| properties(&root, &mut budget))
             .transpose()?;
+        // A version declaration survives scalar deletion. Fresh history has
+        // no tombstone to carry it, so retain the equivalent marker while
+        // leaving the source document unchanged.
+        if self.has_style_reference_contexts()
+            && identities
+                .as_ref()
+                .is_none_or(|m| !m.contains_key("reference-contexts2"))
+        {
+            budget.key("reference-contexts2")?;
+            budget.add_bytes(1)?;
+            identities
+                .get_or_insert_with(BTreeMap::new)
+                .insert("reference-contexts2".into(), LoroValue::String("1".into()));
+        }
         let mut clocks = BTreeMap::new();
         if self.has_style_identities() {
             for (peer, counter) in self.doc.oplog_vv().iter() {

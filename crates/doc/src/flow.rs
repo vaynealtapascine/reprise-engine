@@ -72,6 +72,10 @@ pub(crate) struct Para {
 }
 
 impl HostFlow {
+    pub(crate) fn index_of(&self, id: NodeId) -> Option<usize> {
+        self.index.get(&id).copied()
+    }
+
     pub(crate) fn para(&self, id: NodeId) -> Option<&Para> {
         self.index.get(&id).map(|&i| &self.paras[i])
     }
@@ -87,11 +91,16 @@ impl HostFlow {
 
     /// The live paragraphs in text order.
     pub(crate) fn live(&self) -> impl Iterator<Item = &Para> {
-        self.paras
+        let live = self
+            .paras
             .iter()
             .enumerate()
             .filter(|(i, _)| *i > 0 || self.head_live)
-            .map(|(_, p)| p)
+            .map(|(_, p)| p);
+        // Instrument the real scan in tests without changing production iterators.
+        #[cfg(test)]
+        let live = live.inspect(|_| crate::annotation::charge(1));
+        live
     }
 
     /// Whether anything other than the head is visible: a break paragraph

@@ -843,6 +843,15 @@ UTF-8 byte offsets, statuses, capabilities, limits and fallbacks.
   labels. `copy_fragment` accepts whole subtrees or explicit UTF-8 byte ranges;
   intersecting persistent ranges are clipped with their authored policies (legacy ranges use observable cursor behavior).
   Styles include inherited parents. Copy-all also carries raw authored page setup. Kernel selections promote fully selected tables to subtrees; partial table selections flatten cell text with `clipboard.selection-table` Warning. Collapsed selections copy nothing.
+- Cross-paragraph ranges (review fixes 2): `FragmentRange` gains
+  `end: Option<FragmentEndpoint>`, with `FragmentEndpoint { node: NodeId, at: usize }`.
+  `node` and `bytes` remain the first-piece compatibility view. An absent `end` encodes
+  byte-identically to existing fragment JSON. A present `end` names the final copied
+  paragraph and its UTF-8 endpoint; every intermediate selected paragraph belongs to the
+  same retained range identity. Validation and paste remap both endpoints and the internal
+  links that target the range. Older strict fragment readers refuse the field. A document
+  holding such a range requires package bit 20 (`REQUIRED_RANGE_ENDPOINTS`) and sync
+  feature `range-endpoints1` (bit 6).
 - Hosts supply a nonempty source/target namespace (normally the package DocumentId).
   Only equal namespaces authorize external relation targets. Peer equality does not.
   `plan_copy` is authoritative at both copy and paste; cross-document crossing relations
@@ -1162,10 +1171,12 @@ Copied style owners are protected from reallocation by bounded scalar per-peer
 allocation floors under `styles2.clock/<peer>`. Capture includes these added keys
 in its existing graph budget; unreadable clocks refuse new owner allocation.
 
-Required sync feature `legacy-builtins1` (bit 5) preserves known historical
-paragraph-v1 built-in interpretation without changing a source during export.
-A receiver lacking stable identities adopts the context with one preflighted,
-staged `styles2.legacy-builtins1` operation, excluded from user undo; its
-revision changes and subsequent packages declare required bit 18. Existing
-identity-aware receivers retain their own context. It cannot be combined with
-required sync feature `style-identities1` (bit 4).
+Required sync feature `legacy-builtins1` (bit 5) declares the sender's historical
+built-in interpretation and may coexist with `style-identities1` (bit 4). A receiver
+pins each side's affected retained references during isolated preflight, then
+publishes those migration operations outside user undo. Existing unrelated unmarked
+references retain their original-owner fallback. The `styles2.reference-contexts2`
+marker opts encoded owner references into explicit interpretation; package bit 21
+(`REQUIRED_STYLE_REFERENCE_CONTEXTS`) and sync feature `style-reference-contexts2`
+(bit 7) require aware readers. Old identity histories without the marker retain their
+earlier interpretation (review fixes 2, N3).
