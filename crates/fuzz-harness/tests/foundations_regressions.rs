@@ -309,6 +309,63 @@ fn a_link_made_beside_its_text_keeps_its_extent_on_redo() {
     assert_eq!(spans(&s), applied);
 }
 
+/// `import_copy` keeps live definitions nothing refers to (docs/roles-and-lists.md),
+/// but not when no block was left: the paste returned early for a fragment
+/// without blocks, before it reached the lists. (Soak seeds 400112, 400958,
+/// 401115, 500252, 500599, 500658, 500667, 600161, 600501 and 600621.)
+#[test]
+fn import_copy_keeps_the_lists_of_a_document_with_no_blocks() {
+    let mut s = session();
+    let node = paragraph(&mut s, "alpha");
+    let level = ListLevel {
+        level: 0,
+        format: Some("decimal".into()),
+        ..ListLevel::default()
+    };
+    apply(
+        &mut s,
+        vec![
+            Command::CreateList {
+                definition: ListDefinition {
+                    base: None,
+                    levels: vec![level],
+                },
+            },
+            Command::SetListItem {
+                node: node.clone(),
+                list: ListRef::New { index: 0 },
+                level: 0,
+            },
+        ],
+    )
+    .unwrap();
+    apply(&mut s, vec![Command::DeleteBlock { node }]).unwrap();
+    let source = state(&s);
+    assert!(source.blocks.is_empty());
+    assert_eq!(
+        source.lists.len(),
+        1,
+        "the definition outlives its only item"
+    );
+    let bytes = s.save().unwrap().data.bytes;
+    let copy = Workspace::new()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: "ffeeddccbbaa99887766554433221100".into(),
+                peer_id: "9".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    let definitions = |s: &State| {
+        s.lists
+            .iter()
+            .map(|l| l.definition.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(definitions(&state(&copy)), definitions(&source));
+}
+
 /// fuzz-2 `format-undo`: bold a word, delete it, undo: the word comes back
 /// without its bold. Annotations have restore hints for this (docs/
 /// annotations.md, "Undo"); formatting ranges have none.

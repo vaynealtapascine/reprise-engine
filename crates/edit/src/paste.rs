@@ -355,6 +355,8 @@ pub(crate) fn write(
             if let Some(raw) = &fragment.page_setup_patch {
                 doc.restore_raw_page_setup(raw).map_err(store)?;
             }
+            // A document whose last block is gone keeps its list definitions.
+            write_semantics(doc, &fragment, &mut result, None, same_namespace)?;
         }
         return Ok(result);
     }
