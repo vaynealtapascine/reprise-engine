@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// Compositions of one story kept at once. A header that shows its page's
 /// number is a composition per page, and a look-ahead makes them ahead of the
 /// pages that use them, so this is how far ahead the memo keeps them.
-const MAX_ENTRIES: usize = 64;
+pub(crate) const MAX_ENTRIES: usize = 64;
 
 /// What composing a story into a frame produced.
 #[derive(Clone, Debug)]
@@ -646,6 +646,14 @@ impl Shared {
     /// Compositions a stepped flow made itself.
     pub fn inline_count(&self) -> usize {
         self.memo.borrow().inline
+    }
+
+    /// Drops every cached composition and keeps the job's digests: what a memo
+    /// at its [`MAX_ENTRIES`] does to its oldest entries when others arrive,
+    /// done to all of them, so a test can lose what a look-ahead just made.
+    #[cfg(test)]
+    pub fn evict_compositions(&self) {
+        self.memo.borrow_mut().entries.clear();
     }
 
     /// The story composed for `request`, from the memo when what it read is

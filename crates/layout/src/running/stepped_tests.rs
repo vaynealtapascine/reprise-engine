@@ -2,10 +2,12 @@
 //! budget (sections §11, "Scheduling"). A page's regions used to be composed
 //! inside the unit that made the page, and the first page's inside
 //! `LayoutJob::new`, so a budget of 1 bounded neither.
-use super::compose::DIGEST_CHUNK;
+use super::compose::{DIGEST_CHUNK, MAX_ENTRIES};
 use super::field_tests::{P, story_of};
 use super::layout_tests::*;
-use crate::incremental::{JobError, LayoutSession, Pass, StepWork, Viewport, WorkCounters};
+use crate::incremental::{
+    JobError, LayoutSession, MAX_REGION_ROUNDS, Pass, StepWork, Viewport, WorkCounters,
+};
 use crate::{Engine, LayoutSnapshot, PageKind};
 use reprise_doc::sections::BreakKind;
 use reprise_doc::{Document, NodeId};
@@ -22,7 +24,15 @@ fn stepped(
     doc: &Document,
     budget: usize,
 ) -> (LayoutSnapshot, Vec<Work>, WorkCounters) {
-    let mut session = LayoutSession::new(engine);
+    stepped_on(&mut LayoutSession::new(engine), doc, budget)
+}
+
+/// As [`stepped`], on a session that may have laid the document out before.
+fn stepped_on(
+    session: &mut LayoutSession<'_>,
+    doc: &Document,
+    budget: usize,
+) -> (LayoutSnapshot, Vec<Work>, WorkCounters) {
     let mut job = session.start(doc, Viewport::Pages(0..usize::MAX));
     let mut works = Vec::new();
     let mut allocating = false;
@@ -41,6 +51,13 @@ fn stepped(
 /// Every step charged at most the budget and did a bounded amount of region
 /// work, and the flow never made a composition itself.
 fn assert_bounded(works: &[Work], counters: &WorkCounters, budget: usize) {
+    assert_bounded_steps(works, budget);
+    assert_eq!(counters.running_inline, 0, "{counters:?}");
+}
+
+/// The per-step bounds alone: what a job that had to fall back to composing
+/// regions inline (see the hostile tests at the end) still holds to.
+fn assert_bounded_steps(works: &[Work], budget: usize) {
     for (i, (used, w, allocating)) in works.iter().enumerate() {
         assert!(*used <= budget.max(1), "step {i} charged {used}: {w:?}");
         if budget == 1 {
@@ -58,7 +75,6 @@ fn assert_bounded(works: &[Work], counters: &WorkCounters, budget: usize) {
             }
         }
     }
-    assert_eq!(counters.running_inline, 0, "{counters:?}");
 }
 
 fn all_budgets(engine: &Engine, doc: &Document) -> LayoutSnapshot {
@@ -545,4 +561,295 @@ fn pages_the_region_allocation_makes_have_their_regions_made_by_the_look_ahead()
         let units: usize = works.iter().map(|(_, w, _)| w.region_units).sum();
         assert!(units >= pages, "{units} region units for {pages} pages");
     }
+}
+
+// Hostile tests of the synchronous escape paths of the look-ahead. A stepped job
+// makes a page's regions in units of their own, but two paths still compose
+// inline, whole: `Cursor::look` lets a page make a region itself when the
+// look-ahead made it and the memo still does not have it, and region feedback
+// stops collecting missing regions after `MAX_REGION_ROUNDS` and lets the
+// allocation compose them. Both are correct and counted in `running_inline`;
+// these tests make them happen, check the result is still the unbounded one,
+// and pin what is still bounded.
+
+/// A note far longer than a page, on a page template with a notes area, under a
+/// header showing its page number: every continuation page the region
+/// allocation makes needs a header of its own.
+fn endless_note(lines: usize) -> (Engine, Document) {
+    use reprise_doc::relation::builtin;
+    use reprise_doc::text::RangePolicy;
+    use reprise_doc::{
+        BlockKind, Dim, FrameRole, FrameTemplate, PageTemplate, Param, Relation, Target,
+    };
+    let (engine, doc) = setup();
+    doc.set_page_template(
+        &PageTemplate::new("notes", Dim::pt(200), Dim::pt(120))
+            .with_frame(FrameTemplate::new(
+                "main",
+                FrameRole::Flow("main".into()),
+                (Dim::pt(0), Dim::pt(0)),
+                (Dim::pt(200), Dim::pt(120)),
+            ))
+            .with_frame(FrameTemplate::new(
+                "notes",
+                FrameRole::Notes,
+                (Dim::pt(0), Dim::pt(30)),
+                (Dim::pt(200), Dim::pt(90)),
+            )),
+    )
+    .unwrap();
+    let head = story_of(&doc, &[P::T("head "), P::F("page-number")]);
+    first(
+        &doc,
+        &[
+            ("header.distance", json!(0)),
+            ("region.header.default", bind(head)),
+        ],
+    );
+    let a = body(&doc, "a");
+    let note = doc
+        .append_block(
+            BlockKind::Annotation,
+            "s",
+            &vec!["note"; lines].join(
+                "
+",
+            ),
+        )
+        .unwrap();
+    let range = doc.add_range(a, 0..1, RangePolicy::FIXED).unwrap();
+    doc.add_relation(
+        &engine.schemas,
+        &Relation::new(builtin::NOTE)
+            .owned_by(note)
+            .target("anchor", Target::Range(range))
+            .param("placement", Param::Text("page".into())),
+    )
+    .unwrap();
+    doc.commit();
+    (engine, doc)
+}
+
+#[test]
+fn more_than_sixty_four_distinct_missing_regions_in_region_feedback_fall_back_correctly() {
+    // Continuation pages the region allocation makes, each with a header of its
+    // own number: the allocation finds the memo without them, and feedback
+    // makes them one round at a time. Past `MAX_REGION_ROUNDS` it stops
+    // collecting and the allocation composes the rest itself.
+    let (engine, doc) = endless_note(700);
+    let expected = engine.layout(&doc);
+    let pages = expected.pages.len();
+    assert!(pages > MAX_REGION_ROUNDS + 8, "{pages} pages");
+    for budget in [1usize, 7] {
+        let (snapshot, works, counters) = stepped(&engine, &doc, budget);
+        assert_eq!(snapshot, expected, "budget {budget}");
+        assert_bounded_steps(&works, budget);
+        // The fallback ran, and was counted: the look-ahead alone could not
+        // make a header per page against a memo that keeps 64 a story.
+        assert!(counters.running_inline > 0, "{counters:?}");
+        assert!(counters.running_inline <= pages, "{counters:?}");
+        // The look-ahead still made the first rounds' regions in units.
+        let units: usize = works.iter().map(|(_, w, _)| w.region_units).sum();
+        assert!(
+            units >= MAX_REGION_ROUNDS,
+            "{units} region units for {pages} pages"
+        );
+    }
+}
+
+#[test]
+fn compositions_evicted_from_the_memo_are_made_again_in_units_not_inline() {
+    // The memo keeps `MAX_ENTRIES` compositions of a story, and a header that
+    // shows its page's number has one a page. So after a layout of more pages
+    // than that, the early pages' compositions are gone from the memo while the
+    // story's digest is unchanged. An edit at the top replays the transitions
+    // after it, and each needs its pages' regions to judge that: those the memo
+    // has lost are made again by the look-ahead, a unit at a time, before the
+    // block that needs them, and not by the flow in the middle of a unit.
+    let (engine, doc) = setup();
+    let head = story_of(&doc, &[P::T("head "), P::F("page-number")]);
+    first(&doc, &[("region.header.default", bind(head))]);
+    let blocks: Vec<_> = (0..40)
+        .map(|i| {
+            body(
+                &doc,
+                &format!("paragraph {i}: {}", "overflowing text ".repeat(700)),
+            )
+        })
+        .collect();
+    doc.commit();
+    let mut warm = LayoutSession::new(&engine);
+    let pages = warm.layout(&doc).unwrap().pages.len();
+    assert!(pages > MAX_ENTRIES + 8, "{pages} pages");
+    // The edit keeps the body's shape: the same pages, and the same heights.
+    let end = doc.block(blocks[0]).unwrap().text.len();
+    doc.block(blocks[0]).unwrap().text.insert(end, ".").unwrap();
+    doc.commit();
+    let expected = engine.layout(&doc);
+    assert_eq!(
+        expected.pages.len(),
+        pages,
+        "the edit changed the page count"
+    );
+    let (snapshot, works, counters) = stepped_on(&mut warm, &doc, 1);
+    assert_eq!(snapshot, expected);
+    assert_bounded(&works, &counters, 1);
+    // The memo kept what it could: some of its compositions served this job.
+    assert!(counters.running_reused > 0, "{counters:?}");
+    // What it had lost was made again. The flow confirms its fields with a
+    // second pass, which finds the 64-entry memo flooded by the first when the
+    // pages outnumber it, so a page's header is made at most twice.
+    assert!(
+        counters.running_compositions >= pages - MAX_ENTRIES,
+        "{} compositions for {pages} pages: {counters:?}",
+        counters.running_compositions
+    );
+    assert!(
+        counters.running_compositions <= 2 * pages + 2,
+        "{} compositions for {pages} pages: {counters:?}",
+        counters.running_compositions
+    );
+    let units: usize = works.iter().map(|(_, w, _)| w.region_units).sum();
+    assert!(
+        units >= counters.running_compositions,
+        "{units} region units: {counters:?}"
+    );
+}
+
+/// What a job that loses its memo's compositions after every step did.
+struct Evicted {
+    snapshot: LayoutSnapshot,
+    /// Each step's work, and whether the flow composed a region in it.
+    steps: Vec<(Work, bool)>,
+    counters: WorkCounters,
+}
+
+/// Runs a job on `session` to the end at budget 1, emptying the running memo
+/// of its compositions after every step. The look-ahead then makes a story,
+/// installs it, and finds it gone: the state a memo at its cap leaves it in
+/// when other requests of the same story arrive first.
+fn stepped_evicting(session: &mut LayoutSession<'_>, doc: &Document, limit: usize) -> Evicted {
+    let memo = session.running_memo();
+    let mut job = session.start(doc, Viewport::Pages(0..usize::MAX));
+    let mut steps = Vec::new();
+    let mut allocating = false;
+    let mut inline = 0;
+    for _ in 0..limit {
+        let step = job.step(1).unwrap();
+        let now = job.counters().running_inline;
+        steps.push(((step.used, job.step_work(), allocating), now > inline));
+        inline = now;
+        allocating = step.pass == Pass::RegionFeedback;
+        if step.complete {
+            let snapshot = job.complete().unwrap().unwrap();
+            return Evicted {
+                snapshot,
+                steps,
+                counters: job.counters(),
+            };
+        }
+        memo.evict_compositions();
+    }
+    panic!("a job whose memo loses every composition did not finish in {limit} steps");
+}
+
+#[test]
+fn a_memo_that_loses_what_the_look_ahead_just_made_does_not_loop() {
+    // `Cursor::look` makes a page's regions ahead, then asks the memo again.
+    // If the memo no longer has what was made, asking for the same thing a
+    // second time would make it a second time, forever: the page makes its
+    // regions itself instead, once, and that is counted.
+    let (engine, doc) = setup();
+    let head = story_of(&doc, &[P::T("head "), P::F("page-number")]);
+    let foot = story_of(
+        &doc,
+        &[P::F("page-number"), P::T(" of "), P::F("page-count")],
+    );
+    first(
+        &doc,
+        &[
+            ("region.header.default", bind(head)),
+            ("region.footer.default", bind(foot)),
+        ],
+    );
+    for i in 0..5 {
+        body(
+            &doc,
+            &format!("paragraph {i}: {}", "overflowing text ".repeat(700)),
+        );
+    }
+    doc.commit();
+    let expected = engine.layout(&doc);
+    let pages = expected.pages.len();
+    assert!(pages >= 8, "{pages} pages");
+    let (_, plain, plain_counters) = stepped(&engine, &doc, 1);
+    assert_eq!(plain_counters.running_inline, 0);
+    // Without the stall check the job never finishes: the limit is a few times
+    // what a job whose memo keeps what it is given needs.
+    let mut session = LayoutSession::new(&engine);
+    let evicted = stepped_evicting(&mut session, &doc, 3 * plain.len() + 1_000);
+    assert_eq!(evicted.snapshot, expected);
+    let c = &evicted.counters;
+    let made: usize = evicted
+        .steps
+        .iter()
+        .map(|((_, w, _), _)| w.pages_made)
+        .sum();
+    // The fallback ran, and was counted: no more than the header and the footer
+    // of each page that was made.
+    assert!(c.running_inline > 0, "{c:?}");
+    assert!(c.running_inline <= 2 * made, "{c:?}");
+    // Only the step that made a page composed regions itself, once.
+    let composing = evicted.steps.iter().filter(|(_, inline)| *inline).count();
+    assert!(composing <= made, "{composing} steps, {made} pages made");
+    // Every other step keeps the budget-1 bounds.
+    let rest: Vec<_> = evicted
+        .steps
+        .iter()
+        .filter(|(_, inline)| !inline)
+        .map(|(work, _)| work.clone())
+        .collect();
+    assert_bounded_steps(&rest, 1);
+}
+
+#[test]
+fn a_memoised_transition_whose_regions_keep_vanishing_is_redone_not_waited_for() {
+    // A replayed transition waits for the regions of the pages it made, then
+    // judges whether they are unchanged. If the memo keeps losing them, waiting
+    // again would never end: the second time it is redone instead.
+    let (engine, doc) = setup();
+    let head = story_of(&doc, &[P::T("head "), P::F("page-number")]);
+    first(&doc, &[("region.header.default", bind(head))]);
+    let blocks: Vec<_> = (0..10)
+        .map(|i| {
+            body(
+                &doc,
+                &format!("paragraph {i}: {}", "overflowing text ".repeat(300)),
+            )
+        })
+        .collect();
+    doc.commit();
+    // Two sessions that have laid the document out, to be edited the same way.
+    let mut keeps = LayoutSession::new(&engine);
+    let mut loses = LayoutSession::new(&engine);
+    keeps.layout(&doc).unwrap();
+    loses.layout(&doc).unwrap();
+    let end = doc.block(blocks[0]).unwrap().text.len();
+    doc.block(blocks[0]).unwrap().text.insert(end, ".").unwrap();
+    doc.commit();
+    let expected = engine.layout(&doc);
+    assert!(expected.pages.len() >= 8);
+    let (snapshot, plain, kept) = stepped_on(&mut keeps, &doc, 1);
+    assert_eq!(snapshot, expected);
+    assert_eq!(kept.running_inline, 0);
+    let evicted = stepped_evicting(&mut loses, &doc, 3 * plain.len() + 1_000);
+    assert_eq!(evicted.snapshot, expected);
+    let lost = &evicted.counters;
+    // With its memo the later paragraphs' transitions were replayed; without,
+    // they were made again, and none was waited for twice.
+    assert!(kept.reused_compositions > 0, "{kept:?}");
+    assert!(
+        lost.compositions > kept.compositions,
+        "kept {kept:?}, lost {lost:?}"
+    );
 }

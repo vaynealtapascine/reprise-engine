@@ -1155,7 +1155,7 @@ impl Evaluation {
 
 /// Times a region allocation is run for nothing but to find the regions of
 /// the pages it makes, before it composes them itself.
-const MAX_REGION_ROUNDS: usize = 64;
+pub(crate) const MAX_REGION_ROUNDS: usize = 64;
 
 /// Short paragraphs prepared together, speculatively, at a block start (one
 /// current block plus up to this many minus one following blocks).
@@ -1279,6 +1279,12 @@ impl<'engine> LayoutSession<'engine> {
             evaluation: Evaluation::default(),
             document: None,
         }
+    }
+    /// The session's running-region memo, for tests that act on it between
+    /// the steps of a job.
+    #[cfg(test)]
+    pub(crate) fn running_memo(&self) -> Rc<crate::running::compose::Shared> {
+        self.evaluation.running()
     }
     pub fn counters(&self) -> WorkCounters {
         let mut counters = self.evaluation.cache.borrow().counters.clone();
