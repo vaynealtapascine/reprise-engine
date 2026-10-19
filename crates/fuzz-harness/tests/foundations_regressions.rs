@@ -474,6 +474,70 @@ fn import_copy_drops_a_deleted_base_and_draws_the_same() {
     assert_eq!(drawing(&mut s), drawing(&mut copy));
 }
 
+/// Pinned as designed: an orphaned comment keeps a point in its paragraph and
+/// comes across `import_copy` with it; one whose paragraph was deleted has no
+/// span in the source either, nothing in a copy to attach it to, and is not
+/// carried (a copy replays live content; the tombstone stays with the source).
+/// The oracle compares the first kind and skips the second. (Eleven soak seeds,
+/// among them 400026, 400392 and 500457.)
+#[test]
+fn import_copy_carries_an_orphan_with_a_paragraph_and_not_without_one() {
+    for delete_block in [false, true] {
+        let mut s = session();
+        let node = paragraph(&mut s, "alpha");
+        paragraph(&mut s, "beta");
+        apply(
+            &mut s,
+            vec![Command::AddAnnotation {
+                node: node.clone(),
+                start: 0,
+                end: 5,
+                annotation: AnnotationPayload::Comment { thread: "t".into() },
+            }],
+        )
+        .unwrap();
+        apply(
+            &mut s,
+            vec![if delete_block {
+                Command::DeleteBlock { node: node.clone() }
+            } else {
+                Command::DeleteText {
+                    node: node.clone(),
+                    start: 0,
+                    end: 5,
+                }
+            }],
+        )
+        .unwrap();
+        let orphans = |s: &DocumentSession| {
+            state(s)
+                .annotations
+                .iter()
+                .map(|a| (a.status.clone(), a.spans.len()))
+                .collect::<Vec<_>>()
+        };
+        let source = orphans(&s);
+        assert_eq!(source.len(), 1);
+        assert_eq!(source[0].1, usize::from(!delete_block), "{delete_block}");
+        let bytes = s.save().unwrap().data.bytes;
+        let copy = Workspace::new()
+            .import_copy(
+                &Payload::new(ImportCopy {
+                    document_id: "ffeeddccbbaa99887766554433221100".into(),
+                    peer_id: "9".into(),
+                }),
+                &bytes,
+            )
+            .unwrap();
+        let copied = orphans(&copy);
+        if delete_block {
+            assert!(copied.is_empty(), "nothing to attach it to");
+        } else {
+            assert_eq!(copied, source);
+        }
+    }
+}
+
 /// fuzz-2 `format-undo`: bold a word, delete it, undo: the word comes back
 /// without its bold. Annotations have restore hints for this (docs/
 /// annotations.md, "Undo"); formatting ranges have none.

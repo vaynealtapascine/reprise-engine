@@ -433,6 +433,11 @@ Pinned as designed (not faults), each with a test or an oracle that knows it:
     so "unchanged" is compared by operations.
 -   `import_copy` drops a link whose target block is gone, and says so
     (`clipboard.annotation-dropped`).
+-   `import_copy` carries a comment orphaned by deleting its text (it keeps a
+    point in its paragraph) but not one whose paragraph was deleted: it has no
+    span in the source either and nothing in a copy to attach it to. The oracle
+    skips the second kind. A host that lists orphans will list one fewer in the
+    copy.
 -   `import_copy` drops a list's base that was deleted: a copy replays live
     definitions only. The list draws the same without it; only the
     `list.definition-missing` warning the source carried is gone. The content
