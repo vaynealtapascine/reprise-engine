@@ -338,9 +338,13 @@ fn malformed_identity_root_refuses_before_authored_style_writes() {
     let doc = Document::new(1).unwrap();
     doc.doc.get_list("styles2").push("wrong kind").unwrap();
     doc.commit();
-    let bytes = doc.try_export(PersistenceMode::History).unwrap();
+    // Operations, not a snapshot: asking for the identity map by type next to
+    // a root of another type declares an empty map root (see `map_root`).
+    // That is a declaration, not an operation, and every read of a document
+    // may make such declarations; what must not happen is a write.
+    let operations = doc.export_delta(&[]).unwrap();
     assert!(doc.define_named_style("A", &Style::default()).is_err());
-    assert_eq!(bytes, doc.try_export(PersistenceMode::History).unwrap());
+    assert_eq!(operations, doc.export_delta(&[]).unwrap());
 }
 
 #[test]
@@ -560,6 +564,46 @@ fn copied_owner_tokens_cannot_be_reallocated_when_fresh_history_catches_up() {
     copy.commit();
     assert_eq!(copy.computed_style(old).unwrap().weight, Some(500));
     assert_ne!(copy.style_identity("A"), copy.style_identity("C"));
+}
+
+/// fuzz-2 `shadow-root`: a text root named `styles2` next to the identity map.
+/// A lookup by name alone resolves to whichever root a replica registered
+/// last, so a replica that opened a snapshot could lose every style identity
+/// that a live one still read. Same operations, same names. (A shadow that
+/// comes *before* the identities makes authoring them refuse, by design: see
+/// `check_identity_keys`.)
+#[test]
+fn a_root_of_another_type_under_the_identity_name_hides_no_style() {
+    let a = Document::new(1).unwrap();
+    a.define_named_style(
+        "Quote",
+        &Style {
+            weight: Some(400),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let node = a
+        .append_block(BlockKind::Paragraph, "Quote", "quote")
+        .unwrap();
+    a.rename_named_style("Quote", "Quotation").unwrap();
+    a.commit();
+    let b = a.fork(2).unwrap();
+    b.doc.get_text("styles2").insert(0, "shadow").unwrap();
+    b.commit();
+    a.merge(&b).unwrap();
+    // An edit after the merge is what makes a snapshot prefer the shadow.
+    a.block(node).unwrap().text.insert(0, "x").unwrap();
+    a.commit();
+    let opened = Document::import(&a.try_export(PersistenceMode::History).unwrap(), 3).unwrap();
+    for (name, d) in [("live", &a), ("snapshot", &opened)] {
+        assert_eq!(d.computed_style(node).unwrap().weight, Some(400), "{name}");
+        assert_eq!(
+            d.block(node).unwrap().style.as_deref(),
+            Some("Quotation"),
+            "{name}"
+        );
+    }
 }
 
 #[test]

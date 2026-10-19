@@ -30,3 +30,17 @@ path = "fuzz_targets/scenario_twice.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "foundations"
+path = "fuzz_targets/foundations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "foundations_twice"
+path = "fuzz_targets/foundations_twice.rs"
+test = false
+doc = false
+bench = false

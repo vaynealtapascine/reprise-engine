@@ -42,7 +42,7 @@ included by immutable session lifetime, rather than a caller-assembled fingerpri
 | Itemisation/shaping | Complete `ParagraphInput` (owned by exhaustive destructuring), resolved fallback face/size, immutable engine fonts/adapter | Shaping-only portion of preparation; reused when context or line height changes without changing shaping inputs |
 | Paragraph flow | Preparation inputs, resolved template, incoming page/frame cursor and relevant fills, predecessor identity, complete input region plan | Emitted blocks/lines, diagnostics in original order, new pages/frames, outgoing fills and cursor |
 | Annotation | Preparation inputs and resolved template (including its margin-frame context) | Provisional unplaced block/extent and ordered diagnostics |
-| Region allocation | Complete flowed snapshot except revision, resolved template, ordered authored relations, actual document target resolutions, owner existence and preparation inputs, semantic tree order | Complete next plan, including diagnostics and applied relation IDs |
+| Region allocation | Complete flowed snapshot except revision, resolved template, ordered authored relations, actual document target resolutions, owner existence and preparation inputs, semantic tree order, the field texts it composes with and what the fields of the flowed blocks resolve to (a field's parameters and target are not in the snapshot, only its composed text) | Complete next plan, including diagnostics and applied relation IDs |
 | Relations and reading order | The same derived inputs, pending annotations, applied region IDs | Complete final snapshot and ordered diagnostics |
 
 The text's exact content is its **semantic text revision**: returning to identical

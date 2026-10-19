@@ -2,7 +2,9 @@
 //!
 //! Loro's undo recreates deleted characters under new IDs, so the cursors of
 //! an annotation whose text was deleted would stay collapsed. Before text is
-//! deleted, each annotation with an end in the deleted span records a hint,
+//! deleted, each annotation with an end in the deleted span (live there, or left
+//! on a tombstone there by an earlier delete: it records the place it sits)
+//! records a hint,
 //! outside the undo history: the live character before the span, the span's
 //! length and digest, the end's offset in it and its stored anchor. After an
 //! undo or redo, an end whose anchor is still that stored anchor and is
@@ -180,7 +182,12 @@ impl Document {
             let end_at = |key: &str| -> Option<End> {
                 let stored = get_str(&meta, key)?;
                 let anchor = Anchor::decode(&crate::ranges::stored_anchor(meta.get(key))?)?;
-                let Ok(Resolved::Live(u)) = whole.resolve_shared(&anchor) else {
+                // An end an earlier delete already left on a tombstone sits
+                // where it used to be; record that place too, or undoing this
+                // delete cannot put it back and it snaps to the end of the
+                // restored text.
+                let Ok(Resolved::Live(u) | Resolved::Tombstoned(u)) = whole.resolve_shared(&anchor)
+                else {
                     return None;
                 };
                 (u0..=u1).contains(&u).then(|| End {

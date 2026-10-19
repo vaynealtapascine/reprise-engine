@@ -146,6 +146,24 @@ impl Document {
         self.doc.get_by_str_path(name).is_some()
     }
 
+    /// The map root `name`, if the document has one, without creating it.
+    ///
+    /// A root is identified by its name *and* its type, so a peer can write a
+    /// root of another type under the same name. A lookup by name alone then
+    /// resolves to whichever of the two this replica registered last, which
+    /// depends on how the replica came to hold the document (live, or opened
+    /// from a snapshot), not on the operations: two replicas holding the same
+    /// operations would read different records. When the name resolves to
+    /// anything but a map, ask for the map by type. That declares a root only
+    /// in a document that already holds the other one, and an empty map reads
+    /// as no map.
+    pub(crate) fn map_root(&self, name: &str) -> Option<LoroMap> {
+        match self.doc.get_by_str_path(name)? {
+            ValueOrContainer::Container(Container::Map(map)) => Some(map),
+            _ => Some(self.doc.get_map(name)).filter(|map| !map.is_empty()),
+        }
+    }
+
     fn flat_styles(&self) -> Option<LoroMap> {
         self.has_root(STYLES).then(|| self.doc.get_map(STYLES))
     }

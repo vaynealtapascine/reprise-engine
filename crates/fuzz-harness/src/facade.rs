@@ -71,7 +71,7 @@ pub fn check_facade_bytes(data: &[u8]) -> Vec<u64> {
     }
 }
 
-fn documented(error: &api::Error) -> R {
+pub(crate) fn documented(error: &api::Error) -> R {
     ensure!(
         codes::is_documented(error.code()),
         "undocumented-code",
@@ -83,7 +83,7 @@ fn documented(error: &api::Error) -> R {
 
 /// Ok, or an error whose code is documented (and which the caller may
 /// then treat as a refusal).
-fn call<T>(result: api::Result<T>) -> R<Option<T>> {
+pub(crate) fn call<T>(result: api::Result<T>) -> R<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
         Err(error) => {
@@ -119,7 +119,7 @@ fn plain_style() -> Style {
 /// Drives a layout job to completion with the given budgets (cycled), or one
 /// unbounded step at a time when `budgets` is empty. Returns the final
 /// progress.
-fn run_job(
+pub(crate) fn run_job(
     s: &mut DocumentSession,
     options: &LayoutOptions,
     budgets: &[u32],
@@ -145,7 +145,7 @@ fn run_job(
     ))
 }
 
-fn pages(s: &DocumentSession, progress: &LayoutProgress) -> R<Vec<String>> {
+pub(crate) fn pages(s: &DocumentSession, progress: &LayoutProgress) -> R<Vec<String>> {
     let mut out = Vec::new();
     for &page in progress.pages.iter().take(8) {
         match call(s.display_json(page))? {
@@ -222,7 +222,7 @@ fn pick(blocks: &[api::Block], selector: u16) -> Option<&api::Block> {
     blocks.get(usize::from(selector) % blocks.len().max(1))
 }
 
-fn boundary(text: &str, selector: u16) -> u32 {
+pub(crate) fn boundary(text: &str, selector: u16) -> u32 {
     let bounds: Vec<usize> = text
         .char_indices()
         .map(|(i, _)| i)
@@ -319,7 +319,7 @@ fn edit(s: &mut DocumentSession, input: &mut Input<'_>) -> R {
     }
 }
 
-fn options(input: &mut Input<'_>) -> LayoutOptions {
+pub(crate) fn options(input: &mut Input<'_>) -> LayoutOptions {
     let mut options = LayoutOptions::default();
     if input.chance(60) {
         options.width = [0, 1, 100 * 1024, 600 * 1024, i32::MAX][input.below(5)];
@@ -332,7 +332,7 @@ fn options(input: &mut Input<'_>) -> LayoutOptions {
 }
 
 /// Any budgets and viewport give the pages that one unbounded job gives.
-fn layout_equivalence(
+pub(crate) fn layout_equivalence(
     s: &mut DocumentSession,
     input: &mut Input<'_>,
     transcript: &mut Vec<u64>,
@@ -541,7 +541,7 @@ fn copy_paste(s: &mut DocumentSession, input: &mut Input<'_>) -> R {
     Ok(())
 }
 
-fn export(s: &mut DocumentSession, kind: u8, transcript: &mut Vec<u64>) -> R {
+pub(crate) fn export(s: &mut DocumentSession, kind: u8, transcript: &mut Vec<u64>) -> R {
     let _ = run_job(s, &LayoutOptions::default(), &[])?;
     let format = match kind % 4 {
         0 => ExportFormat::PlainText,
@@ -577,7 +577,7 @@ fn export(s: &mut DocumentSession, kind: u8, transcript: &mut Vec<u64>) -> R {
     Ok(())
 }
 
-fn render(s: &mut DocumentSession, transcript: &mut Vec<u64>) -> R {
+pub(crate) fn render(s: &mut DocumentSession, transcript: &mut Vec<u64>) -> R {
     let Some(progress) = run_job(s, &LayoutOptions::default(), &[])? else {
         return Ok(());
     };

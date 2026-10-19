@@ -112,7 +112,9 @@ impl Document {
         if !pending && cache.initialized && cache.frontiers.as_ref() == Some(&frontiers) {
             return cache.root.clone();
         }
-        let root = self.doc.get_by_str_path(ROOT);
+        let root = self
+            .map_root(ROOT)
+            .map(|map| ValueOrContainer::Container(Container::Map(map)));
         if root.is_none() {
             self.style_root_absent.store(true, Ordering::Relaxed);
         }
@@ -181,7 +183,7 @@ impl Document {
         cache.initialized = false;
         self.style_root_absent
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        if self.doc.get_by_str_path(ROOT).is_none() {
+        if self.map_root(ROOT).is_none() {
             self.doc.get_map(ROOT);
         }
     }

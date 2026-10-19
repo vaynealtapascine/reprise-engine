@@ -374,7 +374,8 @@ annotations, so a peer cannot make `state()` fail by creating definitions. The
 items of a cut definition still carry their markers. A native fragment (a
 copy) refuses more than 1,024 definitions, because a copy cannot be partial.
 A full-document `import_copy` preserves live unreferenced definitions as well
-as used definitions and bases, giving all definitions and nodes fresh IDs;
+as used definitions and bases (also when no block is left), giving all
+definitions and nodes fresh IDs;
 tombstones/history stay with the source.
 
 `outline()` returns `{node, level, text, page}` in document order. `page` is
