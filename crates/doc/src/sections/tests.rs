@@ -229,3 +229,83 @@ fn story_metadata_has_no_meaning_outside_content() {
     assert!(doc.live(&tree, child));
     assert!(!doc.has_sections());
 }
+
+#[test]
+fn a_copy_that_would_lose_a_section_record_holding_a_container_is_refused() {
+    use crate::fragment::{CopyBlock, FragmentError};
+    use loro::LoroMap;
+    let doc = Document::new(1).unwrap();
+    let a = doc.append_block(BlockKind::Paragraph, "", "a").unwrap();
+    let b = doc.append_block(BlockKind::Paragraph, "", "b").unwrap();
+    let c = doc.append_block(BlockKind::Paragraph, "", "c").unwrap();
+    let life = doc.mint_lifetime(b).unwrap();
+    doc.activate_start(b, &life, BreakKind::Section, &SectionProperties::new())
+        .unwrap();
+    doc.doc
+        .get_map(STARTS)
+        .insert_container(&format!("{b}/{life}/future"), LoroMap::new())
+        .unwrap();
+    doc.commit();
+    let schemas = crate::SchemaRegistry::builtin();
+    let select = |nodes: &[NodeId]| -> Vec<CopyBlock> {
+        nodes
+            .iter()
+            .map(|&node| CopyBlock { node, bytes: None })
+            .collect()
+    };
+    // The record is on a boundary inside the copy, partial or complete: refused.
+    for nodes in [&[a, b][..], &[a, b, c][..]] {
+        let error = doc
+            .copy_fragment("src", &select(nodes), &schemas)
+            .unwrap_err();
+        assert!(matches!(error, FragmentError::Invalid(_)), "{error:?}");
+    }
+    // A copy that doesn't take the record is not affected by it.
+    assert!(
+        doc.copy_fragment("src", &select(&[a]), &schemas)
+            .unwrap()
+            .sections
+            .is_none()
+    );
+    // Nor is the record rewritten or repaired by having been refused.
+    assert!(doc.start_records().iter().any(|r| r.unreadable));
+    // The same for `first`.
+    let other = Document::new(2).unwrap();
+    other.append_block(BlockKind::Paragraph, "", "x").unwrap();
+    other
+        .doc
+        .get_map(STARTS)
+        .insert_container("first/0/future", LoroMap::new())
+        .unwrap();
+    other.commit();
+    assert!(matches!(
+        other.copy_document_fragment("src", &schemas),
+        Err(FragmentError::Invalid(_))
+    ));
+}
+
+#[test]
+fn stories_over_the_fragments_block_limit_are_refused_not_truncated() {
+    use crate::fragment::{FragmentError, MAX_FRAGMENT_BLOCKS};
+    let doc = Document::new(1).unwrap();
+    doc.append_block(BlockKind::Paragraph, "", "body").unwrap();
+    let blocks: Vec<_> = (0..MAX_FRAGMENT_BLOCKS).map(|_| paragraph("x")).collect();
+    let story = doc.create_story(&blocks).unwrap();
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &[(
+            "region.header.default".to_owned(),
+            Value::String(story.to_string()),
+        )]
+        .into(),
+        &[],
+    )
+    .unwrap();
+    doc.commit();
+    // The body's block and the story's 4,096 are one more than a fragment holds.
+    let error = doc
+        .copy_document_fragment("src", &crate::SchemaRegistry::builtin())
+        .unwrap_err();
+    assert!(matches!(error, FragmentError::Limit(_)), "{error:?}");
+}

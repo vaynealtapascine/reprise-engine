@@ -845,7 +845,7 @@ fn cross_paragraph_copy_remaps_internal_range_targets() {
         };
         assert_ne!(range, target);
         let extent = copy.range_extent(range).unwrap();
-        let copied = copy.blocks();
+        let copied = copy.top(reprise_doc::Domain::Body);
         assert_eq!(extent.start, (copied[0], 0));
         assert_eq!(extent.end, (*copied.last().unwrap(), 6));
         assert_eq!(copied.len(), if whole { 2 } else { 1 });

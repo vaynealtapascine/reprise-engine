@@ -30,8 +30,67 @@ fn equal_geometry(
     }
 }
 
+/// What a sections envelope says, with IDs replaced by places so two copies of
+/// one document, made under different IDs, can be compared: a boundary's block
+/// by its position among the copied blocks, a story by its label and the kind,
+/// style and text of its blocks.
+fn envelope_shape(fragment: &reprise_doc::fragment::Fragment) -> Option<serde_json::Value> {
+    let mut value: serde_json::Value = serde_json::from_str(fragment.sections.as_deref()?).unwrap();
+    let places: std::collections::BTreeMap<String, usize> = fragment
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.id.to_string(), i))
+        .collect();
+    for boundary in value["boundaries"].as_array_mut().into_iter().flatten() {
+        let id = boundary["block"].as_str().unwrap().to_owned();
+        boundary["block"] = serde_json::json!(places[&id]);
+    }
+    for story in value["stories"].as_array_mut().into_iter().flatten() {
+        let object = story.as_object_mut().unwrap();
+        object.remove("source");
+        object.remove("ranges");
+        for block in object["blocks"].as_array_mut().into_iter().flatten() {
+            *block = serde_json::json!({
+                "kind": block["kind"], "style": block["style"], "text": block["text"],
+            });
+        }
+    }
+    Some(value)
+}
+
+/// The sections a layout reports, apart from the identities of the blocks and
+/// stories under them: each page's kind, counter and label, and each running
+/// instance's place, variant, clipping and text.
+fn sections_shape(snapshot: &LayoutSnapshot) -> Option<String> {
+    let sections = snapshot.sections.as_ref()?;
+    let pages: Vec<_> = sections
+        .pages
+        .iter()
+        .map(|p| (p.kind, p.counter, p.label.clone(), p.bands.len()))
+        .collect();
+    let running: Vec<_> = sections
+        .running
+        .iter()
+        .map(|r| {
+            let text: Vec<_> = r
+                .blocks
+                .iter()
+                .flat_map(|b| {
+                    b.lines
+                        .iter()
+                        .map(move |l| b.text[l.text.clone()].to_owned())
+                })
+                .collect();
+            (r.page, r.slot.clone(), r.variant.clone(), r.clipped, text)
+        })
+        .collect();
+    Some(format!("{pages:?} {running:?} {}", sections.rules.len()))
+}
+
 #[test]
 fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
+    let mut with_sections = Vec::new();
     for fixture in reprise_fixtures::hostile::all().unwrap() {
         let before = fixture.engine.layout(&fixture.doc);
         // A block or an object a hostile peer left unreadable is refused whole.
@@ -81,6 +140,15 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
         let pasted = editor.paste(&fragment.fragment, None, "target").unwrap();
         let after = fixture.engine.layout(editor.document());
         equal_geometry(&before, &after, &pasted.ids.nodes, fixture.name);
+        assert_eq!(
+            sections_shape(&before),
+            sections_shape(&after),
+            "{}: the sections a layout reports",
+            fixture.name
+        );
+        if fragment.fragment.sections.is_some() {
+            with_sections.push(fixture.name);
+        }
         let again = editor
             .document()
             .copy_all_fragment("source", &fixture.engine.schemas)
@@ -101,6 +169,12 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
             assert_eq!(old.overrides, new.overrides);
             assert_eq!(old.table, new.table);
         }
+        assert_eq!(
+            envelope_shape(&fragment.fragment),
+            envelope_shape(&again),
+            "{}: sections envelope",
+            fixture.name
+        );
         assert_eq!(fragment.fragment.styles, again.styles);
         assert_eq!(fragment.fragment.templates, again.templates);
         assert_eq!(fragment.fragment.template_choice, again.template_choice);
@@ -149,5 +223,15 @@ fn every_hostile_fixture_roundtrips_live_structure_and_rendered_layout() {
                     .collect::<Vec<_>>()
             );
         }
+    }
+    // The envelope was really exercised: the fixtures that bind stories, hold
+    // boundaries or a geometry mode all carry one.
+    for name in [
+        "sections_geometry_hostile",
+        "sections_bands_hostile",
+        "sections_regions_hostile",
+        "sections_retained_hostile",
+    ] {
+        assert!(with_sections.contains(&name), "{name}: {with_sections:?}");
     }
 }

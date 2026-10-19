@@ -342,11 +342,8 @@ impl Document {
         fragment: &mut Fragment,
         schemas: &SchemaRegistry,
         scope: CopyScope,
-        whole: bool,
+        selection: &[CopyBlock],
     ) -> Result<(), FragmentError> {
-        if !self.has_sections() {
-            return Ok(());
-        }
         let roots: Vec<NodeId> = fragment
             .blocks
             .iter()
@@ -357,10 +354,21 @@ impl Document {
             .iter()
             .any(|r| self.domain_of(*r) != Some(Domain::Body))
         {
-            // A copy inside a story has no sections.
+            // A copy inside a story has content, not a place: no sections.
             return Ok(());
         }
-        let top: BTreeSet<NodeId> = self.top(Domain::Body).into_iter().collect();
+        if !self.has_sections() {
+            return Ok(());
+        }
+        let body = self.top(Domain::Body);
+        // The whole body, every block whole and in order, is a complete copy,
+        // however it was asked for.
+        let whole = selection.len() == body.len()
+            && selection
+                .iter()
+                .zip(&body)
+                .all(|(s, n)| s.bytes.is_none() && s.node == *n);
+        let top: BTreeSet<NodeId> = body.into_iter().collect();
         let records: BTreeMap<SectionId, StartRecord> = self
             .start_records()
             .into_iter()
@@ -382,7 +390,11 @@ impl Document {
             let effective = record.active && readable;
             // A boundary at the start of a partial copy stays behind, as it
             // does when the text is deleted.
-            if if whole { !readable } else { index == 0 || !effective } {
+            if if whole {
+                !readable
+            } else {
+                index == 0 || !effective
+            } {
                 continue;
             }
             boundaries.push(self.boundary_of(root, record, &live, &mut labels)?);
@@ -392,8 +404,7 @@ impl Document {
             dropped = records
                 .iter()
                 .filter(|(id, r)| {
-                    matches!(id, SectionId::Block(b) if !on_root.contains(b))
-                        && r.life.is_some()
+                    matches!(id, SectionId::Block(b) if !on_root.contains(b)) && r.life.is_some()
                 })
                 .count()
                 + records
@@ -431,14 +442,15 @@ impl Document {
                 labels.of(story);
             }
         }
-        let mut stories = Vec::with_capacity(labels.order.len());
-        for &story in &labels.order {
-            let label = labels.by_story[&story].clone();
-            stories.push(self.copy_story(source, story, label, schemas, scope, fragment)?);
-            if stories.len() > MAX_STORIES {
-                return Err(FragmentError::Limit("transferred stories"));
-            }
+        // Counted before any story is copied: past the limit, nothing is.
+        if labels.order.len() > MAX_STORIES {
+            return Err(FragmentError::Limit("transferred stories"));
         }
+        if boundaries.len() > MAX_BOUNDARIES {
+            return Err(FragmentError::Limit("section boundaries"));
+        }
+        let mut stories = self.copy_stories(source, &labels, schemas, scope, fragment)?;
+        self.follow_body_targets(&mut stories, fragment, selection);
         if boundaries.is_empty()
             && context.is_none()
             && geometry.is_none()
@@ -461,6 +473,10 @@ impl Document {
             dropped,
         };
         fragment.sections = Some(envelope.encode()?);
+        // The story blocks count against the fragment's own block, range and
+        // size limits as if they were pasted blocks: they are.
+        envelope.validate(fragment)?;
+        fragment.flattened(&envelope).validate()?;
         Ok(())
     }
 
@@ -557,21 +573,113 @@ impl Document {
 
     /// One story as an envelope entry: its blocks and ranges as the ordinary
     /// copy makes them. Styles, lists and notes join the fragment's own.
-    fn copy_story(
+    /// A `page-of` field in a story that is aimed at text of the body copy
+    /// follows the copy, as one in the body does: it is written as a target
+    /// inside the fragment, for the paste to remap. (The copy of the story is
+    /// made apart from the body's, so it could not see those blocks.)
+    fn follow_body_targets(
+        &self,
+        stories: &mut [Story],
+        fragment: &Fragment,
+        selection: &[CopyBlock],
+    ) {
+        // Where each copied body block starts in its source, and ends.
+        let mut cuts: BTreeMap<NodeId, std::ops::Range<usize>> = BTreeMap::new();
+        for block in &fragment.blocks {
+            let start = match block.parent {
+                None => selection
+                    .iter()
+                    .find(|s| s.node == block.id)
+                    .and_then(|s| s.bytes.as_ref())
+                    .map_or(0, |bytes| bytes.start),
+                Some(_) => 0,
+            };
+            cuts.insert(block.id, start..start.saturating_add(block.text.len()));
+        }
+        if cuts.is_empty() {
+            return;
+        }
+        for object in stories
+            .iter_mut()
+            .flat_map(|s| s.blocks.iter_mut())
+            .flat_map(|b| b.inline.iter_mut())
+        {
+            if object.kind != crate::inline::FIELD || object.param("field") != Some("page-of") {
+                continue;
+            }
+            let Some((node, at)) = object
+                .param("target")
+                .and_then(|raw| self.resolve_field_target(raw))
+            else {
+                continue;
+            };
+            let Some(cut) = cuts.get(&node) else {
+                continue;
+            };
+            // As for a body field: the end of a partial cut is the next
+            // character, which stays behind.
+            if cut.start <= at
+                && (at < cut.end
+                    || (at == cut.end && self.block(node).is_ok_and(|b| b.text.len() == cut.end)))
+            {
+                object.params.insert(
+                    "target".into(),
+                    format!("copy:{node} {}", at.saturating_sub(cut.start)),
+                );
+            }
+        }
+    }
+
+    fn copy_stories(
         &self,
         source: &str,
-        story: NodeId,
-        label: String,
+        labels: &Labels,
         schemas: &SchemaRegistry,
         scope: CopyScope,
         into: &mut Fragment,
-    ) -> Result<Story, FragmentError> {
-        let selection: Vec<CopyBlock> = self
-            .top(Domain::Story(story))
-            .into_iter()
-            .map(|node| CopyBlock { node, bytes: None })
+    ) -> Result<Vec<Story>, FragmentError> {
+        // One copy of every story's blocks, so what a copy reads of the whole
+        // document (the ranges, the relations) is read once, not once a story:
+        // the table can hold thousands. The result is then split by root.
+        let mut selection = Vec::new();
+        let mut story_of_root: BTreeMap<NodeId, usize> = BTreeMap::new();
+        for (index, &story) in labels.order.iter().enumerate() {
+            for node in self.top(Domain::Story(story)) {
+                story_of_root.insert(node, index);
+                selection.push(CopyBlock { node, bytes: None });
+            }
+        }
+        let mut part = self.copy_blocks(source, &selection, schemas, scope)?;
+        let mut stories: Vec<Story> = labels
+            .order
+            .iter()
+            .map(|&story| Story {
+                label: labels.by_story[&story].clone(),
+                source: story,
+                blocks: Vec::new(),
+                ranges: Vec::new(),
+            })
             .collect();
-        let mut part = self.copy_fragment_scoped(source, &selection, schemas, scope)?;
+        let mut owner: BTreeMap<NodeId, usize> = BTreeMap::new();
+        let mut current = 0;
+        for block in std::mem::take(&mut part.blocks) {
+            if block.parent.is_none() {
+                current = *story_of_root
+                    .get(&block.id)
+                    .ok_or_else(|| invalid("a copied story root is not a story's"))?;
+            }
+            owner.insert(block.id, current);
+            if let Some(story) = stories.get_mut(current) {
+                story.blocks.push(block);
+            }
+        }
+        for range in std::mem::take(&mut part.ranges) {
+            // A range lies in one domain, so the story of its first block is
+            // its story.
+            if let Some(story) = owner.get(&range.node).and_then(|&i| stories.get_mut(i)) {
+                story.ranges.push(range);
+            }
+        }
         for (name, style) in std::mem::take(&mut part.styles) {
             into.styles.entry(name).or_insert(style);
         }
@@ -580,17 +688,12 @@ impl Document {
         }
         into.notes.append(&mut part.notes);
         if !part.relations.is_empty() {
-            into.notes.push(reprise_diag::Note::warning(
+            into.notes.push(reprise_diag::Note::error(
                 reprise_diag::Code::new("clipboard.relation-dropped"),
                 "relations owned by or anchored in a story are not copied",
             ));
         }
-        Ok(Story {
-            label,
-            source: story,
-            blocks: part.blocks,
-            ranges: part.ranges,
-        })
+        Ok(stories)
     }
 }
 

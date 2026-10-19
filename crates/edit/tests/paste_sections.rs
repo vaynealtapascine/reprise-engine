@@ -174,7 +174,7 @@ fn paste_writes_every_boundary_on_the_copy_of_its_block_with_a_fresh_lifetime() 
     assert_eq!(three.kind, Some(BreakKind::Page));
     // The lifetime is the destination's: an operation of the paste's peer.
     let source_life = record(&src, p[2]).unwrap().life.unwrap();
-    assert_ne!(two.life.unwrap(), source_life);
+    assert_ne!(two.life.clone().unwrap(), source_life);
     // One undo step takes all of it back; redo brings back the same records.
     assert_eq!(editor.undo_count(), 1);
     let lives = (two.life.clone(), three.life.clone());
@@ -192,7 +192,7 @@ fn paste_writes_every_boundary_on_the_copy_of_its_block_with_a_fresh_lifetime() 
 fn the_first_copied_section_takes_what_it_inherited_so_a_paste_picks_up_no_foreign_header() {
     let (src, p, header) = source();
     let fragment = src
-        .copy_fragment("src", &whole(&p[2..5]), &schemas())
+        .copy_fragment("src", &whole(&p[1..5]), &schemas())
         .unwrap();
     let e = envelope(&fragment);
     // p[2] starts a section that inherits `first`'s header, which is not in
@@ -243,7 +243,7 @@ fn a_paste_into_the_same_document_refers_to_the_story_and_another_copies_it_once
     );
     src.commit();
     let fragment = src
-        .copy_fragment("src", &whole(&p[2..5]), &schemas())
+        .copy_fragment("src", &whole(&p[1..5]), &schemas())
         .unwrap();
     assert_eq!(envelope(&fragment).stories.len(), 1);
 
@@ -422,7 +422,7 @@ fn pasting_into_a_story_drops_boundaries_and_bindings_with_a_warning() {
 }
 
 #[test]
-fn a_boundary_on_the_block_joined_into_the_caret_has_no_place_and_is_dropped() {
+fn a_boundary_on_the_last_block_joined_with_the_tail_sits_on_its_copy() {
     let src = doc(1);
     let a = para(&src, "alpha");
     let b = para(&src, "beta");
@@ -511,6 +511,29 @@ fn a_malformed_envelope_is_refused_before_anything_is_written() {
             "geometry in a partial envelope",
             with(&|e| e["geometry"] = json!({"v": 1, "mode": "paged"})),
         ),
+        (
+            "too many boundaries",
+            with(&|e| {
+                let one = e["boundaries"][0].clone();
+                e["boundaries"] = Value::Array(vec![one; 16_385]);
+            }),
+        ),
+        (
+            "an unknown break kind",
+            with(&|e| e["boundaries"][0]["break"] = json!("chapter")),
+        ),
+        (
+            "an unknown binding kind",
+            with(&|e| {
+                e["boundaries"][0]["bindings"]["region.header.default"] = json!({"t": "weird"})
+            }),
+        ),
+        (
+            "no mode",
+            with(&|e| {
+                e.as_object_mut().unwrap().remove("mode");
+            }),
+        ),
     ];
     for (what, fragment) in cases {
         let dst = doc(2);
@@ -526,6 +549,10 @@ fn a_malformed_envelope_is_refused_before_anything_is_written() {
         assert_eq!(editor.document().revision(), revision, "{what}");
         assert_eq!((editor.undo_count(), editor.redo_count()), (0, 0), "{what}");
         assert!(editor.document().start_records().is_empty(), "{what}");
+        assert!(
+            !editor.document().has_sections(),
+            "{what}: a refused paste creates no section root, so no package bit"
+        );
     }
 }
 
@@ -580,6 +607,7 @@ fn the_story_table_holds_sixteen_thousand_three_hundred_eighty_four_and_refuses_
     assert_eq!(editor.document().revision(), revision);
     assert_eq!((editor.undo_count(), editor.redo_count()), (0, 0));
     assert!(editor.document().stories().is_empty());
+    assert!(!editor.document().has_sections());
 }
 
 #[test]
@@ -605,4 +633,92 @@ fn copying_counts_every_story_orphans_and_running_only_ones_included() {
         error,
         reprise_doc::fragment::FragmentError::Limit("transferred stories")
     );
+}
+
+#[test]
+fn a_page_of_in_a_copied_header_follows_the_copy_of_the_body_text_it_names() {
+    use reprise_doc::InlineObject;
+    let src = doc(1);
+    let a = para(&src, "the target paragraph");
+    let b = para(&src, "see ");
+    let head = story(&src, &["page "]);
+    let head_block = src.top(Domain::Story(head))[0];
+    first(&src, &[("region.header.default", id(head))]);
+    let to_a = src.field_target(a, 4).unwrap();
+    for (node, at) in [(head_block, 5), (b, 4)] {
+        src.insert_inline(
+            node,
+            at,
+            &InlineObject::field("page-of").with("target", to_a.clone()),
+        )
+        .unwrap();
+    }
+    src.commit();
+    let fragment = src.copy_all_fragment("src", &schemas()).unwrap();
+    // The header's field, copied apart from the body, names text of the copy.
+    let envelope = envelope(&fragment);
+    assert!(
+        envelope.stories[0].blocks[0].inline[0].params["target"].starts_with("copy:"),
+        "{:?}",
+        envelope.stories[0].blocks[0].inline
+    );
+    let mut editor = Editor::new(doc(2), schemas());
+    let pasted = editor.paste(&fragment, None, "dst").unwrap();
+    let d = editor.document();
+    let new_a = pasted.ids.nodes[&a];
+    let copy = pasted.stories[&head];
+    let fields = [
+        d.inline_objects(d.top(Domain::Story(copy))[0]).unwrap(),
+        d.inline_objects(pasted.ids.nodes[&b]).unwrap(),
+    ];
+    for entry in fields.iter().flatten() {
+        let target = entry.object.param("target").unwrap();
+        let (node, at) = d.resolve_field_target(target).unwrap();
+        assert_eq!((node, at), (new_a, 4), "{target}");
+    }
+}
+
+#[test]
+fn a_copied_story_keeps_its_formatting_list_role_and_inline_objects() {
+    use reprise_doc::formatting::TextStyle;
+    use reprise_doc::{InlineObject, ListDefinition, Role};
+    let src = doc(1);
+    let head = story(&src, &["bold and plain", "an item"]);
+    let blocks = src.top(Domain::Story(head));
+    first(&src, &[("region.header.default", id(head))]);
+    para(&src, "body");
+    let bold = TextStyle {
+        weight: Some(700),
+        ..TextStyle::default()
+    };
+    src.format_text(
+        blocks[0],
+        0..4,
+        &bold,
+        reprise_doc::text::RangePolicy::EXPANDING,
+    )
+    .unwrap();
+    src.set_role(blocks[0], Role::Heading(2)).unwrap();
+    let list = src.stage_list(&ListDefinition::numbered()).unwrap();
+    src.activate_list(list).unwrap();
+    src.set_list_item(blocks[1], list, 0).unwrap();
+    src.insert_inline(blocks[1], 2, &InlineObject::field("page-number"))
+        .unwrap();
+    src.commit();
+    let fragment = src.copy_all_fragment("src", &schemas()).unwrap();
+    let mut editor = Editor::new(doc(2), schemas());
+    let pasted = editor.paste(&fragment, None, "dst").unwrap();
+    let d = editor.document();
+    let copy = pasted.stories[&head];
+    let moved = d.top(Domain::Story(copy));
+    assert_eq!(story_text(d, copy).len(), 2);
+    let runs = d.text_formats(moved[0]).unwrap().runs;
+    assert!(
+        runs.iter()
+            .any(|r| r.bytes == (0..4) && r.style.weight == Some(700)),
+        "{runs:?}"
+    );
+    assert_eq!(d.stored_role(moved[0]).unwrap().role, Role::Heading(2));
+    assert!(d.list_item(moved[1]).is_some());
+    assert_eq!(d.inline_objects(moved[1]).unwrap().len(), 1);
 }

@@ -77,6 +77,16 @@ impl BreakKind {
 /// remain unreadable and are never rewritten by interpretation.
 pub type SectionProperties = BTreeMap<String, Value>;
 
+/// A start a paste writes: its block (already pasted), its kind, whether the
+/// source record was active, and its raw properties with bindings resolved.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PastedStart {
+    pub block: NodeId,
+    pub kind: BreakKind,
+    pub active: bool,
+    pub properties: SectionProperties,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartRecord {
     pub id: SectionId,
@@ -229,6 +239,12 @@ impl Document {
         if !self.top(Domain::Body).contains(&address) {
             return Err(DocError::NoNode(address));
         }
+        self.mint_lifetime_unchecked(address)
+    }
+
+    /// [`Document::mint_lifetime`] for an address the caller has already
+    /// found in the body, so a paste of thousands of starts reads the body once.
+    fn mint_lifetime_unchecked(&self, address: NodeId) -> Result<String, DocError> {
         self.commit_part();
         let peer = self.doc.peer_id();
         let counter = self.doc.oplog_vv().get(&peer).copied().unwrap_or_default();
@@ -272,6 +288,56 @@ impl Document {
         map.insert(&format!("{block}/{life}/break"), kind.token())?;
         map.insert(&format!("{block}/life"), life)?;
         map.insert(&format!("{block}/active"), true)?;
+        Ok(())
+    }
+
+    /// Writes the starts a paste brings (sections §14): each on its block, in a
+    /// lifetime of its own that this call mints, with the `active` flag the
+    /// source record had. Nothing of the source's lifetimes is read or kept.
+    /// Every start is checked before the first is written.
+    pub fn write_pasted_starts(&self, starts: &[PastedStart]) -> Result<(), DocError> {
+        let body: BTreeSet<NodeId> = self.top(Domain::Body).into_iter().collect();
+        for start in starts {
+            if !body.contains(&start.block) {
+                return Err(DocError::NoNode(start.block));
+            }
+            validate_properties(&start.properties, &[])?;
+        }
+        for start in starts {
+            let life = self.mint_lifetime_unchecked(start.block)?;
+            self.write_section_properties(
+                SectionId::Block(start.block),
+                &life,
+                &start.properties,
+                &[],
+            )?;
+            let map = self.doc.get_map(STARTS);
+            let block = start.block;
+            map.insert(&format!("{block}/{life}/break"), start.kind.token())?;
+            map.insert(&format!("{block}/life"), life.as_str())?;
+            map.insert(&format!("{block}/active"), start.active)?;
+        }
+        Ok(())
+    }
+
+    /// Writes the raw geometry-mode record a copy carried (sections §18): its
+    /// scalar keys exactly as they were, unknown ones included, so a record
+    /// this reader doesn't understand is still carried to the next one.
+    pub fn write_geometry_record(&self, record: &SectionProperties) -> Result<(), DocError> {
+        validate_properties(record, &[])?;
+        let map = self.doc.get_map(GEOMETRY);
+        for (key, value) in record {
+            match value {
+                Value::String(v) => map.insert(key, v.as_str())?,
+                Value::Bool(v) => map.insert(key, *v)?,
+                Value::Number(v) => map.insert(
+                    key,
+                    v.as_i64()
+                        .ok_or_else(|| DocError::Store("non-integer geometry value".into()))?,
+                )?,
+                _ => return Err(DocError::Store("non-scalar geometry value".into())),
+            };
+        }
         Ok(())
     }
 

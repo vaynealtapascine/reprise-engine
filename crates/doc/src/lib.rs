@@ -39,6 +39,7 @@ mod flow;
 mod flow_tests;
 pub mod formatting;
 pub mod fragment;
+pub mod fragment_sections;
 pub mod function;
 mod history;
 #[cfg(any(test, feature = "hostile-peer"))]

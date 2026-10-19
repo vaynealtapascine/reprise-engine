@@ -165,6 +165,10 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         sections_retained_hostile()?,
         metadata_depth_1024()?,
         metadata_depth_4096()?,
+        // Dedicated until S9 carried sections through the shared roundtrip.
+        sections_geometry_hostile()?,
+        sections_bands_hostile()?,
+        sections_regions_hostile()?,
     ])
 }
 
@@ -3370,7 +3374,7 @@ pub fn sections_retained_hostile() -> Result<Fixture, DocError> {
     Ok(Fixture::new("sections_retained_hostile", doc, &[]))
 }
 
-/// Effective continuous bands stay dedicated until S9 adds clipboard transport.
+/// Effective continuous bands. In `all()` since S9 carried sections through the clipboard.
 pub fn sections_bands_hostile() -> Result<Fixture, DocError> {
     use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
     let doc = document()?;
@@ -3697,7 +3701,7 @@ pub fn inline_fields_with_oscillating_regions() -> Result<Fixture, DocError> {
 
 /// Running regions: variants, a tall clipped header, an empty story, a
 /// background, a deleted story, a story holding a note, bad distances and keys.
-/// Dedicated until S9 carries sections through the shared roundtrip.
+/// In `all()` since S9 carried sections through the shared roundtrip.
 pub fn sections_regions_hostile() -> Result<Fixture, DocError> {
     use reprise_doc::NewBlock;
     use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};

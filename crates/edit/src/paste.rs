@@ -13,6 +13,10 @@ use crate::{Applied, EditError, Editor, Effect, Reason};
 pub const STYLE_CLASH: Code = Code::new("clipboard.style-clash");
 pub const RELATION_DROPPED: Code = Code::new("clipboard.relation-dropped");
 pub const HOST_RANGE_DROPPED: Code = Code::new("clipboard.host-range-dropped");
+/// The envelope held settings the destination can't take (sections §14).
+pub const SECTION_CONTEXT: Code = Code::new("clipboard.section-context");
+/// Section records of the copy that had no block to sit on (sections §14).
+pub const SECTION_DROPPED: Code = Code::new("clipboard.section-dropped");
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pasted {
@@ -25,6 +29,10 @@ pub struct Pasted {
     /// caret): the block and byte offset a caret should take. `None` if the
     /// fragment had no blocks.
     pub end: Option<(NodeId, usize)>,
+    /// Each story the fragment carried, by its ID in the document it was
+    /// copied from, and the story the paste used for it: the same story when
+    /// pasting into that document, a new one anywhere else.
+    pub stories: BTreeMap<NodeId, NodeId>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +50,8 @@ pub(crate) struct Prepared {
     /// Source and target are one document: internal link targets outside the copy stay.
     same_namespace: bool,
     notes: Vec<Note>,
+    /// What the fragment's sections envelope adds (sections §14).
+    sections: Option<crate::paste_sections::SectionsPaste>,
 }
 
 fn invalid(error: FragmentError) -> EditError {
@@ -76,6 +86,14 @@ fn prepare_with_styles(
     preserve_graph: bool,
 ) -> Result<Prepared, EditError> {
     fragment.validate().map_err(invalid)?;
+    // The envelope is read and checked first, and its stories' blocks join the
+    // fragment's own: from here a story is pasted as blocks are.
+    let crate::paste_sections::Split {
+        fragment: flat,
+        sections,
+        notes: section_notes,
+    } = crate::paste_sections::split(doc, fragment, at, target)?;
+    let fragment: &Fragment = &flat;
     if at.is_none()
         && doc.top(reprise_doc::Domain::Body).is_empty()
         && let Some(raw) = &fragment.page_setup_patch
@@ -99,7 +117,8 @@ fn prepare_with_styles(
         host: None,
         host_ranges: Vec::new(),
         same_namespace: fragment.source == target,
-        notes: Vec::new(),
+        notes: section_notes,
+        sections,
     };
     if let Some((node, offset)) = at {
         let block = doc.block(node).map_err(|_| EditError {
@@ -157,7 +176,12 @@ fn prepare_with_styles(
             text: String::new(),
         });
         prepared.host_ranges = doc
-            .copy_fragment(target, &[CopyBlock { node, bytes: None }], schemas)
+            .copy_fragment_bare(
+                target,
+                &[CopyBlock { node, bytes: None }],
+                schemas,
+                reprise_doc::fragment::CopyScope::Clipboard,
+            )
             .map_err(invalid)?
             .ranges;
     }
@@ -339,10 +363,17 @@ pub(crate) fn write(
         host_ranges,
         same_namespace,
         notes,
+        sections,
     } = prepared;
     let mut result = Pasted {
         notes,
         ..Pasted::default()
+    };
+    // The stories the paste copies exist, empty and not yet live, before
+    // anything refers to them.
+    let staged = match &sections {
+        Some(sections) => sections.stage(doc)?,
+        None => Vec::new(),
     };
     if fragment.blocks.is_empty() {
         if at.is_none() && doc.top(reprise_doc::Domain::Body).is_empty() {
@@ -356,13 +387,26 @@ pub(crate) fn write(
                 doc.restore_raw_page_setup(raw).map_err(store)?;
             }
         }
+        for story in staged.iter().flatten() {
+            doc.activate_story(*story).map_err(store)?;
+        }
+        if let Some(sections) = &sections {
+            sections.finish(doc, &staged, None, &mut result)?;
+        }
         return Ok(result);
     }
+    let owned = |id: NodeId| sections.as_ref().is_some_and(|s| s.owns(id));
     let roots: Vec<_> = fragment
         .blocks
         .iter()
-        .filter(|b| b.parent.is_none())
+        .filter(|b| b.parent.is_none() && !owned(b.id))
         .collect();
+    // A fragment of stories alone has no place at the caret.
+    let (at, host) = if roots.is_empty() {
+        (None, None)
+    } else {
+        (at, host)
+    };
     let can_join = |b: &&reprise_doc::fragment::FragmentBlock| {
         host.as_ref()
             .is_some_and(|h| h.kind == BlockKind::Paragraph)
@@ -390,6 +434,8 @@ pub(crate) fn write(
             last,
             single: roots.len() == 1,
             same_namespace,
+            sections,
+            staged,
         };
         return write_into_flow(doc, schemas, fragment, &names, styles, plan, result);
     }
@@ -525,6 +571,9 @@ pub(crate) fn write(
             doc.restore_raw_page_setup(raw).map_err(store)?;
         }
     }
+    for story in staged.iter().flatten() {
+        doc.activate_story(*story).map_err(store)?;
+    }
     let mut root_index = index;
     if let Some(new) = leading {
         doc.activate_block_at(new, parent, root_index)
@@ -548,6 +597,15 @@ pub(crate) fn write(
                 .ok_or_else(|| invalid(FragmentError::Invalid("staged parent".into())))?;
             let child_index = child_indices.entry(new_parent).or_default();
             doc.activate_block_at(new, Some(new_parent), *child_index)
+                .map_err(store)?;
+            *child_index += 1;
+        } else if let Some(story) = sections
+            .as_ref()
+            .and_then(|s| s.story_of(block.id, &staged))
+        {
+            // The root of a story the paste copies goes into that story.
+            let child_index = child_indices.entry(story).or_default();
+            doc.activate_block_at(new, Some(story), *child_index)
                 .map_err(store)?;
             *child_index += 1;
         } else {
@@ -625,6 +683,14 @@ pub(crate) fn write(
             doc.supersede(node, head).map_err(store)?;
         }
         doc.delete_block(node).map_err(store)?;
+    }
+    if let Some(sections) = &sections {
+        sections.finish(
+            doc,
+            &staged,
+            join_first.then_some(first).flatten(),
+            &mut result,
+        )?;
     }
     let shifts = if join_first {
         first.map(|id| (id, prefix.len())).into_iter().collect()
@@ -783,6 +849,8 @@ struct FlowPaste {
     last: Option<NodeId>,
     single: bool,
     same_namespace: bool,
+    sections: Option<crate::paste_sections::SectionsPaste>,
+    staged: Vec<Option<NodeId>>,
 }
 
 /// The block a fragment block becomes, with imported style names.
@@ -832,6 +900,8 @@ fn write_into_flow(
         last,
         single,
         same_namespace,
+        sections,
+        staged,
     } = plan;
     let inline = single && join_first;
     // The split comes first: it is staged, and everything after it may
@@ -955,6 +1025,9 @@ fn write_into_flow(
     for (name, style) in styles {
         doc.define_style(&name, &style).map_err(store)?;
     }
+    for story in staged.iter().flatten() {
+        doc.activate_story(*story).map_err(store)?;
+    }
     // The staged roots go between the halves, in order.
     let mut root_index = match tail {
         Some(t) => doc
@@ -986,6 +1059,14 @@ fn write_into_flow(
             doc.activate_block_at(new, Some(new_parent), *child_index)
                 .map_err(store)?;
             *child_index += 1;
+        } else if let Some(story) = sections
+            .as_ref()
+            .and_then(|s| s.story_of(block.id, &staged))
+        {
+            let child_index = child_indices.entry(story).or_default();
+            doc.activate_block_at(new, Some(story), *child_index)
+                .map_err(store)?;
+            *child_index += 1;
         } else {
             doc.activate_block_at(new, parent, root_index)
                 .map_err(store)?;
@@ -997,6 +1078,14 @@ fn write_into_flow(
     }
     for new in result.relations.values() {
         doc.restore_relation(*new).map_err(store)?;
+    }
+    if let Some(sections) = &sections {
+        sections.finish(
+            doc,
+            &staged,
+            if join_first { first } else { None },
+            &mut result,
+        )?;
     }
     let kept = if join_first { first } else { None };
     write_semantics(doc, &fragment, &mut result, kept, same_namespace)?;

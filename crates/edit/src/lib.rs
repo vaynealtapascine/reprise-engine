@@ -26,6 +26,7 @@ mod model;
 mod movement;
 mod navigator;
 mod paste;
+mod paste_sections;
 mod plan;
 mod region;
 mod replace;
