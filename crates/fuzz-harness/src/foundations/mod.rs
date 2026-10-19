@@ -1180,7 +1180,8 @@ impl World<'_> {
             ensure!(
                 live.pages == fresh.pages && a == b,
                 "incremental-equals-reference",
-                "the live session and a from-scratch layout of its own package draw differently"
+                "the live session and a from-scratch layout of its own package draw differently: {}",
+                describe_layout_difference(&a, &b)
             );
         }
         // The reopened package, saved again, declares the same bits.
@@ -1817,6 +1818,40 @@ pub fn describe_difference(want: &State, got: &State) -> String {
         parts.push("diagnostics or metadata".to_owned());
     }
     parts.join("\n")
+}
+
+/// A short account of where two sets of rendered pages first differ: the page
+/// counts, then the first differing byte of the first page that differs, with
+/// some context from each side.
+pub fn describe_layout_difference(want: &[String], got: &[String]) -> String {
+    if want.len() != got.len() {
+        return format!("{} pages vs {}", want.len(), got.len());
+    }
+    for (page, (w, g)) in want.iter().zip(got).enumerate() {
+        if w == g {
+            continue;
+        }
+        let at = w
+            .bytes()
+            .zip(g.bytes())
+            .position(|(a, b)| a != b)
+            .unwrap_or(w.len().min(g.len()));
+        let around = |s: &str| {
+            let (from, to) = (at.saturating_sub(120), (at + 160).min(s.len()));
+            let from = (from..=at.min(s.len())).find(|&i| s.is_char_boundary(i));
+            let to = (to..=s.len()).find(|&i| s.is_char_boundary(i));
+            match (from, to) {
+                (Some(from), Some(to)) => s[from..to].to_owned(),
+                _ => String::new(),
+            }
+        };
+        return format!(
+            "page {page} differs at byte {at}\n   live  {}\n   fresh {}",
+            around(w),
+            around(g)
+        );
+    }
+    "the page lists differ".to_owned()
 }
 
 /// The options the layout-equivalence op draws, for callers that want them.
