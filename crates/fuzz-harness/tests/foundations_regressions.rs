@@ -959,3 +959,155 @@ fn an_import_copy_covers_no_more_than_its_source() {
         "an import_copy gave an annotation more extent than its source has"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Layout
+
+/// A workspace that can draw text: one face, standing for the serif generic.
+fn lettered_workspace() -> Workspace {
+    let ws = Workspace::new();
+    ws.declare_font(
+        &Payload::new(FontDeclaration {
+            family: "Source Serif Pro".into(),
+            weight: 400,
+            style: FontStyle::Normal,
+            stretch: 1000,
+            face_index: 0,
+        }),
+        reprise_fixtures::SERIF,
+    )
+    .unwrap();
+    ws.set_font_settings(&Payload::new(FontSettings {
+        generics: std::collections::BTreeMap::from([(
+            GenericFamily::Serif,
+            "Source Serif Pro".to_owned(),
+        )]),
+        ..FontSettings::default()
+    }))
+    .unwrap();
+    ws
+}
+
+/// Every page of a finished layout, as the display list draws it.
+fn drawing(s: &mut DocumentSession) -> Vec<String> {
+    let mut job = s
+        .start_layout(&Payload::new(LayoutOptions::default()))
+        .unwrap();
+    let pages = loop {
+        let progress = job.step(s, 100_000).unwrap().data;
+        if progress.complete {
+            break progress.pages;
+        }
+    };
+    pages
+        .into_iter()
+        .map(|page| s.display_json(page).unwrap().data)
+        .collect()
+}
+
+/// The same document opened from its package and laid out from scratch.
+fn fresh_drawing(s: &mut DocumentSession) -> Vec<String> {
+    let bytes = s.save().unwrap().data.bytes;
+    let mut reopened = lettered_workspace()
+        .open(
+            &Payload::new(Open {
+                peer_id: "8".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    drawing(&mut reopened)
+}
+
+fn page_of(target: String) -> InlineObject {
+    InlineObject {
+        kind: "field".into(),
+        align: InlineAlign::Baseline,
+        params: [
+            ("field".to_owned(), "page-of".to_owned()),
+            ("target".to_owned(), target),
+        ]
+        .into(),
+    }
+}
+
+fn set_target(node: &str, at: u32, target: Option<String>) -> Command {
+    Command::UpdateInline {
+        node: node.into(),
+        at,
+        patch: InlinePatch {
+            align: None,
+            params: [("target".to_owned(), target)].into(),
+        },
+    }
+}
+
+fn field_target_of(s: &DocumentSession, node: &str) -> String {
+    s.field_target(&Payload::new(FieldTarget {
+        node: node.into(),
+        at: 0,
+    }))
+    .unwrap()
+    .data
+}
+
+/// The region pass is cached on the blocks it flowed, and the blocks hold
+/// only the text a field was composed with. Removing the target left that
+/// text as it was, so the session kept the page it had found before.
+/// (Soak seed 500685, `incremental-equals-reference`.)
+#[test]
+fn a_page_of_that_loses_its_target_is_drawn_as_a_fresh_layout_draws_it() {
+    let mut s = lettered_workspace()
+        .create(&Payload::new(Create {
+            document_id: DOC.into(),
+            peer_id: "1".into(),
+        }))
+        .unwrap();
+    let one = paragraph(&mut s, "Intro");
+    let two = paragraph(&mut s, "see  for");
+    let target = field_target_of(&s, &one);
+    apply(
+        &mut s,
+        vec![Command::InsertInline {
+            node: two.clone(),
+            at: 4,
+            object: page_of(target),
+        }],
+    )
+    .unwrap();
+    let resolved = drawing(&mut s);
+    apply(&mut s, vec![set_target(&two, 4, None)]).unwrap();
+    let live = drawing(&mut s);
+    assert_ne!(live, resolved, "the field no longer finds its page");
+    assert_eq!(live, fresh_drawing(&mut s));
+}
+
+/// The same cache, retargeted to a block on another page.
+#[test]
+fn a_page_of_that_is_retargeted_is_drawn_as_a_fresh_layout_draws_it() {
+    let mut s = lettered_workspace()
+        .create(&Payload::new(Create {
+            document_id: DOC.into(),
+            peer_id: "1".into(),
+        }))
+        .unwrap();
+    let ids: Vec<String> = (0..=120)
+        .map(|i| paragraph(&mut s, &format!("paragraph {i}")))
+        .collect();
+    let (first, last) = (field_target_of(&s, &ids[0]), field_target_of(&s, &ids[120]));
+    apply(
+        &mut s,
+        vec![Command::InsertInline {
+            node: ids[60].clone(),
+            at: 0,
+            object: page_of(first),
+        }],
+    )
+    .unwrap();
+    let before = drawing(&mut s);
+    assert!(before.len() > 1, "the document runs to a second page");
+    apply(&mut s, vec![set_target(&ids[60], 0, Some(last))]).unwrap();
+    let live = drawing(&mut s);
+    assert_ne!(live, before, "the field names another page now");
+    assert_eq!(live, fresh_drawing(&mut s));
+}
