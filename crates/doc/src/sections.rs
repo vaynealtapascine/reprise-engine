@@ -418,6 +418,24 @@ impl Document {
         Ok(NodeId::tree(id))
     }
 
+    /// Appends a block to the end of a live story.
+    pub fn append_story_block(
+        &self,
+        story: NodeId,
+        kind: crate::BlockKind,
+        style: &str,
+        text: &str,
+    ) -> Result<NodeId, DocError> {
+        if story.is_break()
+            || !self.is_story_node(story.node)
+            || self.tree("content").parent(story.node) != Some(TreeParentId::Root)
+            || !self.is_live(story)
+        {
+            return Err(DocError::NoNode(story));
+        }
+        self.table_block(Some(story), kind, style, text)
+    }
+
     pub fn activate_story(&self, story: NodeId) -> Result<(), DocError> {
         if story.is_break()
             || !self.is_story_node(story.node)

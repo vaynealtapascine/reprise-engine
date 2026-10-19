@@ -44,10 +44,27 @@ use crate::{Color, DisplayList, GlyphRun, Item, Path, RenderError, Segment};
 pub mod tags;
 
 use tags::{
-    CellRole, Child, Content, DEFAULT_LANG, DEFAULT_TITLE, DocLink, FIGURE_ALT_MISSING,
-    HEADING_LEVEL, LINK_UNRESOLVED, Link, LinkTo, MAX_DEPTH, Node, Numbering, REFERENCE_UNLINKED,
-    RUN_SPLIT, Role, STRUCTURE_DEPTH, Scope, Structure, UA_NOT_MET,
+    ArtifactKind, CellRole, Child, Content, DEFAULT_LANG, DEFAULT_TITLE, DocLink,
+    FIGURE_ALT_MISSING, HEADING_LEVEL, LINK_UNRESOLVED, LabelStyle, Link, LinkTo, MAX_DEPTH, Node,
+    Numbering, REFERENCE_UNLINKED, RUN_SPLIT, Role, STRUCTURE_DEPTH, Scope, Structure, UA_NOT_MET,
 };
+
+/// A page's label as the PDF writer takes it: a numbering style and the
+/// number the page has in it, with no prefix.
+fn krilla_label(label: &tags::PageLabel) -> krilla::page::PageLabel {
+    use krilla::page::NumberingStyle;
+    krilla::page::PageLabel::new(
+        Some(match label.style {
+            LabelStyle::Decimal => NumberingStyle::Arabic,
+            LabelStyle::LowerRoman => NumberingStyle::LowerRoman,
+            LabelStyle::UpperRoman => NumberingStyle::UpperRoman,
+            LabelStyle::LowerAlpha => NumberingStyle::LowerAlpha,
+            LabelStyle::UpperAlpha => NumberingStyle::UpperAlpha,
+        }),
+        None,
+        NonZeroU32::new(label.number),
+    )
+}
 
 fn pt(l: Length) -> f32 {
     l.to_pt_f32()
@@ -130,6 +147,7 @@ pub fn render_with_assets(
             krilla_fonts: &mut krilla_fonts,
             tagged: false,
             artifact: false,
+            kind: None,
             id: None,
         };
         pdf.items(&mut surface, &list.items)?;
@@ -204,7 +222,7 @@ pub fn render_ordered_with_assets(
         title: String::new(),
         lang: String::new(),
         children,
-        artifacts: Vec::new(),
+        ..Structure::default()
     };
     render_tagged(pages, fonts, assets, &structure).map(|t| t.bytes)
 }
@@ -334,8 +352,10 @@ struct Leaf {
 /// Everything decided before any page is painted.
 struct Plan {
     leaves: Vec<Leaf>,
-    /// Non-text items per page, wrapped in their groups, in original order.
-    artifacts: Vec<Vec<Item>>,
+    /// Non-text items per page, wrapped in their groups, in original order,
+    /// then the runs the structure names as artifacts, with the kind of
+    /// running region each belongs to.
+    artifacts: Vec<Vec<(Item, Option<ArtifactKind>)>>,
     /// Per node in pre-order: the index of its first leaf, if it has one.
     first_leaf: Vec<Option<usize>>,
     notes: Vec<Note>,
@@ -360,7 +380,7 @@ impl Plan {
         let error = |s: &str| RenderError::Pdf(s.into());
         // Index every glyph and image item by address; other leaves are artifacts.
         let mut text: BTreeMap<ReadingRun, (Wrappers, &Item)> = BTreeMap::new();
-        let mut artifacts: Vec<Vec<Item>> = vec![Vec::new(); pages.len()];
+        let mut artifacts: Vec<Vec<(Item, Option<ArtifactKind>)>> = vec![Vec::new(); pages.len()];
         for (page, list) in pages.iter().enumerate() {
             let mut stack = Vec::new();
             for (i, item) in list.items.iter().enumerate().rev() {
@@ -386,7 +406,7 @@ impl Plan {
                 } else if matches!(item, Item::Glyphs(_) | Item::Image { .. }) {
                     text.insert(ReadingRun { page, path }, (parents, item));
                 } else if let Some(out) = artifacts.get_mut(page) {
-                    out.push(wrap(item.clone(), &parents));
+                    out.push((wrap(item.clone(), &parents), None));
                 }
             }
         }
@@ -399,7 +419,10 @@ impl Plan {
                 ));
             };
             if let Some(out) = artifacts.get_mut(run.page) {
-                out.push(wrap(item.clone(), &wrappers));
+                out.push((
+                    wrap(item.clone(), &wrappers),
+                    structure.artifact_kinds.get(run).copied(),
+                ));
             }
         }
 
@@ -875,7 +898,16 @@ fn build(
     let mut krilla_fonts = BTreeMap::new();
     for (p, list) in pages.iter().enumerate() {
         let (w, h) = (pt(list.width), pt(list.height));
-        let settings = PageSettings::from_wh(w, h).ok_or(RenderError::BadSize(w, h))?;
+        let mut settings = PageSettings::from_wh(w, h).ok_or(RenderError::BadSize(w, h))?;
+        // One label a page, or none: a count that doesn't match writes no labels.
+        // Each page is its own entry, with its style and number: the writer
+        // makes an entry for every page, and an empty one would label it
+        // with nothing.
+        if structure.page_labels.len() == pages.len()
+            && let Some(label) = structure.page_labels.get(p)
+        {
+            settings = settings.with_page_label(krilla_label(label));
+        }
         let mut page = doc.start_page_with(settings);
         let mut surface = page.surface();
         background(&mut surface, w, h, true);
@@ -885,11 +917,14 @@ fn build(
             krilla_fonts: &mut krilla_fonts,
             tagged: true,
             artifact: true,
+            kind: None,
             id: None,
         };
-        if let Some(items) = plan.artifacts.get(p) {
-            pdf.items(&mut surface, items)?;
+        for (item, kind) in plan.artifacts.get(p).into_iter().flatten() {
+            pdf.kind = *kind;
+            pdf.items(&mut surface, std::slice::from_ref(item))?;
         }
+        pdf.kind = None;
         for &i in by_page.get(p).map(Vec::as_slice).unwrap_or_default() {
             let Some(leaf) = plan.leaves.get(i) else {
                 continue;
@@ -1024,6 +1059,8 @@ struct Pdf<'a> {
     tagged: bool,
     /// The leaf being painted is an artifact. Only read when `tagged`.
     artifact: bool,
+    /// The running region an artifact belongs to, for its `Subtype`.
+    kind: Option<ArtifactKind>,
     /// The marked-content id of the content leaf just painted.
     id: Option<Identifier>,
 }
@@ -1031,7 +1068,12 @@ struct Pdf<'a> {
 impl Pdf<'_> {
     fn begin(&mut self, surface: &mut Surface<'_>, span: SpanTag<'_>) {
         let tag = if self.tagged && self.artifact {
-            ContentTag::Artifact(Artifact::with_kind(ArtifactType::Other))
+            ContentTag::Artifact(Artifact::with_kind(match self.kind {
+                Some(ArtifactKind::Header) => ArtifactType::Header,
+                Some(ArtifactKind::Footer) => ArtifactType::Footer,
+                Some(ArtifactKind::Watermark) => ArtifactType::Watermark,
+                None => ArtifactType::Other,
+            }))
         } else {
             ContentTag::Span(span)
         };

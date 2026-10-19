@@ -120,7 +120,7 @@ Codes in use:
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
 | clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped`, `clipboard.annotation-dropped`, `clipboard.section-context`, `clipboard.section-dropped` |
 | pdf | `pdf.figure-alt-missing`, `pdf.reference-unlinked`, `pdf.heading-level`, `pdf.structure-depth`, `pdf.run-split`, `pdf.ua-not-met`, `pdf.link-unresolved` |
-| export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure`, `export.annotations` |
+| export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure`, `export.annotations`, `export.sections` |
 | annotation | `annotation.unreadable`, `annotation.limit`, `annotation.link-scheme`, `annotation.link-invalid`, `annotation.link-length`, `annotation.payload-invalid`, `annotation.empty`, `annotation.missing` |
 | bindings | `bindings.version`, `bindings.invalid`, `bindings.limit`, `bindings.id`, `bindings.stale`, `bindings.cancelled`, `bindings.layout-required`, `bindings.read-only`, `bindings.store`, `bindings.render`, `bindings.poisoned`, `bindings.missing-font`, `bindings.copy-source` |
 | sync (collaboration) | `sync.format`, `sync.feature`, `sync.invalid`, `sync.limit`, `sync.missing`, `sync.local-peer`, `sync.store`, `collab.malformed-node`, `collab.tree-tombstone`, `collab.hidden-content`, `collab.flow-depth` |
@@ -1275,6 +1275,9 @@ serialise byte-identically.
 -   **Display** (`reprise-display`). An optional `artifact_kinds` map, from an
     artifact run to `Header | Footer | Watermark`, sits beside the unchanged
     artifact run list. Backends that ignore it draw exactly as before.
+    `Structure.page_labels` (one `PageLabel { style: Decimal | LowerRoman |
+    UpperRoman | LowerAlpha | UpperAlpha, number }` per page, or none) makes
+    the PDF backend write `/PageLabels`; both fields default to empty.
 -   **Facade** (`reprise`, `reprise-wasm`).
     -   Commands: `insert_break`, `remove_break`, `set_section`,
         `create_story`, `set_region`, `create_region`, `link_region`,

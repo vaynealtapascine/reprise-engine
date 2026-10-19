@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ClipboardError, copy_all};
 
+/// What an export leaves out of a document's sections, running regions and
+/// pagination, as notes (the loss report's ten features are fixed): `Info` for
+/// what the format cannot hold at all, `Warning` where the output differs.
+pub(crate) const SECTIONS: Code = Code::new("export.sections");
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Feature {
@@ -302,11 +307,41 @@ impl Exporter for PlainText {
             None,
             "comment anchors are not in plain text",
         ));
+        losses.notes.extend(sections_lost(doc, layout));
         Ok(ExportResult {
             bytes: out.into_bytes(),
             losses,
         })
     }
+}
+
+/// What plain text leaves out of a document's sections (sections §15): it is
+/// the body only. The stories (running headers, footers and backgrounds, bound
+/// or not) and everything pagination is are reported, as `Info` because plain
+/// text cannot hold them at all. A document with neither reports nothing.
+fn sections_lost(doc: &Document, layout: Option<&LayoutSnapshot>) -> Vec<reprise_diag::Note> {
+    let mut notes = Vec::new();
+    let stories = doc.stories().len();
+    if stories > 0 {
+        notes.push(reprise_diag::Note::info(
+            SECTIONS,
+            format!(
+                "{stories} stor{} (running headers, footers and backgrounds, and any bound to none) {} not in plain text, which is the body only",
+                if stories == 1 { "y" } else { "ies" },
+                if stories == 1 { "is" } else { "are" },
+            ),
+        ));
+    }
+    if !doc.effective_starts().is_empty()
+        || doc.geometry_mode_record().is_some()
+        || layout.is_some_and(|l| l.sections.is_some())
+    {
+        notes.push(reprise_diag::Note::info(
+            SECTIONS,
+            "section, page and column breaks, columns, page numbers and the geometry mode are not in plain text",
+        ));
+    }
+    notes
 }
 
 /// A list item's marker in plain text: four spaces per level, the marker and
@@ -385,6 +420,7 @@ fn paragraph(
     layout: Option<&LayoutSnapshot>,
     links: &crate::links::LinkIndex<'_>,
     out: &mut String,
+    extra_css: &str,
 ) -> Result<(), ClipboardError> {
     let block = doc
         .block(node)
@@ -435,6 +471,7 @@ fn paragraph(
                         .and_then(|l| l.blocks.iter().find(|b| b.node == node))
                         .map_or(&style, |b| &b.style)
                 )
+                + extra_css
         ),
     )?;
     let formats = doc
@@ -595,6 +632,16 @@ fn list_boundary(
     lists.before(doc, node, out)
 }
 
+/// The CSS a page or column break adds to the block it starts at.
+fn break_css(kind: Option<reprise_doc::sections::BreakKind>) -> &'static str {
+    match kind {
+        Some(reprise_doc::sections::BreakKind::Page) => "; break-before: page",
+        Some(reprise_doc::sections::BreakKind::Column) => "; break-before: column",
+        _ => "",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn html_node(
     doc: &Document,
     node: NodeId,
@@ -603,6 +650,7 @@ fn html_node(
     out: &mut String,
     depth: usize,
     grid: Option<&reprise_doc::TableGrid>,
+    extra_css: &str,
 ) -> Result<(), ClipboardError> {
     if depth > reprise_doc::fragment::MAX_FRAGMENT_DEPTH {
         return Err(ClipboardError::Limit("HTML tree"));
@@ -618,7 +666,10 @@ fn html_node(
         grid = own_grid.as_ref();
     }
     let open = match &role {
-        Some(TableRole::Table(_)) => Some("<table>".to_string()),
+        Some(TableRole::Table(_)) => Some(match extra_css.strip_prefix("; ") {
+            Some(css) => format!("<table style=\"{css}\">"),
+            None => "<table>".to_string(),
+        }),
         Some(TableRole::Row(_)) => Some("<tr>".to_string()),
         Some(TableRole::Cell(_)) => {
             let placed = grid.and_then(|g| g.cell(node));
@@ -652,12 +703,12 @@ fn html_node(
     if let Some(open) = &open {
         append(out, open)?;
     } else {
-        paragraph(doc, node, layout, links, out)?;
+        paragraph(doc, node, layout, links, out, extra_css)?;
     }
     let mut lists = crate::semantic_html::ListWriter::default();
     for child in doc.children_of(node) {
         list_boundary(doc, child, &mut lists, out)?;
-        html_node(doc, child, layout, links, out, depth + 1, grid)?;
+        html_node(doc, child, layout, links, out, depth + 1, grid, "")?;
     }
     lists.close(out)?;
     if let Some(close) = close {
@@ -665,6 +716,113 @@ fn html_node(
     }
     Ok(())
 }
+/// The body's roots section by section, each section in its wrapper with the
+/// stories it is the first to bind written at its start.
+fn html_sections(
+    doc: &Document,
+    plan: &crate::sections_html::Plan,
+    roots: &[NodeId],
+    layout: Option<&LayoutSnapshot>,
+    links: &crate::links::LinkIndex<'_>,
+    out: &mut String,
+) -> Result<(), ClipboardError> {
+    let top = doc.top(reprise_doc::Domain::Body);
+    let position: std::collections::BTreeMap<NodeId, usize> =
+        top.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    // Reading order within a section; sections in their own order.
+    let mut buckets: Vec<Vec<NodeId>> = vec![Vec::new(); plan.views.len().max(1)];
+    for &root in roots {
+        let section = position
+            .get(&root)
+            .map_or(0, |at| plan.section_of(*at))
+            .min(buckets.len().saturating_sub(1));
+        if let Some(bucket) = buckets.get_mut(section) {
+            bucket.push(root);
+        }
+    }
+    for (i, bucket) in buckets.iter().enumerate() {
+        append(out, &plan.open(i))?;
+        for home in plan.homes(i) {
+            append(
+                out,
+                &format!(
+                    "<{} {}=\"{}\">",
+                    home.shown.tag(),
+                    crate::sections_html::STORY_ATTR,
+                    escape(&home.label)
+                ),
+            )?;
+            let mut lists = crate::semantic_html::ListWriter::default();
+            for node in doc.top(reprise_doc::Domain::Story(home.story)) {
+                list_boundary(doc, node, &mut lists, out)?;
+                html_node(doc, node, layout, links, out, 0, None, "")?;
+            }
+            lists.close(out)?;
+            append(out, &format!("</{}>", home.shown.tag()))?;
+        }
+        let mut lists = crate::semantic_html::ListWriter::default();
+        for &node in bucket {
+            list_boundary(doc, node, &mut lists, out)?;
+            html_node(
+                doc,
+                node,
+                layout,
+                links,
+                out,
+                0,
+                None,
+                break_css(plan.breaks.get(&node).copied()),
+            )?;
+        }
+        lists.close(out)?;
+        append(out, "</section>")?;
+    }
+    Ok(())
+}
+
+/// What HTML leaves out of a document's sections, as `Info` notes (the format
+/// cannot hold it) or `Warning` where the output differs from what was authored.
+fn html_section_notes(
+    plan: &crate::sections_html::Plan,
+    layout: Option<&LayoutSnapshot>,
+) -> Vec<reprise_diag::Note> {
+    let mut notes = vec![reprise_diag::Note::info(
+        SECTIONS,
+        "pages are not in HTML: page sizes, filler pages, page labels and per-page values are omitted; \
+         a page field shows the page the layout first places it on, or ? without a layout",
+    )];
+    if layout.is_none() {
+        notes.push(reprise_diag::Note::info(
+            SECTIONS,
+            "no layout was given, so page fields in headers, footers and the body show ?",
+        ));
+    }
+    if plan.unbound > 0 {
+        notes.push(reprise_diag::Note::info(
+            SECTIONS,
+            format!(
+                "{} stor{} bound to no section {} not in HTML",
+                plan.unbound,
+                if plan.unbound == 1 { "y" } else { "ies" },
+                if plan.unbound == 1 { "is" } else { "are" }
+            ),
+        ));
+    }
+    if plan.unequal_columns {
+        notes.push(reprise_diag::Note::warning(
+            SECTIONS,
+            "columns of unequal widths are written as equal CSS columns; the widths are kept in the section stored form",
+        ));
+    }
+    if plan.raw_bindings {
+        notes.push(reprise_diag::Note::info(
+            SECTIONS,
+            "a binding to a story that no longer exists is kept as written and shows nothing",
+        ));
+    }
+    notes
+}
+
 impl Exporter for Html {
     fn export(
         &self,
@@ -695,14 +853,25 @@ impl Exporter for Html {
                 roots.push(root);
             }
         }
-        let mut out = String::from("<!doctype html><html><body>");
+        let plan = crate::sections_html::plan(doc);
+        let mut out = format!(
+            "<!doctype html><html><body{}>",
+            plan.as_ref()
+                .map(crate::sections_html::Plan::geometry_attr)
+                .unwrap_or_default()
+        );
         let links = crate::links::LinkIndex::new(doc);
-        let mut lists = crate::semantic_html::ListWriter::default();
-        for node in roots {
-            list_boundary(doc, node, &mut lists, &mut out)?;
-            html_node(doc, node, layout, &links, &mut out, 0, None)?;
+        match &plan {
+            None => {
+                let mut lists = crate::semantic_html::ListWriter::default();
+                for node in roots {
+                    list_boundary(doc, node, &mut lists, &mut out)?;
+                    html_node(doc, node, layout, &links, &mut out, 0, None, "")?;
+                }
+                lists.close(&mut out)?;
+            }
+            Some(plan) => html_sections(doc, plan, &roots, layout, &links, &mut out)?,
         }
-        lists.close(&mut out)?;
         append(&mut out, "</body></html>")?;
         let presence = links.presence();
         use Disposition::*;
@@ -749,6 +918,9 @@ impl Exporter for Html {
             ),
             "comment anchors are not in HTML",
         ));
+        if let Some(plan) = &plan {
+            losses.notes.extend(html_section_notes(plan, layout));
+        }
         Ok(ExportResult {
             bytes: out.into_bytes(),
             losses,

@@ -206,7 +206,7 @@ impl Document {
         Ok(node)
     }
 
-    fn table_block(
+    pub(crate) fn table_block(
         &self,
         parent: Option<NodeId>,
         kind: BlockKind,

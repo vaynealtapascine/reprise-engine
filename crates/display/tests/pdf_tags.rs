@@ -197,7 +197,7 @@ fn render(
             title: "House of Leaves".into(),
             lang: "fr".into(),
             children,
-            artifacts: Vec::new(),
+            ..Default::default()
         },
     )
 }

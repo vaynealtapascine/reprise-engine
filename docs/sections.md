@@ -1289,6 +1289,58 @@ Copying an orphan never makes it bound.
 
 **Plain text:** body only. Stories and pagination are reported as losses.
 
+**As built (S10).**
+
+-   **PDF.** The renderer already wrote each page's `MediaBox` from its own
+    display list; a test now pins it (portrait, landscape, portrait).
+    `Structure.artifact_kinds` (display crate, beside the unchanged
+    `artifacts` run list) maps a running region's glyph and image runs to
+    `Header`, `Footer` or `Watermark`, written as
+    `/Artifact << /Type /Pagination /Subtype ... >>`; a repeated table header
+    copy has no kind. The checker reads the subtypes from the content streams, and
+    the file still claims PDF/UA-1. `Structure.page_labels` is one
+    `{style, number}` per page. `/PageLabels` is written only when every page's
+    label is exactly what `/D`, `/r`, `/R`, `/a` or `/A` writes for its
+    counter (the layout's label is compared with the PDF's own scheme, in which
+    a letter repeats and does not carry): otherwise none is written, with a
+    Warning `export.sections` naming the page and why (a format such as
+    `decimal-leading-zero`, a counter below 1, a roman numeral past 3,999).
+    Every page has its own entry. A document with no sections writes no labels
+    and is byte-identical to before.
+-   **HTML.** A document with any effective boundary, `first` key, story or
+    geometry mode is written section by section; any other is written exactly
+    as before. Each `<section data-reprise-section='{"v":1,"first"?,"props",
+    "bindings"}'>` holds the section's raw keys apart from its bindings and
+    `break`. A binding is `""` (none), a story label, or `{"raw":...}` for a
+    value that names no live story; absent is same as previous. Labels are
+    `s0`, `s1`, ... in the order the sections first refer to the stories. A
+    story is written in the first section that binds it: as `<header>` or
+    `<footer data-reprise-story>` when that binding is the slot's default
+    variant, else in a `<template data-reprise-story>`. A section after the
+    first with a `start` other than `continuous` gets `break-before: page`
+    for viewers, and `columns` and `column-gap` come from its own
+    `columns.count` and `columns.gap`. A page or column break is
+    `break-before` on its block. The geometry-mode record is
+    `data-reprise-geometry` on `<body>`. A page field in a story carries the
+    text it has in the first instance of the story the layout places, and `?`
+    without a layout.
+-   **HTML import** reads all of it back into the import document, so copying
+    that document builds the envelope: sections (with the section's block as
+    the first block after the element), their bindings by label, `first`,
+    stories (a story element's blocks go into a new story; links in it are
+    annotations of the story), `break-before` and the geometry attribute. A
+    section with no block after it, a binding to a label the HTML lacks, a
+    table in a story and a story inside a story are read as far as they can
+    be and reported. Markup without the attributes is read as before.
+-   **Losses**, as `export.sections` notes (the loss report's ten features
+    are fixed): Info for what the format cannot hold, Warning where the output
+    differs. HTML: pages, fillers, page labels and per-page values are not
+    there; stories bound to no section are not there; unequal column widths
+    are written as equal CSS columns (Warning, the widths are in the stored
+    form); a dangling binding is kept as written. Plain text: the body only,
+    with a note for the stories and one for breaks, columns, page numbers and
+    the geometry mode; a document with neither says nothing.
+
 **DOCX** is design-level only; this workstream doesn't build it.
 
 -   Each section's properties move to DOCX's trailing `sectPr`: on the

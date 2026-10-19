@@ -202,12 +202,27 @@ pub(crate) fn structure(
         keys: BTreeMap::new(),
     };
     let (children, derived_title) = builder.tree(&blocks);
+    // A document with sections has page labels; one whose labels a PDF can't
+    // write has none, and says so.
+    let page_labels = match crate::pdf_labels::labels(layout) {
+        Ok(labels) => labels.unwrap_or_default(),
+        Err(why) => {
+            builder.notes.push(Note::warning(
+                crate::export::SECTIONS,
+                format!("the PDF has no page labels: {why}"),
+            ));
+            Vec::new()
+        }
+    };
     let structure = Structure {
         title: meta.title.clone().or(derived_title).unwrap_or_default(),
         lang: meta.lang.clone().unwrap_or_default(),
         children,
-        // Repeated table headers are derived copies: decoration, never content.
+        // Repeated table headers and running regions are derived copies:
+        // decoration, never content. A running region says which it is.
         artifacts: layout.pdf_artifact_runs(),
+        artifact_kinds: layout.pdf_artifact_kinds(),
+        page_labels,
     };
     (structure, builder.notes)
 }
