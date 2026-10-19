@@ -513,7 +513,7 @@ fn import_copy_carries_an_orphan_with_a_paragraph_and_not_without_one() {
             state(s)
                 .annotations
                 .iter()
-                .map(|a| (a.status.clone(), a.spans.len()))
+                .map(|a| (a.status, a.spans.len()))
                 .collect::<Vec<_>>()
         };
         let source = orphans(&s);
