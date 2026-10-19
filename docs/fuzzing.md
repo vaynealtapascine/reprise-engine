@@ -387,6 +387,20 @@ Fixed:
     same offset both landed at the end of the restored text. The hint now also
     records the place of a tombstoned end inside the span. Three regressions in
     `tests/foundations_regressions.rs`.
+-   `field-cache` (`reprise-layout`, `incremental.rs`): the region-pass cache was
+    keyed on the flowed snapshot, which holds a field's composed text but not its
+    parameters or the target it names. Removing a `page-of`'s target, or pointing
+    it at another page, flowed the same snapshot as the pass that had resolved it,
+    so the session reused that pass's plan and went on drawing the old page number
+    while a layout of the reopened package drew `?` (`incremental-equals-reference`,
+    soak seed 500685). The key now holds what the fields of the flowed blocks
+    resolve to. Two regressions: a removed target, and a retarget across pages.
+-   `import-copy-no-blocks` (`reprise-edit`, `paste.rs`): a full-document paste
+    returned early for a fragment without blocks, after restoring templates and
+    page setup and before writing list definitions, so `import_copy` of a document
+    whose last block had been deleted came back with no lists although
+    `docs/roles-and-lists.md` says live unreferenced definitions are preserved
+    (`import-copy-keeps-content`, ten soak seeds). One regression.
 
 Closed on main by review fixes 2, which this branch merged: Astra 4 R1 (a
 refused batch published the commands before it), R2 (deep trees overflowed the
@@ -419,6 +433,11 @@ Pinned as designed (not faults), each with a test or an oracle that knows it:
     so "unchanged" is compared by operations.
 -   `import_copy` drops a link whose target block is gone, and says so
     (`clipboard.annotation-dropped`).
+-   `import_copy` drops a list's base that was deleted: a copy replays live
+    definitions only. The list draws the same without it; only the
+    `list.definition-missing` warning the source carried is gone. The content
+    oracle compares a base by its place among the live definitions, so a live base
+    that went missing is still a failure.
 -   Opening a package authors the base style again if a peer deleted it, so a live
     session and its reopened copy differ for that one hostile document.
 -   Bit 14 is set while some paragraph *holds* a role or list key: undoing the only

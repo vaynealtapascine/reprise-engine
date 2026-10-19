@@ -366,6 +366,114 @@ fn import_copy_keeps_the_lists_of_a_document_with_no_blocks() {
     assert_eq!(definitions(&state(&copy)), definitions(&source));
 }
 
+/// A list based on another, the paragraph in the derived one, and the base
+/// deleted or not. Returns the session and its `import_copy`.
+fn based_lists(delete_base: bool) -> (DocumentSession, DocumentSession) {
+    let mut s = lettered_workspace()
+        .create(&Payload::new(Create {
+            document_id: DOC.into(),
+            peer_id: "1".into(),
+        }))
+        .unwrap();
+    let node = paragraph(&mut s, "alpha");
+    let level = |format: &str| ListLevel {
+        level: 0,
+        format: Some(format.into()),
+        ..ListLevel::default()
+    };
+    let base = apply(
+        &mut s,
+        vec![Command::CreateList {
+            definition: ListDefinition {
+                base: None,
+                levels: vec![level("upper-alpha")],
+            },
+        }],
+    )
+    .unwrap()
+    .lists[0]
+        .clone();
+    apply(
+        &mut s,
+        vec![
+            Command::CreateList {
+                definition: ListDefinition {
+                    base: Some(base.clone()),
+                    levels: vec![],
+                },
+            },
+            Command::SetListItem {
+                node,
+                list: ListRef::New { index: 0 },
+                level: 0,
+            },
+        ],
+    )
+    .unwrap();
+    if delete_base {
+        apply(
+            &mut s,
+            vec![Command::DeleteList {
+                list: ListRef::Existing { id: base },
+            }],
+        )
+        .unwrap();
+    }
+    let bytes = s.save().unwrap().data.bytes;
+    let copy = lettered_workspace()
+        .import_copy(
+            &Payload::new(ImportCopy {
+                document_id: "ffeeddccbbaa99887766554433221100".into(),
+                peer_id: "9".into(),
+            }),
+            &bytes,
+        )
+        .unwrap();
+    (s, copy)
+}
+
+/// A live base that no paragraph uses still comes across, and the derived list
+/// keeps pointing at it.
+#[test]
+fn import_copy_keeps_a_live_base_nothing_uses() {
+    let (s, copy) = based_lists(false);
+    let (source, copied) = (state(&s), state(&copy));
+    assert_eq!(source.lists.len(), 2);
+    assert_eq!(
+        reprise_fuzz_harness::foundations::oracles::shape(&source),
+        reprise_fuzz_harness::foundations::oracles::shape(&copied)
+    );
+    let bases = |s: &State| {
+        s.lists
+            .iter()
+            .filter_map(|l| l.definition.as_ref()?.base.clone())
+            .count()
+    };
+    assert_eq!((bases(&source), bases(&copied)), (1, 1));
+}
+
+/// Pinned as designed: a base deleted since is a tombstone, and a copy replays
+/// live definitions only (docs/roles-and-lists.md), so the derived list comes
+/// across with no base. The document draws the same either way; only the
+/// `list.definition-missing` warning the source carried is gone. (Soak seed
+/// 700049: the oracle used to read this as a changed copy.)
+#[test]
+fn import_copy_drops_a_deleted_base_and_draws_the_same() {
+    let (mut s, mut copy) = based_lists(true);
+    let (source, copied) = (state(&s), state(&copy));
+    assert_eq!(source.lists.len(), 1);
+    assert!(
+        source.lists[0].definition.as_ref().unwrap().base.is_some(),
+        "the source still names the deleted base"
+    );
+    assert_eq!(copied.lists[0].definition.as_ref().unwrap().base, None);
+    assert_eq!(
+        reprise_fuzz_harness::foundations::oracles::shape(&source),
+        reprise_fuzz_harness::foundations::oracles::shape(&copied)
+    );
+    assert_eq!(drawing(&mut s), drawing(&mut copy));
+}
+
 /// fuzz-2 `format-undo`: bold a word, delete it, undo: the word comes back
 /// without its bold. Annotations have restore hints for this (docs/
 /// annotations.md, "Undo"); formatting ranges have none.

@@ -301,7 +301,6 @@ pub fn bits_match(bytes: &[u8], state: &State, may: Flags) -> R {
 /// equal when they hold the same content.
 ///
 /// Annotations are compared in `annotation_lines`, not here.
-/// truncates them to their first paragraph (Astra 4 R3, known).
 pub fn shape(state: &State) -> String {
     let mut out = String::new();
     let block_ord: BTreeMap<&str, usize> = state
@@ -321,6 +320,16 @@ pub fn shape(state: &State) -> String {
         map.get(id)
             .map_or_else(|| "?".to_owned(), |n| n.to_string())
     };
+    // A base is told by its place among the live definitions. One that has
+    // been deleted is not content: a copy replays live definitions only, so
+    // the list comes across without a base and draws alike
+    // (docs/roles-and-lists.md).
+    let live: BTreeMap<&str, usize> = state
+        .lists
+        .iter()
+        .enumerate()
+        .map(|(n, l)| (l.id.as_str(), n))
+        .collect();
     for b in &state.blocks {
         let _ = writeln!(
             out,
@@ -357,7 +366,10 @@ pub fn shape(state: &State) -> String {
         .map(|l| {
             let mut definition = l.definition.clone();
             if let Some(d) = definition.as_mut() {
-                d.base = d.base.as_deref().map(|id| ord(&list_ord, id));
+                d.base = d
+                    .base
+                    .as_deref()
+                    .and_then(|id| live.get(id).map(ToString::to_string));
             }
             format!("{definition:?} error={:?}", l.error)
         })
