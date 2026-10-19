@@ -242,6 +242,73 @@ fn pasted_links_survive_undo_and_redo() {
     assert_eq!(spans(&s), pasted, "redo lost the pasted link");
 }
 
+/// fuzz-2 `annotation-redo`, the stretched form: a comment grows over the text
+/// its own step inserted beside it. A comment's end takes text typed there
+/// (`Kind::Comment`), and redo replays the insertion with the comment's anchors
+/// already in place; the step made the text first. A link, whose edges stay
+/// outside, comes back exact (the next test).
+/// Seen as: `redo-restores-state` after a join followed by a comment (soak
+/// seed 500763), and after a paste (seed 401231, below).
+#[test]
+#[ignore = "fuzz-2: annotation-redo, see report"]
+fn a_comment_made_beside_its_text_keeps_its_extent_on_redo() {
+    let mut s = session();
+    let node = paragraph(&mut s, "alpha ");
+    apply(
+        &mut s,
+        vec![
+            Command::InsertText {
+                node: node.clone(),
+                at: 6,
+                text: "beta ".into(),
+            },
+            Command::AddAnnotation {
+                node,
+                start: 0,
+                end: 6,
+                annotation: AnnotationPayload::Comment { thread: "t".into() },
+            },
+        ],
+    )
+    .unwrap();
+    let applied = spans(&s);
+    s.undo().unwrap();
+    s.redo().unwrap();
+    assert_eq!(
+        spans(&s),
+        applied,
+        "redo stretched the comment over the new text"
+    );
+}
+
+/// The contrast: the same step with a link.
+#[test]
+fn a_link_made_beside_its_text_keeps_its_extent_on_redo() {
+    let mut s = session();
+    let node = paragraph(&mut s, "alpha ");
+    apply(
+        &mut s,
+        vec![
+            Command::InsertText {
+                node: node.clone(),
+                at: 6,
+                text: "beta ".into(),
+            },
+            Command::AddAnnotation {
+                node,
+                start: 0,
+                end: 6,
+                annotation: link("https://a.example/"),
+            },
+        ],
+    )
+    .unwrap();
+    let applied = spans(&s);
+    s.undo().unwrap();
+    s.redo().unwrap();
+    assert_eq!(spans(&s), applied);
+}
+
 /// fuzz-2 `format-undo`: bold a word, delete it, undo: the word comes back
 /// without its bold. Annotations have restore hints for this (docs/
 /// annotations.md, "Undo"); formatting ranges have none.
@@ -1110,4 +1177,28 @@ fn a_page_of_that_is_retargeted_is_drawn_as_a_fresh_layout_draws_it() {
     let live = drawing(&mut s);
     assert_ne!(live, before, "the field names another page now");
     assert_eq!(live, fresh_drawing(&mut s));
+}
+
+/// The same fault through a paste: the link a paste brings has its last piece
+/// grow on redo (seed 401231, shrunk). The bytes are a scenario of
+/// `reprise_fuzz_harness::foundations` as the generators stood at the commit
+/// that added this test; a later change to a generator changes what they mean.
+#[test]
+#[ignore = "fuzz-2: annotation-redo, see report"]
+fn a_pasted_link_keeps_its_extent_on_redo() {
+    let bytes: Vec<u8> = "001c0000e982b2df00ed8b5f00000000000000007f001b00100000000000cf000000ddc7a83c000000000000b500008ca5000000008d000022000000d64a00000000000000000000000000a400be0000000000bb00a5000000000000000000a7000000f500cc00000000000000000000ef92000000e7ce0000000000bdbbb3000000fb00008eb6"
+        .as_bytes()
+        .chunks(2)
+        .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
+        .collect();
+    let report = reprise_fuzz_harness::foundations::run_foundations(&bytes).unwrap();
+    assert_eq!(
+        report
+            .counts
+            .get("known:fuzz2-annotation-redo-stretched")
+            .copied()
+            .unwrap_or(0),
+        0,
+        "redo gave an annotation its step created more extent than it had"
+    );
 }

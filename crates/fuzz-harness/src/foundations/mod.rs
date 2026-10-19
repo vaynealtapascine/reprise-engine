@@ -518,6 +518,7 @@ impl World<'_> {
                 if batch { "batch" } else { "apply" }
             )
         });
+        trace(|| format!("  before: {}", outline(&before)));
         for c in &commands {
             self.count(format!("cmd:{}", command_name(c)));
         }
@@ -600,6 +601,7 @@ impl World<'_> {
                 }
                 self.reps[i].old_revision = before.revision.clone();
                 let after = self.state(i)?;
+                trace(|| format!("  after:  {}", outline(&after)));
                 if let Some(sel) = mapped {
                     for caret in [&sel.anchor, &sel.focus] {
                         let ok = after.blocks.iter().any(|b| {
@@ -716,6 +718,7 @@ impl World<'_> {
                 "undo-restores-state",
                 &authored(before),
                 &authored(&mid),
+                after,
             );
         }
         let redone = call(self.reps[i].s.redo())?;
@@ -731,6 +734,7 @@ impl World<'_> {
                 "redo-restores-state",
                 &authored(after),
                 &authored(&end),
+                &authored(&mid),
             );
         }
         // Undo and redo are steps of their own for the version vector, but
@@ -747,7 +751,18 @@ impl World<'_> {
     ///     the text it covers is gone after undo and redo (docs/fuzzing.md).
     /// -   `fuzz2-format-undo`: formatted text that was deleted comes back
     ///     without its formatting after undo (docs/fuzzing.md).
-    fn restore_mismatch(&mut self, i: usize, oracle: &'static str, want: &State, got: &State) -> R {
+    /// -   `fuzz2-annotation-redo-stretched`: an annotation the step created
+    ///     comes back longer after redo (docs/fuzzing.md).
+    ///
+    /// `left` is the state the undo or redo started from.
+    fn restore_mismatch(
+        &mut self,
+        i: usize,
+        oracle: &'static str,
+        want: &State,
+        got: &State,
+        left: &State,
+    ) -> R {
         let (mut a, mut b) = (want.clone(), got.clone());
         let mut known = Vec::new();
         if a.blocks != b.blocks {
@@ -789,6 +804,11 @@ impl World<'_> {
                 a.annotations = b.annotations.clone();
             } else if resurrected {
                 known.push("known:fuzz2-link-resurrected");
+                a.annotations = b.annotations.clone();
+            } else if oracle == "redo-restores-state"
+                && stretched_by_redo(&a.annotations, &b.annotations, left)
+            {
+                known.push("known:fuzz2-annotation-redo-stretched");
                 a.annotations = b.annotations.clone();
             } else if self.reps[i].retired {
                 known.push("known:fuzz2-join-atom-undo");
@@ -1015,6 +1035,7 @@ impl World<'_> {
                 },
                 &expected,
                 &authored(&after),
+                &authored(&before),
             )?;
         }
         self.observe(i, &after)
@@ -1772,6 +1793,39 @@ impl World<'_> {
         }
         Ok(())
     }
+}
+
+/// fuzz-2 `annotation-redo`, stretched: redo replays the step's text while the
+/// anchors of an annotation the step created are already in place, so one
+/// whose end sits beside text the step inserted comes back longer. True when
+/// that is the only difference, and every annotation that differs is one the
+/// state redo started from (`left`) didn't have.
+fn stretched_by_redo(
+    want: &[reprise::AnnotationBrief],
+    got: &[reprise::AnnotationBrief],
+    left: &State,
+) -> bool {
+    want != got
+        && want.len() == got.len()
+        && want.iter().zip(got).all(|(x, y)| {
+            x == y
+                || (x.id == y.id
+                    && x.kind == y.kind
+                    && x.status == y.status
+                    && x.thread == y.thread
+                    && !left.annotations.iter().any(|l| l.id == x.id)
+                    && x.spans.len() == y.spans.len()
+                    && x.spans
+                        .iter()
+                        .zip(&y.spans)
+                        .all(|(s, t)| s.node == t.node && s.start == t.start && s.end <= t.end))
+        })
+}
+
+/// The text of every block and the annotations over it, for the trace.
+fn outline(state: &State) -> String {
+    let blocks: Vec<_> = state.blocks.iter().map(|b| (&b.id, &b.text)).collect();
+    format!("{blocks:?} {:?}", state.annotations)
 }
 
 /// A short account of how two states differ, for violation details.

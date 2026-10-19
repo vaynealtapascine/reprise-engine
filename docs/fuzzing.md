@@ -230,6 +230,7 @@ passing regression.
 | Id | Shape | Handling |
 | --- | --- | --- |
 | fuzz-2 `annotation-redo` | an annotation created in the same step as the text it covers is gone, or loses a span, after undo then redo (a paste's links too) | `known:fuzz2-annotation-redo` |
+| fuzz-2 `annotation-redo`, stretched | a comment (or a paste's re-anchored range) made in the same step as text inserted beside its end comes back longer after redo: redo replays the insertion with the anchors already in place, and a comment's end takes text typed there | `known:fuzz2-annotation-redo-stretched` (redo only, only an annotation the step created, only a longer end) |
 | fuzz-2 `link-resurrected` | a link removed along with its text comes back when a later delete of the same re-typed text is undone | `known:fuzz2-link-resurrected` (a strict superset of annotations after undo) |
 | fuzz-2 `format-undo` | formatted text that was deleted comes back unformatted after undo | `known:fuzz2-format-undo` (only formatting differs) |
 | fuzz-2 `join-atom-undo` | a link crossing two paragraphs loses its first piece when a copying join that retired an active inline object is undone | `known:fuzz2-join-atom-undo` (annotation-only difference in a lineage that retired an object) |
@@ -400,7 +401,10 @@ Open, each with a minimal `#[ignore]`d regression in
 `tests/foundations_regressions.rs` and a suggested fix in the final report:
 
 -   `annotation-redo`: a link made in the same undo step as the text it covers
-    is gone after undo then redo (so a paste's links too).
+    is gone after undo then redo (so a paste's links too). Its stretched form: a
+    comment made in the same step as text inserted at its end comes back longer
+    (`a_comment_made_beside_its_text_keeps_its_extent_on_redo`; a link, which
+    keeps typing at its edges outside, is exact).
 -   `format-undo`: deleted bold text comes back unformatted after undo.
 -   `link-resurrected`: a link removed with its text comes back when a later
     delete of the re-typed text is undone.
