@@ -63,10 +63,17 @@ impl NativeFragment {
         store: &reprise_display::AssetStore,
     ) -> Result<(), ClipboardError> {
         // Block images and the images of inline objects both carry an asset hash.
+        // The stories of a sections envelope hold images too (a header's logo).
+        let envelope = self.fragment.envelope().ok().flatten();
         let hashes: BTreeSet<_> = self
             .fragment
             .blocks
             .iter()
+            .chain(
+                envelope
+                    .iter()
+                    .flat_map(|e| e.stories.iter().flat_map(|s| s.blocks.iter())),
+            )
             .flat_map(|b| {
                 let block = b
                     .image
@@ -123,6 +130,12 @@ impl NativeFragment {
     }
     pub fn validate(&self) -> Result<(), ClipboardError> {
         self.fragment.validate()?;
+        // A sections envelope is read and checked here as well as at paste, so
+        // a malformed or over-limit one is refused when the bytes are decoded.
+        if let Some(envelope) = self.fragment.envelope()? {
+            envelope.validate(&self.fragment)?;
+            self.fragment.flattened(&envelope).validate()?;
+        }
         if self.resources.len() > 1024 {
             return Err(ClipboardError::Limit("resources"));
         }
@@ -248,6 +261,13 @@ fn bundle(
     let mut resources = BTreeMap::new();
     let mut pins = BTreeSet::new();
     let mut families = BTreeSet::new();
+    // The stories a sections envelope carries are text too: the fonts their
+    // running instances were set in travel with the copy.
+    let envelope = fragment.envelope().ok().flatten();
+    let story_sources: BTreeSet<_> = envelope
+        .iter()
+        .flat_map(|e| e.stories.iter().map(|s| s.source))
+        .collect();
     if let Some(layout) = layout.filter(|l| l.revision == doc.revision()) {
         for block in &layout.blocks {
             if copied.nodes.contains(&block.node) {
@@ -256,8 +276,26 @@ fn bundle(
                 }
             }
         }
+        for instance in layout
+            .sections
+            .iter()
+            .flat_map(|s| &s.running)
+            .filter(|r| story_sources.contains(&r.story))
+        {
+            for run in instance
+                .blocks
+                .iter()
+                .flat_map(|b| b.lines.iter().flat_map(|l| &l.runs))
+            {
+                pins.insert(run.face.clone());
+            }
+        }
     } else {
-        for block in &fragment.blocks {
+        for block in fragment.blocks.iter().chain(
+            envelope
+                .iter()
+                .flat_map(|e| e.stories.iter().flat_map(|s| s.blocks.iter())),
+        ) {
             if block.kind == reprise_doc::BlockKind::Image {
                 continue;
             }

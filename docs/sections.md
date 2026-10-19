@@ -1211,6 +1211,38 @@ source document, and it means nothing in the destination.
 
 Copying an orphan never makes it bound.
 
+**As built (S9, details the design left open).**
+
+-   A paste reads and checks the whole envelope in preflight, then flattens the
+    stories it copies into the fragment as ordinary blocks, so ranges,
+    annotations, lists, formatting, images and inline objects in a story are
+    pasted by the code that pastes the body's. A story's roots go into the new
+    story node, in order. `Pasted.stories` maps each source story to the story
+    the paste used (the same one for a paste into its own document).
+-   A paste refers to a story in place only when the destination is the
+    document the copy came from **and** the story is still live; a story that
+    has since been deleted is copied from the envelope instead.
+-   Stories nothing the paste writes refers to (for instance one only `first`
+    bound, when `first` is dropped because the destination isn't empty) are not
+    copied. An empty destination takes every story of a complete envelope,
+    orphans too.
+-   A boundary on the block that was joined into the paragraph at the caret has
+    no place: it is not written, and counts in the Info
+    `clipboard.section-dropped`. (A partial copy never holds a boundary on its
+    first block; a complete copy does.)
+-   Every limit is `Reason::CopyLimit(name)` once a fragment carries an envelope,
+    including the aggregate ones, because the stories' blocks count against the
+    fragment's block, range and size limits as if they were pasted blocks. A
+    fragment without an envelope keeps the errors it always had.
+-   A copy copies all stories in one pass and splits the result by root: copying
+    them one by one reads every range and relation per story, which is
+    quadratic at 16,384 stories.
+-   A `page-of` field in a story aimed at body text of the copy is written as a
+    target inside the fragment, so the paste remaps it like one in the body. A
+    field in the body aimed at a story keeps its target and shows `?`.
+-   `NativeFragment` also checks the envelope when it is decoded, and bundles
+    the image bytes and fonts the stories use.
+
 **Tests for N7:**
 
 -   a deleted body prefix, so the first block carries an effective boundary;
