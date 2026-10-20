@@ -1677,10 +1677,13 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &mut self.snapshot,
                         std::mem::take(&mut self.pending),
                     );
+                    // The section diagnostics go to their sorted place before the
+                    // final pass is kept, so a job that hits it returns the same
+                    // layout a full one makes.
+                    self.sections.sort_diagnostics(&mut self.snapshot);
                     if let Some(key) = self.final_key.take() {
                         self.session.evaluation.finish(key, &self.snapshot);
                     }
-                    self.sections.sort_diagnostics(&mut self.snapshot);
                     self.pass = Pass::Complete;
                     self.record_graph(true);
                 }

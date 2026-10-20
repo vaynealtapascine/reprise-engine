@@ -1285,7 +1285,14 @@ serialise byte-identically.
         `SetRegion { binding: Inherit }` ("same as previous"); it has no
         kernel command of its own.
     -   `State.sections`, `State.stories` and `BlockState.starts`. Each is left
-        out of JSON when empty or absent.
+        out of JSON when empty or absent. `Applied.stories` (the IDs
+        `create_story` and `create_region` made) is left out when empty.
+    -   Wire forms (`docs/bindings.md`): a break's position is `{ position:
+        "position" | "before", ... }` and its kind is `break_kind` (the
+        command's own `kind` is its tag); a binding is `{ state: "inherit" |
+        "none" | "story" }`; `set_section` takes `"first"` or a block ID.
+    -   Placed navigation: `hit_placed`, `caret_in` and `selection_rects_in`,
+        over `RegionInstance { page, slot }`, which is view state.
     -   Queries: `page_sections`, `section_pages`, `page_label`,
         `page_regions`, `region_instances`, `page_fields`.
     -   `set_page_setup` keeps its meaning: the document default.
