@@ -117,6 +117,19 @@ its envelope when decoded. The dedicated fixtures `sections_geometry_hostile`,
 and the shared clipboard round trip now compares each envelope's shape and the
 sections layout, and checks that four fixtures really carry one.
 
+**A defect the move found (`9d233d0`).** The shared incremental equivalence test
+(`fixtures/tests/incremental.rs`) failed on `sections_geometry_hostile`, edit 3,
+the first time the three fixtures ran in it: the session's final-pass cache kept
+the finished snapshot *before* sorting its section diagnostics, so a job that hit
+the cache (an edit nothing in the layout reads; here a style redefinition that
+resolves to the same size) returned `section.*` diagnostics ahead of the body's
+instead of after. The defect dates from S4 and no earlier test could see it,
+because the dedicated tests compare a cold session with a full layout. The sort
+now comes first (it is idempotent). The regression test
+(`incremental_sections.rs`) asserts the cache really was hit and compares the
+result and the diagnostic order with a full layout for four sections fixtures;
+it fails without the change with the order above.
+
 **S10, exports (§15).** *PDF:* each page already had its own `MediaBox` (now
 pinned by a portrait, landscape, portrait test); a running region's glyph and
 image runs are `/Artifact << /Type /Pagination /Subtype Header | Footer |
@@ -146,7 +159,58 @@ section for it.
 
 ## 2. Commits (`git log --oneline 93f8ef8..HEAD`)
 
-{{COMMITS}}
+```
+9d233d0 fix(layout): the final-pass cache keeps section diagnostics in their sorted place
+200d3e9 feat(reprise): S11 facade and WASM - section commands, page queries, placed navigation
+c617492 feat(clipboard): S10 exports - PDF page labels and artifact subtypes, HTML sections, plain text
+db906a9 feat(clipboard): S9 import_copy, native resources and the design note's as-built details
+38d5832 feat(clipboard): S9 sections envelope - copy and paste of boundaries, bindings and stories
+bcaf038 test(layout): hostile tests of the look-ahead's synchronous escape paths
+a2ea452 perf(layout): an unchanged running story's digest is compared once per job, not per page
+be58669 fix(layout): a running story's tables are charged to its read budget, and reading it is bounded
+18672c3 fix(layout): relation ownership is part of a running story's memo key
+d248557 fix(layout): a running story's memo keys its tables' structure and every cell
+59a292e fix(layout): a flow transition's key holds everything it reads of its section
+8dc48e7 test(format): pin KNOWN_REQUIRED to the assigned bits after the merge of main 88ede78
+859c42c fix(layout): footnotes are allocated inside the body left after the running reservation
+b34230b merge: engine main (88ede78, review fixes 2 and contract commit) into ws/sections2
+e27720e wip(clipboard): S9 start - envelope in the fragment, paste test draft, 16,384-story cap
+19d9acb feat(layout): S7c scheduling units - region composition and the first page are stepped
+88ede78 feat(contracts): review fixes 2 endpoints and style contexts; reserve frames bits
+305fd5a docs: finalize review fixes verification and measured performance
+3c01727 docs: checkpoint final-source clipping regression and corpus evidence
+670b460 fix(clipboard): clip annotation pieces before subtracting byte offsets
+bbaea45 docs: checkpoint complete file inventory and retained-marker follow-up
+b5bb750 fix(format): retain new format declarations after marker deletion
+b2f7a28 docs: record negative controls and versioned compatibility proposals
+17a09aa style(loro): format the isolated tree replay patch
+0625eca fix(styles): version explicit context migration and retain old encoded references
+d748da3 test(fixtures): record hidden 1024 and 4096 depth goldens
+ca9f190 fix(format): require endpoint-aware readers for portable cross-host ranges
+5b3dc6f Merge engine main documentation before review fixes verification
+3788e2a test(clipboard): keep internal range targets across copied paragraphs
+25ec2ca docs: checkpoint review fixes evidence and remaining verification
+4e3fda0 test(wasm): run deep metadata packages with a 1 MiB stack in CI
+40c9ede fix(doc): restore copied range ends in their own text host
+280183f test(styles): cover historical identity roots and undo across joins
+d68f7cd fix(loro): preserve pending undo through unchanged tree replay
+10b59e2 perf(styles): avoid property resolution during authoring and duplicate reference reads
+d2b985a test(perf): retain repeatable review phase measurements
+624b304 perf(doc): build cross-host annotation order once and count index work
+c9fd96c test(doc): bound deep fixture construction and exercise history round trips
+1322076 fix(loro): bound deep tree snapshot traversal and decoding
+fcb3a97 test(edit): read the nested export content bytes in the matching-revision refusal test
+25bf3d1 fix(styles): pin historical references before joining identity metadata
+b87c4f4 test(edit): cover matching revision annotation refusal and retained redo
+d3f5fb5 fix(edit): exhaustively select preflight and keep missing annotation reads pure
+9d8ffa0 test(doc): exercise metadata on 1024 and 4096 deep trees
+9478c4b fix(doc): bound root discovery independently of tree depth
+d818990 fix(clipboard): retain cross-paragraph annotation endpoints
+b52a88a fix(pdf): retain authored links around inline atoms
+3f5e0a7 perf(doc): resolve annotation endpoints with ordered host intervals
+573e29e fix(doc): retain annotation restore hints across hidden marker gaps
+d8eb32e fix(edit): preflight annotation writes against transaction targets
+```
 
 ## 3. Files touched
 
@@ -160,7 +224,8 @@ small or additive edit:
     `/PageLabels` and artifact subtypes (test helper).
 -   `crates/layout/src/display.rs`: `pdf_artifact_kinds`.
 -   `crates/layout/src/incremental.rs`, `running/compose.rs`: `MAX_REGION_ROUNDS`
-    and `MAX_ENTRIES` are `pub(crate)`; two `cfg(test)` hooks.
+    and `MAX_ENTRIES` are `pub(crate)`; two `cfg(test)` hooks; and the one
+    behaviour change outside the slices, the final-pass cache fix (`9d233d0`, §1).
 -   `crates/doc/src/table.rs`: `table_block` is `pub(crate)` (story blocks reuse it).
 -   `crates/doc/src/fragment.rs`: `Fragment.sections`, `copy_blocks` split out of
     `copy_fragment_scoped`, `copy_fragment_bare`.
@@ -252,7 +317,130 @@ None needed. Additions to record in `contracts.md`, all additive and made:
 -   **PDF labels** for odd counters (see §4).
 -   Running text in a vertical section is horizontal; per-band note areas and a
     chain placement are future work (unchanged from part 2).
+-   **Main has moved** since the merge this branch carries (§11): two textual
+    conflicts, both small.
 
-## 10. Verification
+## 10. Incremental timings against main
 
-{{VERIFICATION}}
+The brief's reference times on idle main, debug: `incremental.rs` about 235 s,
+`incremental_fuzz.rs` about 52 s, `incremental_steps` about 40 s. As in part 2,
+other agents were building on this machine, so main `0d8d296` (its three test
+binaries from `F:/reprise-target/main-0d8d296`) and this head (the same three
+suites, rebuilt after the last code change) were run back-to-back, one after the
+other, from the fixtures crate directory (`G:/tmp/ab3.ps1`, log
+`G:/tmp/b3c-logs/ab3.txt`; all six runs passed):
+
+| Suite | main 0d8d296 wall / CPU (load at start) | this head wall / CPU (load at start) | Difference |
+| --- | --- | --- | --- |
+| `incremental_steps` (5 tests) | 54.6 s / 128.3 s (4%) | 53.3 s / 122.9 s (45%) | −2% wall, −4% CPU |
+| `incremental_fuzz` (1) | 28.4 s / 26.4 s (39%) | 29.8 s / 27.7 s (57%) | +5% wall, +5% CPU |
+| `incremental` (15) | 299.0 s / 359.5 s (45%) | 223.7 s / 284.2 s (32%) | −25% wall, −21% CPU |
+
+No suite is more than 20% slower than main, so nothing needed investigating. The
+`incremental` difference runs the other way (the head is faster) and is within what
+the differing machine load explains; the head runs three more fixtures than main
+(114 against 111) and all of S7c to S11. For part 2's +5% to +17% (read recording
+on every memoised transition) this part adds nothing measurable. Not run: current
+main (`0c05a19`), which has moved since.
+
+## 11. Main has moved
+
+Main is now `0c05a19` (it merged `hardening/fuzz-2`: the region-pass key and the
+no-blocks paste fixes) beyond the `88ede78` this branch carries. I did not merge
+it: this part's brief says to merge when told. A dry run (`git merge-tree`) shows
+two conflicts and three clean auto-merges:
+
+-   `crates/layout/src/incremental.rs`: both sides changed the region pass's key
+    (`key.fields = previous.fields.clone()` here; `key.fields = fields.clone();
+    key.resolved = resolve_fields(doc, snapshot)` there). Main's two lines are
+    the ones to keep; this branch's `collect` argument sits beside them.
+-   `crates/format/SPEC.md`: the required-bit sentence ("bits 19 and 22" there,
+    "bits 17, 19, 22 and 23" with main's reserved-root table) wants main's text
+    with this branch's bit 17 kept.
+-   Auto-merged: `crates/edit/src/paste.rs` (main's no-blocks paste fix against
+    this branch's envelope hooks, which also touch the empty-fragment path),
+    `crates/doc/src/flow.rs`, `docs/CODEMAP.md`. The empty-fragment path is the
+    one place worth reading after the merge: with an envelope it must still
+    activate the stories and write `first`.
+
+## 12. Verification
+
+The gate is `G:/tmp/gate-b3.sh` (a copy of `gate-integrate.sh` pointed at this
+worktree, with the sections native/WASM parity steps of `tools/check-sections.sh`;
+the test step under `timeout --kill-after=10s 3600`). Builds go to
+`G:/reprise-target/eng-sections` and `-wasm`; `TMP`/`TEMP` are `G:/tmp`;
+`CARGO_PROFILE_*_DEBUG=0`; `INSTA_UPDATE` unset in the gate and `no` in my own runs.
+The full log of the final run is `G:/tmp/b3c-logs/gate-full-2.log`, run on the
+last commit's code (the report is the only file changed after it). It ran twice:
+the first run's workspace tests failed once (the final-pass cache defect, §1,
+`incremental.rs` edit 3 of `sections_geometry_hostile`); that is fixed (`9d233d0`)
+and this is the second run, every step `rc=0`:
+
+```
+=== types / wasmbuild / bindgen-web / bindgen-node / tsc / tsc-worker   rc=0 each
+=== smoke        rc=0
+WASM smoke: native JSON parity, editor loop, sync, defaults, images, formatting, emphasis/decoration/colour, host fonts, synthetic glyph outlines and ink bounds, authored marks, bytes, and hostile objects passed
+paragraph style WASM smoke passed
+plumbing WASM smoke passed
+page setup WASM smoke passed
+roles/lists WASM smoke passed
+annotations WASM smoke passed
+inline objects WASM smoke passed
+sections WASM smoke passed
+roles/lists worker smoke passed
+Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed
+sections native/WASM parity: geometry, continuous and vertical bands, notes and floats, section queries and navigation passed
+=== fmt         (cargo fmt --all -- --check)   rc=0, no output
+=== clippy      (cargo clippy -q --workspace --all-targets -- -D warnings)   rc=0, no output
+=== wasmcheck   (cargo check -q --target wasm32-unknown-unknown -p reprise-layout -p reprise-display
+                 -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin
+                 -p reprise-clipboard -p reprise -p reprise-wasm)   rc=0, no output
+=== test        (timeout 3600 cargo test --workspace --no-fail-fast)   rc=0
+```
+
+The tail of the test step, verbatim:
+
+```
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests reprise_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== rc=0
+=== GATE DONE
+gate exit 0
+```
+
+Totals over the whole run: **162 test suites, 1584 passed, 0 failed,
+2 ignored.** No warnings in any step. Existing snapshots: none changed
+(`INSTA_UPDATE` was never set to record; `git diff --name-status 93f8ef8 HEAD --
+'*.snap'` lists only the four `metadata_depth_*` files that came with main's merge
+`88ede78`); this part added none.
+
+**New tests in this part**, by crate:
+
+| Where | Tests |
+| --- | --- |
+| `layout` `running/stepped_tests.rs` | 4 hostile tests of the synchronous escape paths (§1), on top of S7c's 13 |
+| `edit` `tests/paste_sections.rs` | 13: boundaries in a selection, fresh lifetimes and one undo, inherited bindings, same- and cross-document, the N7 cases, context and geometry into an empty document only, paste into a story, 14 malformed envelopes refused with nothing written and no section root, the 16,384 / 16,385 story limit, orphans and running-only stories counted, a header `page-of` following the copy, a story's formatting, list, role and inline objects |
+| `doc` `sections/tests.rs` | 2: a record holding a container refuses the copy; stories over the block limit are refused |
+| `clipboard` | `story_resources` (3), `pdf_sections` (7), `html_sections` (6), the strengthened `roundtrip` (envelope and sections-layout comparison over 114 fixtures), `pdf_labels` unit test |
+| `reprise` | `sections_api` (6), `import_copy_sections` (2), `public_api` re-pinned |
+| `fixtures` | `incremental_sections` (the cache defect), `hostile` count 114 |
+| WASM | `smoke.cjs` and `worker-smoke.cjs` sections blocks; the parity example's new `regions` case (7 native cases, each compared with WASM: display, diagnostics, section state, every section query and a hit, caret and selection in a header) |
+
+**Mutation checks** (logs in `G:/tmp/b3c-logs/`): disabling the stall check in
+`Cursor::look` (`mut-look.log`) or in `bands.rs` (`mut-bands.log`) fails the two
+loop tests ("did not finish in 1,087 / 1,315 steps"); removing the 64-round cap
+hangs the 101-page test (`mut-rounds.log`, killed at 420 s); disabling the
+story-font lookup in the native bundle fails `the_fonts_of_a_header_story_are_named_by_the_fragment`
+("Source Sans 3 … is not bundled"); disabling the importer's section writing
+fails three HTML tests (`html_sections`); the cache defect's test fails without
+the fix (`inc-sections-red.log`).
+
