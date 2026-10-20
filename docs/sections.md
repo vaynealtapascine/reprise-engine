@@ -1439,6 +1439,27 @@ order.
 | Envelope | §14: 16,384 records, 64 keys of 2 KiB, 16,384 distinct stories | Refused before mutation, `Reason::CopyLimit` |
 | Field passes | 16, shared | `layout.field-unsettled` |
 
+**As built (S11).** The commands and queries above are `insert-break`,
+`remove-break`, `set-section`, `create-story`, `set-region`, `create-region`,
+`link-region` and `delete-story`; `page_sections`, `section_pages`, `page_label`,
+`page_regions`, `region_instances` and `page_fields`; and `hit_placed`,
+`caret_in` and `selection_rects_in` (§12). `docs/bindings.md` describes each
+shape. Choices the design left open:
+
+-   A command's section is `"first"` or the ID of the block it starts at; a
+    break's position is `{ position: "position" | "before", ... }`; the
+    command's own `kind` is already taken by the tag, so a break's is
+    `break_kind` (as `insert-block` has `block_kind`).
+-   `Applied` gains `stories` (the IDs `create-story` and `create-region` made),
+    left out when empty. Nothing else about an existing result changes.
+-   A layout with no sections answers the queries as one section, `first`:
+    every page is its, labelled 1, 2, 3, with no bands and no regions.
+-   `page_label` and the other page queries take a page index; the `counter`
+    is a decimal string like every 64-bit counter; the rest are plain arrays.
+-   A position in a story is checked against the document (live block, UTF-8
+    boundary), not the body's layout, because a running region's lines are
+    not in the snapshot's blocks.
+
 **New codes** (severity per 37: Info means as asked, Warning means differs,
 Error means left out)
 

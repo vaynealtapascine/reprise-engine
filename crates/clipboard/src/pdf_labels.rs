@@ -35,7 +35,7 @@ pub(crate) fn labels(layout: &LayoutSnapshot) -> Result<Option<Vec<PageLabel>>, 
             .ok_or_else(|| {
                 format!(
                     "page {} has the number {}, and a PDF page label starts at 1 or more",
-                    index + 1,
+                    index.saturating_add(1),
                     page.counter
                 )
             })?;
@@ -45,7 +45,7 @@ pub(crate) fn labels(layout: &LayoutSnapshot) -> Result<Option<Vec<PageLabel>>, 
             .ok_or_else(|| {
                 format!(
                     "page {} is labelled {:?}, which no PDF numbering style writes for {number}",
-                    index + 1,
+                    index.saturating_add(1),
                     page.label
                 )
             })?;

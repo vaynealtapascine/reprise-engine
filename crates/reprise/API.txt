@@ -99,3 +99,13 @@ pub fn undo_report(&mut self) -> Result<Payload<EditReport>>
 pub fn redo_report(&mut self) -> Result<Payload<EditReport>>
 pub fn presence(&self, request: &Payload<Presence>) -> Result<Payload<Awareness>>
 pub fn resolve_presence(&self, request: &Payload<Awareness>) -> Result<Payload<PresenceView>>
+sections
+pub fn page_sections(&self, page: u32) -> Result<Payload<PageSections>>
+pub fn section_pages(&self, section: &Payload<String>) -> Result<Payload<SectionPages>>
+pub fn page_label(&self, page: u32) -> Result<Payload<PageLabel>>
+pub fn page_regions(&self, page: u32) -> Result<Payload<Vec<PageRegion>>>
+pub fn region_instances( &self, story: &Payload<String>, ) -> Result<Payload<Vec<RegionInstance>>>
+pub fn page_fields(&self, page: u32) -> Result<Payload<Vec<PageField>>>
+pub fn hit_placed(&self, request: &Payload<HitPlaced>) -> Result<Payload<PlacedHit>>
+pub fn caret_in(&self, request: &Payload<CaretIn>) -> Result<Payload<PageRect>>
+pub fn selection_rects_in( &self, request: &Payload<SelectionIn>, ) -> Result<Payload<Vec<PageRect>>>

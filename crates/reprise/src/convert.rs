@@ -1,4 +1,5 @@
 use crate::*;
+mod sections;
 mod semantics;
 use reprise_geom::Length;
 pub(crate) use semantics::{list_definition_out, list_item_out, role_out};
@@ -475,7 +476,12 @@ pub(crate) fn command(c: &Command, medium: reprise_doc::Medium) -> Result<repris
             data: annotation_data(annotation)?,
         },
         Command::RemoveAnnotation { id: s } => C::RemoveAnnotation { id: range_id(s)? },
-        other => return semantics::command(other),
+        other => {
+            return match sections::command(other)? {
+                Some(command) => Ok(command),
+                None => semantics::command(other),
+            };
+        }
     })
 }
 
@@ -721,6 +727,7 @@ pub(crate) fn applied(a: reprise_edit::Applied, notes: Vec<reprise_diag::Note>) 
         relations: a.relations.iter().map(ToString::to_string).collect(),
         lists: a.lists.iter().map(ToString::to_string).collect(),
         annotations: a.annotations.iter().map(ToString::to_string).collect(),
+        stories: a.stories.iter().map(ToString::to_string).collect(),
         effects: a
             .effects
             .into_iter()

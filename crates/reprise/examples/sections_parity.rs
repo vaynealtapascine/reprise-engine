@@ -204,6 +204,124 @@ fn spatial(oversized: bool) -> Result<Document> {
     doc.commit();
     Ok(doc)
 }
+/// A header with a page number, a footer, a page break and a second section
+/// that hides the header: what the section queries and navigation are about.
+fn regions() -> Result<Document> {
+    use reprise_doc::{InlineObject, NewBlock};
+    let doc = document()?;
+    let head = doc.create_story(&[NewBlock::new(BlockKind::Paragraph, "band", "Head ")])?;
+    let head_block = doc.top(reprise_doc::Domain::Story(head))[0];
+    doc.insert_inline(head_block, 5, &InlineObject::field("page-number"))?;
+    let foot = doc.create_story(&[NewBlock::new(BlockKind::Paragraph, "band", "Foot")])?;
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &properties(&[
+            ("region.header.default", json!(head.to_string())),
+            ("region.footer.default", json!(foot.to_string())),
+            ("numbering.format", json!("lower-roman")),
+        ]),
+        &[],
+    )?;
+    let p: Vec<_> = (0..4)
+        .map(|i| doc.append_block(BlockKind::Paragraph, "band", &format!("page {i}")))
+        .collect::<std::result::Result<_, _>>()?;
+    for (node, kind, own) in [
+        (p[1], BreakKind::Page, properties(&[])),
+        (
+            p[2],
+            BreakKind::Section,
+            properties(&[
+                ("region.header.default", json!("")),
+                ("numbering.format", json!("decimal")),
+                ("numbering.restart", json!(1)),
+            ]),
+        ),
+        (p[3], BreakKind::Page, properties(&[])),
+    ] {
+        let life = doc.mint_lifetime(node)?;
+        doc.activate_start(node, &life, kind, &own)?;
+    }
+    doc.commit();
+    Ok(doc)
+}
+/// Every section query and placed navigation of a finished layout, as the JSON
+/// the WASM facade must reproduce.
+fn queries(session: &reprise::DocumentSession) -> Result<Value> {
+    use reprise::Payload;
+    let state = session.state()?.data;
+    let mut pages = Vec::new();
+    for page in 0.. {
+        let Ok(label) = session.page_label(page) else {
+            break;
+        };
+        pages.push(json!({
+            "label": label.data,
+            "sections": session.page_sections(page)?.data,
+            "regions": session.page_regions(page)?.data,
+            "fields": session.page_fields(page)?.data,
+        }));
+    }
+    let mut section_pages = serde_json::Map::new();
+    for section in &state.sections {
+        section_pages.insert(
+            section.id.clone(),
+            json!(
+                session
+                    .section_pages(&Payload::new(section.id.clone()))?
+                    .data
+            ),
+        );
+    }
+    let mut instances = serde_json::Map::new();
+    for story in &state.stories {
+        instances.insert(
+            story.id.clone(),
+            json!(
+                session
+                    .region_instances(&Payload::new(story.id.clone()))?
+                    .data
+            ),
+        );
+    }
+    let mut navigation = Value::Null;
+    if let Some(region) = session
+        .page_regions(0)
+        .ok()
+        .and_then(|r| r.data.into_iter().next())
+    {
+        let hit = session
+            .hit_placed(&Payload::new(reprise::HitPlaced {
+                page: 0,
+                x: region.rect.x + region.rect.width / 2,
+                y: region.rect.y + region.rect.height / 2,
+                mode: None,
+            }))?
+            .data;
+        if let reprise::PlacedHit::Running { position, instance } = &hit {
+            let anchor = reprise::Caret {
+                offset: 0,
+                ..position.clone()
+            };
+            navigation = json!({
+                "hit": hit,
+                "caret": session.caret_in(&Payload::new(reprise::CaretIn {
+                    instance: instance.clone(),
+                    position: position.clone(),
+                }))?.data,
+                "selection": session.selection_rects_in(&Payload::new(reprise::SelectionIn {
+                    instance: instance.clone(),
+                    selection: reprise::Selection { anchor, focus: position.clone() },
+                }))?.data,
+            });
+        } else {
+            navigation = json!({"hit": hit});
+        }
+    }
+    Ok(
+        json!({"pages": pages, "section_pages": section_pages, "instances": instances, "navigation": navigation}),
+    )
+}
 fn main() -> Result<()> {
     let target =
         std::path::PathBuf::from(std::env::args().nth(1).ok_or("output directory required")?);
@@ -216,6 +334,7 @@ fn main() -> Result<()> {
         ("notes-floats", bands(false, true)?),
         ("spatial-bands", spatial(false)?),
         ("spatial-overflow", spatial(true)?),
+        ("regions", regions()?),
     ]
     .into_iter()
     .enumerate()
@@ -255,7 +374,8 @@ fn main() -> Result<()> {
             .map(|page| session.display_json(page).map(|d| d.data))
             .collect::<reprise::Result<Vec<_>>>()?;
         cases.push(json!({"name": name, "options": options, "display": display,
-            "diagnostics": session.diagnostics().data, "sections": session.state()?.data.sections}));
+            "diagnostics": session.diagnostics().data, "sections": session.state()?.data.sections,
+            "queries": queries(&session)?}));
     }
     std::fs::write(
         target.join("native.json"),

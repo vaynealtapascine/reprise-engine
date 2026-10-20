@@ -131,14 +131,18 @@ export type TextFeature = {
  */
 tag: string, value: number, };
 export type TextRun = { start: number, end: number, style: TextStyle, };
-export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "set-role", node: string, role: BlockRole, } | { "kind": "create-list", definition: ListDefinition, } | { "kind": "update-list", list: string, definition: ListDefinition, } | { "kind": "delete-list", list: ListRef, } | { "kind": "set-list-item", node: string, list: ListRef, level: number, } | { "kind": "remove-list-item", node: string, } | { "kind": "set-list-level", node: string, level: number, } | { "kind": "indent-list-item", node: string, by: number, } | { "kind": "restart-list", node: string, value: string | null, } | { "kind": "continue-list", node: string, } | { "kind": "enter", node: string, at: number, } | { "kind": "backspace-at-start", node: string, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, } | { "kind": "insert-inline", node: string, at: number, object: InlineObject, } | { "kind": "update-inline", node: string, at: number, patch: InlinePatch, };
+export type Command = { "kind": "set-page-setup", setup: PageSetupPatch, } | { "kind": "swap-page-orientation" } | { "kind": "insert-line-break", node: string, at: number, } | { "kind": "insert-tab", node: string, at: number, } | { "kind": "set-alignment", node: string, at: number | null, alignment: Alignment | null, } | { "kind": "set-tab-stops", node: string, tabs: TabStops, } | { "kind": "add-anchor", node: string, at: number, edge: LineEdge, target: string, target_at: number, target_edge: AnchorEdge, } | { "kind": "remove-anchor", id: string, } | { "kind": "insert-image", image: ImageInsert, } | { "kind": "add-relation", relation: Relation, } | { "kind": "remove-relation", id: string, } | { "kind": "insert-text", node: string, at: number, text: string, } | { "kind": "delete-text", node: string, start: number, end: number, } | { "kind": "split-block", node: string, at: number, } | { "kind": "join-blocks", first: string, second: string, } | { "kind": "insert-block", parent: string | null, index: number, block_kind: BlockKind, text: string, style: Style, } | { "kind": "delete-block", node: string, } | { "kind": "move-block", node: string, parent: string | null, index: number, } | { "kind": "set-style", node: string, style: Style, clear?: Array<StyleProperty> | null, } | { "kind": "format-text", node: string, start: number, end: number, style: TextStyle, } | { "kind": "define-style", name: string, parent: string | null, style: Style, } | { "kind": "update-style", name: string, parent?: string | null, style: Style, clear?: Array<StyleProperty>, } | { "kind": "rename-style", from: string, to: string, } | { "kind": "delete-style", name: string, } | { "kind": "apply-style", node: string, style: string | null, } | { "kind": "set-role", node: string, role: BlockRole, } | { "kind": "create-list", definition: ListDefinition, } | { "kind": "update-list", list: string, definition: ListDefinition, } | { "kind": "delete-list", list: ListRef, } | { "kind": "set-list-item", node: string, list: ListRef, level: number, } | { "kind": "remove-list-item", node: string, } | { "kind": "set-list-level", node: string, level: number, } | { "kind": "indent-list-item", node: string, by: number, } | { "kind": "restart-list", node: string, value: string | null, } | { "kind": "continue-list", node: string, } | { "kind": "enter", node: string, at: number, } | { "kind": "backspace-at-start", node: string, } | { "kind": "add-annotation", node: string, start: number, end: number, annotation: AnnotationPayload, } | { "kind": "update-annotation", id: string, annotation: AnnotationPayload, } | { "kind": "remove-annotation", id: string, } | { "kind": "insert-inline", node: string, at: number, object: InlineObject, } | { "kind": "update-inline", node: string, at: number, patch: InlinePatch, } | { "kind": "insert-break", at: BreakPosition, break_kind: BreakKind, patch?: Record<string, string | number | boolean>, } | { "kind": "remove-break", block: string, } | { "kind": "set-section", section: string, patch?: Record<string, string | number | boolean>, clear?: Array<string>, } | { "kind": "create-story", blocks: Array<StoryBlock>, } | { "kind": "set-region", section: string, slot: string, variant: string, binding: RegionBinding, } | { "kind": "create-region", section: string, slot: string, variant: string, from: StoryFrom, } | { "kind": "link-region", section: string, slot: string, variant: string, } | { "kind": "delete-story", story: string, };
 export type Transaction = { commands: Array<Command>, };
 export type Effect = { "kind": "text", node: string, at: number, removed: number, inserted: number, } | { "kind": "split", node: string, at: number, new: string, } | { "kind": "join", first: string, second: string, at: number, } | { "kind": "deleted", node: string, } | { "kind": "moved", node: string, new: string, };
 export type Applied = { blocks: Array<string>, relations: Array<string>, lists?: Array<string>, effects: Array<Effect>, diagnostics: Array<Diagnostic>, 
 /**
  * The annotations `add-annotation` created, in command order.
  */
-annotations: Array<string>, };
+annotations: Array<string>, 
+/**
+ * The stories `create-story` and `create-region` made, in command order.
+ */
+stories?: Array<string>, };
 export type FontStyle = "normal" | "italic" | "oblique";
 export type FontDeclaration = { family: string, weight: number, style: FontStyle, stretch: number, face_index: number, };
 export type GenericFamily = "serif" | "sans-serif" | "monospace" | "script";
@@ -387,4 +391,39 @@ id: string,
  */
 at: number, object: InlineObject, };
 export type FieldTarget = { node: string, at: number, };
+export type BreakKind = "section" | "page" | "column";
+export type BreakPosition = { "position": "position", node: string, offset: number, } | { "position": "before", node: string, };
+export type StoryBlock = { block_kind: BlockKind, text: string, style?: string, };
+export type RegionBinding = { "state": "inherit" } | { "state": "none" } | { "state": "story", story: string, };
+export type StoryFrom = { "source": "empty" } | { "source": "copy-of", story: string, };
+export type SectionPageKind = "content" | "filler" | "note-continuation";
+export type PageBand = { section: string, life: string, rect: Rect, offset: number, depth: number, balanced: boolean, };
+export type PageSections = { page: number, kind: SectionPageKind, owner: string, bands: Array<PageBand>, };
+export type SectionPages = { owned: Array<number>, occupied: Array<number>, };
+export type PageLabel = { page: number, label: string, counter: string, kind: SectionPageKind, };
+export type PageRegion = { slot: string, variant: string, story: string, 
+/**
+ * The region's frame on the page.
+ */
+rect: Rect, 
+/**
+ * Some of its content did not fit and was left out.
+ */
+clipped: boolean, };
+export type RegionInstance = { page: number, slot: string, };
+export type FieldPlace = { "kind": "single" } | { "kind": "page", page: number, } | { "kind": "running", page: number, slot: string, repeat: number, };
+export type PageField = { 
+/**
+ * The paragraph holding it: a body block or a story block.
+ */
+node: string, atom: string, 
+/**
+ * Its U+FFFC, as a UTF-8 byte offset in `node`.
+ */
+at: number, instance: FieldPlace, text: string, };
+export type PlacedMode = "normal" | "background";
+export type HitPlaced = { page: number, x: number, y: number, mode?: PlacedMode, };
+export type PlacedHit = { "kind": "body", hit: Hit, } | { "kind": "running", position: Caret, instance: RegionInstance, };
+export type CaretIn = { instance: RegionInstance, position: Caret, };
+export type SelectionIn = { instance: RegionInstance, selection: Selection, };
 export type PacketBound = 33554432

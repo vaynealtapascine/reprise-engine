@@ -7,6 +7,7 @@ fn listing() -> String {
         ("typescript", include_str!("../src/typescript.rs")),
         ("dto", include_str!("../src/dto.rs")),
         ("collab", include_str!("../src/session/collab.rs")),
+        ("sections", include_str!("../src/session/sections.rs")),
     ] {
         out.push_str(name);
         out.push('\n');

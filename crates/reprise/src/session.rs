@@ -1,4 +1,5 @@
 mod collab;
+mod sections;
 use crate::convert as cv;
 use crate::*;
 use reprise_doc::{Document, PersistenceMode};
