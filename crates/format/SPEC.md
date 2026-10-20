@@ -80,10 +80,23 @@ recomputed, except where a section below says history keeps it.
 | 20 | `REQUIRED_RANGE_ENDPOINTS` | required | Retained cross-paragraph range endpoints (`end-node1`) in distinct text hosts |
 | 21 | `REQUIRED_STYLE_REFERENCE_CONTEXTS` | required | Explicit style-reference interpretation (`styles2.reference-contexts2`) |
 | 22 | none | none | **Reserved** for frames: canvas mode (design on `ws/frames`); no constant is defined and no reader may assign it another meaning |
+| 23 | none | none | **Reserved** for the replay quarantine (`quarantine1`, slice X in `docs/frames-and-canvas.md` on `ws/frames`), with sync feature bit 8; no constant is defined and no reader may assign it another meaning |
 
 `KNOWN_REQUIRED` is the union of every required constant above; `KNOWN_OPTIONAL` is
 `OPTIONAL_TABLE_HEADERS`. A package that sets a required bit outside `KNOWN_REQUIRED`,
-bits 19 and 22 included, is `RequiredFeatures`.
+bits 19, 22 and 23 included, is `RequiredFeatures`. (Bit 17 is `REQUIRED_SECTIONS`, known
+here.)
+
+### Reserved root names
+
+Readers ignore a root map they don't know, and report changes under it only as
+`ChangeReport.other`. These names are reserved for work in progress, so no other
+stream may use them:
+
+| Root | Reserved for | Capability |
+| --- | --- | --- |
+| `quarantine1` | The replay quarantine (slice X in `docs/frames-and-canvas.md` on `ws/frames`) | Required bit 23 and sync bit 8, set while the root is retained |
+| `steps1` | Slice X's undo guard commits: local-undo bookkeeping that no reader interprets | None: ignorable |
 
 ## Sections
 

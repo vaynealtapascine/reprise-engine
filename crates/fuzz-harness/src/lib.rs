@@ -11,6 +11,7 @@ pub mod authored;
 pub mod codes;
 pub mod engine;
 pub mod facade;
+pub mod foundations;
 pub mod input;
 pub mod minimize;
 pub mod oracle;

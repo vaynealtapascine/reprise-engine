@@ -335,3 +335,81 @@ fn a_page_count_in_a_header_follows_a_later_edit_back_to_page_one() {
     assert_eq!(c.reflowed_pages.iter().min(), Some(&0), "{c:?}");
     let _ = nodes;
 }
+
+/// A header whose `page-of` names body text: the region pass keys what the
+/// fields of the flowed blocks, running instances included, resolve to, so a
+/// retargeted, moved, removed or gone target is resolved again and not matched
+/// to the pass that resolved it before (main's `PassKey::resolved`).
+#[test]
+fn a_running_page_of_is_resolved_again_when_its_target_or_the_target_moves() {
+    use super::field_tests::{on, shown};
+    use reprise_doc::{InlineObject, InlinePatch};
+    use std::collections::BTreeMap;
+    let (engine, doc) = setup();
+    let nodes = pages(&doc, 3);
+    let head = story(&doc, &["see "]);
+    let block = story_block(&doc, head);
+    let aim = |node: NodeId| doc.field_target(node, 0).unwrap();
+    doc.insert_inline(
+        block,
+        4,
+        &InlineObject::field("page-of").with("target", aim(nodes[0]).as_str()),
+    )
+    .unwrap();
+    first(&doc, &[("region.header.default", bind(head))]);
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let check = |session: &mut LayoutSession<'_>, what: &str| {
+        doc.commit();
+        let full = engine.layout(&doc);
+        assert_eq!(session.layout(&doc).unwrap(), full, "{what}");
+        full
+    };
+    let headers = |s: &crate::LayoutSnapshot| -> Vec<Vec<String>> {
+        (0..s.pages.len())
+            .map(|p| shown(on(s, p, "header")))
+            .collect()
+    };
+    let s = check(&mut session, "aimed at the first page");
+    assert_eq!(headers(&s), [["1"], ["1"], ["1"]]);
+    let retarget = |to: NodeId| {
+        let entry = doc.inline_objects(block).unwrap().remove(0);
+        doc.update_inline(
+            entry.id,
+            &InlinePatch {
+                align: None,
+                params: BTreeMap::from([("target".into(), Some(aim(to)))]),
+            },
+        )
+        .unwrap();
+    };
+    // Retargeted: the composed text changes with it.
+    retarget(nodes[1]);
+    let s = check(&mut session, "retargeted to the second page");
+    assert_eq!(headers(&s), [["2"], ["2"], ["2"]]);
+    retarget(nodes[2]);
+    let s = check(&mut session, "retargeted to the third page");
+    assert_eq!(headers(&s), [["3"], ["3"], ["3"]]);
+    // The target moves: its page break goes, and it flows onto the second page.
+    doc.deactivate_start(nodes[2]).unwrap();
+    let s = check(&mut session, "the target moved a page back");
+    assert_eq!(s.pages.len(), 2);
+    assert_eq!(headers(&s), [["2"], ["2"]]);
+    // The break comes back with a fresh lifetime, and the target with it.
+    boundary(&doc, nodes[2], BreakKind::Page, &[]);
+    let s = check(&mut session, "the target moved a page forward again");
+    assert_eq!(headers(&s), [["3"], ["3"], ["3"]]);
+    // The target is gone: the field says so and keeps its place.
+    doc.delete_block(nodes[2]).unwrap();
+    let s = check(&mut session, "the target is gone");
+    assert!(headers(&s).iter().all(|h| h == &["?"]), "{:?}", headers(&s));
+    // The field is removed: a header with no field at all.
+    let at = doc.inline_objects(block).unwrap().remove(0).at;
+    doc.block(block)
+        .unwrap()
+        .text
+        .delete(at..at + reprise_text::OBJECT.len_utf8())
+        .unwrap();
+    let s = check(&mut session, "the field is removed");
+    assert!(headers(&s).iter().all(Vec::is_empty), "{:?}", headers(&s));
+}

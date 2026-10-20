@@ -425,10 +425,7 @@ impl Document {
         if let Some(map) = known.as_ref() {
             return Some(map.clone());
         }
-        let ValueOrContainer::Container(Container::Map(map)) = self.doc.get_by_str_path(INLINE)?
-        else {
-            return None;
-        };
+        let map = self.map_root(INLINE)?;
         *known = Some(map.clone());
         Some(map)
     }

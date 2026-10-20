@@ -288,6 +288,46 @@ fn hostile_markers_and_records_are_hidden_and_audited() {
     assert_eq!(audit.orphan_records, vec!["1@1/99@7".to_string()]);
 }
 
+/// fuzz-2 `shadow-root`: a root is identified by its name and its type, so a
+/// peer can write a text root named `inline1` next to the record map. A lookup
+/// by name alone resolves to whichever root a replica registered last, which
+/// depends on how it came to hold the document, not on the operations: a
+/// replica that opened a snapshot read no records and hid every object while
+/// the live one still saw them. Same operations, same objects.
+#[test]
+fn a_root_of_another_type_under_the_records_name_hides_no_object() {
+    // The two orders in which a snapshot ends up preferring the shadow.
+    for (shadow_first, edit_after) in [(true, false), (false, true)] {
+        let (doc, p) = one("see page  now");
+        let peer = Document::new(2).unwrap();
+        let shadow = |peer: &Document, doc: &Document| {
+            sync(doc, peer);
+            peer.doc.get_text(INLINE).insert(0, "shadow").unwrap();
+            sync(peer, doc);
+        };
+        if shadow_first {
+            shadow(&peer, &doc);
+        }
+        doc.insert_inline(p, 9, &InlineObject::field("page-number"))
+            .unwrap();
+        doc.commit_step();
+        if !shadow_first {
+            shadow(&peer, &doc);
+        }
+        if edit_after {
+            doc.block(p).unwrap().text.insert(0, "x").unwrap();
+            doc.commit_step();
+        }
+        let opened = Document::import(&doc.export(crate::PersistenceMode::History), 4).unwrap();
+        for (name, d) in [("live", &doc), ("snapshot", &opened)] {
+            let case = format!("{name} (shadow first: {shadow_first}, edit after: {edit_after})");
+            assert_eq!(d.inline_objects(p).unwrap().len(), 1, "{case}");
+            assert_eq!(text(d, p), text(&doc, p), "{case}");
+            assert!(d.has_inline_objects(), "{case}");
+        }
+    }
+}
+
 #[test]
 fn field_targets_follow_their_text() {
     let (doc, p) = one("intro target");

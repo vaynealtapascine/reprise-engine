@@ -239,7 +239,7 @@ impl Span for ParaSpan {
 }
 
 /// Whether node metadata describes a flow host.
-fn is_host_meta(meta: &LoroMap) -> bool {
+pub(crate) fn is_host_meta(meta: &LoroMap) -> bool {
     matches!(
         get_str(meta, "kind").and_then(|k| BlockKind::parse(&k)),
         Some(BlockKind::Paragraph | BlockKind::Annotation)
@@ -266,11 +266,7 @@ impl Document {
         if let Some(records) = &cache.records {
             return Some(records.clone());
         }
-        let ValueOrContainer::Container(Container::Map(records)) =
-            self.doc.get_by_str_path(BREAKS)?
-        else {
-            return None;
-        };
+        let records = self.map_root(BREAKS)?;
         cache.records = Some(records.clone());
         Some(records)
     }

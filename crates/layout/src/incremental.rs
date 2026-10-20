@@ -474,6 +474,11 @@ struct PassKey {
     applied: BTreeSet<RelationId>,
     /// The field texts a region pass composes its notes and floats with.
     fields: crate::inline::FieldValues,
+    /// What the fields of the flowed blocks resolve to. A field's text and the
+    /// target it names are not in the snapshot (only the text it was composed
+    /// with is), so a removed or retargeted `page-of` would otherwise match
+    /// the pass that resolved it before.
+    resolved: (crate::inline::FieldValues, Vec<(NodeId, usize, String)>),
 }
 impl PassKey {
     fn changes(&self, old: Option<&Self>) -> BTreeSet<Dependency> {
@@ -556,6 +561,7 @@ impl PassKey {
             template: template.clone(),
             applied: applied.clone(),
             fields: Default::default(),
+            resolved: Default::default(),
         }
     }
 }
@@ -984,6 +990,7 @@ impl Evaluation {
     ) -> Plan {
         let mut key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
         key.fields = previous.fields.clone();
+        key.resolved = crate::inline::resolve_fields(doc, snapshot);
         if let Some(plan) = self
             .cache
             .borrow()
