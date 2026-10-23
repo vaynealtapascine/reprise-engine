@@ -496,9 +496,18 @@ impl Document {
         } else {
             None
         };
+        // The raw record, every key as it is. One the copy can't carry (a
+        // container, a null, a number that is not an integer) is refused, as a
+        // section record's is, and never dropped: not the key, not the record.
         let geometry = if whole {
-            self.geometry_mode_record()
-                .filter(|g| g.values().all(is_plain))
+            match self.geometry_mode_record() {
+                Some(record) if !record.values().all(is_plain) => {
+                    return Err(invalid(
+                        "the geometry record holds a value a copy can't carry",
+                    ));
+                }
+                record => record,
+            }
         } else {
             None
         };

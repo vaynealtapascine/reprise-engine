@@ -1418,7 +1418,17 @@ impl Reader {
             ("body", false) => {
                 if let Some(raw) = attrs.get(GEOMETRY_ATTR) {
                     match sections_html::read_geometry(raw) {
-                        Some(record) => self.geometry = Some(record),
+                        Some((record, left_out)) => {
+                            if left_out > 0 {
+                                once(
+                                    &mut self.notes,
+                                    codes::HTML_DROPPED,
+                                    "geometry mode keys that are not plain values were omitted",
+                                    true,
+                                );
+                            }
+                            self.geometry = Some(record);
+                        }
                         None => once(
                             &mut self.notes,
                             codes::HTML_DROPPED,

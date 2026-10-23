@@ -328,15 +328,16 @@ pub(crate) fn read(raw: &str) -> Option<Stored> {
     })
 }
 
-/// Reads [`GEOMETRY_ATTR`]: the record's scalar keys, as written.
-pub(crate) fn read_geometry(raw: &str) -> Option<SectionProperties> {
+/// Reads [`GEOMETRY_ATTR`]: the record's scalar keys, as written, and how many
+/// keys held something else, which the record can't hold.
+pub(crate) fn read_geometry(raw: &str) -> Option<(SectionProperties, usize)> {
     let value: Value = serde_json::from_str(raw).ok()?;
     let object = value.as_object()?;
-    Some(
-        object
-            .iter()
-            .filter(|(_, v)| matches!(v, Value::String(_) | Value::Bool(_)) || v.as_i64().is_some())
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect(),
-    )
+    let record: SectionProperties = object
+        .iter()
+        .filter(|(_, v)| matches!(v, Value::String(_) | Value::Bool(_)) || v.as_i64().is_some())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let left_out = object.len().saturating_sub(record.len());
+    Some((record, left_out))
 }

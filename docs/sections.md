@@ -1234,6 +1234,13 @@ Copying an orphan never makes it bound.
     including the aggregate ones, because the stories' blocks count against the
     fragment's block, range and size limits as if they were pasted blocks. A
     fragment without an envelope keeps the errors it always had.
+-   A complete copy carries the `geometry1` record exactly, every key as it
+    is. A record that holds a value a copy can't carry (a container, a null, a
+    number that is not an integer, or a root that is not a record) is refused
+    with `FragmentError::Invalid`, as an unreadable section record is: the
+    copy never drops a key, or the record, silently. A HTML import that meets
+    such a key in `data-reprise-geometry` keeps the plain keys and reports the
+    rest (`clipboard.html-dropped`).
 -   A copy copies all stories in one pass and splits the result by root: copying
     them one by one reads every range and relation per story, which is
     quadratic at 16,384 stories.

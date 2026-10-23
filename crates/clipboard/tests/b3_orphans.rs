@@ -1,7 +1,9 @@
-//! B3 fixes (the Astra B3 review), finding 5: HTML carries every authored
-//! story. A story no section binds is written once as an inert
-//! `<template data-reprise-story>` after the last section, and an import keeps
-//! it without binding it (sections §6, §15).
+//! B3 fixes (the Astra B3 review), the HTML side of findings 5 and 6.
+//!
+//! Finding 5: HTML carries every authored story. A story no section binds is
+//! written once as an inert `<template data-reprise-story>` after the last
+//! section, and an import keeps it without binding it (sections §6, §15).
+//! Finding 6: a geometry key the import can't hold is reported, not dropped.
 use reprise_clipboard::{ExportOptions, Exporter, Html, ImportLimits, import_html};
 use reprise_doc::sections::{SectionId, SectionProperties};
 use reprise_doc::{BlockKind, Document, Domain, NewBlock, NodeId, SchemaRegistry};
@@ -135,4 +137,23 @@ fn a_paste_into_a_document_with_content_takes_no_orphans() {
     destination.commit();
     let back = paste_into(destination, &html);
     assert!(back.stories().is_empty());
+}
+
+#[test]
+fn an_html_geometry_key_that_is_not_plain_is_reported_not_dropped_silently() {
+    let html = "<html><body data-reprise-geometry='{\"v\":1,\"mode\":\"pageless\",\"future\":[1,2]}'><p>x</p></body></html>";
+    let imported = import_html(html, ImportLimits::default()).unwrap();
+    assert!(
+        imported
+            .notes
+            .iter()
+            .any(|n| n.code == "clipboard.html-dropped" && n.message.contains("geometry")),
+        "{:?}",
+        imported.notes
+    );
+    // The plain keys are kept.
+    let back = paste_into(Document::new(2).unwrap(), html);
+    let record = back.geometry_mode_record().unwrap();
+    assert_eq!(record["mode"], "pageless");
+    assert!(!record.contains_key("future"));
 }
