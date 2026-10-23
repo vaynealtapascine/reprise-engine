@@ -29,6 +29,48 @@ fn story_blocks(f: &Fragment, n: usize) -> Vec<Value> {
         .collect()
 }
 #[test]
+fn aggregate_body_limit_is_copy_limit_with_envelope() {
+    let mut f = base();
+    let b = f.blocks[0].clone();
+    f.blocks = (0..4097)
+        .map(|i| {
+            let mut c = b.clone();
+            c.id = NodeId::parse(&format!("{}@99", i + 1)).unwrap();
+            c
+        })
+        .collect();
+    f.sections = Some(json!({"v":1,"mode":"complete"}).to_string());
+    let mut e = dst(false);
+    let before = e.document().revision();
+    let err = e.paste(&f, None, "dest").unwrap_err();
+    assert_eq!(e.document().revision(), before);
+    assert_eq!((e.undo_count(), e.redo_count()), (0, 0));
+    assert!(
+        matches!(err.reason, Reason::CopyLimit(_)),
+        "wrong error: {:?}",
+        err.reason
+    );
+}
+#[test]
+fn skipped_story_still_counts_toward_aggregate_limit() {
+    let mut f = base();
+    f.sections=Some(json!({"v":1,"mode":"complete","stories":[{"label":"s0","source":"1@8","blocks":story_blocks(&f,4097)}]}).to_string());
+    let mut e = dst(true);
+    let before = e.document().revision();
+    let result = e.paste(&f, None, "dest");
+    eprintln!(
+        "accepted={}, undo={}, body_blocks={}",
+        result.is_ok(),
+        e.undo_count(),
+        e.document().top(Domain::Body).len()
+    );
+    assert!(
+        matches!(result,Err(ref err) if matches!(err.reason,Reason::CopyLimit(_))),
+        "over-limit skipped story was accepted"
+    );
+    assert_eq!(e.document().revision(), before);
+}
+#[test]
 fn story_parent_must_not_cross_into_body() {
     let mut f = base();
     let mut b = story_blocks(&f, 1).remove(0);

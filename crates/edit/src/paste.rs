@@ -85,7 +85,15 @@ fn prepare_with_styles(
     target: &str,
     preserve_graph: bool,
 ) -> Result<Prepared, EditError> {
-    fragment.validate().map_err(invalid)?;
+    // With an envelope, a limit is a copy limit however the fragment's own
+    // body reaches it.
+    fragment.validate().map_err(|e| {
+        if fragment.sections.is_some() {
+            crate::paste_sections::refuse(e)
+        } else {
+            invalid(e)
+        }
+    })?;
     // The envelope is read and checked first, and its stories' blocks join the
     // fragment's own: from here a story is pasted as blocks are.
     let crate::paste_sections::Split {
