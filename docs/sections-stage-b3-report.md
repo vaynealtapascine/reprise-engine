@@ -22,6 +22,7 @@ on the branch.
 | S10 exports | Done: PDF (MediaBox, labels, artifact subtypes), HTML (sections, stories, round trip), plain text. |
 | S11 facade and WASM | Done: eight commands, six page queries, three placed-navigation calls, worker kinds, types and API pin regenerated. |
 | S12 pageless | Not started (gated; the orchestrator decides after review). |
+| Main `0c05a19` | Merged (`81a752b`); the S7 keys compose with `PassKey::resolved` (§11). |
 
 Orchestrator decisions of the brief: (1) the scheduling units are built, not
 narrowed; (2) the story table holds **16,384** distinct stories, counted across
@@ -317,8 +318,6 @@ None needed. Additions to record in `contracts.md`, all additive and made:
 -   **PDF labels** for odd counters (see §4).
 -   Running text in a vertical section is horizontal; per-band note areas and a
     chain placement are future work (unchanged from part 2).
--   **Main has moved** since the merge this branch carries (§11): two textual
-    conflicts, both small.
 
 ## 10. Incremental timings against main
 
@@ -340,30 +339,57 @@ No suite is more than 20% slower than main, so nothing needed investigating. The
 `incremental` difference runs the other way (the head is faster) and is within what
 the differing machine load explains; the head runs three more fixtures than main
 (114 against 111) and all of S7c to S11. For part 2's +5% to +17% (read recording
-on every memoised transition) this part adds nothing measurable. Not run: current
-main (`0c05a19`), which has moved since.
+on every memoised transition) this part adds nothing measurable. Measured before
+the merge of main `0c05a19`, which changes only the region-pass key and a paste
+branch.
 
-## 11. Main has moved
+## 11. Merge of main 0c05a19
 
-Main is now `0c05a19` (it merged `hardening/fuzz-2`: the region-pass key and the
-no-blocks paste fixes) beyond the `88ede78` this branch carries. I did not merge
-it: this part's brief says to merge when told. A dry run (`git merge-tree`) shows
-two conflicts and three clean auto-merges:
+Main moved to `0c05a19` (it merged `hardening/fuzz-2`) after the report above
+was first written. At the orchestrator's instruction it is merged, on its own
+commit (`81a752b`), before the final gate.
 
--   `crates/layout/src/incremental.rs`: both sides changed the region pass's key
-    (`key.fields = previous.fields.clone()` here; `key.fields = fields.clone();
-    key.resolved = resolve_fields(doc, snapshot)` there). Main's two lines are
-    the ones to keep; this branch's `collect` argument sits beside them.
--   `crates/format/SPEC.md`: the required-bit sentence ("bits 19 and 22" there,
-    "bits 17, 19, 22 and 23" with main's reserved-root table) wants main's text
-    with this branch's bit 17 kept.
--   Auto-merged: `crates/edit/src/paste.rs` (main's no-blocks paste fix against
-    this branch's envelope hooks, which also touch the empty-fragment path),
-    `crates/doc/src/flow.rs`, `docs/CODEMAP.md`. The empty-fragment path is the
-    one place worth reading after the merge: with an envelope it must still
-    activate the stories and write `first`.
+*What main brought:* `PassKey::resolved` in the region-pass key (what the fields
+of the flowed blocks resolve to, and the `page-of` targets that failed), a paste
+fix (a full paste into a document with no blocks keeps list definitions), a
+`flow.rs` visibility change, the fuzz foundations harness and its tests.
+
+*Conflicts, both small:*
+
+-   `crates/layout/src/incremental.rs`: main's `allocate(fields)` is this branch's
+    `allocate(previous, collect)`. The key keeps `previous.fields` and takes main's
+    `key.resolved = resolve_fields(doc, snapshot)` line.
+-   `crates/format/SPEC.md`: main's sentence about the required bits an older
+    reader doesn't know, without bit 17, which is `REQUIRED_SECTIONS` and known
+    here; main's reserved-root table kept.
+-   `crates/edit/src/paste.rs` auto-merges: main's `write_semantics` call in the
+    empty-fragment path sits before this branch's story activation and envelope
+    records. A complete envelope pasted into an empty document still activates
+    its stories and writes `first` (the paste tests pass through that path).
+
+*Does the S7 running cache compose with `PassKey::resolved`?* Yes, and the
+region-pass key needs it for running fields. `resolve_fields` enumerates the
+running instances' blocks as well as the body's (`field_blocks`, added with S8a),
+so a running `page-of` is in `resolved`. The running memo's own check
+(`still_valid`: label, guessed page, and every field it read against the plan)
+and the flow's read-set keys (`PlanRead::Field`) read the plan that pass produces,
+so they are right when the pass is. The test is
+`running/incremental_tests.rs::a_running_page_of_is_resolved_again_when_its_target_or_the_target_moves`:
+a header whose `page-of` names body text, in one persistent session, compared
+with a full layout after each of: retarget to the second page, retarget to the
+third, the target's page break removed (the target moves back a page), the break
+restored, the target deleted (`?`), the field removed. **With the `resolved` line
+removed the first retarget stays stale; with it, all pass.**
+
+*Byte identity, rerun after the merge:* no golden file differs from main's
+(`git diff --diff-filter=MD main HEAD -- '*.snap' '*.hex' ...` is empty; the only
+snapshot additions are the eight sections goldens from parts 1 and 2), and the
+full gate below runs every snapshot test with `INSTA_UPDATE` unset to record.
+Native equals WASM (the parity step).
 
 ## 12. Verification
+
+*After the merge of main (`81a752b`)* the full gate ran again on that commit: every step `rc=0`, 1,610 passed, 0 failed, 12 ignored (`G:/tmp/b3c-logs/gate-full-3.log`). The record of the earlier run follows.
 
 The gate is `G:/tmp/gate-b3.sh` (a copy of `gate-integrate.sh` pointed at this
 worktree, with the sections native/WASM parity steps of `tools/check-sections.sh`;
