@@ -828,8 +828,11 @@ so ask again after a relayout. `hit_placed({ page, x, y, mode? })` returns
 footer wins over the body inside its rectangle, and a background answers only
 for `mode: "background"` where nothing above it does. `caret_in({ instance,
 position })` returns `{ page, rect }`, and `selection_rects_in({ instance,
-selection })` the rectangles; if a relayout moved the story off `instance`, the
-nearest page that still shows it in that slot answers. `caret_rect`, `hit_test`
+selection })` the rectangles; if a relayout moved the story off `instance`, or
+removed its page, the nearest page that still shows it in that slot answers
+(`instance.page` is only context, so a page past the end of the layout is not
+refused; its slot and the position still are, and `hit_placed` still asks about
+a page that exists). `caret_rect`, `hit_test`
 and `selection_rects` are unchanged and body-only. Text in a story is edited with
 the ordinary commands on its block IDs; typing into an inherited header edits the
 story every section sharing it shows, and an app that wants an independent one

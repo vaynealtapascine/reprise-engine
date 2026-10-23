@@ -542,3 +542,161 @@ fn the_wire_forms_are_stable_and_strict() {
         );
     }
 }
+
+/// B3 finding 7: a saved running instance is navigation context. Its page may
+/// be past the end of a layout that has lost pages since, and the nearest page
+/// that still shows the story answers, for the caret and the selection alike.
+#[test]
+fn a_saved_instance_on_a_page_since_removed_still_navigates() {
+    let (mut s, _, story) = built();
+    layout(&mut s);
+    let saved = s
+        .region_instances(&Payload::new(story.clone()))
+        .unwrap()
+        .data
+        .pop()
+        .unwrap();
+    assert!(saved.page > 0);
+    let state = s.state().unwrap().data;
+    let head = state.stories[0].blocks[0].id.clone();
+    let breaks = state
+        .blocks
+        .iter()
+        .filter(|b| b.starts.is_some())
+        .map(|b| Command::RemoveBreak {
+            block: b.id.clone(),
+        })
+        .collect();
+    tx(&mut s, breaks);
+    let pages = layout(&mut s).pages.len() as u32;
+    assert_eq!(pages, 1);
+    assert!(saved.page >= pages, "the saved page is gone");
+    let at = |offset| Caret {
+        node: head.clone(),
+        offset,
+        affinity: Affinity::Downstream,
+    };
+    // The caret: drawn on the page that remains.
+    let rect = s
+        .caret_in(&Payload::new(CaretIn {
+            instance: saved.clone(),
+            position: at(3),
+        }))
+        .unwrap()
+        .data;
+    assert_eq!(rect.page, 0);
+    // The selection too.
+    let rects = s
+        .selection_rects_in(&Payload::new(SelectionIn {
+            instance: saved.clone(),
+            selection: Selection {
+                anchor: at(0),
+                focus: at(7),
+            },
+        }))
+        .unwrap()
+        .data;
+    assert!(
+        !rects.is_empty() && rects.iter().all(|r| r.page == 0),
+        "{rects:?}"
+    );
+    // However far past the end it was: a page index is only context.
+    let far = RegionInstance {
+        page: u32::MAX,
+        slot: "header".into(),
+    };
+    assert_eq!(
+        s.caret_in(&Payload::new(CaretIn {
+            instance: far,
+            position: at(0),
+        }))
+        .unwrap()
+        .data
+        .page,
+        0
+    );
+    // What is still checked: the slot, the position, and a hit on a page that
+    // is not there now.
+    for slot in ["margin-note", ""] {
+        assert_eq!(
+            s.caret_in(&Payload::new(CaretIn {
+                instance: RegionInstance {
+                    page: saved.page,
+                    slot: slot.into()
+                },
+                position: at(0),
+            }))
+            .unwrap_err()
+            .code(),
+            "bindings.invalid",
+            "slot {slot:?}"
+        );
+    }
+    assert!(
+        s.caret_in(&Payload::new(CaretIn {
+            instance: saved.clone(),
+            position: at(9999),
+        }))
+        .is_err()
+    );
+    assert_eq!(
+        s.hit_placed(&Payload::new(HitPlaced {
+            page: saved.page,
+            x: 0,
+            y: 0,
+            mode: None,
+        }))
+        .unwrap_err()
+        .code(),
+        "bindings.invalid"
+    );
+}
+
+#[test]
+fn a_saved_instance_of_a_story_no_page_shows_any_more_has_no_geometry() {
+    let (mut s, _, story) = built();
+    layout(&mut s);
+    let saved = s
+        .region_instances(&Payload::new(story))
+        .unwrap()
+        .data
+        .pop()
+        .unwrap();
+    let state = s.state().unwrap().data;
+    let head = state.stories[0].blocks[0].id.clone();
+    // Unbind the header, so no page shows the story.
+    tx(
+        &mut s,
+        vec![Command::SetRegion {
+            section: "first".into(),
+            slot: "header".into(),
+            variant: "default".into(),
+            binding: RegionBinding::None,
+        }],
+    );
+    layout(&mut s);
+    let position = Caret {
+        node: head,
+        offset: 0,
+        affinity: Affinity::Downstream,
+    };
+    assert!(
+        s.caret_in(&Payload::new(CaretIn {
+            instance: saved.clone(),
+            position: position.clone(),
+        }))
+        .is_err()
+    );
+    assert!(
+        s.selection_rects_in(&Payload::new(SelectionIn {
+            instance: saved,
+            selection: Selection {
+                anchor: position.clone(),
+                focus: position,
+            },
+        }))
+        .unwrap()
+        .data
+        .is_empty()
+    );
+}

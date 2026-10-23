@@ -53,8 +53,15 @@ impl DocumentSession {
         Ok(c)
     }
 
+    /// A saved running instance as navigation context. Its page is where the
+    /// story was drawn when the caller saved it, so it may be past the end of a
+    /// layout that has lost pages since: the kernel then answers from the
+    /// nearest page that still shows the story. Only its representation and
+    /// slot are checked here. Hit queries ask about a page that exists now, and
+    /// check it with `page_index`.
     fn instance(&self, i: &RegionInstance) -> Result<reprise_edit::RegionInstance> {
-        let page = self.page_index(i.page)?;
+        let page =
+            usize::try_from(i.page).map_err(|_| Error::Invalid(format!("no page {}", i.page)))?;
         if reprise_layout::SlotId::parse(&i.slot).is_none() {
             return Err(Error::Invalid(format!("no region slot {}", i.slot)));
         }
@@ -288,7 +295,8 @@ impl DocumentSession {
     }
 
     /// Where a position is drawn in a running region. If a relayout moved the
-    /// story off `instance`, the nearest page that still shows it answers.
+    /// story off `instance`, or removed its page, the nearest page that still
+    /// shows it answers.
     pub fn caret_in(&self, request: &Payload<CaretIn>) -> Result<Payload<PageRect>> {
         let r = validate(request)?;
         let instance = self.instance(&r.instance)?;
@@ -303,8 +311,9 @@ impl DocumentSession {
         }))
     }
 
-    /// The page rectangles covering a selection in a running region; empty when
-    /// no page shows the story.
+    /// The page rectangles covering a selection in a running region, resolved
+    /// like [`DocumentSession::caret_in`] (so `instance.page` may be a page the
+    /// layout no longer has); empty when no page shows the story.
     pub fn selection_rects_in(
         &self,
         request: &Payload<SelectionIn>,
