@@ -59,7 +59,7 @@ pub(crate) struct SectionsPaste {
 
 /// A refusal of the envelope: a limit is a copy limit, anything else a
 /// malformed fragment.
-fn refuse(error: FragmentError) -> EditError {
+pub(crate) fn refuse(error: FragmentError) -> EditError {
     EditError {
         command: None,
         reason: match error {
@@ -106,7 +106,10 @@ pub(crate) fn split<'f>(
         });
     };
     let envelope = Envelope::parse(raw).map_err(refuse)?;
-    envelope.validate(fragment).map_err(refuse)?;
+    // The whole envelope counts, every story and every limit, before this
+    // paste decides which stories it uses, discards them for a story
+    // destination, or refers to them in place.
+    envelope.validate_in(fragment).map_err(refuse)?;
     let mut notes = Vec::new();
     // A story has content, not a place: nothing of the envelope applies in one.
     if at.is_some_and(|(node, _)| matches!(doc.domain_of(node), Some(Domain::Story(_)))) {
@@ -167,9 +170,8 @@ pub(crate) fn split<'f>(
         })
         .collect();
     let keep: Vec<bool> = stories.iter().map(|s| s.plan == Plan::Copy).collect();
+    // What is left of a validated envelope is within its limits too.
     let flat = fragment.flattened_for(&envelope, &keep);
-    // The stories' blocks count against the fragment's own limits.
-    flat.validate().map_err(refuse)?;
     let roots = envelope
         .story_roots()
         .into_iter()

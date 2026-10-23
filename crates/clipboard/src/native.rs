@@ -133,8 +133,7 @@ impl NativeFragment {
         // A sections envelope is read and checked here as well as at paste, so
         // a malformed or over-limit one is refused when the bytes are decoded.
         if let Some(envelope) = self.fragment.envelope()? {
-            envelope.validate(&self.fragment)?;
-            self.fragment.flattened(&envelope).validate()?;
+            envelope.validate_in(&self.fragment)?;
         }
         if self.resources.len() > 1024 {
             return Err(ClipboardError::Limit("resources"));

@@ -225,6 +225,50 @@ impl Envelope {
         Ok(())
     }
 
+    /// The whole envelope against the fragment it travels in, before anything
+    /// is planned or staged: the records ([`Envelope::validate`]), that every
+    /// block, parent and range endpoint stays in the body or the one story
+    /// that carries it, and the aggregate limits of the body and every story
+    /// together, whether or not a paste will use each of them.
+    pub fn validate_in(&self, fragment: &Fragment) -> Result<(), FragmentError> {
+        self.validate(fragment)?;
+        self.validate_ownership(fragment)?;
+        fragment.flattened(self).validate()
+    }
+
+    /// Each component, the body and every story, is a tree of its own: a
+    /// block's parent is an earlier block of the same component, IDs are
+    /// unique across all of them, and a range, or the end of one, sits in the
+    /// component that carries it. [`Fragment::flattened`] concatenates the
+    /// components, and the flat validator accepts any earlier parent in that
+    /// list, so a story block could otherwise be pasted into the body or into
+    /// another story. A relation hangs on a block of the body: copies drop the
+    /// ones a story owns.
+    fn validate_ownership(&self, fragment: &Fragment) -> Result<(), FragmentError> {
+        let mut seen = BTreeSet::new();
+        let body = component_ids(&fragment.blocks, &mut seen)?;
+        let in_component = |range: &FragmentRange, own: &BTreeSet<NodeId>| {
+            own.contains(&range.node) && range.end.as_ref().is_none_or(|e| own.contains(&e.node))
+        };
+        if !fragment.ranges.iter().all(|r| in_component(r, &body)) {
+            return Err(invalid("a range of the body ends in a story"));
+        }
+        if fragment
+            .relations
+            .iter()
+            .any(|r| r.relation.owner.is_some_and(|o| !body.contains(&o)))
+        {
+            return Err(invalid("a relation is owned by a block outside the body"));
+        }
+        for story in &self.stories {
+            let own = component_ids(&story.blocks, &mut seen)?;
+            if !story.ranges.iter().all(|r| in_component(r, &own)) {
+                return Err(invalid("a range of a story ends outside it"));
+            }
+        }
+        Ok(())
+    }
+
     /// The story labels carried by roots of the table, in order.
     pub fn story_roots(&self) -> BTreeMap<NodeId, usize> {
         let mut out = BTreeMap::new();
@@ -235,6 +279,27 @@ impl Envelope {
         }
         out
     }
+}
+
+/// The IDs of one component's blocks, if each parent is an earlier block of
+/// that component and none repeats an ID already `seen` in any component.
+fn component_ids(
+    blocks: &[FragmentBlock],
+    seen: &mut BTreeSet<NodeId>,
+) -> Result<BTreeSet<NodeId>, FragmentError> {
+    let mut own = BTreeSet::new();
+    for block in blocks {
+        if block.parent.is_some_and(|p| !own.contains(&p)) {
+            return Err(invalid(
+                "a block's parent is not an earlier block of its own body or story",
+            ));
+        }
+        if !seen.insert(block.id) {
+            return Err(invalid("duplicate node ID"));
+        }
+        own.insert(block.id);
+    }
+    Ok(own)
 }
 
 fn check_keys(
@@ -475,9 +540,7 @@ impl Document {
         fragment.sections = Some(envelope.encode()?);
         // The story blocks count against the fragment's own block, range and
         // size limits as if they were pasted blocks: they are.
-        envelope.validate(fragment)?;
-        fragment.flattened(&envelope).validate()?;
-        Ok(())
+        envelope.validate_in(fragment)
     }
 
     fn boundary_of(
