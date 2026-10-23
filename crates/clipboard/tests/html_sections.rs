@@ -363,8 +363,9 @@ fn losses_are_reported_not_silent() {
         .iter()
         .filter(|n| n.code == "export.sections")
         .collect();
+    // An orphan is written, not lost, so there is nothing to report of it.
     assert!(
-        notes
+        !notes
             .iter()
             .any(|n| n.message.contains("bound to no section")),
         "{notes:?}"
@@ -377,10 +378,27 @@ fn losses_are_reported_not_silent() {
         "{notes:?}"
     );
     assert!(notes.iter().any(|n| n.message.contains("no longer exists")));
-    // The orphan is not in the HTML; the dangling binding is, as written.
-    assert!(!out.html.contains("Bound to nothing"));
+    // The orphan is in the HTML, in an inert template after the last section;
+    // the dangling binding is, as written.
+    let tail = out.html.rsplit("</section>").next().unwrap();
+    assert!(
+        tail.starts_with("<template data-reprise-story=\"s1\">")
+            && tail.contains("Bound to nothing")
+            && tail.ends_with("</template></body></html>"),
+        "{tail}"
+    );
     assert!(out.html.contains("999@9"));
     let (back, _) = round_trip(&doc);
+    let texts: Vec<_> = back
+        .stories()
+        .into_iter()
+        .map(|s| story_texts(&back, s))
+        .collect();
+    assert_eq!(
+        texts,
+        [["Used"], ["Bound to nothing"]],
+        "both stories came back"
+    );
     let view = &back.section_table()[1];
     let footer = view
         .bindings

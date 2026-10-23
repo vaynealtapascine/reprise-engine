@@ -5,6 +5,8 @@
 //! story is written once per document under a document-local label: as visible
 //! `<header>` or `<footer>` content in the first section that binds it as the
 //! default variant of that slot, else in a `<template data-reprise-story>`. A
+//! story no section binds is an orphan, and is written the same inert way
+//! after the last section, so authored text is never left out. A
 //! binding keeps its three states, absent (same as previous), `""` (none) and
 //! the label. A page or column break is `break-before: page | column` on its
 //! block; the geometry mode record is `data-reprise-geometry` on the root
@@ -65,8 +67,9 @@ pub(crate) struct Plan {
     pub geometry: Option<SectionProperties>,
     /// Where each section starts among the body's top-level blocks.
     starts: Vec<usize>,
-    /// Stories no section binds, which HTML does not carry.
-    pub unbound: usize,
+    /// The stories no section binds, each in an inert template after the last
+    /// section. They get the labels after the bound ones.
+    pub orphans: Vec<Home>,
     /// Sections whose columns are not equal, which CSS cannot say.
     pub unequal_columns: bool,
     /// Bindings to something that is not a live story, kept as written.
@@ -149,8 +152,19 @@ pub(crate) fn plan(doc: &Document) -> Option<Plan> {
                 .unwrap_or(0)
         })
         .collect();
+    let orphans = doc
+        .stories()
+        .into_iter()
+        .filter(|story| !labels.contains_key(story))
+        .enumerate()
+        .map(|(i, story)| Home {
+            label: format!("s{}", order.len().saturating_add(i)),
+            story,
+            shown: Shown::Template,
+        })
+        .collect();
     Some(Plan {
-        unbound: live.len().saturating_sub(order.len()),
+        orphans,
         views,
         labels,
         homes,

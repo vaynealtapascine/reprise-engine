@@ -52,7 +52,9 @@ fn fragment(
     mut notes: Vec<Note>,
     links: Vec<(NodeId, Range<usize>, AnnotationData)>,
 ) -> Result<Import, ClipboardError> {
-    let mut fragment = doc.copy_all_fragment("clipboard-import", &SchemaRegistry::builtin())?;
+    // Every story the markup carries is authored content, bound or not.
+    let mut fragment =
+        doc.copy_imported_fragment("clipboard-import", &SchemaRegistry::builtin())?;
     // Links are ranges of their own. They are added to the fragment rather
     // than the import document, whose annotation index would be rebuilt for
     // every link.

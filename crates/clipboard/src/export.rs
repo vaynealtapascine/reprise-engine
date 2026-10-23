@@ -743,22 +743,7 @@ fn html_sections(
     for (i, bucket) in buckets.iter().enumerate() {
         append(out, &plan.open(i))?;
         for home in plan.homes(i) {
-            append(
-                out,
-                &format!(
-                    "<{} {}=\"{}\">",
-                    home.shown.tag(),
-                    crate::sections_html::STORY_ATTR,
-                    escape(&home.label)
-                ),
-            )?;
-            let mut lists = crate::semantic_html::ListWriter::default();
-            for node in doc.top(reprise_doc::Domain::Story(home.story)) {
-                list_boundary(doc, node, &mut lists, out)?;
-                html_node(doc, node, layout, links, out, 0, None, "")?;
-            }
-            lists.close(out)?;
-            append(out, &format!("</{}>", home.shown.tag()))?;
+            html_story(doc, home, layout, links, out)?;
         }
         let mut lists = crate::semantic_html::ListWriter::default();
         for &node in bucket {
@@ -777,7 +762,38 @@ fn html_sections(
         lists.close(out)?;
         append(out, "</section>")?;
     }
+    // Stories no section binds are authored content too: written once, inert,
+    // after the last section.
+    for orphan in &plan.orphans {
+        html_story(doc, orphan, layout, links, out)?;
+    }
     Ok(())
+}
+
+/// One story under its label, in the element its `Home` says.
+fn html_story(
+    doc: &Document,
+    home: &crate::sections_html::Home,
+    layout: Option<&LayoutSnapshot>,
+    links: &crate::links::LinkIndex<'_>,
+    out: &mut String,
+) -> Result<(), ClipboardError> {
+    append(
+        out,
+        &format!(
+            "<{} {}=\"{}\">",
+            home.shown.tag(),
+            crate::sections_html::STORY_ATTR,
+            escape(&home.label)
+        ),
+    )?;
+    let mut lists = crate::semantic_html::ListWriter::default();
+    for node in doc.top(reprise_doc::Domain::Story(home.story)) {
+        list_boundary(doc, node, &mut lists, out)?;
+        html_node(doc, node, layout, links, out, 0, None, "")?;
+    }
+    lists.close(out)?;
+    append(out, &format!("</{}>", home.shown.tag()))
 }
 
 /// What HTML leaves out of a document's sections, as `Info` notes (the format
@@ -795,17 +811,6 @@ fn html_section_notes(
         notes.push(reprise_diag::Note::info(
             SECTIONS,
             "no layout was given, so page fields in headers, footers and the body show ?",
-        ));
-    }
-    if plan.unbound > 0 {
-        notes.push(reprise_diag::Note::info(
-            SECTIONS,
-            format!(
-                "{} stor{} bound to no section {} not in HTML",
-                plan.unbound,
-                if plan.unbound == 1 { "y" } else { "ies" },
-                if plan.unbound == 1 { "is" } else { "are" }
-            ),
         ));
     }
     if plan.unequal_columns {

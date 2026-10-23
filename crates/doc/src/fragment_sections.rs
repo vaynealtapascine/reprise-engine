@@ -407,6 +407,7 @@ impl Document {
         fragment: &mut Fragment,
         schemas: &SchemaRegistry,
         scope: CopyScope,
+        orphans: bool,
         selection: &[CopyBlock],
     ) -> Result<(), FragmentError> {
         let roots: Vec<NodeId> = fragment
@@ -501,7 +502,7 @@ impl Document {
         } else {
             None
         };
-        if whole && scope == CopyScope::Document {
+        if whole && orphans {
             // The orphans too, which stay orphans.
             for story in self.stories() {
                 labels.of(story);

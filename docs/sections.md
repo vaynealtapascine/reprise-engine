@@ -1271,7 +1271,8 @@ Copying an orphan never makes it bound.
 -   Each story is emitted **once per document**, with a document-local label:
     -   as visible `<header>` or `<footer>` content in the first section that
         binds it as a default variant;
-    -   otherwise as `<template data-reprise-story=label>`.
+    -   otherwise, an orphan included, as an inert
+        `<template data-reprise-story=label>`.
 -   Bindings use the labels and keep the three states: absent (Inherit),
     `""` (None), and the label.
 -   Background, first and even variants are bindings like any other, so
@@ -1316,7 +1317,9 @@ Copying an orphan never makes it bound.
     `s0`, `s1`, ... in the order the sections first refer to the stories. A
     story is written in the first section that binds it: as `<header>` or
     `<footer data-reprise-story>` when that binding is the slot's default
-    variant, else in a `<template data-reprise-story>`. A section after the
+    variant, else in a `<template data-reprise-story>`. A story no section
+    binds (an orphan) is written the same inert way, after the last section,
+    under the next labels in the document's story order. A section after the
     first with a `start` other than `continuous` gets `break-before: page`
     for viewers, and `columns` and `column-gap` come from its own
     `columns.count` and `columns.gap`. A page or column break is
@@ -1329,13 +1332,16 @@ Copying an orphan never makes it bound.
     the first block after the element), their bindings by label, `first`,
     stories (a story element's blocks go into a new story; links in it are
     annotations of the story), `break-before` and the geometry attribute. A
+    story element nothing binds stays an unbound story: the import copy keeps
+    every story the markup holds, and a paste into an empty document takes
+    them all, as a native paste does. A
     section with no block after it, a binding to a label the HTML lacks, a
     table in a story and a story inside a story are read as far as they can
     be and reported. Markup without the attributes is read as before.
 -   **Losses**, as `export.sections` notes (the loss report's ten features
     are fixed): Info for what the format cannot hold, Warning where the output
     differs. HTML: pages, fillers, page labels and per-page values are not
-    there; stories bound to no section are not there; unequal column widths
+    there; unequal column widths
     are written as equal CSS columns (Warning, the widths are in the stored
     form); a dangling binding is kept as written. Plain text: the body only,
     with a note for the stories and one for breaks, columns, page numbers and

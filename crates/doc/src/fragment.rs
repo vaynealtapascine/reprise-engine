@@ -354,8 +354,27 @@ impl Document {
         schemas: &SchemaRegistry,
         scope: CopyScope,
     ) -> Result<Fragment, FragmentError> {
+        self.copy_fragment_with(
+            source,
+            selection,
+            schemas,
+            scope,
+            scope == CopyScope::Document,
+        )
+    }
+
+    /// As [`Document::copy_fragment_scoped`], with `orphans` saying whether a
+    /// complete copy also carries the stories no binding names.
+    fn copy_fragment_with(
+        &self,
+        source: &str,
+        selection: &[CopyBlock],
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
+        orphans: bool,
+    ) -> Result<Fragment, FragmentError> {
         let mut fragment = self.copy_blocks(source, selection, schemas, scope)?;
-        self.attach_sections(source, &mut fragment, schemas, scope, selection)?;
+        self.attach_sections(source, &mut fragment, schemas, scope, orphans, selection)?;
         fragment.validate()?;
         Ok(fragment)
     }
@@ -718,7 +737,18 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
     ) -> Result<Fragment, FragmentError> {
-        self.copy_all_scoped(source, schemas, CopyScope::Clipboard)
+        self.copy_all_scoped(source, schemas, CopyScope::Clipboard, false)
+    }
+
+    /// [`Document::copy_all_fragment`] for a document that was just read from
+    /// another format (an import), whose stories are all authored content:
+    /// the ones no binding names travel too, and stay unbound.
+    pub fn copy_imported_fragment(
+        &self,
+        source: &str,
+        schemas: &SchemaRegistry,
+    ) -> Result<Fragment, FragmentError> {
+        self.copy_all_scoped(source, schemas, CopyScope::Clipboard, true)
     }
 
     /// The whole document as a fragment to rebuild it elsewhere (a duplicate):
@@ -728,7 +758,7 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
     ) -> Result<Fragment, FragmentError> {
-        self.copy_all_scoped(source, schemas, CopyScope::Document)
+        self.copy_all_scoped(source, schemas, CopyScope::Document, true)
     }
 
     fn copy_all_scoped(
@@ -736,13 +766,14 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
         scope: CopyScope,
+        orphans: bool,
     ) -> Result<Fragment, FragmentError> {
         let selection: Vec<_> = self
             .top(crate::Domain::Body)
             .into_iter()
             .map(|node| CopyBlock { node, bytes: None })
             .collect();
-        let mut fragment = self.copy_fragment_scoped(source, &selection, schemas, scope)?;
+        let mut fragment = self.copy_fragment_with(source, &selection, schemas, scope, orphans)?;
         // A full-document copy also carries unreferenced authored definitions.
         // Tombstones belong to history and are intentionally not replayed.
         for (id, read) in self.lists() {
