@@ -147,6 +147,11 @@ struct Entry {
 #[derive(Default)]
 struct Memo {
     entries: BTreeMap<NodeId, Vec<Entry>>,
+    /// Compositions a region allocation needs and asked the look-ahead for.
+    /// The allocation needs every page's at once, which can be more than
+    /// [`MAX_ENTRIES`], so these are kept, uncapped, until the allocation that
+    /// needed them has consumed them ([`Shared::release_held`]).
+    held: BTreeMap<NodeId, Vec<Entry>>,
     /// Valid within one job: the document cannot change under it.
     digests: BTreeMap<NodeId, Rc<Digest>>,
     classes: Option<Rc<Classes>>,
@@ -216,7 +221,7 @@ impl Classes {
 }
 
 /// A [`Request`] that owns its data: what a look-ahead is asked to make.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Want {
     pub story: NodeId,
     pub slot: SlotId,
@@ -244,7 +249,7 @@ impl Request<'_> {
 }
 
 /// What a memo-only lookup is missing.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Need {
     /// The story's blocks have not been read yet.
     Digest(NodeId),
@@ -499,6 +504,7 @@ impl Shared {
     pub fn begin_job(&self) {
         let mut memo = self.memo.borrow_mut();
         memo.digests.clear();
+        memo.held.clear();
         memo.classes = None;
         memo.compares = 0;
         memo.compositions = 0;
@@ -562,33 +568,16 @@ impl Shared {
     fn find(&self, key: &Key, request: &Request<'_>) -> Option<Rc<Composed>> {
         let mut memo = self.memo.borrow_mut();
         let Memo {
-            entries, compares, ..
+            entries,
+            held,
+            compares,
+            ..
         } = &mut *memo;
-        let list = entries.get_mut(&request.story)?;
-        let mut found = None;
-        let mut stale = Vec::new();
-        for (i, entry) in list.iter_mut().enumerate() {
-            if !entry.key.same_request(key) {
-                continue;
-            }
-            if !Rc::ptr_eq(&entry.key.digest.0, &key.digest.0) {
-                *compares = compares.saturating_add(1);
-                if entry.key.digest.0.same_as(&key.digest.0) {
-                    entry.key.digest = key.digest.clone();
-                } else {
-                    stale.push(i);
-                    continue;
-                }
-            }
-            if still_valid(entry, request) {
-                found = Some(entry.composed.clone());
-                break;
-            }
-        }
-        for i in stale.into_iter().rev() {
-            list.remove(i);
-        }
-        found
+        [entries, held].into_iter().find_map(|lists| {
+            lists
+                .get_mut(&request.story)
+                .and_then(|list| scan(list, key, request, compares))
+        })
     }
 
     fn store(&self, key: Key, story: NodeId, page: usize, composed: Rc<Composed>) {
@@ -631,6 +620,47 @@ impl Shared {
             run.want.page,
             Rc::new(composed),
         );
+    }
+
+    /// Keeps a composition a region allocation asked for, whole, past the
+    /// memo's cap, until [`Shared::release_held`].
+    pub fn hold(&self, run: &StoryRun, composed: Composed) {
+        let mut memo = self.memo.borrow_mut();
+        memo.compositions += 1;
+        memo.held.entry(run.want.story).or_default().push(Entry {
+            key: run.key.clone(),
+            page: run.want.page,
+            composed: Rc::new(composed),
+        });
+    }
+
+    /// The allocation consumed what it asked for: the held compositions go to
+    /// the memo, oldest first, as if they had been stored one by one, so the
+    /// memo keeps the most recent [`MAX_ENTRIES`] of a story as it always did.
+    pub fn release_held(&self) {
+        let mut memo = self.memo.borrow_mut();
+        let held = std::mem::take(&mut memo.held);
+        for (story, list) in held {
+            let entries = memo.entries.entry(story).or_default();
+            for entry in list {
+                if entries.len() >= MAX_ENTRIES {
+                    entries.remove(0);
+                }
+                entries.push(entry);
+            }
+        }
+    }
+
+    /// Compositions held for a region allocation now.
+    #[cfg(test)]
+    pub fn held_count(&self) -> usize {
+        self.memo.borrow().held.values().map(Vec::len).sum()
+    }
+
+    /// Forgets what is held, as a memo cleared under a job would.
+    #[cfg(test)]
+    pub fn lose_held(&self) {
+        self.memo.borrow_mut().held.clear();
     }
 
     /// What preparing the stories' paragraphs did since the last call.
@@ -697,6 +727,41 @@ impl Shared {
             }
         }
     }
+}
+
+/// The entry of `list` that serves `request`, if any. An entry of an earlier
+/// job whose digest has the same contents as this job's takes this job's in
+/// place; one whose digest differs can not serve this job and is dropped.
+fn scan(
+    list: &mut Vec<Entry>,
+    key: &Key,
+    request: &Request<'_>,
+    compares: &mut usize,
+) -> Option<Rc<Composed>> {
+    let mut found = None;
+    let mut stale = Vec::new();
+    for (i, entry) in list.iter_mut().enumerate() {
+        if !entry.key.same_request(key) {
+            continue;
+        }
+        if !Rc::ptr_eq(&entry.key.digest.0, &key.digest.0) {
+            *compares = compares.saturating_add(1);
+            if entry.key.digest.0.same_as(&key.digest.0) {
+                entry.key.digest = key.digest.clone();
+            } else {
+                stale.push(i);
+                continue;
+            }
+        }
+        if still_valid(entry, request) {
+            found = Some(entry.composed.clone());
+            break;
+        }
+    }
+    for i in stale.into_iter().rev() {
+        list.remove(i);
+    }
+    found
 }
 
 impl Key {

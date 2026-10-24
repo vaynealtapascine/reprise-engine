@@ -35,6 +35,9 @@ pub(crate) struct Ahead {
     need: Need,
     digest: Option<DigestBuild>,
     run: Option<Box<StoryRun>>,
+    /// What it makes is kept for the region allocation that asked for it,
+    /// rather than stored in the memo, which forgets all but the last 64.
+    hold: bool,
 }
 
 /// What asking for a page's regions came to.
@@ -51,7 +54,22 @@ impl Ahead {
             need,
             digest: None,
             run: None,
+            hold: false,
         }
+    }
+
+    /// A need of the region allocation, which wants all its compositions at
+    /// once: what is made is held until the allocation has consumed it.
+    pub fn held(need: Need) -> Self {
+        Self {
+            hold: true,
+            ..Self::new(need)
+        }
+    }
+
+    /// The need this look-ahead is making.
+    pub fn need(&self) -> &Need {
+        &self.need
     }
 
     /// One unit. Returns the units charged and whether the need is met.
@@ -102,7 +120,11 @@ impl Ahead {
                     });
                 }
                 if let Some(composed) = composed {
-                    shared.install(run, composed);
+                    if self.hold {
+                        shared.hold(run, composed);
+                    } else {
+                        shared.install(run, composed);
+                    }
                     return (units, true);
                 }
                 (units, false)

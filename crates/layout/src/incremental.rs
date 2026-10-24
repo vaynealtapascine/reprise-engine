@@ -10,7 +10,7 @@ use reprise_doc::{
 };
 use reprise_geom::{PageSpace, Rect};
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -1160,10 +1160,6 @@ impl Evaluation {
     }
 }
 
-/// Times a region allocation is run for nothing but to find the regions of
-/// the pages it makes, before it composes them itself.
-pub(crate) const MAX_REGION_ROUNDS: usize = 64;
-
 /// Short paragraphs prepared together, speculatively, at a block start (one
 /// current block plus up to this many minus one following blocks).
 pub const PREFETCH_BLOCKS: usize = 8;
@@ -1365,7 +1361,15 @@ pub struct LayoutJob<'job, 'engine> {
     terminal: Rc<Cell<Option<JobError>>>,
     /// The regions of a page the allocation made, being made (sections §11).
     region_ahead: Option<Box<crate::flow::ahead::Ahead>>,
-    region_rounds: usize,
+    /// What the last region allocation found missing, not made yet: all of it,
+    /// in the order the allocation asked.
+    region_needs: VecDeque<crate::running::compose::Need>,
+    /// What this feedback pass has made. A need that comes back after being
+    /// made means the memo lost it under the job.
+    region_made: HashSet<crate::running::compose::Need>,
+    /// The allocation composes what is missing itself: the last resort when
+    /// a need keeps coming back (counted in `running_inline`).
+    region_inline: bool,
 }
 impl<'job, 'engine> LayoutJob<'job, 'engine> {
     fn new(
@@ -1436,7 +1440,9 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             cancelled: false,
             terminal: Rc::new(Cell::new(None)),
             region_ahead: None,
-            region_rounds: 0,
+            region_needs: VecDeque::new(),
+            region_made: HashSet::new(),
+            region_inline: false,
         }
     }
     pub fn revision(&self) -> &Revision {
@@ -1552,9 +1558,11 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                     }
                 }
                 Pass::RegionFeedback => {
+                    // The allocation composes nothing. It asks, in one pass, for
+                    // every composition the memo lacks (the regions of every page
+                    // it makes); each is made here a unit at a time and held, past
+                    // the cap of the memo, until an allocation finds all it needs.
                     if let Some(mut ahead) = self.region_ahead.take() {
-                        // The regions of a page the allocation made: a unit
-                        // at a time, then the allocation is run again.
                         let running = self.session.evaluation.running();
                         let (units, done) = ahead.step(
                             &running,
@@ -1565,15 +1573,19 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             budget.saturating_sub(used),
                         );
                         charged = units.max(1);
-                        if !done {
+                        if done {
+                            self.region_made.insert(ahead.need().clone());
+                        } else {
                             self.region_ahead = Some(ahead);
                         }
                         used = used.saturating_add(charged);
-                        {
-                            let mut cache = self.session.evaluation.cache.borrow_mut();
-                            cache.counters.units = cache.counters.units.saturating_add(charged);
-                            cache.work.units = cache.work.units.saturating_add(charged);
-                        }
+                        self.charge(charged);
+                        continue;
+                    }
+                    if let Some(need) = self.region_needs.pop_front() {
+                        self.region_ahead = Some(Box::new(crate::flow::ahead::Ahead::held(need)));
+                        used = used.saturating_add(charged);
+                        self.charge(charged);
                         continue;
                     }
                     let collected = RefCell::new(Vec::new());
@@ -1584,20 +1596,35 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &self.snapshot,
                         &self.sections,
                         &self.plan,
-                        (self.region_rounds < MAX_REGION_ROUNDS).then_some(&collected),
+                        (!self.region_inline).then_some(&collected),
                     );
-                    if let Some(need) = collected.into_inner().into_iter().next() {
-                        self.region_rounds = self.region_rounds.saturating_add(1);
-                        self.region_ahead = Some(Box::new(crate::flow::ahead::Ahead::new(need)));
-                        used = used.saturating_add(charged);
-                        {
-                            let mut cache = self.session.evaluation.cache.borrow_mut();
-                            cache.counters.units = cache.counters.units.saturating_add(charged);
-                            cache.work.units = cache.work.units.saturating_add(charged);
+                    let mut asked = HashSet::new();
+                    let (mut missing, mut again) = (VecDeque::new(), false);
+                    for need in collected.into_inner() {
+                        if !asked.insert(need.clone()) {
+                            continue;
                         }
+                        if self.region_made.contains(&need) {
+                            again = true;
+                        } else {
+                            missing.push_back(need);
+                        }
+                    }
+                    if !missing.is_empty() || again {
+                        // Something to make, and the allocation is run again once
+                        // it is. Every round makes at least one thing not made
+                        // before, so the rounds end. If all that is asked for was
+                        // made already, the memo lost it under the job (it was
+                        // cleared): the allocation then composes the rest itself.
+                        self.region_inline |= missing.is_empty();
+                        self.region_needs = missing;
+                        used = used.saturating_add(charged);
+                        self.charge(charged);
                         continue;
                     }
-                    self.region_rounds = 0;
+                    self.region_made.clear();
+                    self.region_inline = false;
+                    self.session.evaluation.running().release_held();
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
                     if outcome == crate::regions::Feedback::Continue {
@@ -1717,6 +1744,12 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             viewport_ready: self.viewport_ready(),
             complete: self.pass == Pass::Complete,
         })
+    }
+    /// Counts `units` charged to the job.
+    fn charge(&self, units: usize) {
+        let mut cache = self.session.evaluation.cache.borrow_mut();
+        cache.counters.units = cache.counters.units.saturating_add(units);
+        cache.work.units = cache.work.units.saturating_add(units);
     }
     /// The work the most recent [`step`](Self::step) did, as counters.
     pub fn step_work(&self) -> StepWork {
@@ -1977,7 +2010,15 @@ pub struct LayoutContinuation {
     cancelled: bool,
     terminal: Rc<Cell<Option<JobError>>>,
     region_ahead: Option<Box<crate::flow::ahead::Ahead>>,
-    region_rounds: usize,
+    /// What the last region allocation found missing, not made yet: all of it,
+    /// in the order the allocation asked.
+    region_needs: VecDeque<crate::running::compose::Need>,
+    /// What this feedback pass has made. A need that comes back after being
+    /// made means the memo lost it under the job.
+    region_made: HashSet<crate::running::compose::Need>,
+    /// The allocation composes what is missing itself: the last resort when
+    /// a need keeps coming back (counted in `running_inline`).
+    region_inline: bool,
 }
 impl<'engine> LayoutSession<'engine> {
     pub fn from_cache(engine: &'engine Engine, cache: LayoutCache) -> Self {
@@ -2025,7 +2066,9 @@ impl<'engine> LayoutSession<'engine> {
             cancelled: state.cancelled,
             terminal: state.terminal,
             region_ahead: state.region_ahead,
-            region_rounds: state.region_rounds,
+            region_needs: state.region_needs,
+            region_made: state.region_made,
+            region_inline: state.region_inline,
         })
     }
 }
@@ -2053,7 +2096,9 @@ impl LayoutJob<'_, '_> {
             cancelled: self.cancelled,
             terminal: self.terminal,
             region_ahead: self.region_ahead,
-            region_rounds: self.region_rounds,
+            region_needs: self.region_needs,
+            region_made: self.region_made,
+            region_inline: self.region_inline,
         }
     }
 }

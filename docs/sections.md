@@ -1033,6 +1033,19 @@ makes it, and the unit that makes the page only finds it in the memo.
     flow had to make itself because the look-ahead had not, and is zero in
     every test.
 
+-   **Region feedback.** The region allocation (notes and floats, which can make
+    continuation pages, each with regions of its own) composes nothing. In one
+    pass it asks for every composition and digest the memo lacks. The look-ahead
+    makes them one at a time, a unit each, in the order they were asked, and
+    holds them apart from the memo, whose 64 entries a story would otherwise
+    lose before the allocation had them all (a 100-page note needs a header per
+    page at once). When none is missing the allocation has what it needs; the
+    held compositions then go to the memo. Each round makes at least one thing
+    not made before, so the rounds end; there is no cap. The one exception is a
+    need that comes back after it was made (the memo was cleared under the job):
+    the allocation then composes what it lacks itself, once, counted in
+    `running_inline`.
+
 **Partial publication.** A page is **publishable** only when all its bands are
 committed and its running instances composed. `partial()` cuts before the
 first page that isn't. It drops every frame, rule, band, running instance,

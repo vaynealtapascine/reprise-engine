@@ -5,9 +5,7 @@
 use super::compose::{DIGEST_CHUNK, MAX_ENTRIES};
 use super::field_tests::{P, story_of};
 use super::layout_tests::*;
-use crate::incremental::{
-    JobError, LayoutSession, MAX_REGION_ROUNDS, Pass, StepWork, Viewport, WorkCounters,
-};
+use crate::incremental::{JobError, LayoutSession, Pass, StepWork, Viewport, WorkCounters};
 use crate::{Engine, LayoutSnapshot, PageKind};
 use reprise_doc::sections::BreakKind;
 use reprise_doc::{Document, NodeId};
@@ -563,14 +561,13 @@ fn pages_the_region_allocation_makes_have_their_regions_made_by_the_look_ahead()
     }
 }
 
-// Hostile tests of the synchronous escape paths of the look-ahead. A stepped job
-// makes a page's regions in units of their own, but two paths still compose
-// inline, whole: `Cursor::look` lets a page make a region itself when the
-// look-ahead made it and the memo still does not have it, and region feedback
-// stops collecting missing regions after `MAX_REGION_ROUNDS` and lets the
-// allocation compose them. Both are correct and counted in `running_inline`;
-// these tests make them happen, check the result is still the unbounded one,
-// and pin what is still bounded.
+// Hostile tests of the paths where a stepped job could still compose a region
+// inline, whole. `Cursor::look` lets a page make a region itself when the
+// look-ahead made it and the memo still does not have it (an eviction); that is
+// correct and counted in `running_inline`. Region feedback does not: the
+// allocation asks for every composition it lacks, the look-ahead makes them a
+// unit at a time and holds them for it, and only a need that comes back after
+// being made (the memo was cleared under the job) is composed by the allocation.
 
 /// A note far longer than a page, on a page template with a notes area, under a
 /// header showing its page number: every continuation page the region
@@ -630,31 +627,135 @@ fn endless_note(lines: usize) -> (Engine, Document) {
     (engine, doc)
 }
 
+/// Runs a job on `session` at budget 1 up to the middle of region feedback:
+/// the first step after which `held` compositions are held for the allocation.
+fn into_feedback<'j, 'e>(
+    session: &'j mut LayoutSession<'e>,
+    doc: &'j Document,
+    held: usize,
+) -> crate::incremental::LayoutJob<'j, 'e> {
+    let memo = session.running_memo();
+    let mut job = session.start(doc, Viewport::Pages(0..usize::MAX));
+    for _ in 0..4_000_000 {
+        job.step(1).unwrap();
+        if memo.held_count() >= held {
+            return job;
+        }
+    }
+    panic!("the job never held {held} compositions");
+}
+
 #[test]
-fn more_than_sixty_four_distinct_missing_regions_in_region_feedback_fall_back_correctly() {
+fn region_feedback_over_more_pages_than_the_memo_keeps_composes_nothing_inline() {
     // Continuation pages the region allocation makes, each with a header of its
-    // own number: the allocation finds the memo without them, and feedback
-    // makes them one round at a time. Past `MAX_REGION_ROUNDS` it stops
-    // collecting and the allocation composes the rest itself.
+    // own number: the allocation asks for every one of them in a pass, they are
+    // made a unit at a time and held, past the memo's 64, until an allocation
+    // finds them all. Nothing is composed inside the allocation unit.
     let (engine, doc) = endless_note(700);
     let expected = engine.layout(&doc);
     let pages = expected.pages.len();
-    assert!(pages > MAX_REGION_ROUNDS + 8, "{pages} pages");
+    assert!(pages > MAX_ENTRIES + 8, "{pages} pages");
     for budget in [1usize, 7] {
-        let (snapshot, works, counters) = stepped(&engine, &doc, budget);
+        let mut session = LayoutSession::new(&engine);
+        let memo = session.running_memo();
+        let mut job = session.start(&doc, Viewport::Pages(0..usize::MAX));
+        let (mut works, mut made, mut most_held) = (Vec::new(), 0usize, 0usize);
+        let mut allocating = false;
+        let snapshot = loop {
+            let step = job.step(budget).unwrap();
+            let work = job.step_work();
+            let c = job.counters();
+            // A composition is finished by a look-ahead unit, one a step at
+            // most for a budget of 1, and never by the flow or the allocation.
+            let delta = c.running_compositions - made;
+            made = c.running_compositions;
+            assert!(delta == 0 || work.region_units > 0, "{work:?}");
+            if budget == 1 {
+                assert!(delta <= 1, "{delta} compositions in one unit: {work:?}");
+            }
+            assert_eq!(c.running_inline, 0, "{c:?}");
+            most_held = most_held.max(memo.held_count());
+            works.push((step.used, work, allocating));
+            allocating = step.pass == Pass::RegionFeedback;
+            if step.complete {
+                break job.complete().unwrap().unwrap();
+            }
+        };
         assert_eq!(snapshot, expected, "budget {budget}");
         assert_bounded_steps(&works, budget);
-        // The fallback ran, and was counted: the look-ahead alone could not
-        // make a header per page against a memo that keeps 64 a story.
-        assert!(counters.running_inline > 0, "{counters:?}");
-        assert!(counters.running_inline <= pages, "{counters:?}");
-        // The look-ahead still made the first rounds' regions in units.
-        let units: usize = works.iter().map(|(_, w, _)| w.region_units).sum();
-        assert!(
-            units >= MAX_REGION_ROUNDS,
-            "{units} region units for {pages} pages"
-        );
+        // More compositions were kept for the allocation than the memo holds,
+        // and all were handed back to it when the allocation had them.
+        assert!(most_held > MAX_ENTRIES, "{most_held} held at most");
+        assert_eq!(memo.held_count(), 0);
+        assert_eq!(job.counters().running_inline, 0);
     }
+}
+
+#[test]
+fn cancellation_in_region_feedback_leaves_nothing_held_for_the_next_job() {
+    let (engine, doc) = endless_note(700);
+    let expected = engine.layout(&doc);
+    let mut session = LayoutSession::new(&engine);
+    let memo = session.running_memo();
+    let mut job = into_feedback(&mut session, &doc, 10);
+    assert!(memo.held_count() >= 10);
+    job.cancel();
+    assert!(matches!(job.step(1), Err(JobError::Cancelled)));
+    assert!(matches!(job.partial(), Err(JobError::Cancelled)));
+    assert!(matches!(job.complete(), Err(JobError::Cancelled)));
+    drop(job);
+    // The next job starts clean, and lays out what a plain layout does.
+    assert_eq!(session.layout(&doc).unwrap(), expected);
+    assert_eq!(memo.held_count(), 0);
+}
+
+#[test]
+fn staleness_in_region_feedback_rejects_the_job_and_forgets_what_was_held() {
+    let (engine, doc) = endless_note(700);
+    let before = engine.layout(&doc);
+    let mut session = LayoutSession::new(&engine);
+    let memo = session.running_memo();
+    let mut job = into_feedback(&mut session, &doc, 10);
+    assert!(memo.held_count() >= 10);
+    // The header changes under the compositions held for the allocation.
+    let head = doc.stories()[0];
+    let block = doc.top(reprise_doc::Domain::Story(head))[0];
+    doc.block(block).unwrap().text.insert(0, "EDITED ").unwrap();
+    doc.commit();
+    assert!(matches!(job.step(1), Err(JobError::Stale)));
+    assert!(matches!(job.partial(), Err(JobError::Stale)));
+    assert!(matches!(job.complete(), Err(JobError::Stale)));
+    drop(job);
+    assert_eq!(memo.held_count(), 0, "a stale job keeps nothing");
+    let fresh = session.layout(&doc).unwrap();
+    assert_eq!(fresh, engine.layout(&doc));
+    assert_ne!(fresh, before);
+}
+
+#[test]
+fn a_need_that_comes_back_after_it_was_made_is_composed_by_the_allocation_not_awaited_again() {
+    // The memo is cleared under the job after every step of region feedback, so
+    // what was made for the allocation is gone when it runs again. Waiting for
+    // the same thing again would never end: the allocation composes what it
+    // lacks itself, once, and that is counted. The result is still the plain one.
+    let (engine, doc) = endless_note(300);
+    let expected = engine.layout(&doc);
+    let mut session = LayoutSession::new(&engine);
+    let memo = session.running_memo();
+    let mut job = session.start(&doc, Viewport::Pages(0..usize::MAX));
+    let mut steps = 0usize;
+    let snapshot = loop {
+        let step = job.step(1).unwrap();
+        steps += 1;
+        assert!(steps < 100_000, "the job did not finish");
+        if step.complete {
+            break job.complete().unwrap().unwrap();
+        }
+        memo.lose_held();
+    };
+    assert_eq!(snapshot, expected);
+    let c = job.counters();
+    assert!(c.running_inline > 0, "{c:?}");
 }
 
 #[test]
