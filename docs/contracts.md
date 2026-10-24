@@ -1222,6 +1222,15 @@ serialise byte-identically.
     WASM, fragments) names a slot by its stable token (`header`, `footer`,
     `background`, ...), so adding a slot never renumbers stored or exchanged
     data. `FieldInstance::{Single, Page}` are unchanged.
+-   **Scheduling** (`reprise-layout::incremental`; `docs/sections.md` §11). The
+    running regions of a page are made by units of their own, charged to
+    `step(budget)` before the unit that makes the page. A job owns the digests
+    and the compositions it holds for a region allocation, in the session's
+    memo: starting another job on the session, or a layout, which is one, or
+    clearing the memo, ends every earlier job, and `LayoutSession::resume`
+    returns `JobError::Stale` for its continuation although the document and
+    its revision are unchanged. A job that finds memo state it made gone ends
+    the same way. Neither ever composes a story inline in place of it.
 -   **Navigation** (`reprise-edit`).
     -   `Navigator::hit_placed(point) -> Option<PlacedHit>`, where `PlacedHit`
         is `Body(Hit)` or `Running { position, instance: RegionInstance }`.

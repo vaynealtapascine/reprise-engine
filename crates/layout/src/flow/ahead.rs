@@ -20,9 +20,18 @@
 //!
 //! The machine runs the ordinary flow over the story's blocks (the same code
 //! the synchronous path uses, to the end), so what it makes is what composing
-//! the story whole makes. A page the look-ahead did not foresee is made the
-//! slow way, still correctly, and counted in `WorkCounters::running_inline`;
-//! the tests hold that count at zero.
+//! the story whole makes.
+//!
+//! What a job makes it depends on until it ends: digests, and compositions held
+//! for a region allocation. They belong to the job, not to whoever shares the
+//! session's memo: starting another job drops them, and the job they were made
+//! for can then no longer be resumed (`LayoutSession::resume`). If a job finds
+//! one of them gone all the same, it ends (`Shared::lose`); it never composes
+//! the story itself in its place. The one slow way left is a page's own
+//! regions, composed by the page when the look-ahead made them and the memo's
+//! cap evicted them before the page was made (`Cursor::look`): counted in
+//! `WorkCounters::running_inline`, and out of reach of any sequence of public
+//! calls (a page needs a few compositions of a story, the memo keeps 64).
 
 use super::*;
 use crate::running::attach::{self, PageProbe};
@@ -104,8 +113,12 @@ impl Ahead {
             }
             Need::Story(want) => {
                 let Some(digest) = shared.ready_digest(want.story) else {
-                    // The digest went away (the memo was cleared): ask again.
-                    return (1, true);
+                    // The story's digest was made before this need was asked
+                    // for, and is gone: the memo was dropped under the job.
+                    // This is not a need met, and nothing is composed in its
+                    // place; the job ends (`Shared::lose`).
+                    shared.lose();
+                    return (1, false);
                 };
                 let run = self.run.get_or_insert_with(|| {
                     Box::new(StoryRun::new(engine, doc, plan, want.clone(), digest))

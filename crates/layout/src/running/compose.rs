@@ -162,6 +162,13 @@ struct Memo {
     /// Compositions a stepped flow had to make itself, because the look-ahead
     /// had not made them. Zero when the look-ahead is complete.
     inline: usize,
+    /// Names the job these digests and held compositions belong to: a new one
+    /// each time they are dropped ([`Shared::begin_job`], [`Shared::clear`]).
+    /// A suspended job keeps the one it was made under, and can resume only
+    /// while the memo still has it.
+    epoch: Rc<()>,
+    /// A job found that something it had made, and depends on, was gone.
+    lost: bool,
 }
 
 /// The running memo: owned by a session (or by one plain layout), shared by
@@ -596,6 +603,27 @@ impl Shared {
         memo.compositions = 0;
         memo.reused = 0;
         memo.inline = 0;
+        memo.epoch = Rc::new(());
+        memo.lost = false;
+    }
+    /// The job the memo's digests and held compositions belong to.
+    pub fn epoch(&self) -> Rc<()> {
+        self.memo.borrow().epoch.clone()
+    }
+    /// Whether a suspended job made under `epoch` can go on: nothing it holds
+    /// has been dropped since.
+    pub fn holds(&self, epoch: &Rc<()>) -> bool {
+        Rc::ptr_eq(&self.memo.borrow().epoch, epoch)
+    }
+    /// Something a job depends on is not in the memo although the job made it:
+    /// the job can only be abandoned (see `LayoutJob::step`), never made good
+    /// by composing inline.
+    pub fn lose(&self) {
+        self.memo.borrow_mut().lost = true;
+    }
+    /// Whether the job has found its memo state gone.
+    pub fn lost(&self) -> bool {
+        self.memo.borrow().lost
     }
     /// A document edit that raced a job can leave anything in the memo.
     pub fn clear(&self) {

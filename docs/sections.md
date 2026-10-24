@@ -1066,10 +1066,25 @@ makes it, and the unit that makes the page only finds it in the memo.
     lose before the allocation had them all (a 100-page note needs a header per
     page at once). When none is missing the allocation has what it needs; the
     held compositions then go to the memo. Each round makes at least one thing
-    not made before, so the rounds end; there is no cap. The one exception is a
-    need that comes back after it was made (the memo was cleared under the job):
-    the allocation then composes what it lacks itself, once, counted in
-    `running_inline`.
+    not made before, so the rounds end; there is no cap. A need that comes back
+    after it was made means the memo lost it under the job; the allocation does
+    not compose it in its place. The job ends with `JobError::Stale` and the
+    caller starts another (below). No sequence of public calls reaches this.
+
+-   **A job owns what it made.** The digests a job has read and the compositions
+    it holds for an allocation live in the session's running memo, and belong to
+    the job that made them. Starting another job on the session (a layout is
+    one) drops them, as does clearing the memo, so the continuation of an
+    earlier job cannot go on: `LayoutSession::resume` returns `JobError::Stale`
+    for it, though the document and the revision are as they were, and leaves
+    the newer job's memo alone. A host that wants to keep a job keeps it the
+    only one. Memo state a job finds gone all the same ends the job the same
+    way. Losing memo state never makes a job compose a story inline. What is
+    left of `running_inline` is `Cursor::look`'s last resort (a page composing
+    its own few regions when the memo's cap evicted what the look-ahead had
+    just made), which no sequence of public calls reaches either; tests that
+    force it with a memo that evicts everything assert it is nonzero, and every
+    other test asserts it is zero.
 
 **Partial publication.** A page is **publishable** only when all its bands are
 committed and its running instances composed. `partial()` cuts before the

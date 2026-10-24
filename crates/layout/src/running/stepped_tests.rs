@@ -561,13 +561,15 @@ fn pages_the_region_allocation_makes_have_their_regions_made_by_the_look_ahead()
     }
 }
 
-// Hostile tests of the paths where a stepped job could still compose a region
-// inline, whole. `Cursor::look` lets a page make a region itself when the
-// look-ahead made it and the memo still does not have it (an eviction); that is
-// correct and counted in `running_inline`. Region feedback does not: the
+// Hostile tests of the paths where a stepped job could compose a region inline,
+// whole. `Cursor::look` lets a page make a region itself when the look-ahead
+// made it and the memo still does not have it (an eviction); that is correct
+// and counted in `running_inline`, and the tests that provoke it with a memo
+// that evicts everything assert it is nonzero. Region feedback never does: the
 // allocation asks for every composition it lacks, the look-ahead makes them a
-// unit at a time and holds them for it, and only a need that comes back after
-// being made (the memo was cleared under the job) is composed by the allocation.
+// unit at a time and holds them for it, and a need that comes back after being
+// made (the memo lost it under the job) ends the job. A job whose memo was
+// taken by another cannot be resumed at all (`incremental_tests.rs`).
 
 /// A note far longer than a page, on a page template with a notes area, under a
 /// header showing its page number: every continuation page the region
@@ -733,29 +735,104 @@ fn staleness_in_region_feedback_rejects_the_job_and_forgets_what_was_held() {
 }
 
 #[test]
-fn a_need_that_comes_back_after_it_was_made_is_composed_by_the_allocation_not_awaited_again() {
-    // The memo is cleared under the job after every step of region feedback, so
-    // what was made for the allocation is gone when it runs again. Waiting for
-    // the same thing again would never end: the allocation composes what it
-    // lacks itself, once, and that is counted. The result is still the plain one.
+fn a_need_that_comes_back_after_it_was_made_ends_the_job_and_composes_nothing() {
+    // The memo loses what was held for the allocation after every step of
+    // region feedback, so what was made is gone when the allocation runs again.
+    // Waiting for the same thing again would never end, and composing it in the
+    // allocation is the escape the units exist to remove: the job ends, stale,
+    // and the next job (which makes its own) lays out what a plain layout does.
     let (engine, doc) = endless_note(300);
     let expected = engine.layout(&doc);
     let mut session = LayoutSession::new(&engine);
     let memo = session.running_memo();
     let mut job = session.start(&doc, Viewport::Pages(0..usize::MAX));
     let mut steps = 0usize;
-    let snapshot = loop {
-        let step = job.step(1).unwrap();
-        steps += 1;
-        assert!(steps < 100_000, "the job did not finish");
-        if step.complete {
-            break job.complete().unwrap().unwrap();
+    let error = loop {
+        match job.step(1) {
+            Ok(step) => assert!(!step.complete, "a job that lost what it made finished"),
+            Err(error) => break error,
         }
+        steps += 1;
+        assert!(steps < 100_000, "the job did not end");
         memo.lose_held();
     };
+    assert_eq!(error, JobError::Stale);
+    assert_eq!(job.counters().running_inline, 0);
+    assert!(matches!(job.partial(), Err(JobError::Stale)));
+    assert!(matches!(job.complete(), Err(JobError::Stale)));
+    assert!(matches!(job.step(1), Err(JobError::Stale)));
+    drop(job);
+    assert_eq!(session.layout(&doc).unwrap(), expected);
+    assert_eq!(session.counters().running_inline, 0);
+}
+
+#[test]
+fn a_job_whose_holds_another_job_took_cannot_resume_and_composes_nothing() {
+    // The compositions held for an allocation are the session's memo's, and
+    // starting a job drops them. A continuation suspended in the middle of
+    // region feedback has lost what it was waiting for; resuming it would have
+    // its allocation compose the whole of it inline in one step. It is refused
+    // instead, however unchanged the document is, and the memo it leaves is the
+    // newer job's.
+    let (engine, doc) = endless_note(700);
+    let expected = engine.layout(&doc);
+    let mut session = LayoutSession::new(&engine);
+    let memo = session.running_memo();
+    let state = into_feedback(&mut session, &doc, 10).suspend();
+    assert!(memo.held_count() >= 10);
+    // Starting a job, and dropping it at once, is enough.
+    drop(session.start(&doc, Viewport::Pages(0..1)));
+    assert_eq!(memo.held_count(), 0);
+    assert!(matches!(session.resume(&doc, state), Err(JobError::Stale)));
+    // Of two jobs started, the earlier one's continuation is the stale one.
+    let first = session
+        .start(&doc, Viewport::Pages(0..usize::MAX))
+        .suspend();
+    let second = session
+        .start(&doc, Viewport::Pages(0..usize::MAX))
+        .suspend();
+    assert!(matches!(session.resume(&doc, first), Err(JobError::Stale)));
+    // Refusing the old one took nothing from the newer: it runs to the end.
+    let mut state = second;
+    let snapshot = loop {
+        let mut job = session.resume(&doc, state).unwrap();
+        if job.step(1).unwrap().complete {
+            break job.complete().unwrap().unwrap();
+        }
+        assert_eq!(job.counters().running_inline, 0);
+        state = job.suspend();
+    };
     assert_eq!(snapshot, expected);
-    let c = job.counters();
-    assert!(c.running_inline > 0, "{c:?}");
+    assert_eq!(session.counters().running_inline, 0);
+}
+
+#[test]
+fn a_continuation_resumes_only_on_the_session_whose_memo_it_was_made_under() {
+    let (engine, doc) = endless_note(300);
+    let expected = engine.layout(&doc);
+    let mut session = LayoutSession::new(&engine);
+    let state = into_feedback(&mut session, &doc, 5).suspend();
+    // Another session has none of its digests or holds.
+    let mut other = LayoutSession::new(&engine);
+    assert!(matches!(other.resume(&doc, state), Err(JobError::Stale)));
+    // A layout is a job of its own and takes the memo as well.
+    let state = into_feedback(&mut session, &doc, 5).suspend();
+    assert_eq!(session.layout(&doc).unwrap(), expected);
+    assert!(matches!(session.resume(&doc, state), Err(JobError::Stale)));
+    // The memo carried into a new session (a host that cannot keep the
+    // borrowed one) is the same memo: the continuation goes on there.
+    let mut session = LayoutSession::new(&engine);
+    let mut state = into_feedback(&mut session, &doc, 5).suspend();
+    let mut session = LayoutSession::from_cache(&engine, session.into_cache());
+    let snapshot = loop {
+        let mut job = session.resume(&doc, state).unwrap();
+        if job.step(3).unwrap().complete {
+            break job.complete().unwrap().unwrap();
+        }
+        state = job.suspend();
+    };
+    assert_eq!(snapshot, expected);
+    assert_eq!(session.counters().running_inline, 0);
 }
 
 #[test]

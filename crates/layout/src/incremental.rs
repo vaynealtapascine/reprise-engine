@@ -1372,9 +1372,9 @@ pub struct LayoutJob<'job, 'engine> {
     /// What this feedback pass has made. A need that comes back after being
     /// made means the memo lost it under the job.
     region_made: HashSet<crate::running::compose::Need>,
-    /// The allocation composes what is missing itself: the last resort when
-    /// a need keeps coming back (counted in `running_inline`).
-    region_inline: bool,
+    /// The running memo's epoch this job was made under: what it has made and
+    /// holds there is its own, and gone once another job starts.
+    epoch: Rc<()>,
 }
 impl<'job, 'engine> LayoutJob<'job, 'engine> {
     fn new(
@@ -1422,6 +1422,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             session.evaluation.running(),
         );
         let active = crate::regions::active(engine, doc);
+        let epoch = session.evaluation.running().epoch();
         Self {
             session,
             doc,
@@ -1447,7 +1448,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             region_ahead: None,
             region_needs: VecDeque::new(),
             region_made: HashSet::new(),
-            region_inline: false,
+            epoch,
         }
     }
     pub fn revision(&self) -> &Revision {
@@ -1499,6 +1500,9 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         // What the stories' own preparation did is counted with the step.
         self.session.evaluation.running().take_work();
         while used < budget && self.pass != Pass::Complete {
+            if self.session.evaluation.running().lost() {
+                return Err(self.abandon());
+            }
             let engine = self.session.engine;
             let mut charged = 1usize;
             match self.pass {
@@ -1601,7 +1605,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &self.snapshot,
                         &self.sections,
                         &self.plan,
-                        (!self.region_inline).then_some(&collected),
+                        Some(&collected),
                     );
                     let mut asked = HashSet::new();
                     let (mut missing, mut again) = (VecDeque::new(), false);
@@ -1615,20 +1619,24 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             missing.push_back(need);
                         }
                     }
+                    if again {
+                        // The job made this and the memo no longer has it: what
+                        // it holds was dropped under it. Nothing here may stand
+                        // in for that by composing, which is what the units are
+                        // for; the job is abandoned and a new one starts over
+                        // (the next iteration of this loop ends it).
+                        self.session.evaluation.running().lose();
+                    }
                     if !missing.is_empty() || again {
                         // Something to make, and the allocation is run again once
                         // it is. Every round makes at least one thing not made
-                        // before, so the rounds end. If all that is asked for was
-                        // made already, the memo lost it under the job (it was
-                        // cleared): the allocation then composes the rest itself.
-                        self.region_inline |= missing.is_empty();
+                        // before, so the rounds end.
                         self.region_needs = missing;
                         used = used.saturating_add(charged);
                         self.charge(charged);
                         continue;
                     }
                     self.region_made.clear();
-                    self.region_inline = false;
                     self.session.evaluation.running().release_held();
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
@@ -1742,6 +1750,9 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             let running = self.session.evaluation.running().take_work();
             self.session.evaluation.work(|w| w.absorb(&running));
         }
+        if self.session.evaluation.running().lost() {
+            return Err(self.abandon());
+        }
         self.current()?;
         Ok(Step {
             used,
@@ -1749,6 +1760,14 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             viewport_ready: self.viewport_ready(),
             complete: self.pass == Pass::Complete,
         })
+    }
+    /// Ends the job because the memo no longer has what the job made and
+    /// depends on. The job is stale like one whose document changed: the memo
+    /// is dropped and the caller starts a new job.
+    fn abandon(&mut self) -> JobError {
+        self.terminal.set(Some(JobError::Stale));
+        self.session.evaluation.clear();
+        JobError::Stale
     }
     /// Counts `units` charged to the job.
     fn charge(&self, units: usize) {
@@ -2021,9 +2040,9 @@ pub struct LayoutContinuation {
     /// What this feedback pass has made. A need that comes back after being
     /// made means the memo lost it under the job.
     region_made: HashSet<crate::running::compose::Need>,
-    /// The allocation composes what is missing itself: the last resort when
-    /// a need keeps coming back (counted in `running_inline`).
-    region_inline: bool,
+    /// The running memo's epoch this job was made under: what it has made and
+    /// holds there is its own, and gone once another job starts.
+    epoch: Rc<()>,
 }
 impl<'engine> LayoutSession<'engine> {
     pub fn from_cache(engine: &'engine Engine, cache: LayoutCache) -> Self {
@@ -2045,6 +2064,14 @@ impl<'engine> LayoutSession<'engine> {
     ) -> Result<LayoutJob<'job, 'engine>, JobError> {
         if !std::ptr::eq(state.document, doc) || state.revision != doc.revision() {
             self.evaluation.clear();
+            return Err(JobError::Stale);
+        }
+        // What a job has made and holds is the running memo's, for as long as
+        // the job is the one the memo belongs to. Another job started on the
+        // session (or the memo cleared) took it: this one has lost its
+        // compositions and digests and cannot go on, however unchanged the
+        // document is. The memo is the newer job's, so it is left alone.
+        if !self.evaluation.running().holds(&state.epoch) {
             return Err(JobError::Stale);
         }
         self.document = Some(doc);
@@ -2073,7 +2100,7 @@ impl<'engine> LayoutSession<'engine> {
             region_ahead: state.region_ahead,
             region_needs: state.region_needs,
             region_made: state.region_made,
-            region_inline: state.region_inline,
+            epoch: state.epoch,
         })
     }
 }
@@ -2103,7 +2130,7 @@ impl LayoutJob<'_, '_> {
             region_ahead: self.region_ahead,
             region_needs: self.region_needs,
             region_made: self.region_made,
-            region_inline: self.region_inline,
+            epoch: self.epoch,
         }
     }
 }

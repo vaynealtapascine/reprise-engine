@@ -398,7 +398,11 @@ across executors.
     threads find the queue empty and exit.
 -   *Suspend and resume through the facade.* The machine in progress is owned
     state inside `LayoutContinuation`, so it survives being moved between steps
-    and sessions with the same revision gate as before.
+    and sessions with the same revision gate as before. It goes on only while
+    its job is the latest on the session's memo (carried by `LayoutCache`):
+    starting another job (a layout is one), or clearing the memo, takes the
+    digests and compositions the suspended job holds, and `resume` then returns
+    `Stale` (sections §11, "A job owns what it made").
 -   *Viewport inside a long paragraph.* Coverage advances with the cursor's page
     while the paragraph is still being composed, and the partial view includes
     its lines on passed pages.
