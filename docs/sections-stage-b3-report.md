@@ -726,3 +726,210 @@ signature (B2 API, used only by the digest); `Document::copy_imported_fragment`;
 ### Gate
 
 Full gate (`G:/tmp/gate-sections-fix.sh`, copy of `gate-integrate.sh` on this worktree, log `G:/tmp/gate-sections-fix.log`, finished 2026-10-24 15:59): 12 x `=== rc=0`, 1,659 passed, 0 failed, no `d.ts` or `API.txt` drift; `gate exit 0`. Filled in by the orchestrator from the log.
+
+## B3 fixes, round 2
+
+Astra's re-review of the B3 fixes (`F:/reprise-wt/reviews/sections-b3-fixes-review.md`,
+pinned at `5957d68`) asked for changes: two blockers, one should-fix and two suggestions.
+The original ownership, limit, orphan, geometry and navigation fixes passed it. Its new
+probes (`G:/reprise-review/sections-b3-fixes-{layout,resume,clipboard}-probes.rs`) were
+ported to `crates/layout/tests/review_b3_fixes.rs` and
+`crates/clipboard/tests/review_b3_fixes.rs` (rustfmt only; the clipboard port drops the
+probe's write of an HTML file to `G:/reprise-review`). Their four failing assertions
+(public resume, keep work, keep cache, strict decode) are Astra's evidence at `5957d68`;
+this round was done by two agents (the first stopped on a rate limit after findings 1 and
+2), and I did not re-run the probes against `5957d68`. No assertion was weakened; the one
+that was replaced (finding 3) is explained there.
+
+| Item | Commit |
+| --- | --- |
+| 1. A suspended job owns what it made (blocker) | `43c832e` |
+| 2. Keep-with-next look-ahead (blocker) | `a4a2c84` |
+| Suggestions: `top_reader` comment, `running_inline` wording | `8a66f78` |
+| Clipboard probes ported | `55ed5f1` |
+| 3. The decode of a flow host is one bounded atomic unit (should-fix) | `1be5182` |
+| This report and the gate | the commit after them |
+
+I read the source of the first two commits before building on them and found nothing to
+change in them. The uncommitted state I took over for finding 3 had two defects, below.
+
+### 1. A suspended job owns what it made (blocker)
+
+*What was wrong.* The digests a job has read and the compositions it holds for a region
+allocation live in the session's running memo. `LayoutSession::start` dropped them, but a
+continuation suspended earlier still passed `resume` (it checks the document and the
+revision only) and its allocation then composed what was missing itself, inline. The
+reproduction uses public calls only: step to 40 look-ahead units of feedback, suspend,
+start and drop another job, resume. At the next steps `running_inline` was 115, in a
+budget-one step (232 composer calls, 410 KB scanned).
+
+*What changed, and why this way.* I chose the **generation gate** over making the
+continuation own its holds. The memo has an epoch (`Rc<()>`), a new one each time the
+digests and holds are dropped (a job starting, `Shared::clear`). A job carries the epoch
+it was made under, a continuation takes it along, and `LayoutSession::resume` returns
+`JobError::Stale` for a continuation whose epoch is not the memo's, leaving the newer
+job's memo alone. Owning the holds would have meant a second copy of every digest and
+held composition per job, or an older job overwriting the newer one's digests in the
+shared memo; the gate is one comparison, and the caller's remedy (start a new job) is
+the one it already has for a changed document.
+
+Losing memo state can no longer authorise inline composition. A need that comes back after
+the job made it, and a story need whose digest has vanished, mark the memo lost
+(`Shared::lose`); the job ends with `Stale` at its next unit (`LayoutJob::abandon`) and
+the memo is dropped. The synchronous fallback of the region allocation (`region_inline`)
+is gone. What remains of `running_inline` is `Cursor::look`'s last resort (a page
+composing its own few regions when the memo's 64-entry cap evicted what the look-ahead
+just made), which no sequence of public calls reaches, counted and tested with a memo
+that evicts everything.
+
+The facade is not affected: its job holds a token that `start_layout` bumps, so an older
+job was already refused there, and the cache it passes to `LayoutSession::from_cache`
+carries the epoch with it.
+
+*Tests.* In `layout/tests/review_b3_fixes.rs`, Astra's probe (it accepts a refusal at
+`resume`, as the first design in the review allows) and an exact version beside it,
+`a_continuation_of_a_replaced_job_is_refused_and_the_replacement_is_unharmed`: a job
+started, a layout run, and a continuation resumed with nothing started in between, which
+goes on and equals the plain layout. In `running/stepped_tests.rs`: a need that comes back
+ends the job and composes nothing (it replaces the test that accepted the inline
+fallback); a job whose holds another job took cannot resume; a continuation resumes only
+on the session whose memo it was made under, and carries across `into_cache` /
+`from_cache`.
+
+### 2. Keep-with-next look-ahead (blocker)
+
+*What was wrong.* The digest cuts a story before a host over `MAX_HOST_BYTES` or past a
+read limit, but a paragraph that keeps with the next enumerated the whole story with
+`doc.top` and prepared the refused block synchronously: 69 adapter requests and
+1,100,004 shaped bytes in one budget-one step, in a header whose second paragraph the
+digest had refused. What it read was no part of the memo's key either: setting only the
+refused paragraph's `keep_together` left a cached layout without the
+`layout.keep-unsatisfied` warning a full layout gives.
+
+*What changed.* A running story's cursor is given its digest (`Cursor::with_scope`), and
+`Flow::following` returns the digest's nodes, in its order, and no others. Nothing outside
+the digest is enumerated, prepared or composed for a chain; what the chain reads of the
+blocks inside it (kind, text, style, formatting, inline objects) is what the digest's
+items hold, so the story's memo is keyed by all of it. The refused tail is not read into
+the key, as the brief requires. The check is a machine (`ChainRun`, `Flow::chain_step`)
+instead of a call: a member's preparation stage (`begin_preparation`, `advance_staged`,
+the paragraph's own stages made reusable) and its composition are units of their own,
+charged like the paragraph's, and the paragraph keeps its composed lines between them
+(`Held`) so a unit holds one composer call. The trial composition is counted in
+`composer_calls` now. Body flows use the same machine, which runs to the end in a full
+layout; they have no digest, so their chain reads the document's top-level blocks as before.
+
+*A visible consequence.* For a story whose chain runs into a block the digest left out,
+neither layout notes `layout.keep-unsatisfied` on the paragraph any more: the block is not
+looked at, and the story is reported clipped. The full layout used to warn, which is
+exactly what made the cached one differ. No snapshot depended on it.
+
+*Tests.* Astra's two keep probes pass as ported (work, and cached equals full). Added: a
+chain of long members is checked a shaping request a unit; of short members a composition
+a unit (at budgets 1, 2 and 5, equal to the plain layout); a chain that runs into a block
+the digest cut gives no warning whether or not that block is edited, and the cached layout
+equals the full one after each of three edits; editing the style of a block that is in the
+digest and that only the first block's chain reads re-lays out the paragraph that keeps with
+it, and the cached layout equals the full one, for both values of `keep_together`.
+
+### 3. The decode of a flow host is one bounded atomic unit (should-fix)
+
+*What was wrong.* A host's text is decoded in one go. The first round let the decoding
+step overspend and had the digest repay the difference in the steps after it, so a cold
+1,000,000-byte header made a budget-one step decode 244 units of text, and the "paid
+back" steps afterwards were idle. The review wanted the decode to be resumable or the
+bound to be agreed.
+
+*The ruling, as built.* The orchestrator ruled that the decode stays atomic, with an
+explicit bound. One host decode is a single look-ahead unit of its own:
+
+-   at most `MAX_HOST_BYTES`, 1,060,864 bytes, which is 258 units of reading plus the
+    first block: **5 look-ahead units of 64** at most (a 1,000,000-byte host is 4);
+-   that unit decodes the host, takes the host's first block, and does nothing else;
+-   the step that runs it reports its true cost (`Step.used`, `StepWork.units`,
+    `region_units`). No debt is carried into later calls; `DigestBuild::debt` is gone. A
+    job step that starts it with a unit of budget left charges up to 4 over its budget (a
+    budget of 1 still makes progress and charges up to 5). This is the only unit kind
+    allowed to;
+-   cancellation and staleness are observed before and after the step, never inside the
+    decode;
+-   a host with more text is not decoded: the story is cut in front of it and reported
+    clipped. That cutoff depends on how the text is stored (how many paragraphs share a
+    physical host), not on the content, and §11 says it is not a semantic boundary, for
+    frames to inherit knowingly.
+
+The maximum atomic work is written in §11 ("The one atomic unit"), in the contract's
+scheduling text ("Maximum atomic work", under Section additions), in
+`docs/bindings.md` and `docs/incremental.md` where they said a step charges at most its
+budget, and on `Step::used` and `StepWork::digest_decoded`.
+
+*A hole in "nothing else", found while verifying.* The reader decided whether a host was
+too dear for the call by the units that call had spent. The digest's step makes several
+calls (one block each), so a host met after the step had spent 63 of its 64 units, such
+as a block embedded in the flow of the paragraph in front of it, was decoded in that step:
+63 blocks and a 258-unit decode together, **6 units**. The new probe
+`a_decode_is_alone_in_its_step_whatever_the_step_had_done_before_it` reproduced exactly
+that before the fix. `ReadLimits` gains a `fresh` flag (`unbounded()` sets it): only a
+call that opens a piece of work decodes a host dearer than its units, and the digest sets
+it on the first read of a step only (top level and table walk alike). Any other call
+stops in front of the host (`ReadStep::deferred`), possibly having done nothing, and the
+next step, which opens with it, decodes it alone.
+
+*The probe that was replaced.* Astra's
+`a_host_decode_must_fit_the_current_step_instead_of_borrowing_future_steps` asserts that a
+budget-one step never decodes more than 64 reading units of text. The ruling makes that
+false by design, so it cannot stay: its fixture (a 1,000,000-byte header paragraph) is
+kept as `a_host_decode_is_one_bounded_atomic_unit_that_charges_its_cost_in_its_step`
+in `review_b3_fixes.rs`, whose assertions are the ruling's: the decode is at most
+`MAX_HOST_BYTES`, costs 2 to 5 units, is charged in full in its own step
+(`used == units == cost`), nothing else ran in it (one block taken, no other child looked
+at, no composition, shaping or page), every other step charges exactly its one unit, and
+the host is decoded once.
+
+*Tests.* `layout/tests/b3_hosts.rs`: the 1,000,000-byte paragraph (replaces the payback
+test), the largest paragraph a story reads whole (1 MiB, four units), a table-cell block
+decode, a host met after sixty-three units of other reads, and a host no story could read
+is still not decoded. `doc/tests/child_reader.rs`: a call that is not fresh never decodes
+a dear host, however often it is made, and a fresh call does. In `running/stepped_tests.rs`
+the bounded-step helper allows the one exception (up to the five units, and only for a
+step that decoded) and asserts, for a budget of 1, that nothing else ran in the unit that
+decoded. The draft I took over had not updated it: `a_one_mebibyte_paragraph_steps_to_the_
+same_snapshot` still required every step to charge at most its budget and failed.
+
+### Suggestions
+
+-   The `Document::top_reader` comment no longer says the child IDs are copied up front.
+-   The scheduling-counts paragraph of §11 no longer says `running_inline` is zero in every
+    test: it is zero for every sequence of public calls the tests make, and the synthetic
+    tests that force the last resort assert that it is not.
+
+### Deviations and decisions
+
+-   Finding 3 changes the scheduling contract in one place: `Step.used` can exceed the
+    budget by up to 4. It is stated in §11, the contract, bindings and incremental docs.
+    Nothing in the facade, its TypeScript types or `API.txt` asserted the opposite.
+-   `ReadLimits.fresh` is a new field of a `reprise-doc` struct (B2 API; the digest is its
+    only consumer, and `doc/tests/child_reader.rs` its other callers). The facade, its
+    types and `API.txt` are unchanged. No new dependencies.
+-   Starting a job, or running a layout, on a session now makes an earlier suspended
+    continuation of that session stale (finding 1). A host that wants to keep a job keeps
+    it the only one on its session; §11 says so.
+-   No snapshot changed or was added. Existing tests changed: the inline-fallback test of
+    `stepped_tests.rs` (finding 1), the payback test of `b3_hosts.rs` and the
+    bounded-step helper (finding 3).
+-   Environment, not repository: linking the layout crate's `review_b3` test failed here
+    with `LNK1181: cannot open input file 'kernel32.lib'` until `LIB` was set explicitly
+    (MSVC `lib\x64` and the SDK's `ucrt\x64` and `um\x64`); the other test binaries linked
+    without it. The gate ran with the same `LIB`.
+
+### Left tracked
+
+As in round 1: the 64-entry composition memo (redundant but charged work), body `page-of`
+aimed at a story shows `?`, and S12 stays its own gated slice. For frames F0: a reader has
+no document or revision binding of its own and needs a same-revision lifetime; the host
+cutoff is representation-dependent; and the digest scope above is the only scope a
+look-ahead of a running story may read.
+
+### Gate
+
+Full gate (`G:/tmp/gate-sections-fix.sh`, log `G:/tmp/gate-sections-fix2.log`, run on `1be5182` under `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 timeout 7000`, finished 2026-10-25 07:24): 12 x `=== rc=0` (types, wasmbuild, bindgen-web, bindgen-node, tsc, tsc-worker, smoke, worker-smoke, fmt, clippy, wasmcheck, test), 1,679 passed (round 1: 1,659; the 20 added are this round's tests), 0 failed, 12 ignored (as before), no `d.ts` or `API.txt` drift (`git status` clean after the gate); `gate exit 0`.
