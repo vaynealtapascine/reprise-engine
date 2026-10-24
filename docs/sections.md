@@ -947,6 +947,18 @@ Asks of `FieldEnv`:
     new field text with old metrics.
 -   **Pageless.** Page fields render `?` in pageless sections (§18).
 
+**As built, and a tracked follow-up (B3 review).** A `page-of` in the body
+aimed at text in a story keeps its target as written and shows `?`. That is not
+a choice between placements: a logical story is shown on every page of its
+slot (a header of 100 pages is 100 placements of one block), so it has no
+single body-facing physical page, and `?` is what the field semantics above
+already say for a target with many placements or none. The converse works: a
+`page-of` in a story aimed at body text shows that text's page, and a copy
+rewrites such a target to follow the copied text (§14). Placement-aware
+semantics (which instance a body field means, for a story placed once, such as
+a frame's chain) belong with frames, which introduce placements a field can
+name; they are not decided here.
+
 ## 11. Incremental layout and scheduling (R8)
 
 **Dependencies, not whole-plan keys.** Today `FlowKey` clones the **whole**
