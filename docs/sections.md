@@ -1071,8 +1071,10 @@ makes it, and the unit that makes the page only finds it in the memo.
     stages. The body flow checks its chains the same way.
 -   **Counts.** `StepWork` has `pages_made`, `region_units`, `region_blocks`
     and `digest_blocks`; `WorkCounters::running_inline` counts regions the
-    flow had to make itself because the look-ahead had not, and is zero in
-    every test.
+    flow had to make itself because the look-ahead had not. It is zero for
+    every sequence of public calls the tests make; the synthetic tests that
+    make the memo evict what the look-ahead just made (to exercise the last
+    resort, below) assert that it is not.
 
 -   **Region feedback.** The region allocation (notes and floats, which can make
     continuation pages, each with regions of its own) composes nothing. In one

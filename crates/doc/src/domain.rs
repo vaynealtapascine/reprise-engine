@@ -167,9 +167,10 @@ impl Document {
     }
 
     /// A resumable, bounded read of the live blocks at the top of `domain`
-    /// (see [`Document::top`]). Only the raw list of child IDs is copied up
-    /// front; a child is looked at when a read reaches it, so reading a prefix
-    /// of a huge domain costs the prefix.
+    /// (see [`Document::top`]). Nothing is gathered up front: the reader keeps
+    /// the number of physical children and its place among them, and a child
+    /// is found, by index, and looked at when a read reaches it, so reading a
+    /// prefix of a huge domain costs the prefix.
     pub fn top_reader(&self, domain: Domain) -> ChildReader {
         let parent = match domain {
             Domain::Body => TreeParentId::Root,
