@@ -470,3 +470,259 @@ story-font lookup in the native bundle fails `the_fonts_of_a_header_story_are_na
 fails three HTML tests (`html_sections`); the cache defect's test fails without
 the fix (`inc-sections-red.log`).
 
+
+## B3 fixes
+
+The Astra B3 review (`F:/reprise-wt/reviews/sections-b3-review.md`, pinned at
+`8bc86f4`) asked for changes: five blockers and two should-fix findings, with ten
+failing probes. This section is the repair. Astra's five probe files were ported
+unchanged (rustfmt only) as `crates/<crate>/tests/review_b3.rs`, and the ten failures
+reproduced before anything was fixed (doc 1, edit 4, clipboard 2, layout 2, facade 1).
+They are the regression gates; no assertion was weakened and none turned out to be
+wrong. The fixes were made in the brief's order, one commit each (findings 3 and 4
+share a validator and are two commits, see below), the affected crates' tests green at
+each:
+
+| Finding | Commit |
+| --- | --- |
+| 3. Story ownership in envelopes | `43c84dd` |
+| 4. Aggregate limits of the whole envelope | `e253b51` |
+| 5. Orphan stories in HTML | `b8606fd` |
+| 6. Geometry record | `553b0a0` |
+| 7. Navigation fallback | `917487f` |
+| 1. Running composition in a budget-one step | `be6240e` |
+| 2. Flow-host expansion | `2e2f2d7` |
+| follow-up: body `page-of` aimed at a story, documented | `fbc5a4c` |
+
+The text of §1 above ("Past `MAX_REGION_ROUNDS` the region allocation composes the
+remaining regions itself") and the second gap of §9 are superseded by finding 1 below;
+the read-budget part of the B2 findings by finding 2.
+
+### 3. Story ownership in envelopes (blocker)
+
+*What was wrong.* The envelope's validation flattened the body and every story into
+one block list, and the flat validator accepts any earlier block as a parent, so a
+story block could name a body paragraph, or another story's root, as its parent.
+Paste attached the block to that parent before it looked at the story root mapping:
+the content landed in the body and the created story was empty (probes: story sizes
+`[2, 0]`). `NativeFragment::validate` shared the path.
+
+*What changed.* `Envelope::validate_in(fragment)` (`doc/fragment_sections.rs`) checks
+the records, then each component, the body and every story, as a tree of its own: a
+parent is an earlier block of the same component, IDs are unique across all of them,
+a range and the end of a spanning range sit in the component that carries them, and a
+relation hangs on a body block (copies drop the ones a story owns). Then it runs the
+flat validator for the aggregate limits. The copy (`attach_sections`), the native
+validation (`NativeFragment::validate`) and the paste (`split`, which runs before it
+stages or plans anything) all call it.
+
+*Tests.* The review's cross-domain, cross-story and cyclic probes; `edit/tests/
+b3_ownership.rs` (a story range on a body block, one ending in the body, a body range
+ending in a story or on a story block, a relation owned by a story block, an ID shared
+with the body: each refused in the kernel with nothing written and by `validate_in`,
+and the same envelope with everything in its own component accepted);
+`clipboard/tests/b3_fixes.rs` (the cross-domain and cross-story parents refused when
+the native bytes are decoded). The new tests fail without the fix (checked by
+stashing the source).
+
+### 4. Aggregate limits count the whole envelope (blocker)
+
+*What was wrong.* The aggregate fragment limits were checked only after paste had
+kept the stories it would copy, so an over-limit story that a nonempty destination
+skipped, a story destination discarded, or a same-document paste would reuse in place
+was accepted (undo count 1, a block added). And the fragment's own body validation
+ran first and mapped its limit to `Reason::Fragment(Limit("items"))`, not
+`CopyLimit` / `clipboard.limit`, when an envelope was present.
+
+*What changed.* `validate_in` (above) runs at the top of `paste_sections::split`,
+before the story-destination discard and before any story gets a plan, so the body and
+all the stories count against the fragment limits whatever the paste does with them.
+`prepare_with_styles` maps its body validation's limit to a copy limit when an envelope
+is present. The redundant second validation of the kept subset is gone. Every paste
+path (`Editor::paste`, replace, paste commands, `import_copy`) goes through
+`prepare_with_styles`. A fragment without an envelope keeps its old error.
+
+*Tests.* The review's two probes; `edit/tests/b3_limits.rs`: an over-limit unused story,
+and an over-limit body with an envelope, each pasted into a nonempty body, at a caret
+and into a story; a story the paste would reuse in place (same document, live source).
+Every case has undo and redo both populated and checks the history export bytes,
+revision and both counts are unchanged. All three new tests fail without the change.
+
+*Deviation.* Findings 3 and 4 share `validate_in`: the first commit has it and the
+paste-side call, the second the error mapping and the limit tests.
+
+### 5. Orphan stories in HTML (blocker)
+
+*What was wrong.* The export planned a home only for stories a binding names; an
+unbound live story got an Info loss note and no payload, and the import copied its
+document with the clipboard scope, which omits unreferenced stories again.
+
+*What changed.* The plan lists the orphans after the bound stories, in the document's
+story order under the next labels (`s{n}`), and the export writes each once as an inert
+`<template data-reprise-story>` after the last section, through the writer that wrote
+the bound ones (`export.rs` `html_story`). The "bound to no section" loss note is
+gone: nothing is left out. The import copies its document with
+`Document::copy_imported_fragment` (new, `doc/fragment.rs`): the clipboard copy of
+everything plus the stories no binding names, which stay unbound. A paste into an empty
+document takes them; one into a document with content does not, as for a native paste
+(§14, unchanged). `docs/sections.md` §15 is updated.
+
+*Tests.* The review's two probes; `clipboard/tests/b3_orphans.rs` (orphans written once
+with escaping, stable labels and order, an empty orphan, a document of nothing but
+orphans, a second export equal to the first, and the nonempty destination);
+`html_sections::losses_are_reported_not_silent`, which asserted the old behaviour (the
+note, the missing text), now asserts the template and the round trip.
+
+### 6. Geometry record (should-fix)
+
+*What was wrong.* A complete copy kept the raw geometry record only if every value was
+a string, boolean or integer; one container-valued key (the reader shows it as null)
+dropped `v`, `mode` and the other keys with no report.
+
+*What changed.* The record is carried exactly, every key as it is, or the copy is
+refused with `FragmentError::Invalid`, as an unreadable section record is: for a
+container, a null, a number that is not an integer, or a root that is not a record.
+I chose refusal over carrying the readable keys and reporting the rest because a copy
+that quietly differs from its source is what the review objects to, and the section
+records already refuse. The same silent drop existed in the HTML import
+(`data-reprise-geometry` kept the scalar keys and said nothing of the others); it now
+reports `clipboard.html-dropped`.
+
+*Tests.* The review's probe; `doc/tests/b3_geometry.rs` (plain keys of each scalar kind
+travel byte for byte and are written back; a container, a float, a list and a root that
+is no record each refuse both complete copies while a partial copy still works);
+`b3_orphans::an_html_geometry_key_that_is_not_plain_is_reported_not_dropped_silently`.
+
+### 7. Navigation fallback (should-fix)
+
+*What was wrong.* `caret_in` and `selection_rects_in` checked the saved instance's page
+against the new layout before the kernel's nearest-placement fallback could run, so
+removing trailing pages gave `Invalid("no page 2")` with the header still on page 0.
+
+*What changed.* `DocumentSession::instance` checks the page's representation and the
+slot only; the kernel's fallback answers. `hit_placed` still checks its page against
+the layout (`page_index`). A story no page shows any more still gives no geometry.
+`docs/bindings.md` says so.
+
+*Tests.* The review's probe (caret); `sections_api::a_saved_instance_on_a_page_since_
+removed_still_navigates` (the same for the selection, a page index of `u32::MAX`, and
+the slot, the position and `hit_placed` on the removed page still refused) and
+`a_saved_instance_of_a_story_no_page_shows_any_more_has_no_geometry`.
+
+### 1. Region feedback composes nothing inline (blocker)
+
+*What was wrong.* Region feedback collected one missing composition a round and ran
+the allocation again; after 64 rounds it stopped collecting and the allocation
+composed the rest itself. The 100-page case (700-line note, numbered header) ran 99
+whole running stories in one budget-one step (199 composer calls, 350 KB scanned). The
+cap existed because removing it did not finish: the allocation needs a composition per
+page at once, the running memo keeps 64 a story, and what the look-ahead made was
+evicted before the allocation ran again.
+
+*What changed.* The allocation collects every missing composition and digest in a pass
+(deduplicated, in the order it asked). The job queues them (`region_needs`) and makes
+each in look-ahead units of its own, at the same charge as any region, and holds what
+it makes in a side store of the running memo with no cap (`Memo.held`, `Shared::hold`).
+When a pass finds nothing missing, the held compositions go to the memo, oldest first,
+so it still keeps the most recent 64 a story. Each round makes at least one thing not
+made before, so the rounds end with no cap (`MAX_REGION_ROUNDS` is gone). One last
+resort remains, counted in `running_inline`: a need that comes back after it was made
+(the memo was cleared under the job) is composed by the allocation itself, once. The
+queue, the made set and that flag travel with a suspended job. `docs/sections.md` §11
+says it.
+
+*Tests.* The review's probe (`running_inline` 0 for the whole job; it was 99 in one
+step; the probe now runs in 1.5 s, not 15). In `running/stepped_tests.rs`:
+`region_feedback_over_more_pages_than_the_memo_keeps_composes_nothing_inline` (100 pages
+at budgets 1 and 7: a composition is finished only by a look-ahead unit and at most one
+a step, more than 64 are held at once, none held at the end, output equal to the plain
+layout); cancellation and staleness in the middle of feedback with compositions held,
+each leaving the next job clean and nothing held; and the last resort
+(`a_need_that_comes_back_...`). The old 101-page test, which accepted the escape, is
+replaced. Mutations: holding in the memo instead fails the first; removing the
+come-back check never finishes the last (a 100,000-step guard).
+
+*What it does not do.* The allocation is still a unit that runs from the start in each
+round; what is gone is any composition inside it. The rounds are the dependency levels
+of the plan (pages made while the headers were absent, then with them, ...), typically
+three or four, not one per page. A document in which each round's regions change the
+page count by one could take many; that is bounded work in each unit, and the output is
+unchanged. A resumable mid-pass allocation would be a larger change to `notes` and
+`floats` placement; it was not needed to remove the synchronous escape. `Cursor::look`'s
+own last resort (the memo evicting what the look-ahead has just made for a page;
+counted, zero in every ordinary test) is unchanged: it is a page's two or three
+regions, not the allocation's whole set.
+
+### 2. Flow-host expansion (blocker)
+
+*What was wrong.* The digest's reader gathered every physical child up front, and a
+physical child can be a flow host that stands for any number of paragraphs: reading it
+decoded the host's whole text and listed all its paragraphs, and the digest took the
+queue of them uncharged. A one-character story split 130 times at offset zero is one
+child and 131 paragraphs, and the first budget-one step read all 131 (limit 64).
+
+*What changed.* `ChildReader` is now a cursor: the next physical child (found by index
+through the loro tree handler, `LoroDoc::inner()`, so nothing is gathered and no
+dependency was added), and a stack for the host being expanded that keeps its place
+between calls and yields paragraphs and embedded nodes in exactly the order `expand`
+and `top` list them. `read_children` takes `ReadLimits { units, blocks, host_bytes }`
+and returns what it did. A child looked at is a unit and the first block it stands for
+comes with it (so an ordinary paragraph is one unit, as before); each further paragraph
+or embedded node is a unit; decoding a host costs a unit for each 4 KiB of its text.
+A decode dearer than the units left in a call is deferred to a call of its own and
+overspends; `DigestBuild` turns that overspend into a debt the following steps pay off
+before they read on. So a step reads at most 64 units, and what is charged is what the
+work comes to. The digest takes each block as it is read; the queue it kept behind a
+table walk is gone, and a table's nodes are counted as they are read. `StepWork` gains
+`digest_decoded`.
+
+*Decision to review.* A flow host longer than a story could ever read whole (1 MiB of
+text and 3 bytes of break marker for each of 4,096 blocks: 1,060,864 bytes) is not
+decoded: the story is cut in front of it, as it is in front of a table that does not
+fit. Before, such a host was decoded in full and the story cut inside it, keeping the
+first paragraphs. The limit is a constant, so the digest does not depend on how the
+work is divided into steps (stepped equals full). Without it a host's decode, which is
+linear in its text and not splittable (every `Text` view of a paragraph reads the whole
+host), would be unbounded; with it, one unit costs at most about 1 MiB of decoding,
+charged and paid back. Splitting the decode itself would mean making `read_flow` and
+the paragraph views incremental: a change to the CRDT layer's flow reading, beyond §11.
+This is the residual limit of the fix.
+
+*Tests.* The review's probe (`digest_blocks` 64, was 131). `layout/tests/b3_hosts.rs`: a
+200-paragraph host read 64 a step with its one ID looked at; a host over the limit and
+a cell block over it are not decoded; a 1,000,000-byte paragraph is a step of its own
+and is paid back in idle steps. `doc/tests/child_reader.rs` (moved to the new API, with
+the old assertions on IDs and prefixes): a host expanded a bounded piece a call; a block
+limit stopping mid-host; the decode limit and deferral; an embedded host expanded in
+place and read once; the reader against `top` over twelve seeds of random splits, joins,
+deletions and embedded blocks, at three chunk sizes. Mutations: leaving a host's
+paragraphs uncharged fails the probe; dropping the length limit fails the decode test;
+dropping the debt fails the payback test.
+
+### Changes to existing tests and snapshots
+
+-   `running/stepped_tests.rs`: the 101-page escape test replaced (finding 1); the
+    comment block above the hostile tests rewritten.
+-   `clipboard/tests/html_sections.rs::losses_are_reported_not_silent` (finding 5).
+-   `doc/tests/child_reader.rs`: moved to the new reader API (finding 2).
+-   No snapshot changed or was added.
+
+### New public API and dependencies
+
+`reprise_doc::{ReadLimits, ReadStep, DECODE_UNIT_BYTES}` and a new `read_children`
+signature (B2 API, used only by the digest); `Document::copy_imported_fragment`;
+`Envelope::validate_in`; `StepWork::digest_decoded`. The facade, its types and
+`API.txt` are unchanged. No new dependencies.
+
+### Left tracked, as the review allows
+
+-   The 64-entry composition memo (`running/compose.rs` `MAX_ENTRIES`): a per-page field
+    in a document of more than 64 pages is composed twice a page, in look-ahead units
+    (not inline). With finding 1 fixed this is redundant but charged work, which can be
+    deferred.
+-   Body `page-of` aimed at a story shows `?`; documented in `docs/sections.md` §10.
+-   S12 (pageless) stays its own gated slice.
+
+### Gate
+
+Full gate (`G:/tmp/gate-sections-fix.sh`, copy of `gate-integrate.sh` on this worktree, log `G:/tmp/gate-sections-fix.log`, finished 2026-10-24 15:59): 12 x `=== rc=0`, 1,659 passed, 0 failed, no `d.ts` or `API.txt` drift; `gate exit 0`. Filled in by the orchestrator from the log.
