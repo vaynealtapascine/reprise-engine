@@ -282,7 +282,22 @@ pub(crate) const DIGEST_CHUNK: usize = 64;
 /// else the story holds. It is not decoded at all, and the story is cut in
 /// front of it, like a table that does not fit: a host is decoded to the end
 /// in one go, so what it costs is bounded by this, not by the author.
+///
+/// The cutoff is a property of how the text is stored (how many paragraphs
+/// share a physical host), not of the content: a host over it is left out
+/// whole, even if its first paragraphs would have fitted the story, and the
+/// story is reported clipped. Nothing built on the digest should treat it as a
+/// semantic boundary.
 pub(crate) const MAX_HOST_BYTES: usize = MAX_STORY_TEXT + 3 * MAX_STORY_BLOCKS;
+
+/// The most look-ahead units one step of a digest charges: the decode of a host
+/// of [`MAX_HOST_BYTES`] (the reading units [`ReadLimits::units`] counts for
+/// it), in the [`DIGEST_CHUNK`] a unit holds. A digest step charges one unit,
+/// except the one that decodes such a host: it is alone in its step and charges
+/// all of its cost there.
+pub(crate) const MAX_DECODE_STEP_UNITS: usize =
+    (MAX_HOST_BYTES / reprise_doc::DECODE_UNIT_BYTES).div_ceil(DIGEST_CHUNK);
+const _: () = assert!(MAX_DECODE_STEP_UNITS == 5);
 
 /// What a stretch of reading a digest did, for the work counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -322,9 +337,6 @@ pub(crate) struct DigestBuild {
     story: NodeId,
     top: ChildReader,
     top_done: bool,
-    /// Units a step spent over its allowance, on a host decoded in one go.
-    /// The steps after it pay the debt off before they read on.
-    debt: usize,
     nodes: Vec<NodeId>,
     items: Vec<Item>,
     /// Blocks and bytes of text taken so far, tables' parts included.
@@ -362,7 +374,6 @@ impl DigestBuild {
             story,
             top: doc.top_reader(Domain::Story(story)),
             top_done: false,
-            debt: 0,
             nodes: Vec::new(),
             items: Vec::new(),
             blocks: 0,
@@ -381,10 +392,12 @@ impl DigestBuild {
 
     /// Reads on for up to `units` units of work (see [`DIGEST_CHUNK`]). The
     /// story's top level is read one block at a time and each is taken as it
-    /// comes, so a step takes at most the units it was given. A host is decoded
-    /// in one go, which can cost a step more than its units; the steps after
-    /// it pay that off before they read on, so what a step charges is what the
-    /// work comes to, on the whole.
+    /// comes, so a step takes at most the units it was given, with one
+    /// exception: a host whose decoding costs more than a step's units is
+    /// decoded by a step of its own, as one atomic unit. That step does the
+    /// decode (at most [`MAX_HOST_BYTES`] of text), takes the first block it
+    /// stands for, and nothing else; it reports what it cost, in
+    /// `DigestWork::units`, and no step after it pays anything back.
     pub fn step(
         &mut self,
         shared: &Shared,
@@ -394,14 +407,12 @@ impl DigestBuild {
     ) -> DigestWork {
         let mut work = DigestWork::default();
         let room = units.max(1);
-        let paid = self.debt.min(room);
-        self.debt = self.debt.saturating_sub(paid);
-        let mut spent = paid;
+        let mut spent = 0usize;
         let mut out = Vec::new();
         while spent < room && !self.done {
             let left = room.saturating_sub(spent);
             if self.walk.is_some() {
-                let done = self.walk_step(doc, left);
+                let done = self.walk_step(doc, left, spent == 0);
                 spent = spent.saturating_add(done.units);
                 work.add(done);
                 if done.deferred {
@@ -419,6 +430,7 @@ impl DigestBuild {
                     units: left,
                     blocks: 1,
                     host_bytes: MAX_HOST_BYTES,
+                    fresh: spent == 0,
                 },
                 &mut out,
             );
@@ -438,14 +450,13 @@ impl DigestBuild {
             self.top_done = read.done;
             if read.deferred {
                 // A host dearer than what is left of this step is decoded by
-                // a step of its own.
+                // a step of its own, which opens with it: `fresh`.
                 break;
             }
         }
         if self.top_done && self.walk.is_none() {
             self.done = true;
         }
-        self.debt = self.debt.saturating_add(spent.saturating_sub(room));
         work
     }
 
@@ -499,8 +510,9 @@ impl DigestBuild {
         1
     }
 
-    /// Reads on in the table being read, for up to `room` units.
-    fn walk_step(&mut self, doc: &Document, room: usize) -> DigestWork {
+    /// Reads on in the table being read, for up to `room` units; `fresh` when
+    /// the step has spent none yet.
+    fn walk_step(&mut self, doc: &Document, room: usize, fresh: bool) -> DigestWork {
         use reprise_doc::TableRole;
         let mut work = DigestWork::default();
         let Some(mut walk) = self.walk.take() else {
@@ -523,6 +535,7 @@ impl DigestBuild {
                 units: room,
                 blocks: room,
                 host_bytes: MAX_HOST_BYTES,
+                fresh,
             },
             &mut out,
         );

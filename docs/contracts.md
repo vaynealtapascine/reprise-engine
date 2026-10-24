@@ -961,7 +961,10 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
   Compatible newer packages return `bindings.read-only`; the facade currently
   cannot lay out the core's `DocumentAt` view and never exposes it as editable.
 - Layout jobs are owned, single-threaded continuations of the same incremental
-  coordinator. Each `step(session, budget)` charges at most its explicit budget,
+  coordinator. Each `step(session, budget)` charges at most its explicit budget
+  (the one exception is the atomic decode of a running story's flow host, which
+  the step that runs it charges in full, at most 5 units, so at most 4 over; see
+  "Section additions", Scheduling),
   may stop early for the viewport and returns pass, coverage, completeness,
   settled/outside-document flags and work counters. Zero is a checked no-op.
   Partial pages are available only inside advertised coverage. Navigation,
@@ -1235,6 +1238,26 @@ serialise byte-identically.
     against the blocks of the story's digest only, a unit at a time (a
     preparation stage or a composer call each), and the story's memo is keyed
     by everything the check reads.
+
+    **Maximum atomic work.** Every unit is bounded by a constant of the
+    engine's limits except one, whose bound is stated here so that a host of
+    this contract (frames included) takes it knowingly: the **decode of a flow
+    host's text**, which cannot be split without making the CRDT layer's flow
+    reading incremental. It is one atomic unit: at most `MAX_HOST_BYTES`
+    (1,060,864 bytes: 1 MiB of text and the three-byte break marker of each of
+    4,096 blocks), alone in its look-ahead unit with only the host's first block
+    (a unit that has read anything else first stops in front of such a host,
+    and the next unit, which opens with it, decodes it), charged in full by the
+    step that runs it, at most **5 units** (`Step.used`, `StepWork.units`).
+    That is the only unit that may take a step past its budget: a step that
+    starts it with a unit of budget left charges at most 4 over (a budget of 1
+    still charges up to 5). No debt is carried into later calls.
+    Cancellation and staleness are observed before and after the step, never
+    inside the decode. A host with more text is not decoded at all: the story
+    is cut in front of it and reported clipped. That cutoff depends on how the
+    text is stored (paragraphs sharing a physical host), not on its content,
+    and is not a semantic boundary: a consumer takes what the digest holds and
+    what it reports omitted.
 -   **Navigation** (`reprise-edit`).
     -   `Navigator::hit_placed(point) -> Option<PlacedHit>`, where `PlacedHit`
         is `Body(Hit)` or `Running { position, instance: RegionInstance }`.

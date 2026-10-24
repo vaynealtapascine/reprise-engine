@@ -105,6 +105,10 @@ effects. Rejected transactions preserve authored state and undo history.
 
 A job charges one core work unit at a time: a paragraph/table or a staged pass.
 A unit can be substantial; `step(64)` is a count budget, not a millisecond promise.
+A step charges at most its budget, except when it runs the unit that decodes a
+long flow host of a running story: an atomic unit of at most 1,060,864 bytes of
+text, charged whole by that step (at most 5 units, so `used` may exceed the
+budget by 4; sections §11).
 Zero budget is a checked no-op; budgets above 100,000 are rejected. The job may
 yield early as soon as viewport demand is covered. `LayoutProgress` reports the
 producing pass, covered pages, complete/settled flags, outside-document demand,

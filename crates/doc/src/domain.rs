@@ -62,14 +62,25 @@ pub struct ReadLimits {
     /// it stands for with it. A flow host also costs its text in
     /// [`DECODE_UNIT_BYTES`] to decode, and one for each further paragraph or
     /// embedded node it stands for. So an ordinary paragraph is one unit, and
-    /// a host of a thousand paragraphs a thousand. A call does at least one
-    /// thing, so a decode dearer than `units` runs alone and overspends.
+    /// a host of a thousand paragraphs a thousand. A decode dearer than `units`
+    /// is the one thing that may cost more, and only for a [`fresh`] call: it
+    /// runs alone (with the first block of the host) and overspends.
+    ///
+    /// [`fresh`]: ReadLimits::fresh
     pub units: usize,
     /// Most blocks a call appends.
     pub blocks: usize,
     /// Longest flow host text, in bytes, a call decodes. A longer host is not
     /// read: the call stops in front of it and says so.
     pub host_bytes: usize,
+    /// Whether the call opens the piece of work `units` is the allowance of:
+    /// none of it is spent yet. A caller that reads its allowance in several
+    /// calls sets it on the first only. A call that is not fresh never decodes
+    /// a host dearer than `units`: it stops in front of the host
+    /// ([`ReadStep::deferred`]), possibly having done nothing, for a fresh
+    /// call to decode it alone, so a decode never shares its piece of work with
+    /// what came before it.
+    pub fresh: bool,
 }
 
 impl ReadLimits {
@@ -79,6 +90,7 @@ impl ReadLimits {
             units: usize::MAX,
             blocks: usize::MAX,
             host_bytes: usize::MAX,
+            fresh: true,
         }
     }
 }
@@ -97,7 +109,8 @@ pub struct ReadStep {
     /// Blocks appended.
     pub blocks: usize,
     /// The call stopped in front of a host whose decoding costs more than the
-    /// units it had left. A call again decodes it, alone, and overspends.
+    /// units it had left. A [`fresh`](ReadLimits::fresh) call decodes it,
+    /// alone, and overspends.
     pub deferred: bool,
     /// Bytes of host text decoded.
     pub decoded: usize,
@@ -294,9 +307,10 @@ impl Document {
                         read.refused = true;
                         return read;
                     }
-                    if read.units > 0 && read.units.saturating_add(cost) > want {
-                        // Dearer than what is left of this call: the next
-                        // call, which has all of its units, decodes it.
+                    if (read.units > 0 || !limits.fresh) && read.units.saturating_add(cost) > want {
+                        // Dearer than what is left of this call, or of the
+                        // piece of work it is in: a call that opens one, with
+                        // all of its units, decodes it.
                         reader.todo.push(Todo::Node(node, depth));
                         read.deferred = true;
                         return read;

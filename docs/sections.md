@@ -1015,7 +1015,10 @@ promised unconditionally.
 -   one running instance: per block, then commit.
 
 No unit contains a whole story or a whole search. A budget of 1 still makes
-progress. Cancellation and staleness gates are unchanged.
+progress. Cancellation and staleness gates are unchanged. There is one
+exception, and it is bounded and stated: the decode of a flow host's text, an
+atomic look-ahead unit of at most 1,060,864 bytes, charged in full by the step
+that runs it, at most 5 units (below, "The one atomic unit").
 
 **As built (S7c): the look-ahead.** A page is made by one unit, and its
 regions are made by units of their own *before* it (`flow/ahead.rs`), the way
@@ -1045,14 +1048,46 @@ makes it, and the unit that makes the page only finds it in the memo.
     with it, so an ordinary paragraph is one unit. A flow host (a paragraph
     split by breaks, with blocks embedded in it) is read through a cursor that
     keeps its place between steps: each further paragraph or embedded node is a
-    unit, and decoding its text costs one unit for each 4 KiB. A host is decoded
-    to the end in one go, which can cost more than the step has. Such a step
-    does nothing else, and the steps after it pay the difference off before the
-    digest reads on, so what is charged is what the work comes to. A host with
-    more text than a story could ever read whole (1 MiB and the break markers of
-    4,096 blocks) is not decoded: the story is cut in front of it, as it is in
-    front of a table that does not fit. The physical children are not gathered
-    up front either; a step looks at the next ones by index.
+    unit, and decoding its text costs one unit for each 4 KiB. The physical
+    children are not gathered up front; a step looks at the next ones by index.
+
+    **The one atomic unit.** Decoding a host's text is linear in it and cannot
+    be split without making the CRDT layer's flow reading incremental, so it is
+    done whole, and it is the one kind of unit that may cost more than a step's
+    units, by the following rule and no other:
+
+    -   One host decode is a single atomic unit, a look-ahead unit of its own.
+        A unit that is to decode a host dearer than what it has left stops in
+        front of it, and the next unit, which opens with it, decodes it: the
+        decode, the host's first block, nothing else. A unit that has read
+        anything has spent some of its allowance, and does not decode such a
+        host either, wherever it meets it (a block embedded in the flow of the
+        paragraph in front of it, in a table cell or at the top of the story):
+        it stops in front of it as well.
+    -   It decodes at most `MAX_HOST_BYTES`, 1,060,864 bytes (1 MiB and the
+        three-byte break marker of each of 4,096 blocks), which is 259 units of
+        reading, **5 look-ahead units of 64**. A job step that starts it with a
+        unit of its budget left charges all of it, so `Step.used` exceeds the
+        budget, for that step alone, by at most 4 (a budget of 1 still charges
+        up to 5: it makes progress, it is not refused).
+    -   The step that runs it reports its true cost in that step (`Step.used`,
+        `StepWork.units`, `region_units`). No debt is carried into later calls:
+        there is no payback, and the steps after it read on at once.
+    -   Cancellation and staleness are observed before the step and after it,
+        never inside the decode. A frontier that moves under it is found by the
+        step's final gate, which discards the result.
+
+    **What is left out.** A host with more text than that is not decoded at all:
+    the story is cut in front of it, as it is in front of a table that does not
+    fit, and the story is reported clipped (`layout.running-clipped`). The
+    cutoff depends on how the text is stored (how many paragraphs share a
+    physical host), not on the content: a host over the limit is left out whole,
+    even when its first paragraphs would have fitted the story, where reading
+    the same text as separate blocks would have kept the ones that fit. It is a
+    guard on the work of one unit, not a semantic boundary of the content, and a
+    consumer of the digest (frames, the chain look-ahead below) must take what
+    the digest holds and what it reports omitted, and not assume a cutoff of its
+    own.
 -   **Keep-with-next look-ahead.** A paragraph that keeps with the next checks
     a chain of up to 32 following blocks against the rest of its frame. In a
     running story the chain is the blocks of the story's digest after the

@@ -2,13 +2,13 @@
 //! budget (sections §11, "Scheduling"). A page's regions used to be composed
 //! inside the unit that made the page, and the first page's inside
 //! `LayoutJob::new`, so a budget of 1 bounded neither.
-use super::compose::{DIGEST_CHUNK, MAX_ENTRIES};
+use super::compose::{DIGEST_CHUNK, MAX_DECODE_STEP_UNITS, MAX_ENTRIES};
 use super::field_tests::{P, story_of};
 use super::layout_tests::*;
 use crate::incremental::{JobError, LayoutSession, Pass, StepWork, Viewport, WorkCounters};
 use crate::{Engine, LayoutSnapshot, PageKind};
 use reprise_doc::sections::BreakKind;
-use reprise_doc::{Document, NodeId};
+use reprise_doc::{DECODE_UNIT_BYTES, Document, NodeId};
 use serde_json::json;
 
 /// What a step charged, what it did, and whether it ran the region
@@ -46,8 +46,9 @@ fn stepped_on(
     panic!("a job of budget {budget} did not finish");
 }
 
-/// Every step charged at most the budget and did a bounded amount of region
-/// work, and the flow never made a composition itself.
+/// Every step charged at most the budget (but for the atomic decode of a long
+/// host) and did a bounded amount of region work, and the flow never made a
+/// composition itself.
 fn assert_bounded(works: &[Work], counters: &WorkCounters, budget: usize) {
     assert_bounded_steps(works, budget);
     assert_eq!(counters.running_inline, 0, "{counters:?}");
@@ -57,7 +58,33 @@ fn assert_bounded(works: &[Work], counters: &WorkCounters, budget: usize) {
 /// regions inline (see the hostile tests at the end) still holds to.
 fn assert_bounded_steps(works: &[Work], budget: usize) {
     for (i, (used, w, allocating)) in works.iter().enumerate() {
-        assert!(*used <= budget.max(1), "step {i} charged {used}: {w:?}");
+        // A step charges at most its budget, but for the unit that decodes a
+        // long flow host: atomic, charged what it cost, at most
+        // `MAX_DECODE_STEP_UNITS`. A step that reaches it with a unit of budget
+        // left charges up to four more than the budget (sections §11).
+        let decodes = w.digest_decoded >= (DIGEST_CHUNK - 1) * DECODE_UNIT_BYTES;
+        let over = if decodes {
+            MAX_DECODE_STEP_UNITS - 1
+        } else {
+            0
+        };
+        assert!(
+            *used <= budget.max(1).saturating_add(over),
+            "step {i} charged {used}: {w:?}"
+        );
+        if decodes && budget == 1 {
+            // And nothing else ran in the unit that decoded.
+            assert_eq!(
+                (
+                    w.digest_inspected,
+                    w.composer_calls,
+                    w.adapter_requests,
+                    w.pages_made
+                ),
+                (0, 0, 0, 0),
+                "step {i}: {w:?}"
+            );
+        }
         if budget == 1 {
             assert!(w.region_blocks <= 1, "step {i}: {w:?}");
             assert!(w.digest_blocks <= DIGEST_CHUNK, "step {i}: {w:?}");

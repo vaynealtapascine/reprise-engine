@@ -196,9 +196,12 @@ pub struct StepWork {
     /// Child IDs a digest looked at, kept or not: the enumeration work, which
     /// is bounded by the story's read budget, not by the story's size.
     pub digest_inspected: usize,
-    /// Bytes of flow-host text a digest decoded: a host is decoded to the end
-    /// in one go, so this is where a digest unit can cost more than its share
-    /// (the digest then pays the overspend back in the units after it).
+    /// Bytes of flow-host text a digest decoded. A host is decoded to the end
+    /// in one go, by a look-ahead unit of its own that does nothing else, at
+    /// most `MAX_HOST_BYTES` (1,060,864) bytes of it; the step that runs it
+    /// charges what the decode cost (at most 5 units), which is the one case of
+    /// a step charging more than its budget (by at most 4). Nothing is paid
+    /// back later.
     pub digest_decoded: usize,
 }
 impl StepWork {
@@ -1268,6 +1271,10 @@ impl PartialLayout<'_> {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Step {
+    /// The units charged: at most the budget, except by a step that runs the
+    /// decode of a long flow host of a running story's digest, which is one
+    /// atomic unit and charges its true cost (at most 5 units, so at most 4
+    /// over; see `StepWork::digest_decoded` and sections §11).
     pub used: usize,
     pub pass: Pass,
     pub viewport_ready: bool,

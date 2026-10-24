@@ -19,6 +19,7 @@ fn limits(units: usize) -> ReadLimits {
         units,
         blocks: usize::MAX,
         host_bytes: usize::MAX,
+        fresh: true,
     }
 }
 
@@ -200,6 +201,7 @@ fn a_block_limit_stops_a_call_in_the_middle_of_a_host() {
         units: usize::MAX,
         blocks: 3,
         host_bytes: usize::MAX,
+        fresh: true,
     };
     let read = doc.read_children(&mut reader, limits, &mut out);
     assert_eq!((read.blocks, out.len(), read.done), (3, 3, false));
@@ -223,6 +225,7 @@ fn a_host_longer_than_the_limit_is_refused_and_one_dearer_than_the_call_runs_alo
         units: usize::MAX,
         blocks: usize::MAX,
         host_bytes: 2 * DECODE_UNIT_BYTES,
+        fresh: true,
     };
     let read = doc.read_children(&mut reader, cap, &mut out);
     assert!(read.refused && !read.done, "{read:?}");
@@ -245,6 +248,35 @@ fn a_host_longer_than_the_limit_is_refused_and_one_dearer_than_the_call_runs_alo
     assert!(read.units > 4, "the decode alone is {} units", read.units);
     assert_eq!(read.units, text.len() / DECODE_UNIT_BYTES);
     assert_eq!(out, [small, large]);
+}
+
+#[test]
+fn a_call_that_is_not_fresh_leaves_a_dear_host_to_one_that_is() {
+    let doc = Document::new(1).unwrap();
+    let text = "y".repeat(10 * DECODE_UNIT_BYTES);
+    let large = doc.append_block(BlockKind::Paragraph, "", &text).unwrap();
+    doc.commit();
+    let mut reader = doc.top_reader(Domain::Body);
+    let mut out = Vec::new();
+    // The units of a call that is part of a piece of work with others spent.
+    let rest = ReadLimits {
+        fresh: false,
+        ..limits(4)
+    };
+    let read = doc.read_children(&mut reader, rest, &mut out);
+    assert!(read.deferred && !read.done, "{read:?}");
+    assert_eq!((read.looked, read.decoded, out.len()), (1, 0, 0));
+    // In front of the host already, a call that is not fresh does nothing at
+    // all, however often it is made: it never decodes the host.
+    for _ in 0..3 {
+        let read = doc.read_children(&mut reader, rest, &mut out);
+        assert!(read.deferred && !read.done, "{read:?}");
+        assert_eq!((read.looked, read.units, read.decoded), (0, 0, 0));
+    }
+    let read = doc.read_children(&mut reader, limits(4), &mut out);
+    assert_eq!(read.decoded, text.len());
+    assert_eq!(read.units, text.len() / DECODE_UNIT_BYTES);
+    assert_eq!(out, [large]);
 }
 
 /// A small deterministic generator, so the documents are the same every run.

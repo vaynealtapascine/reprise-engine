@@ -129,8 +129,10 @@ viewports finish the document and advertise `outside_document`; extreme page
 indices saturate rather than overflow.
 
 A `LayoutJob` owns its cursor, the block in progress, per-pass snapshot and
-region history. A step uses at most its explicit unit budget; the units are
-listed under [Work units and the budget](#work-units-and-the-budget). A unit is
+region history. A step uses at most its explicit unit budget, with one bounded
+exception (the atomic decode of a running story's flow host, at most 5 units,
+charged whole by the step that runs it: sections §11, "The one atomic unit"); the units
+are listed under [Work units and the budget](#work-units-and-the-budget). A unit is
 a bounded amount of counted work, not a promise about elapsed time. Startup
 enumerates the content tree; viewport-first here bounds expensive layout units,
 not the cost of reading authored topology.

@@ -593,3 +593,60 @@ fn editing_a_block_only_the_keep_lookahead_reads_re_lays_out_what_it_keeps_with(
         assert_eq!(cached, engine.layout(&doc), "keep_together {keep_together}");
     }
 }
+
+/// Replaces Astra's `a_host_decode_must_fit_the_current_step_instead_of_
+/// borrowing_future_steps`, which required a budget-one step never to decode
+/// more than 64 units of text. The orchestrator ruled the decode of a host an
+/// atomic unit instead (it cannot be split without making the CRDT layer's flow
+/// reading incremental): at most `MAX_HOST_BYTES`, alone in its step, charged
+/// in full in that step. The probe's fixture is kept; its assertions are these.
+#[test]
+fn a_host_decode_is_one_bounded_atomic_unit_that_charges_its_cost_in_its_step() {
+    const MAX_HOST_BYTES: usize = (1 << 20) + 3 * 4096;
+    const READING_UNIT_BYTES: usize = 4096;
+    const READING_UNITS_PER_STEP: usize = 64;
+    let (engine, doc) = setup();
+    let s = doc
+        .create_story(&[NewBlock::new(
+            BlockKind::Paragraph,
+            "s",
+            &"z".repeat(1_000_000),
+        )])
+        .unwrap();
+    bind_header(&doc, s);
+    block(&doc, "body");
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let mut job = session.start(&doc, Viewport::Pages(0..1));
+    let mut decodes = 0;
+    for i in 0..8 {
+        let step = job.step(1).unwrap();
+        let w = job.step_work();
+        if w.digest_decoded == 0 {
+            // Every other step is the one unit it was asked for.
+            assert_eq!((step.used, w.units), (1, 1), "step {i}: {w:?}");
+            continue;
+        }
+        decodes += 1;
+        assert!(w.digest_decoded <= MAX_HOST_BYTES, "step {i}: {w:?}");
+        // Charged in its own step, whole: no debt left for the steps after it.
+        let cost = (w.digest_decoded / READING_UNIT_BYTES).div_ceil(READING_UNITS_PER_STEP);
+        assert!(cost > 1 && cost <= 5, "step {i}: {cost} units, {w:?}");
+        assert_eq!((step.used, w.units), (cost, cost), "step {i}: {w:?}");
+        // And nothing else ran in it: the host's block, no other look, no
+        // composition, shaping or page.
+        assert_eq!(
+            (
+                w.digest_blocks,
+                w.digest_inspected,
+                w.region_blocks,
+                w.composer_calls,
+                w.adapter_requests,
+                w.pages_made,
+            ),
+            (1, 0, 0, 0, 0, 0),
+            "step {i}: {w:?}"
+        );
+    }
+    assert_eq!(decodes, 1, "the host is decoded once");
+}
