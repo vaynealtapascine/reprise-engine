@@ -6,10 +6,14 @@
 //! see `docs/incremental.md` ("Why finer steps preserve the reference
 //! result"). One unit is at most one preparation stage followed, when no
 //! preparation is pending, by one iteration of the composing loop: one composer
-//! call or one move to the next frame.
+//! call or one move to the next frame. A keep-with-next chain is checked a
+//! step at a time too (`keeps.rs`): the paragraph holds what it has composed
+//! while each preparation stage and each composition of the blocks it keeps
+//! with is a unit of its own.
 
 use std::sync::Arc;
 
+use super::keeps::{ChainRun, ChainStep};
 use super::stage::{self, Begin, Finished, Staged};
 use super::*;
 use crate::incremental::{FlowKey, PrepareMiss, PrepareStart};
@@ -41,6 +45,18 @@ pub(crate) struct Paragraph {
     /// `layout.indent-clamped` and `layout.keep-unsatisfied` go out once.
     indent_reported: bool,
     keep_reported: bool,
+    /// The composing iteration set aside while its keep-with-next chain is
+    /// checked.
+    held: Option<Box<Held>>,
+}
+
+/// What an iteration of the composing loop has when its chain check is not
+/// done in one unit: the check, and the composition it was asked about.
+#[derive(Clone)]
+struct Held {
+    composed: Composed,
+    notes: Vec<Diagnostic>,
+    chain: ChainRun,
 }
 
 /// Which preparation is running: the block's first, or a retry against a
@@ -51,10 +67,27 @@ enum After {
     Retry,
 }
 
+/// A long preparation in progress: itemised, with shaping requests pending.
 #[derive(Clone)]
-struct Preparing {
+pub(super) struct Preparing {
     staged: Box<Staged>,
     miss: Option<PrepareMiss>,
+}
+
+/// How starting a preparation went.
+pub(super) enum Started {
+    /// Done, memo bookkeeping included: the value and its notes.
+    Ready(Option<Prepared>, Vec<Diagnostic>),
+    /// Shaping requests remain.
+    Long(Preparing),
+}
+
+/// What a stage of a long preparation came to.
+pub(super) enum Advance {
+    /// Requests remain; this many units were charged.
+    More(Preparing, usize),
+    /// Done, memo bookkeeping included: the value and its notes.
+    Ready(Option<Prepared>, Vec<Diagnostic>),
 }
 
 impl Paragraph {
@@ -82,6 +115,7 @@ impl Paragraph {
             overflowed: false,
             indent_reported: false,
             keep_reported: false,
+            held: None,
         }
     }
     pub(crate) fn node(&self) -> NodeId {
@@ -160,7 +194,7 @@ impl Flow<'_> {
             }
         }
         if p.preparing.is_none() && !p.finished {
-            self.iteration(doc, p);
+            used = used.max(self.iteration(doc, p, allowance));
         }
         if p.memo.is_some() {
             p.reads = self.take_reads();
@@ -172,61 +206,70 @@ impl Flow<'_> {
     /// of at most `SHAPE_CHUNK_BYTES` finishes here; a longer one is left
     /// itemised, with its shaping requests pending.
     fn start_preparation(&mut self, doc: &Document, p: &mut Paragraph) {
+        // Speculation joins the first preparation of a block only.
+        match self.begin_preparation(doc, p.node, &p.ctx, p.after == After::Initial) {
+            Started::Ready(value, notes) => self.prepared(p, value, notes),
+            Started::Long(preparing) => p.preparing = Some(preparing),
+        }
+    }
+
+    /// Starts preparing `node` for `ctx`, whoever asks (a paragraph for itself,
+    /// or the check of a keep-with-next chain for a block it keeps with).
+    /// `speculate` lets a short paragraph take its short neighbours along.
+    pub(super) fn begin_preparation(
+        &mut self,
+        doc: &Document,
+        node: NodeId,
+        ctx: &ResolutionContext,
+        speculate: bool,
+    ) -> Started {
         let engine = self.engine;
         let mut miss = None;
         if let Some(e) = self.evaluation {
-            match e.prepare_start(engine, doc, p.node, &p.ctx) {
-                PrepareStart::Hit(value, notes) => {
-                    self.prepared(p, value, notes);
-                    return;
-                }
+            match e.prepare_start(engine, doc, node, ctx) {
+                PrepareStart::Hit(value, notes) => return Started::Ready(value, notes),
                 PrepareStart::Untracked => {
                     let mut notes = Vec::new();
-                    let value = prepare(engine, doc, p.node, &p.ctx, &mut notes);
-                    self.prepared(p, value, notes);
-                    return;
+                    let value = prepare(engine, doc, node, ctx, &mut notes);
+                    return Started::Ready(value, notes);
                 }
                 PrepareStart::Miss(m) => miss = Some(m),
             }
         }
-        let staged = match stage::begin(engine, doc, p.node, &p.ctx, self.evaluation) {
+        let staged = match stage::begin(engine, doc, node, ctx, self.evaluation) {
             Begin::Done(value, notes) => {
-                self.end_preparation(
-                    p,
-                    miss,
-                    Finished {
-                        value: value.map(|p| *p),
-                        notes,
-                        itemized: false,
-                    },
-                );
-                return;
+                let finished = Finished {
+                    value: value.map(|p| *p),
+                    notes,
+                    itemized: false,
+                };
+                let (value, notes) = self.end_staged(miss, finished);
+                return Started::Ready(value, notes);
             }
             Begin::Shape(staged) => staged,
         };
         if staged.len() <= SHAPE_CHUNK_BYTES {
             let finished = match (self.evaluation, miss.as_ref()) {
-                // Speculation joins the first preparation of a block only.
-                (Some(e), Some(m)) if p.after == After::Initial => e.prepare_ahead(
+                (Some(e), Some(m)) if speculate => e.prepare_ahead(
                     engine,
                     doc,
                     m,
                     *staged,
-                    &p.ctx,
+                    ctx,
                     self.upcoming,
                     &self.region_owners,
                 ),
                 _ => self.run_staged(*staged),
             };
-            self.end_preparation(p, miss, finished);
-            return;
+            let (value, notes) = self.end_staged(miss, finished);
+            return Started::Ready(value, notes);
         }
         let mut staged = staged;
         staged.itemize(&engine.fonts);
         if let Some(e) = self.evaluation {
             e.scanned(staged.len());
         }
-        p.preparing = Some(Preparing { staged, miss });
+        Started::Long(Preparing { staged, miss })
     }
 
     /// A short preparation, inline: every stage, with requests on workers.
@@ -246,13 +289,29 @@ impl Flow<'_> {
     /// The next stage of a long preparation: a batch of at most `allowance`
     /// shaping requests, or, once none remain, break analysis and assembly.
     fn advance_preparation(&mut self, p: &mut Paragraph, allowance: usize) -> usize {
-        let engine = self.engine;
-        let workers = self.workers();
-        let Some(preparing) = p.preparing.as_mut() else {
+        let Some(preparing) = p.preparing.take() else {
             return 1;
         };
-        if preparing.staged.remaining() > 0 {
-            let sizes = preparing.staged.shape(
+        match self.advance_staged(preparing, allowance) {
+            Advance::More(preparing, units) => {
+                p.preparing = Some(preparing);
+                units
+            }
+            Advance::Ready(value, notes) => {
+                self.prepared(p, value, notes);
+                1
+            }
+        }
+    }
+
+    /// As [`Self::advance_preparation`], for a preparation held by whoever
+    /// started it.
+    pub(super) fn advance_staged(&mut self, preparing: Preparing, allowance: usize) -> Advance {
+        let engine = self.engine;
+        let workers = self.workers();
+        let Preparing { mut staged, miss } = preparing;
+        if staged.remaining() > 0 {
+            let sizes = staged.shape(
                 &engine.fonts,
                 engine.shaper.as_ref(),
                 &*workers,
@@ -262,11 +321,8 @@ impl Flow<'_> {
             if let Some(e) = self.evaluation {
                 e.shaped(sizes);
             }
-            return count.max(1);
+            return Advance::More(Preparing { staged, miss }, count.max(1));
         }
-        let Some(Preparing { mut staged, miss }) = p.preparing.take() else {
-            return 1;
-        };
         staged.analyse_breaks_if_shapeable();
         if let Some(e) = self.evaluation
             && staged.has_breaks()
@@ -274,15 +330,20 @@ impl Flow<'_> {
             e.scanned(staged.len());
         }
         let finished = staged.finish(engine, self.evaluation);
-        self.end_preparation(p, miss, finished);
-        1
+        let (value, notes) = self.end_staged(miss, finished);
+        Advance::Ready(value, notes)
     }
 
-    fn end_preparation(&mut self, p: &mut Paragraph, miss: Option<PrepareMiss>, f: Finished) {
+    /// The memo's bookkeeping when a preparation ends.
+    fn end_staged(
+        &mut self,
+        miss: Option<PrepareMiss>,
+        f: Finished,
+    ) -> (Option<Prepared>, Vec<Diagnostic>) {
         if let (Some(e), Some(miss)) = (self.evaluation, miss) {
             e.prepare_end(miss, &f);
         }
-        self.prepared(p, f.value, f.notes);
+        (f.value, f.notes)
     }
 
     /// What the monolithic loop did right after each `prepare_cached` call.
@@ -309,19 +370,21 @@ impl Flow<'_> {
         p.prepared = Some(prepared);
     }
 
-    /// One iteration of the composing loop.
-    fn iteration(&mut self, doc: &Document, p: &mut Paragraph) {
+    /// One iteration of the composing loop. Returns the units it charged (at
+    /// least 1): more than that only for a batch of shaping requests, which a
+    /// keep-with-next chain check can run (`allowance` is how many it may).
+    fn iteration(&mut self, doc: &Document, p: &mut Paragraph, allowance: usize) -> usize {
         let mode = self.template.frames[self.thread[self.pos]].writing_mode;
         if p.ctx.writing_mode != mode {
             p.ctx.writing_mode = mode;
             self.start_preparation(doc, p);
-            return;
+            return 1;
         }
         let engine = self.engine;
         let subject = Subject::Node(p.node);
         let Some(prepared) = p.prepared.as_ref() else {
             self.finish_paragraph(p);
-            return;
+            return 1;
         };
         let index = self.frame_index();
         let fill = self.fills[index];
@@ -349,48 +412,57 @@ impl Flow<'_> {
         if image && y > Length::ZERO && (y > depth || depth - y < prepared.line_height()) {
             if !self.advance() {
                 self.end_loop(p);
-                return;
+                return 1;
             }
             self.retry(doc, p);
-            return;
+            return 1;
         }
         let inner = room.inner();
         let bounded = Bounded { inner, depth };
         let unbounded =
             (prepared.line_height() > self.max_depth || p.forced) && depth > Length::ZERO;
         let geometry: &dyn GeometryProvider = if unbounded { inner } else { &bounded };
-        let mut composition_notes = Vec::new();
-        let mut composed = prepared.compose(
-            engine,
-            geometry,
-            index,
-            p.start,
-            y,
-            &subject,
-            &mut composition_notes,
-            self.evaluation,
-            &self.fields(),
-        );
-        if composed.lines.is_empty() {
-            self.snapshot.diagnostics.extend(composition_notes);
-            // Nothing fit here. That is ordinary for a frame that is
-            // already partly full. A whole page of empty frames that can't
-            // take a line means the geometry will never allow one: place it
-            // anyway, overflowing.
-            p.stalls += usize::from(fill.empty && depth > Length::ZERO);
-            if p.stalls > self.thread.len() && !p.forced {
-                p.forced = true;
-            } else if !self.advance() {
-                self.end_loop(p);
-                return;
+        // An iteration whose chain check was not done in its unit comes back
+        // with its composition, which nothing since has changed: it is not made
+        // twice, so a unit holds one composer call at most.
+        let (mut composed, mut composition_notes, resumed) = match p.held.take() {
+            Some(held) => (held.composed, held.notes, Some(held.chain)),
+            None => {
+                let mut composition_notes = Vec::new();
+                let composed = prepared.compose(
+                    engine,
+                    geometry,
+                    index,
+                    p.start,
+                    y,
+                    &subject,
+                    &mut composition_notes,
+                    self.evaluation,
+                    &self.fields(),
+                );
+                if composed.lines.is_empty() {
+                    self.snapshot.diagnostics.extend(composition_notes);
+                    // Nothing fit here. That is ordinary for a frame that is
+                    // already partly full. A whole page of empty frames that can't
+                    // take a line means the geometry will never allow one: place it
+                    // anyway, overflowing.
+                    p.stalls += usize::from(fill.empty && depth > Length::ZERO);
+                    if p.stalls > self.thread.len() && !p.forced {
+                        p.forced = true;
+                    } else if !self.advance() {
+                        self.end_loop(p);
+                        return 1;
+                    }
+                    if p.lines.is_empty() {
+                        // No line has been placed yet: resolve against the new
+                        // candidate starting frame, discarding provisional notes.
+                        self.retry(doc, p);
+                    }
+                    return 1;
+                }
+                (composed, composition_notes, None)
             }
-            if p.lines.is_empty() {
-                // No line has been placed yet: resolve against the new
-                // candidate starting frame, discarding provisional notes.
-                self.retry(doc, p);
-            }
-            return;
-        }
+        };
         // Keeps, widows and orphans: bounded lookahead, never undoing placed
         // lines. Moving helps only when the frame holds something that is
         // not a keep-with-next chain into this paragraph; the next frame is
@@ -468,18 +540,26 @@ impl Flow<'_> {
                     }
                 }
                 None if first && style.keep_with_next => {
-                    match self.chain_fits(
-                        doc,
-                        p.node,
-                        style.space_after,
-                        composed.block_end,
-                        index,
-                        frame,
-                        &p.ctx,
-                    ) {
-                        Chain::Fits => {}
-                        Chain::Fails => refuse(&mut move_on, &mut unsatisfied),
-                        Chain::TooLong => unsatisfied = true,
+                    // A chain check is a step at a time. This iteration has just
+                    // composed, so it starts the check and leaves the first piece
+                    // of its work to the next unit; the iteration that comes back
+                    // for the check has done nothing yet, and does one piece.
+                    let fresh = resumed.is_some();
+                    let mut run = resumed.unwrap_or_else(|| {
+                        self.chain_begin(doc, p.node, style.space_after, composed.block_end)
+                    });
+                    match self.chain_step(doc, &mut run, index, frame, &p.ctx, allowance, fresh) {
+                        ChainStep::Done(Chain::Fits) => {}
+                        ChainStep::Done(Chain::Fails) => refuse(&mut move_on, &mut unsatisfied),
+                        ChainStep::Done(Chain::TooLong) => unsatisfied = true,
+                        ChainStep::Working(units) => {
+                            p.held = Some(Box::new(Held {
+                                composed,
+                                notes: composition_notes,
+                                chain: run,
+                            }));
+                            return units;
+                        }
                     }
                 }
                 None => {}
@@ -491,10 +571,10 @@ impl Flow<'_> {
             // As if nothing fit: the next frame is the candidate start.
             if !self.advance() {
                 self.end_loop(p);
-                return;
+                return 1;
             }
             self.retry(doc, p);
-            return;
+            return 1;
         }
         if unsatisfied && !p.keep_reported {
             p.keep_reported = true;
@@ -545,6 +625,7 @@ impl Flow<'_> {
                 }
             }
         }
+        1
     }
 
     /// Re-prepares against the frame the flow just moved to.
@@ -580,6 +661,7 @@ impl Flow<'_> {
     fn finish_paragraph(&mut self, p: &mut Paragraph) {
         p.finished = true;
         p.preparing = None;
+        p.held = None;
         if let (Some(evaluation), Some((key, mark))) = (self.evaluation, p.memo.take()) {
             let delta = self.delta(mark);
             let reads = self.take_reads();

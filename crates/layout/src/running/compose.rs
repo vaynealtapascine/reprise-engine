@@ -98,6 +98,11 @@ pub(crate) struct Digest {
 }
 
 impl Digest {
+    /// The blocks the story is composed from, in order: the only ones the
+    /// composition may read, lookahead included.
+    pub(crate) fn nodes(&self) -> &[NodeId] {
+        &self.nodes
+    }
     /// Whether two digests hold the same inputs. Reads all of both.
     fn same_as(&self, other: &Digest) -> bool {
         self.nodes == other.nodes && self.omitted == other.omitted && self.items == other.items
@@ -963,7 +968,8 @@ impl StoryRun {
             pages: want.pages,
             label: want.label.clone(),
             trace: Some(trace.clone()),
-        });
+        })
+        .with_scope(digest.clone());
         let clipped = digest.omitted;
         Self {
             key: Key::of(&digest, &want),

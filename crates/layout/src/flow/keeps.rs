@@ -6,9 +6,20 @@
 //! thrown away, so nothing it does reaches the snapshot except the decision.
 //! Trial preparations are cached by exact `(node, context)`, so the cache
 //! can't change output.
+//!
+//! The keep-with-next check is a machine ([`ChainRun`]): a stage of the
+//! preparation of a block it keeps with, and the composition of each, are
+//! steps of their own, which the paragraph's unit charges and which a job can
+//! suspend between. It looks only at the blocks it is given. For a running
+//! story those are the blocks of the story's digest, in its order (the
+//! cursor's `Keeps::scope`): a block the digest left out (past a read limit, or
+//! a host too long to decode) is not looked at, so it is not prepared, and
+//! everything the check reads of the blocks it does look at is in the digest
+//! the story's memo is keyed by.
 
 use std::sync::Arc;
 
+use super::paragraph::{Advance, Preparing, Started};
 use super::*;
 use crate::template::ResolvedFrame;
 
@@ -87,13 +98,18 @@ impl Flow<'_> {
         }
     }
 
-    /// The blocks after `node` in document order, built once per layout.
+    /// The blocks after `node` in document order, built once per layout. A
+    /// running story's are the blocks of its digest and no others (see the top
+    /// of this file).
     fn following(&mut self, doc: &Document, node: NodeId) -> Vec<NodeId> {
         let order = self
             .keeps
             .order
             .get_or_insert_with(|| {
-                let nodes = doc.top(self.domain.unwrap_or(reprise_doc::Domain::Body));
+                let nodes = match &self.keeps.scope {
+                    Some(scope) => scope.nodes().to_vec(),
+                    None => doc.top(self.domain.unwrap_or(reprise_doc::Domain::Body)),
+                };
                 let index = nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
                 Arc::new(BlockOrder { nodes, index })
             })
@@ -132,87 +148,133 @@ impl Flow<'_> {
         }
     }
 
-    /// `node` prepared against `ctx`, for a trial only: its diagnostics are
-    /// dropped.
-    fn trial(
-        &mut self,
-        doc: &Document,
-        node: NodeId,
-        ctx: &ResolutionContext,
-    ) -> Option<Arc<Prepared>> {
-        if let Some((_, _, p)) = self
-            .keeps
+    /// The preparation of `node` against `ctx` that an earlier trial kept.
+    fn trial_kept(&self, node: NodeId, ctx: &ResolutionContext) -> Option<Arc<Prepared>> {
+        self.keeps
             .trials
             .iter()
             .find(|(n, c, _)| *n == node && c == ctx)
-        {
-            return Some(p.clone());
-        }
-        let mut scratch = Vec::new();
-        let prepared = Arc::new(prepare_cached(
-            self.engine,
-            doc,
-            node,
-            ctx,
-            &mut scratch,
-            self.evaluation,
-        )?);
+            .map(|(_, _, p)| p.clone())
+    }
+
+    /// Keeps the preparation of `node` against `ctx` for later trials.
+    fn trial_keep(&mut self, node: NodeId, ctx: &ResolutionContext, prepared: Prepared) {
         if self.keeps.trials.len() >= MAX_TRIALS {
             self.keeps.trials.remove(0);
         }
         self.keeps
             .trials
-            .push((node, ctx.clone(), prepared.clone()));
-        Some(prepared)
+            .push((node, ctx.clone(), Arc::new(prepared)));
     }
 
-    /// Whether the blocks after `node`, which keeps with them, fit the rest
-    /// of the frame below `end` (the paragraph's block end): each
-    /// keep-with-next member whole, then the first other block's
-    /// `max(orphans, 1)` lines (all of them if it keeps together). Tables
-    /// and flowed images end a chain as fitting; annotations placed by
-    /// relations are skipped.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn chain_fits(
+    /// Starts the check of the chain `node` begins, once it is composed to end
+    /// at `end` (the paragraph's block end) with `after` space after it. No
+    /// work is done yet.
+    pub(crate) fn chain_begin(
         &mut self,
         doc: &Document,
         node: NodeId,
         after: Length,
         end: Length,
+    ) -> ChainRun {
+        ChainRun {
+            members: self.following(doc, node),
+            next: 0,
+            used: end + self.engine.flow.paragraph_spacing,
+            after,
+            preparing: None,
+        }
+    }
+
+    /// Goes on with the check of `run`, the chain after a paragraph in
+    /// snapshot frame `index` (template frame `frame`), whose members are
+    /// prepared against `ctx`: each fits the rest of the frame whole, then the
+    /// first other block's `max(orphans, 1)` lines (all of them if it keeps
+    /// together). Tables and flowed images end a chain as fitting; annotations
+    /// placed by relations are skipped.
+    ///
+    /// A step does at most one piece of work: a stage of a member's
+    /// preparation (a batch of at most `allowance` shaping requests, if it is
+    /// a long one), or one composition. It returns what it charged to go on
+    /// with the next in another unit. `fresh` says the unit has done no work
+    /// of its own yet; if it has, the step does none and says so. The trial
+    /// preparations are kept, so a member is prepared once however many
+    /// paragraphs ask. Reading only the members, which are the digest's for a
+    /// running story, it reads nothing a story's memo is not keyed by.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn chain_step(
+        &mut self,
+        doc: &Document,
+        run: &mut ChainRun,
         index: usize,
         frame: &ResolvedFrame,
         ctx: &ResolutionContext,
-    ) -> Chain {
+        allowance: usize,
+        mut fresh: bool,
+    ) -> ChainStep {
         let spacing = self.engine.flow.paragraph_spacing;
-        let mut used = end + spacing;
-        let mut after = after;
-        for (count, next) in self.following(doc, node).into_iter().enumerate() {
-            if count >= MAX_KEEP_CHAIN {
-                return Chain::TooLong;
+        loop {
+            let Some(&next) = run.members.get(run.next) else {
+                return ChainStep::Done(Chain::Fits);
+            };
+            if run.next >= MAX_KEEP_CHAIN {
+                return ChainStep::Done(Chain::TooLong);
             }
             if self.region_owners.contains(&next) {
+                run.next += 1;
                 continue;
             }
             match doc.table_role(next) {
                 Ok(None) => {}
-                _ => return Chain::Fits,
+                _ => return ChainStep::Done(Chain::Fits),
             }
             match doc.block(next).map(|b| b.kind) {
                 Ok(BlockKind::Paragraph) => {}
-                Ok(BlockKind::Annotation) => continue,
-                _ => return Chain::Fits,
+                Ok(BlockKind::Annotation) => {
+                    run.next += 1;
+                    continue;
+                }
+                _ => return ChainStep::Done(Chain::Fits),
             }
-            let Some(prepared) = self.trial(doc, next, ctx) else {
-                return Chain::Fits;
+            let Some(prepared) = self.trial_kept(next, ctx) else {
+                if !fresh {
+                    return ChainStep::Working(1);
+                }
+                let (units, value) = match run.preparing.take() {
+                    Some(preparing) => match self.advance_staged(preparing, allowance) {
+                        Advance::More(preparing, units) => {
+                            run.preparing = Some(preparing);
+                            return ChainStep::Working(units);
+                        }
+                        Advance::Ready(value, _) => (1, value),
+                    },
+                    None => match self.begin_preparation(doc, next, ctx, false) {
+                        Started::Long(preparing) => {
+                            run.preparing = Some(preparing);
+                            return ChainStep::Working(1);
+                        }
+                        Started::Ready(value, _) => (1, value),
+                    },
+                };
+                // The notes of a trial are dropped. A block that can't be
+                // prepared ends the chain as fitting.
+                let Some(prepared) = value else {
+                    return ChainStep::Done(Chain::Fits);
+                };
+                self.trial_keep(next, ctx, prepared);
+                return ChainStep::Working(units);
             };
             if prepared.image.is_some() {
-                return Chain::Fits;
+                return ChainStep::Done(Chain::Fits);
             }
             let style = &prepared.style;
-            let top = used + after.max(style.space_before);
+            let top = run.used + run.after.max(style.space_before);
             let room = self.room(index, frame, &prepared, 0);
             if top > room.depth {
-                return Chain::Fails;
+                return ChainStep::Done(Chain::Fails);
+            }
+            if !fresh {
+                return ChainStep::Working(1);
             }
             let mut scratch = Vec::new();
             let composed = prepared.compose(
@@ -226,27 +288,50 @@ impl Flow<'_> {
                 top,
                 &Subject::Node(next),
                 &mut scratch,
-                None,
+                self.evaluation,
                 &self.fields(),
             );
+            fresh = false;
             let lines = rows(&composed.lines).len();
             if lines == 0 {
-                return Chain::Fails;
+                return ChainStep::Done(Chain::Fails);
             }
             let whole = composed.rest.is_none();
             if (style.keep_with_next || style.keep_together) && !whole {
-                return Chain::Fails;
+                return ChainStep::Done(Chain::Fails);
             }
             if !style.keep_with_next {
-                return if whole || lines >= style.orphans() {
+                return ChainStep::Done(if whole || lines >= style.orphans() {
                     Chain::Fits
                 } else {
                     Chain::Fails
-                };
+                });
             }
-            used = composed.block_end + spacing;
-            after = style.space_after;
+            run.used = composed.block_end + spacing;
+            run.after = style.space_after;
+            run.next += 1;
         }
-        Chain::Fits
     }
+}
+
+/// A keep-with-next chain being checked, a step at a time (`Flow::chain_step`).
+#[derive(Clone)]
+pub(crate) struct ChainRun {
+    /// The blocks the chain can reach after the paragraph, in order.
+    members: Vec<NodeId>,
+    /// The member being looked at.
+    next: usize,
+    /// Where the next member would start in the frame, and the space after the
+    /// one before it.
+    used: Length,
+    after: Length,
+    /// The preparation of that member, if it is a long one in progress.
+    preparing: Option<Preparing>,
+}
+
+/// What a step of a chain check came to.
+pub(crate) enum ChainStep {
+    Done(Chain),
+    /// The check goes on in another unit; this many units were charged.
+    Working(usize),
 }

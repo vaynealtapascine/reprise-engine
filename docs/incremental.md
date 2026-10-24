@@ -182,6 +182,7 @@ number of worker threads or how they are scheduled. `C` is
 | --- | --- |
 | Block start | Flow-memo check; on a hit, replay the whole stored transition. A block whose text is at most `C` bytes is prepared in this unit (style, itemisation, shaping, breaks) and its first composer call runs here too. Annotations: preparation plus their single composer call. Malformed/table-invalid blocks: their diagnostic. |
 | Paragraph fragment | One composer call (one frame or skipped frame) and the conversion of the lines it returns |
+| Keep-with-next chain step | For a paragraph that keeps with the next, one piece of checking the blocks after it: starting a block's preparation (or, for a long one, a batch of at most the step's allowance of shaping requests, or its break analysis and assembly), or one composer call over it. The paragraph's composed lines wait for the verdict |
 | Long preparation, start | Style resolution and itemisation of a paragraph longer than `C` |
 | Shaping chunk | One adapter call over at most `C` bytes (or one grapheme cluster longer than `C`) |
 | Long preparation, end | UAX #14 break analysis and assembly of the shaped runs |

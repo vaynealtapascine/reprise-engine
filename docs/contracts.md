@@ -1230,7 +1230,11 @@ serialise byte-identically.
     clearing the memo, ends every earlier job, and `LayoutSession::resume`
     returns `JobError::Stale` for its continuation although the document and
     its revision are unchanged. A job that finds memo state it made gone ends
-    the same way. Neither ever composes a story inline in place of it.
+    the same way. Neither ever composes a story inline in place of it. A
+    paragraph of a running story that keeps with the next checks its chain
+    against the blocks of the story's digest only, a unit at a time (a
+    preparation stage or a composer call each), and the story's memo is keyed
+    by everything the check reads.
 -   **Navigation** (`reprise-edit`).
     -   `Navigator::hit_placed(point) -> Option<PlacedHit>`, where `PlacedHit`
         is `Body(Hit)` or `Running { position, instance: RegionInstance }`.

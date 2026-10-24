@@ -196,6 +196,9 @@ fn running_ctx<'x>(
 pub(crate) struct Keeps {
     order: Option<std::sync::Arc<BlockOrder>>,
     trials: Vec<(NodeId, ResolutionContext, std::sync::Arc<Prepared>)>,
+    /// The blocks a running story's digest took: the lookahead reads these, in
+    /// this order, and nothing the digest left out.
+    scope: Option<std::rc::Rc<crate::running::compose::Digest>>,
 }
 
 /// The document's top-level blocks in order, with each one's position.
@@ -484,6 +487,15 @@ impl Cursor {
     /// The same cursor, composing for the field environment `fields`.
     pub(crate) fn with_fields(mut self, fields: FieldContext) -> Self {
         self.fields = Some(fields);
+        self
+    }
+    /// The same cursor, with keep lookahead confined to the blocks of `scope`,
+    /// the digest of the story it composes (see `keeps.rs`).
+    pub(crate) fn with_scope(
+        mut self,
+        scope: std::rc::Rc<crate::running::compose::Digest>,
+    ) -> Self {
+        self.keeps.scope = Some(scope);
         self
     }
     /// A one-frame source has run out of frame: nothing more can be placed.
@@ -1904,6 +1916,7 @@ pub(crate) struct PaintRun {
 }
 
 /// What composing a block into one region produced.
+#[derive(Clone)]
 pub(crate) struct Composed {
     pub(crate) lines: Vec<LineLayout>,
     /// Where the text continues, if the region ended before it did.

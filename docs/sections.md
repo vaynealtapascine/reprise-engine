@@ -1053,6 +1053,22 @@ makes it, and the unit that makes the page only finds it in the memo.
     4,096 blocks) is not decoded: the story is cut in front of it, as it is in
     front of a table that does not fit. The physical children are not gathered
     up front either; a step looks at the next ones by index.
+-   **Keep-with-next look-ahead.** A paragraph that keeps with the next checks
+    a chain of up to 32 following blocks against the rest of its frame. In a
+    running story the chain is the blocks of the story's digest after the
+    paragraph, in the digest's order, and no others. A block the digest left
+    out (past a read limit, or a host too long to decode) is not looked at, so
+    it is never prepared or composed for the check, whatever its size; and
+    everything the check reads of a block it does look at is an input of the
+    digest, so the memo keyed by the digest is keyed by all of it (editing a
+    block that only the look-ahead reads re-lays the paragraph out, and a
+    cached layout equals the full one). The check is a machine, not a call:
+    each preparation stage of a member (a batch of at most the step's
+    allowance of shaping requests, for a long one) and each composition of one
+    is a unit of its own, charged to the story's composition like any other,
+    with the paragraph's composed lines held between units. A unit holds one
+    composer call and one shaping request at most, as for a paragraph's own
+    stages. The body flow checks its chains the same way.
 -   **Counts.** `StepWork` has `pages_made`, `region_units`, `region_blocks`
     and `digest_blocks`; `WorkCounters::running_inline` counts regions the
     flow had to make itself because the look-ahead had not, and is zero in

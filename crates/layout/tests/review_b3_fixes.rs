@@ -3,9 +3,12 @@ use common::*;
 use reprise_doc::relation::builtin;
 use reprise_doc::text::RangePolicy;
 use reprise_doc::{
-    BlockKind, Dim, Document, Domain, InlineObject, NodeId, PageTemplate, Param, Relation, Target,
+    BlockKind, Dim, Document, Domain, InlineObject, NewBlock, NodeId, PageTemplate, Param,
+    Relation, Style, Target,
 };
-use reprise_layout::incremental::{JobError, LayoutSession, Pass, Viewport};
+use reprise_layout::incremental::{
+    JobError, LayoutSession, Pass, SHAPE_CHUNK_BYTES, StepWork, Viewport,
+};
 use reprise_layout::{Engine, LayoutSnapshot};
 
 fn bounded(engine: &Engine, doc: &Document, budget: usize) -> LayoutSnapshot {
@@ -323,4 +326,270 @@ fn a_continuation_of_a_replaced_job_is_refused_and_the_replacement_is_unharmed()
         state = job.suspend();
     };
     assert_eq!(snapshot, expected);
+}
+#[test]
+fn keep_lookahead_must_not_prepare_a_host_refused_by_the_digest() {
+    let (engine, doc) = setup();
+    let s = doc
+        .create_story(&[
+            NewBlock::new(BlockKind::Paragraph, "s", "head"),
+            NewBlock::new(BlockKind::Paragraph, "s", &"z".repeat(1_100_000)),
+        ])
+        .unwrap();
+    let head = doc.top(Domain::Story(s))[0];
+    doc.set_overrides(
+        head,
+        &reprise_doc::Style {
+            keep_with_next: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    bind_header(&doc, s);
+    block(&doc, "body");
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let mut job = session.start(&doc, Viewport::Pages(0..1));
+    for i in 0..100 {
+        let step = job.step(1).unwrap();
+        let w = job.step_work();
+        eprintln!("keep step {i}, used={}, {w:?}", step.used);
+        assert!(
+            w.shaped_bytes < 1_100_000,
+            "lookahead prepared a refused host: {w:?}"
+        );
+        assert!(
+            w.largest_request <= reprise_layout::incremental::SHAPE_CHUNK_BYTES,
+            "{w:?}"
+        );
+        if step.complete {
+            return;
+        }
+    }
+    panic!("did not finish");
+}
+
+#[test]
+fn omitted_host_keep_style_must_not_leave_running_memo_stale() {
+    let (engine, doc) = setup();
+    let s = doc
+        .create_story(&[
+            NewBlock::new(BlockKind::Paragraph, "s", "head"),
+            NewBlock::new(BlockKind::Paragraph, "s", &"z ".repeat(550_000)),
+        ])
+        .unwrap();
+    let nodes = doc.top(Domain::Story(s));
+    doc.set_overrides(
+        nodes[0],
+        &reprise_doc::Style {
+            keep_with_next: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    bind_header(&doc, s);
+    block(&doc, "body");
+    doc.commit();
+    let mut session = LayoutSession::new(&engine);
+    let before = session.layout(&doc).unwrap();
+    doc.set_overrides(
+        nodes[1],
+        &reprise_doc::Style {
+            keep_together: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    doc.commit();
+    let cached = session.layout(&doc).unwrap();
+    let full = engine.layout(&doc);
+    eprintln!(
+        "before diagnostics={:?}; cached={:?}; full={:?}; counters={:?}",
+        before.diagnostics,
+        cached.diagnostics,
+        full.diagnostics,
+        session.counters()
+    );
+    assert_eq!(
+        cached, full,
+        "keep lookahead reads beyond the digest and its inputs are not memoized"
+    );
+}
+
+/// A running header of paragraphs, each with its text and whether it keeps
+/// with the next, and a body paragraph so the document has a page.
+fn kept_header(blocks: &[(String, bool)]) -> (Engine, Document, NodeId, Vec<NodeId>) {
+    let (engine, doc) = setup();
+    let news: Vec<_> = blocks
+        .iter()
+        .map(|(text, _)| NewBlock::new(BlockKind::Paragraph, "s", text))
+        .collect();
+    let s = doc.create_story(&news).unwrap();
+    let nodes = doc.top(Domain::Story(s));
+    for ((_, keep), node) in blocks.iter().zip(&nodes) {
+        if *keep {
+            let style = Style {
+                keep_with_next: Some(true),
+                ..Default::default()
+            };
+            doc.set_overrides(*node, &style).unwrap();
+        }
+    }
+    bind_header(&doc, s);
+    block(&doc, "body");
+    doc.commit();
+    (engine, doc, s, nodes)
+}
+
+/// Runs a job to the end `budget` units a step, suspending and resuming
+/// between every step, with the work of each.
+fn stepped(engine: &Engine, doc: &Document, budget: usize) -> (LayoutSnapshot, Vec<StepWork>) {
+    let mut session = LayoutSession::new(engine);
+    let mut state = session.start(doc, Viewport::Pages(0..usize::MAX)).suspend();
+    let mut works = Vec::new();
+    for _ in 0..1_000_000 {
+        let mut job = session.resume(doc, state).unwrap();
+        let step = job.step(budget).unwrap();
+        works.push(job.step_work());
+        assert_eq!(job.counters().running_inline, 0);
+        if step.complete {
+            return (job.complete().unwrap().unwrap(), works);
+        }
+        state = job.suspend();
+    }
+    panic!("did not finish");
+}
+
+fn keep_unsatisfied(snapshot: &LayoutSnapshot) -> Vec<NodeId> {
+    snapshot
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.as_str() == "layout.keep-unsatisfied")
+        .filter_map(|d| match d.subject {
+            reprise_layout::Subject::Node(n) => Some(n),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_keep_chain_of_long_members_is_checked_a_piece_a_unit() {
+    // The first block keeps with a 100 KB paragraph that keeps with the next
+    // and does not fit the header whole. Checking that is preparing it (seven
+    // shaping requests, break analysis) and composing it: each a unit of its
+    // own, not the one unit of the block that asks.
+    let long = "word ".repeat(20_000);
+    let (engine, doc, _, nodes) = kept_header(&[("head".into(), true), (long, true)]);
+    let expected = engine.layout(&doc);
+    assert_eq!(keep_unsatisfied(&expected), vec![nodes[0]]);
+    let (snapshot, works) = stepped(&engine, &doc, 1);
+    assert_eq!(snapshot, expected);
+    let mut shaped = 0;
+    for (i, w) in works.iter().enumerate() {
+        assert!(w.composer_calls <= 1, "step {i}: {w:?}");
+        assert!(w.adapter_requests <= 1, "step {i}: {w:?}");
+        assert!(w.largest_request <= SHAPE_CHUNK_BYTES, "step {i}: {w:?}");
+        assert!(w.digest_blocks <= 64, "step {i}: {w:?}");
+        shaped += w.shaped_bytes;
+    }
+    // The member was prepared, over several steps, for the chain.
+    assert!(shaped >= 100_000, "{shaped} bytes shaped");
+    assert!(
+        works.iter().filter(|w| w.adapter_requests == 1).count() >= 7,
+        "{works:?}"
+    );
+}
+
+#[test]
+fn a_keep_chain_of_short_members_is_checked_a_composition_a_unit() {
+    // Each member of the chain is composed in a unit of its own, and the
+    // verdict is the one the whole layout comes to, with or without the unit
+    // boundaries between.
+    for tail_keeps in [false, true] {
+        let blocks: Vec<_> = (0..6)
+            .map(|i| (format!("line {i}"), i < 5 || tail_keeps))
+            .collect();
+        let (engine, doc, _, _) = kept_header(&blocks);
+        let expected = engine.layout(&doc);
+        for budget in [1, 2, 5] {
+            let (snapshot, works) = stepped(&engine, &doc, budget);
+            assert_eq!(snapshot, expected, "budget {budget}");
+            if budget == 1 {
+                for (i, w) in works.iter().enumerate() {
+                    assert!(w.composer_calls <= 1, "step {i}: {w:?}");
+                    assert!(w.adapter_requests <= 1, "step {i}: {w:?}");
+                }
+                // Six blocks, five chains of up to five members: more than the
+                // blocks' own compositions.
+                let composed: usize = works.iter().map(|w| w.composer_calls).sum();
+                assert!(composed > 6 + 5, "{composed} composer calls");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_keep_chain_in_a_running_story_reads_only_what_the_digest_took() {
+    // The story's second block is cut by the read limits (no story can read
+    // all of it). The first keeps with it; there is nothing to keep with. The
+    // layout notes nothing of it, whether the refused block is edited or not,
+    // and the cached layout is the full one.
+    let refused = "z ".repeat(550_000);
+    let (engine, doc, _, nodes) = kept_header(&[("head".into(), true), (refused, false)]);
+    let mut session = LayoutSession::new(&engine);
+    let before = session.layout(&doc).unwrap();
+    assert_eq!(before, engine.layout(&doc));
+    assert!(keep_unsatisfied(&before).is_empty());
+    for edit in 0..3 {
+        match edit {
+            0 => doc.set_overrides(
+                nodes[1],
+                &Style {
+                    keep_together: Some(true),
+                    ..Default::default()
+                },
+            ),
+            1 => doc.set_overrides(
+                nodes[1],
+                &Style {
+                    keep_with_next: Some(true),
+                    ..Default::default()
+                },
+            ),
+            _ => doc.set_overrides(nodes[1], &Style::default()),
+        }
+        .unwrap();
+        doc.commit();
+        let cached = session.layout(&doc).unwrap();
+        assert_eq!(cached, engine.layout(&doc), "edit {edit}");
+        assert!(keep_unsatisfied(&cached).is_empty(), "edit {edit}");
+    }
+}
+
+#[test]
+fn editing_a_block_only_the_keep_lookahead_reads_re_lays_out_what_it_keeps_with() {
+    // Block 1 is read by the first block's chain and is laid out below it: it
+    // is in the digest. Its style decides the chain, so a cached layout after
+    // the edit must be the full one, warning and all.
+    let blocks = vec![
+        ("head".to_owned(), true),
+        ("the second paragraph ".repeat(80), false),
+    ];
+    let (engine, doc, _, nodes) = kept_header(&blocks);
+    let mut session = LayoutSession::new(&engine);
+    let before = session.layout(&doc).unwrap();
+    assert_eq!(before, engine.layout(&doc));
+    for keep_together in [true, false, true] {
+        doc.set_overrides(
+            nodes[1],
+            &Style {
+                keep_together: Some(keep_together),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        doc.commit();
+        let cached = session.layout(&doc).unwrap();
+        assert_eq!(cached, engine.layout(&doc), "keep_together {keep_together}");
+    }
 }
