@@ -196,6 +196,10 @@ pub struct StepWork {
     /// Child IDs a digest looked at, kept or not: the enumeration work, which
     /// is bounded by the story's read budget, not by the story's size.
     pub digest_inspected: usize,
+    /// Bytes of flow-host text a digest decoded: a host is decoded to the end
+    /// in one go, so this is where a digest unit can cost more than its share
+    /// (the digest then pays the overspend back in the units after it).
+    pub digest_decoded: usize,
 }
 impl StepWork {
     /// Adds `other`'s work to this one's.
@@ -219,6 +223,7 @@ impl StepWork {
         self.region_blocks = self.region_blocks.saturating_add(other.region_blocks);
         self.digest_blocks = self.digest_blocks.saturating_add(other.digest_blocks);
         self.digest_inspected = self.digest_inspected.saturating_add(other.digest_inspected);
+        self.digest_decoded = self.digest_decoded.saturating_add(other.digest_decoded);
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

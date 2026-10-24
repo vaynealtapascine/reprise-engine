@@ -17,10 +17,10 @@ use crate::pages::FrameSource;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
 use crate::{BlockLayout, Diagnostic, Engine, LayoutSnapshot, PageLayout, TemplateSource};
-use reprise_doc::{BlockKind, ChildReader, Document, Domain, FrameRole, NodeId};
+use reprise_doc::{BlockKind, ChildReader, Document, Domain, FrameRole, NodeId, ReadLimits};
 use reprise_geom::{Length, Matrix};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -257,8 +257,44 @@ pub(crate) enum Need {
     Story(Want),
 }
 
-/// Blocks of a story read per look-ahead unit when its digest is made.
+/// Units of reading per look-ahead unit when a story's digest is made: child
+/// IDs looked at, and paragraphs and embedded nodes of flow hosts, one each,
+/// and the decoding of a host, one and a share of its text (see
+/// [`ReadLimits::units`]).
 pub(crate) const DIGEST_CHUNK: usize = 64;
+
+/// The longest flow host text, in bytes, a digest decodes. A story reads at
+/// most [`MAX_STORY_TEXT`] bytes of paragraphs and [`MAX_STORY_BLOCKS`] blocks,
+/// and each paragraph of a host costs the host three bytes of break marker, so
+/// a host longer than this is cut by the read limits inside itself whatever
+/// else the story holds. It is not decoded at all, and the story is cut in
+/// front of it, like a table that does not fit: a host is decoded to the end
+/// in one go, so what it costs is bounded by this, not by the author.
+pub(crate) const MAX_HOST_BYTES: usize = MAX_STORY_TEXT + 3 * MAX_STORY_BLOCKS;
+
+/// What a stretch of reading a digest did, for the work counters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DigestWork {
+    /// Story blocks read: a block taken, or a node of a table read.
+    pub blocks: usize,
+    /// Child IDs looked at.
+    pub looked: usize,
+    /// Bytes of flow host text decoded.
+    pub decoded: usize,
+    /// Units of reading done.
+    pub units: usize,
+    /// The step stopped in front of a host that takes one of its own.
+    pub deferred: bool,
+}
+
+impl DigestWork {
+    fn add(&mut self, other: DigestWork) {
+        self.blocks = self.blocks.saturating_add(other.blocks);
+        self.looked = self.looked.saturating_add(other.looked);
+        self.decoded = self.decoded.saturating_add(other.decoded);
+        self.units = self.units.saturating_add(other.units);
+    }
+}
 
 /// A story digest being made, a bounded amount of work at a time.
 ///
@@ -274,8 +310,9 @@ pub(crate) struct DigestBuild {
     story: NodeId,
     top: ChildReader,
     top_done: bool,
-    /// Top-level blocks read and not taken yet.
-    queue: VecDeque<NodeId>,
+    /// Units a step spent over its allowance, on a host decoded in one go.
+    /// The steps after it pay the debt off before they read on.
+    debt: usize,
     nodes: Vec<NodeId>,
     items: Vec<Item>,
     /// Blocks and bytes of text taken so far, tables' parts included.
@@ -313,7 +350,7 @@ impl DigestBuild {
             story,
             top: doc.top_reader(Domain::Story(story)),
             top_done: false,
-            queue: VecDeque::new(),
+            debt: 0,
             nodes: Vec::new(),
             items: Vec::new(),
             blocks: 0,
@@ -330,46 +367,79 @@ impl DigestBuild {
         self.done
     }
 
-    /// Looks at up to `units` more child IDs. Returns the blocks it took and the
-    /// IDs it looked at, so a caller can charge and count them.
+    /// Reads on for up to `units` units of work (see [`DIGEST_CHUNK`]). The
+    /// story's top level is read one block at a time and each is taken as it
+    /// comes, so a step takes at most the units it was given. A host is decoded
+    /// in one go, which can cost a step more than its units; the steps after
+    /// it pay that off before they read on, so what a step charges is what the
+    /// work comes to, on the whole.
     pub fn step(
         &mut self,
         shared: &Shared,
         engine: &Engine,
         doc: &Document,
         units: usize,
-    ) -> (usize, usize) {
-        let (mut read, mut looked) = (0usize, 0usize);
-        while looked < units && !self.done {
-            let room = units.saturating_sub(looked);
+    ) -> DigestWork {
+        let mut work = DigestWork::default();
+        let room = units.max(1);
+        let paid = self.debt.min(room);
+        self.debt = self.debt.saturating_sub(paid);
+        let mut spent = paid;
+        let mut out = Vec::new();
+        while spent < room && !self.done {
+            let left = room.saturating_sub(spent);
             if self.walk.is_some() {
-                let (took, saw) = self.walk_step(doc, room);
-                read = read.saturating_add(took);
-                looked = looked.saturating_add(saw);
-                continue;
-            }
-            let Some(node) = self.queue.pop_front() else {
-                if self.top_done {
-                    self.done = true;
+                let done = self.walk_step(doc, left);
+                spent = spent.saturating_add(done.units);
+                work.add(done);
+                if done.deferred {
                     break;
                 }
-                let mut out = Vec::new();
-                let before = self.top.remaining();
-                self.top_done = doc.read_children(&mut self.top, room, &mut out);
-                looked = looked.saturating_add(before.saturating_sub(self.top.remaining()));
-                self.queue.extend(out);
                 continue;
-            };
-            read = read.saturating_add(self.take(shared, engine, doc, node));
+            }
+            if self.top_done {
+                self.done = true;
+                break;
+            }
+            let read = doc.read_children(
+                &mut self.top,
+                ReadLimits {
+                    units: left,
+                    blocks: 1,
+                    host_bytes: MAX_HOST_BYTES,
+                },
+                &mut out,
+            );
+            spent = spent.saturating_add(read.units);
+            work.looked = work.looked.saturating_add(read.looked);
+            work.decoded = work.decoded.saturating_add(read.decoded);
+            work.units = work.units.saturating_add(read.units);
+            for node in out.drain(..) {
+                work.blocks = work
+                    .blocks
+                    .saturating_add(self.take(shared, engine, doc, node));
+            }
+            if read.refused {
+                self.cut();
+                break;
+            }
+            self.top_done = read.done;
+            if read.deferred {
+                // A host dearer than what is left of this step is decoded by
+                // a step of its own.
+                break;
+            }
         }
-        if self.top_done && self.queue.is_empty() && self.walk.is_none() {
+        if self.top_done && self.walk.is_none() {
             self.done = true;
         }
-        (read, looked)
+        self.debt = self.debt.saturating_add(spent.saturating_sub(room));
+        work
     }
 
     /// Takes the next top-level block, or cuts the story before it. Returns the
-    /// blocks taken now (a table is taken when it has been read).
+    /// blocks read now (a table's container is read now, its parts as they
+    /// come).
     fn take(&mut self, shared: &Shared, engine: &Engine, doc: &Document, node: NodeId) -> usize {
         let bytes = doc.block(node).map_or(0, |b| b.text.len());
         if self.blocks >= MAX_STORY_BLOCKS || self.text.saturating_add(bytes) > MAX_STORY_TEXT {
@@ -404,7 +474,7 @@ impl DigestBuild {
                 blocks: 1,
                 text: bytes,
             });
-            return 0;
+            return 1;
         }
         self.nodes.push(node);
         self.items.push(Item {
@@ -417,27 +487,43 @@ impl DigestBuild {
         1
     }
 
-    /// Reads on in the table being read, looking at up to `room` child IDs.
-    fn walk_step(&mut self, doc: &Document, room: usize) -> (usize, usize) {
+    /// Reads on in the table being read, for up to `room` units.
+    fn walk_step(&mut self, doc: &Document, room: usize) -> DigestWork {
         use reprise_doc::TableRole;
+        let mut work = DigestWork::default();
         let Some(mut walk) = self.walk.take() else {
-            return (0, 0);
+            return work;
         };
         let Some(level) = walk.levels.last_mut() else {
             // Every level is read: the table is taken whole.
-            let taken = walk.blocks;
             self.nodes.push(walk.node);
             self.items.push(walk.item);
             self.blocks = self.blocks.saturating_add(walk.blocks);
             self.text = self.text.saturating_add(walk.text);
-            return (taken, 0);
+            work.units = 1;
+            return work;
         };
         let (parent, depth) = (level.parent, level.depth);
         let mut out = Vec::new();
-        let before = level.reader.remaining();
-        let exhausted = doc.read_children(&mut level.reader, room, &mut out);
-        let saw = before.saturating_sub(level.reader.remaining());
-        if exhausted {
+        let read = doc.read_children(
+            &mut level.reader,
+            ReadLimits {
+                units: room,
+                blocks: room,
+                host_bytes: MAX_HOST_BYTES,
+            },
+            &mut out,
+        );
+        work.looked = read.looked;
+        work.decoded = read.decoded;
+        work.units = read.units;
+        work.deferred = read.deferred;
+        if read.refused {
+            // A cell holds a host too long to read: the table does not fit.
+            self.cut();
+            return work;
+        }
+        if read.done {
             walk.levels.pop();
         }
         let mut deeper = Vec::new();
@@ -449,10 +535,11 @@ impl DigestBuild {
                 // The table does not fit what is left of the story: the story
                 // is cut before it, and none of its cells is ever prepared.
                 self.cut();
-                return (0, saw);
+                return work;
             }
             walk.blocks = walk.blocks.saturating_add(1);
             walk.text = walk.text.saturating_add(bytes);
+            work.blocks = work.blocks.saturating_add(1);
             let (role, malformed) = role_of_node(doc, node);
             let enter = matches!(
                 (depth, &role),
@@ -478,7 +565,7 @@ impl DigestBuild {
         // The first row's cells before the second row.
         walk.levels.extend(deeper.into_iter().rev());
         self.walk = Some(walk);
-        (0, saw)
+        work
     }
 
     /// The story is cut here: what is past a read limit is not composed.
@@ -486,7 +573,6 @@ impl DigestBuild {
         self.omitted = true;
         self.done = true;
         self.walk = None;
-        self.queue.clear();
     }
 
     fn finish(self) -> Digest {

@@ -1028,6 +1028,19 @@ makes it, and the unit that makes the page only finds it in the memo.
     that finds one missing does not start; the machine makes it and the block
     starts again. A transition that made more than eight pages is redone
     instead of waited for.
+-   **Reading a story.** The digest is made 64 units of reading a step. A
+    physical child looked at is a unit and the first block it stands for comes
+    with it, so an ordinary paragraph is one unit. A flow host (a paragraph
+    split by breaks, with blocks embedded in it) is read through a cursor that
+    keeps its place between steps: each further paragraph or embedded node is a
+    unit, and decoding its text costs one unit for each 4 KiB. A host is decoded
+    to the end in one go, which can cost more than the step has. Such a step
+    does nothing else, and the steps after it pay the difference off before the
+    digest reads on, so what is charged is what the work comes to. A host with
+    more text than a story could ever read whole (1 MiB and the break markers of
+    4,096 blocks) is not decoded: the story is cut in front of it, as it is in
+    front of a table that does not fit. The physical children are not gathered
+    up front either; a step looks at the next ones by index.
 -   **Counts.** `StepWork` has `pages_made`, `region_units`, `region_blocks`
     and `digest_blocks`; `WorkCounters::running_inline` counts regions the
     flow had to make itself because the look-ahead had not, and is zero in

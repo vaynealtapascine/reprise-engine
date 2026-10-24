@@ -1,7 +1,10 @@
 //! Explicit traversal of the body and independent authored stories.
 
+use std::sync::Arc;
+
 use loro::{TreeID, TreeParentId};
 
+use crate::flow::{HostFlow, MAX_FLOW_DEPTH};
 use crate::{Document, NodeId, get_str};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -10,19 +13,96 @@ pub enum Domain {
     Story(NodeId),
 }
 
+/// Bytes of a flow host's text decoded for one unit of work.
+pub const DECODE_UNIT_BYTES: usize = 4096;
+
 /// Where a bounded read of one parent's children has got to (see
-/// [`Document::top_reader`]).
+/// [`Document::top_reader`]): the next physical child to look at, and the
+/// flow host being expanded, if one is, as a stack of what is still to come.
+/// Neither is gathered up front, so starting a read costs nothing and a read
+/// costs what it reads.
 #[derive(Clone, Debug, Default)]
 pub struct ChildReader {
-    ids: std::sync::Arc<Vec<TreeID>>,
+    parent: Option<TreeParentId>,
+    /// Physical children when the reader was made, and how many were looked at.
+    total: usize,
     at: usize,
+    todo: Vec<Todo>,
+    /// The first block of the physical child last looked at is paid for by
+    /// the look. Spent by the first block that comes.
+    free: bool,
+}
+
+/// What an expansion still has to do, innermost last.
+#[derive(Clone, Debug)]
+enum Todo {
+    /// A live tree node, `depth` flows deep, not looked at yet.
+    Node(TreeID, usize),
+    /// Paragraph `.1` and the ones after it of a decoded host.
+    Paras(Arc<HostFlow>, usize, usize),
 }
 
 impl ChildReader {
     /// Child IDs not looked at yet.
     pub fn remaining(&self) -> usize {
-        self.ids.len().saturating_sub(self.at)
+        self.total.saturating_sub(self.at)
     }
+
+    /// Whether the reader has nothing left to read, a host half expanded
+    /// included.
+    pub fn is_done(&self) -> bool {
+        self.at >= self.total && self.todo.is_empty()
+    }
+}
+
+/// How much one [`Document::read_children`] call may do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadLimits {
+    /// Units of work: a physical child looked at costs one, and the first block
+    /// it stands for with it. A flow host also costs its text in
+    /// [`DECODE_UNIT_BYTES`] to decode, and one for each further paragraph or
+    /// embedded node it stands for. So an ordinary paragraph is one unit, and
+    /// a host of a thousand paragraphs a thousand. A call does at least one
+    /// thing, so a decode dearer than `units` runs alone and overspends.
+    pub units: usize,
+    /// Most blocks a call appends.
+    pub blocks: usize,
+    /// Longest flow host text, in bytes, a call decodes. A longer host is not
+    /// read: the call stops in front of it and says so.
+    pub host_bytes: usize,
+}
+
+impl ReadLimits {
+    /// No bound at all: a read to the end.
+    pub const fn unbounded() -> Self {
+        Self {
+            units: usize::MAX,
+            blocks: usize::MAX,
+            host_bytes: usize::MAX,
+        }
+    }
+}
+
+/// What one [`Document::read_children`] call did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReadStep {
+    /// The reader has nothing left.
+    pub done: bool,
+    /// The host in front of the reader is longer than
+    /// [`ReadLimits::host_bytes`]. It was not read, and a call again meets it
+    /// again.
+    pub refused: bool,
+    /// Physical child IDs looked at.
+    pub looked: usize,
+    /// Blocks appended.
+    pub blocks: usize,
+    /// The call stopped in front of a host whose decoding costs more than the
+    /// units it had left. A call again decodes it, alone, and overspends.
+    pub deferred: bool,
+    /// Bytes of host text decoded.
+    pub decoded: usize,
+    /// Units of work done, as [`ReadLimits::units`] counts them.
+    pub units: usize,
 }
 
 impl Document {
@@ -114,33 +194,127 @@ impl Document {
 
     fn reader(&self, parent: TreeParentId) -> ChildReader {
         ChildReader {
-            ids: std::sync::Arc::new(self.tree("content").children(parent).unwrap_or_default()),
+            parent: Some(parent),
+            total: self.tree("content").children_num(parent).unwrap_or(0),
             at: 0,
+            todo: Vec::new(),
+            free: false,
         }
     }
 
-    /// Looks at the next at most `inspect` child IDs of `reader` and appends
-    /// the live blocks they stand for to `out` (a flow host stands for all its
-    /// paragraphs). Returns true once the reader is exhausted. Every call looks
-    /// at one ID at least, so a loop of reads ends.
+    /// Reads on in `reader`, within `limits`, appending to `out` the live
+    /// blocks [`Document::top`] or [`Document::children_of`] would list, in
+    /// the same order: a flow host stands for its paragraphs and the nodes
+    /// embedded in them, which are expanded in turn. A host is decoded when
+    /// the reader reaches it and left again once its last paragraph is out, so
+    /// a call does a bounded amount of work however many paragraphs, or how
+    /// much text, the host has (up to `limits.host_bytes`), and the next call
+    /// carries on in the same place. Every call does at least one thing, so a
+    /// loop of reads ends.
     pub fn read_children(
         &self,
         reader: &mut ChildReader,
-        inspect: usize,
+        limits: ReadLimits,
         out: &mut Vec<NodeId>,
-    ) -> bool {
+    ) -> ReadStep {
+        let mut read = ReadStep::default();
+        let want = limits.units.max(1);
+        let room = limits.blocks.max(1);
         let tree = self.tree("content");
-        let end = reader
-            .at
-            .saturating_add(inspect.max(1))
-            .min(reader.ids.len());
-        for &node in reader.ids.get(reader.at..end).unwrap_or_default() {
-            if self.live(&tree, node) && !self.is_story_node(node) && !self.is_embedded(node) {
-                self.expand(node, 0, out);
+        let mut handler = None;
+        loop {
+            // The look at a child paid for its first block: the call is not
+            // over before that block is out.
+            let owed = reader.free && !reader.todo.is_empty();
+            if read.blocks >= room || (read.units >= want && !owed) {
+                return read;
+            }
+            let Some(todo) = reader.todo.pop() else {
+                // Whatever the child stood for is out; a credit it did not
+                // use (a host with nothing visible) is void.
+                reader.free = false;
+                if read.units >= want {
+                    return read;
+                }
+                let Some(parent) = reader.parent.filter(|_| reader.at < reader.total) else {
+                    read.done = true;
+                    return read;
+                };
+                let children = handler.get_or_insert_with(|| self.doc.inner().get_tree("content"));
+                let child = children.get_child_at(&parent, reader.at);
+                reader.at += 1;
+                read.looked += 1;
+                read.units += 1;
+                if let Some(node) = child
+                    && self.live(&tree, node)
+                    && !self.is_story_node(node)
+                    && !self.is_embedded(node)
+                {
+                    reader.todo.push(Todo::Node(node, 0));
+                    reader.free = true;
+                }
+                continue;
+            };
+            match todo {
+                Todo::Paras(flow, i, depth) => {
+                    let Some(para) = flow.paras.get(i) else {
+                        continue;
+                    };
+                    if i + 1 < flow.paras.len() {
+                        reader.todo.push(Todo::Paras(flow.clone(), i + 1, depth));
+                    }
+                    if i > 0 || flow.head_live {
+                        out.push(para.id);
+                        read.blocks += 1;
+                        read.units += usize::from(!std::mem::take(&mut reader.free));
+                    }
+                    if depth < MAX_FLOW_DEPTH {
+                        for &(embedded, _, _) in para.embeds.iter().rev() {
+                            reader.todo.push(Todo::Node(embedded, depth + 1));
+                        }
+                    }
+                }
+                Todo::Node(node, depth) => {
+                    if !self.live(&tree, node) || self.is_story_node(node) {
+                        continue;
+                    }
+                    let Some(bytes) = self.host_text(node).map(|t| t.len_utf8()) else {
+                        // Not a flow host: the block itself. At the top the ID
+                        // looked at has paid for it; one embedded in a flow
+                        // is a block of the host's.
+                        out.push(NodeId::tree(node));
+                        read.blocks += 1;
+                        read.units += usize::from(!std::mem::take(&mut reader.free));
+                        continue;
+                    };
+                    let cost = bytes / DECODE_UNIT_BYTES;
+                    if bytes > limits.host_bytes {
+                        reader.todo.push(Todo::Node(node, depth));
+                        read.refused = true;
+                        return read;
+                    }
+                    if read.units > 0 && read.units.saturating_add(cost) > want {
+                        // Dearer than what is left of this call: the next
+                        // call, which has all of its units, decodes it.
+                        reader.todo.push(Todo::Node(node, depth));
+                        read.deferred = true;
+                        return read;
+                    }
+                    match self.flow(node) {
+                        Some(flow) => {
+                            read.decoded += bytes;
+                            read.units += cost;
+                            reader.todo.push(Todo::Paras(flow, 0, depth));
+                        }
+                        None => {
+                            out.push(NodeId::tree(node));
+                            read.blocks += 1;
+                            read.units += usize::from(!std::mem::take(&mut reader.free));
+                        }
+                    }
+                }
             }
         }
-        reader.at = end;
-        end >= reader.ids.len()
     }
 
     fn content_children(&self, parent: TreeParentId) -> Vec<NodeId> {

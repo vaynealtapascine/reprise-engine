@@ -204,3 +204,33 @@ fn running_field_kinds_revalidate_in_one_persistent_session() {
         "deleted prefix"
     );
 }
+#[test]
+fn one_physical_flow_host_cannot_bypass_digest_step_budget() {
+    let (engine, doc) = setup();
+    let story = doc
+        .create_story(&[NewBlock::new(BlockKind::Paragraph, "s", "x")])
+        .unwrap();
+    let mut tail = doc.top(Domain::Story(story))[0];
+    for _ in 0..130 {
+        tail = doc.split_block(tail, 0).unwrap();
+    }
+    block(&doc, "body");
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &[("region.header.default".into(), json!(story.to_string()))].into(),
+        &[],
+    )
+    .unwrap();
+    doc.commit();
+    assert_eq!(doc.top(Domain::Story(story)).len(), 131);
+    let mut session = reprise_layout::incremental::LayoutSession::new(&engine);
+    let mut job = session.start(&doc, reprise_layout::incremental::Viewport::Pages(0..10));
+    let step = job.step(1).unwrap();
+    let work = job.step_work();
+    eprintln!("split flow host: charged={}, work={work:?}", step.used);
+    assert!(
+        work.digest_blocks <= 64,
+        "one physical host expanded into all its paragraphs in one digest step"
+    );
+}
