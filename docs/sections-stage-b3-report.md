@@ -933,3 +933,168 @@ look-ahead of a running story may read.
 ### Gate
 
 Full gate (`G:/tmp/gate-sections-fix.sh`, log `G:/tmp/gate-sections-fix2.log`, run on `1be5182` under `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 timeout 7000`, finished 2026-10-25 07:24): 12 x `=== rc=0` (types, wasmbuild, bindgen-web, bindgen-node, tsc, tsc-worker, smoke, worker-smoke, fmt, clippy, wasmcheck, test), 1,679 passed (round 1: 1,659; the 20 added are this round's tests), 0 failed, 12 ignored (as before), no `d.ts` or `API.txt` drift (`git status` clean after the gate); `gate exit 0`.
+
+## B3 fixes, round 3
+
+Astra's re-review of round 2 (`F:/reprise-wt/reviews/sections-b3-fixes-2-review.md`, pinned
+at `c01b344`) asked for changes: one blocker, one should-fix and one suggestion. The
+decode, continuation-ownership, engine/font, admitted look-ahead, widows/orphans/table and
+non-layout fixes of round 2 passed it. Its seven extra probes
+(`G:/reprise-review/sections-b3-fixes2-extra-probes.rs`) were ported to
+`crates/layout/tests/review_round2_extra.rs` (SHA-256 checked against the manifest before
+formatting; rustfmt only after). It includes `review_b3_fixes.rs` for its fixtures, so that
+binary also re-runs that file's tests (27 tests in all; about 90 s in debug).
+
+**Probes first, on the unchanged source (`c01b344`).** 5 passed, 2 failed, as in the review:
+`round2_lookahead_relation_owner_is_part_of_digest_validity` (cached keeps
+`layout.keep-unsatisfied`, full does not; `running_reused=2`, `running_compositions=0`) and
+`round2_old_revision_refusal_must_not_destroy_newer_suspended_job` (`current continuation must
+survive: Stale`). Log: `G:/tmp/sec3-probes-before.log`. After the fixes all seven pass. No
+assertion was weakened or changed.
+
+| Item | Commit |
+| --- | --- |
+| 1. Relation ownership in the keep chain (blocker) and 2. ownership before destruction in `resume` (should-fix), the probes and their regressions | `741669d` |
+| 3. `read_children` comment (suggestion) | `b085bdd` |
+| This report and the gate | the commit after them |
+
+### 1. Relation ownership in the keep look-ahead (blocker)
+
+*What was wrong.* `Flow::chain_step` skipped a following block that was in `region_owners`
+(owners of NOTE and FLOAT relations), whatever the block's kind. The running digest keyed
+relation ownership for images only (`Item.unsupported`), and its `Inputs` hold no relations,
+so a paragraph's relations were read by the chain and keyed by nothing. Adding the schema-valid
+NOTE of Astra's probe to the second header paragraph changed the chain in a full layout and not
+in a cached one.
+
+*It was wider than the probe.* The body flow has the same mismatch. The body's per-paragraph
+memo key (`FlowKey.lookahead`) held each look-ahead block's inputs and whether its table role
+was plain, and no ownership. With pages of ten lines, a filler of eight, `head` (keeps with
+the next) and a 5,000-byte paragraph that keeps with the next, a NOTE owned by that paragraph
+left the cached layout with `layout.keep-unsatisfied` and the full layout without it
+(`a_body_paragraph_a_relation_names_owner_is_still_a_paragraph_to_the_keep_chain`). A fix that
+only touched the digest would have closed the probe and left this.
+
+*The choice.* Astra offered two: key the classification for every node the chain can affect,
+or exclude invalid owners from the decision consistently. I did both, because they are one
+function. The flow itself lays out every block of kind paragraph, and every table, whatever
+relation names it owner (`Flow::begin_block`: only an annotation or an image can be left to
+the regions; the region pass reports any other owner invalid and places nothing). The chain
+should look at what the flow lays out, so a paragraph or a table is never skipped for being
+an owner; that is the "exclude invalid owners" half, and it makes the cached and full layouts
+agree by making the read disappear for those kinds. What remains is real: an image a float or
+note owns is skipped, any other image ends the chain, and that is keyed.
+
+The classification is one function, `Link::of` (`flow/keeps.rs`): `Check` (a paragraph:
+composed in the frame), `Pass` (an annotation, or an image a float or note owns) and `End` (a
+table, any other image, anything else). `chain_step` takes its verdict from `Flow::link`
+and from nothing else about structure. The `Link` of every block the chain can reach is
+held in the key:
+
+-   the running digest's `Item` has a `link`, read once per block as the digest is made
+    (`Classes` is still read only when a story holds an image). In a running story
+    `Flow::link` reads it from the digest, by the block's place in the digest's order, so the
+    chain reads what the memo is keyed by, not the document;
+-   the body's `FlowKey.lookahead` holds `flow::Link` in place of the plain-role boolean
+    (a strictly finer key: it is `End` for a non-plain role as before).
+
+This is not the image-only dependency again: every node the chain can reach carries its link,
+and the kinds for which ownership is not read cost nothing extra. It also closes a corner the
+old image key missed: an image that is both followed (`FOLLOW`) and owned (`FLOAT`/`NOTE`) is
+`unsupported` either way, so removing only the owner left the digest unchanged while the chain
+went from `Pass` to `End`. The link is exact where `unsupported` was not.
+
+*Behaviour change, stated plainly.* A paragraph, or a table container, that owns a NOTE or
+FLOAT relation is now treated by the keep chain as the block it is laid out as. Before, a
+full layout skipped it as if region-placed while the flow laid it out anyway. Only an invalid
+owner is affected, and the region pass already reports it (`relation.owner-not-placeable` in
+the body test). No existing snapshot or test changed.
+
+*The audit Astra asked for: everything the admitted look-ahead reads, against its key.*
+
+| The chain reads | Keyed by (running story) | Keyed by (body) |
+| --- | --- | --- |
+| which blocks follow, and their order | digest `nodes`, `omitted` | the `ahead` list in `FlowKey` (stops at section starts; 33 blocks) |
+| section starts (`following`) | not applicable: a story has no section table | in the `ahead` list |
+| relation ownership of a block | **`Item.link`** (was image-only) | **`FlowKey.lookahead` link** (was absent) |
+| table role of a block | `Item.link`, and `Item.table` for a table | `FlowKey.lookahead` link |
+| block kind | `Inputs.kind` | `Inputs.kind` |
+| text, style chain (missing or renamed names included), overrides, text formats, inline objects, image record, list semantics, of the member prepared and composed | `Inputs` of the item | `Inputs` in the look-ahead entry |
+| the initiating paragraph's keep flag | its own `Inputs` (it is in the digest) | its own `Inputs` |
+| resolution context of the trial | derived from the initiating paragraph; trial preparations are cached by exact `(node, context)` | same |
+| frame width, page size | `Key.width`, `Key.page` | `FlowKey.template`, `position` |
+| depth, reservations, exclusions | `Key.depth`; a story's scratch frame has none else | logged plan reads (`Reservation`, `Exclusions`) in the memo entry, checked by `reads_hold` |
+| field values a trial composition reads | `FieldEnv::text` records each read in the composition's `Reads` (label, values, guess), checked by `still_valid` | recorded in `field_log` and noted as `PlanRead::Field` |
+| `paragraph_spacing`, functions, fonts, shaper | engine configuration, immutable for a session (the documented precondition of `LayoutCache` and `LayoutContinuation`) | same |
+
+Two further reads of `region_owners` are not the chain's. `prepare_ahead` uses it to choose
+which upcoming blocks to prepare early; the results are cached by exact inputs, so it cannot
+change output. `table.rs` uses it for annotation blocks in table cells, a composition input
+and not a look-ahead one: I probed a running table with a cell annotation, adding and removing
+a NOTE it owns, and the cached layout equalled the full one both ways, so I changed nothing
+there (a scratch probe; I did not keep it).
+
+*Tests.* In `review_b3_fixes.rs` (each compares every layout in a session with a full
+layout, diagnostics included, and covers adding and removing the relation): a paragraph
+owner of a NOTE and of a FLOAT, in a running header and in the body, with the keep verdict
+unchanged by the relation; an image owned by a NOTE or a FLOAT, whose verdict flips when it
+is owned and back when it is not; an image both followed and owned, then owned no longer,
+then not followed; a table container as owner. Before the fix, on `c01b344`'s source, the
+paragraph (header and body), the followed-and-owned image and the table tests failed. The
+plain owned-image test passed there: the digest already keyed it through `unsupported`, and it
+stays as the guard for the path that was kept. Astra's probe is the regression she named.
+
+### 2. Ownership before destruction in `resume` (should-fix)
+
+*What was wrong.* `LayoutSession::resume` rejected a mismatching document or revision first,
+and cleared the evaluation (the memo, the caches and the counters) before asking whether the
+continuation owned the memo epoch, so an obsolete continuation destroyed the newer job's memo.
+
+*What changed.* `resume` now asks `holds(epoch)` first. On a document or revision mismatch,
+only the continuation that owns the memo clears it, as before: an edit can race a job and
+leave anything in the memo, so the owner drops it with the rest. A continuation that does not
+own it is refused with `JobError::Stale` and touches nothing. The same-document, same-revision
+case is unchanged. A continuation made on another session is not an owner either, so it
+cannot clear this session's memo any more (it could, when it also named another document).
+
+*Tests*, beside the same-revision replacement test: an old-revision continuation refused
+while a newer job holds the memo, which then finishes and equals the full layout (Astra's
+test, with the session's counters asserted unchanged by the refusal); a continuation
+resumed with another document after a newer job replaced it, and a continuation from another
+session resumed with another document; and the owner's behaviour kept, for a wrong document
+and for an edited one (`counters()` is zero afterwards, and the next layout equals the full
+one). The first two failed on `c01b344`'s source; the owner test passed there and still does.
+
+### 3. `read_children` comment (suggestion)
+
+The method comment no longer says every call does at least one thing: a fresh call does, a
+call that is not fresh may stop in front of a host dearer than its allowance and say
+`deferred`, indefinitely, and the caller must handle that and open a fresh call to get past
+it. Comment only.
+
+### Docs
+
+`docs/sections.md` (keep look-ahead, and "A job owns what it made") states the `Link` and the
+refusal rule.
+
+### Deviations and decisions
+
+-   The keep chain's treatment of a paragraph or table that owns a region relation changed
+    (finding 1), for invalid owners only; no snapshot or test depended on it.
+-   `FlowKey`'s look-ahead entry holds `flow::Link` instead of a boolean, and `Item` has a
+    field. Both are crate-private. No public API, facade type, `API.txt` or dependency changed.
+-   The probe file `include!`s `review_b3_fixes.rs`, as Astra's does, so `review_round2_extra`
+    re-runs those 20 tests. I left it as ported rather than move the fixtures.
+-   The finding-2 probe and my test of it are the same sequence under two names: the probe
+    keeps its own name and helper, and the test beside the replacement test asserts the
+    refusal leaves the counters untouched as well.
+
+### Left tracked
+
+As in rounds 1 and 2: the 64-entry composition memo, body `page-of` aimed at a story, and S12
+as its own gated slice. For frames F0, a look-ahead of a running story reads the digest's
+blocks and their `Link`, and only those.
+
+### Gate
+
+Full gate (`G:/tmp/gate-sections-fix.sh`, log `G:/tmp/gate-sections-fix3.log`, run on `741669d` under `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 timeout 7000`, with `LIB` set as in round 2, finished 2026-10-25 23:53): 12 x `=== rc=0` (types, wasmbuild, bindgen-web, bindgen-node, tsc, tsc-worker, smoke, worker-smoke, fmt, clippy, wasmcheck, test), 1,714 passed (round 2: 1,679; the 35 added are this round's: 8 in `review_b3_fixes.rs`, and the 27 of `review_round2_extra.rs`, 20 of which are that file's re-run of `review_b3_fixes.rs`), 0 failed, 12 ignored (as before), no `d.ts` or `API.txt` drift (`git status` clean after the gate); `gate exit 0`. Before the gate, clippy and `cargo test -p reprise-layout -p reprise-doc` were run on the same code and caught one `clippy::useless_vec` in a new test, fixed in `741669d`.
