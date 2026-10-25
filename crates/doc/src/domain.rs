@@ -223,8 +223,15 @@ impl Document {
     /// the reader reaches it and left again once its last paragraph is out, so
     /// a call does a bounded amount of work however many paragraphs, or how
     /// much text, the host has (up to `limits.host_bytes`), and the next call
-    /// carries on in the same place. Every call does at least one thing, so a
-    /// loop of reads ends.
+    /// carries on in the same place.
+    ///
+    /// A call with `limits.fresh` set does at least one thing, so a loop of
+    /// fresh reads ends. One that is not fresh may do nothing: it stops in
+    /// front of a host dearer than its allowance and says so
+    /// ([`ReadStep::deferred`]), having read nothing if the host is the next
+    /// thing in the reader, and says it again however often it is repeated. A
+    /// caller must handle `deferred`, and open a fresh piece of work (a fresh
+    /// call) to get past the host.
     pub fn read_children(
         &self,
         reader: &mut ChildReader,
