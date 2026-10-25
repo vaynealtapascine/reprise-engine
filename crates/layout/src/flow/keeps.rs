@@ -15,7 +15,8 @@
 //! cursor's `Keeps::scope`): a block the digest left out (past a read limit, or
 //! a host too long to decode) is not looked at, so it is not prepared, and
 //! everything the check reads of the blocks it does look at is in the digest
-//! the story's memo is keyed by.
+//! the story's memo is keyed by: their inputs, and the [`Link`] each makes,
+//! which is how the check reads the relations and table roles.
 
 use std::sync::Arc;
 
@@ -23,7 +24,41 @@ use super::paragraph::{Advance, Preparing, Started};
 use super::*;
 use crate::template::ResolvedFrame;
 
+impl Link {
+    /// The link `node` makes. The flow lays out a paragraph, and a table,
+    /// whatever relation names it owner (the region pass reports such an owner
+    /// as invalid and places nothing), so only the kinds the flow itself leaves
+    /// to regions ask `owned`: an annotation is always passed over, an image
+    /// only when a float or note owns it.
+    pub(crate) fn of(doc: &Document, node: NodeId, owned: impl FnOnce() -> bool) -> Link {
+        if !matches!(doc.table_role(node), Ok(None)) {
+            return Link::End;
+        }
+        match doc.block(node).map(|b| b.kind) {
+            Ok(BlockKind::Paragraph) => Link::Check,
+            Ok(BlockKind::Annotation) => Link::Pass,
+            Ok(BlockKind::Image) if owned() => Link::Pass,
+            _ => Link::End,
+        }
+    }
+}
+
 impl Flow<'_> {
+    /// What the chain makes of `node`, one of the blocks of [`Flow::following`].
+    /// A running story's blocks are the digest's, and so is the link: the
+    /// chain reads what the story's memo is keyed by, not the document. The
+    /// body's are looked at.
+    pub(crate) fn link(&self, doc: &Document, node: NodeId) -> Link {
+        match (&self.keeps.scope, &self.keeps.order) {
+            (Some(scope), Some(order)) => order
+                .index
+                .get(&node)
+                .and_then(|&at| scope.link_at(at))
+                .unwrap_or(Link::End),
+            _ => Link::of(doc, node, || self.region_owners.contains(&node)),
+        }
+    }
+
     /// The room snapshot frame `index` (template frame `frame`) offers
     /// `prepared` when composing from byte `start`.
     pub(crate) fn room(
@@ -190,8 +225,9 @@ impl Flow<'_> {
     /// snapshot frame `index` (template frame `frame`), whose members are
     /// prepared against `ctx`: each fits the rest of the frame whole, then the
     /// first other block's `max(orphans, 1)` lines (all of them if it keeps
-    /// together). Tables and flowed images end a chain as fitting; annotations
-    /// placed by relations are skipped.
+    /// together). The [`Link`] of a block says how it counts: tables and images
+    /// laid out in the flow end a chain as fitting; annotations, and images
+    /// placed by relations, are skipped.
     ///
     /// A step does at most one piece of work: a stage of a member's
     /// preparation (a batch of at most `allowance` shaping requests, if it is
@@ -220,21 +256,13 @@ impl Flow<'_> {
             if run.next >= MAX_KEEP_CHAIN {
                 return ChainStep::Done(Chain::TooLong);
             }
-            if self.region_owners.contains(&next) {
-                run.next += 1;
-                continue;
-            }
-            match doc.table_role(next) {
-                Ok(None) => {}
-                _ => return ChainStep::Done(Chain::Fits),
-            }
-            match doc.block(next).map(|b| b.kind) {
-                Ok(BlockKind::Paragraph) => {}
-                Ok(BlockKind::Annotation) => {
+            match self.link(doc, next) {
+                Link::Check => {}
+                Link::Pass => {
                     run.next += 1;
                     continue;
                 }
-                _ => return ChainStep::Done(Chain::Fits),
+                Link::End => return ChainStep::Done(Chain::Fits),
             }
             let Some(prepared) = self.trial_kept(next, ctx) else {
                 if !fresh {

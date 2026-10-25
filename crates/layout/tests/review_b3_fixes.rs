@@ -327,6 +327,99 @@ fn a_continuation_of_a_replaced_job_is_refused_and_the_replacement_is_unharmed()
     };
     assert_eq!(snapshot, expected);
 }
+
+/// Resumes and steps `state` one unit at a time to the end.
+fn finish_suspended(
+    session: &mut LayoutSession<'_>,
+    doc: &Document,
+    mut state: reprise_layout::incremental::LayoutContinuation,
+) -> LayoutSnapshot {
+    for _ in 0..100_000 {
+        let mut job = session.resume(doc, state).expect("the newest job resumes");
+        let step = job.step(1).unwrap();
+        assert_eq!(job.counters().running_inline, 0);
+        if step.complete {
+            return job.complete().unwrap().unwrap();
+        }
+        state = job.suspend();
+    }
+    panic!("did not finish");
+}
+
+#[test]
+fn an_obsolete_continuation_of_an_older_revision_leaves_the_newer_job_alone() {
+    // A job suspended, the document edited, a job on the new revision started
+    // and suspended: the first's continuation is refused for its revision, and
+    // refusing it must not take the memo the second job holds.
+    let (engine, doc) = endless_note();
+    let mut session = LayoutSession::new(&engine);
+    let old = suspended_in_feedback(&mut session, &doc, 2);
+    let body = doc.top(Domain::Body)[0];
+    doc.block(body).unwrap().text.insert(0, "edit ").unwrap();
+    doc.commit();
+    let expected = engine.layout(&doc);
+    let newer = suspended_in_feedback(&mut session, &doc, 3);
+    let before = session.counters();
+    assert!(before.units > 0);
+    assert!(matches!(session.resume(&doc, old), Err(JobError::Stale)));
+    assert_eq!(session.counters(), before, "the memo is the newer job's");
+    assert_eq!(finish_suspended(&mut session, &doc, newer), expected);
+}
+
+#[test]
+fn an_obsolete_continuation_resumed_with_another_document_leaves_the_newer_job_alone() {
+    // The same, refused for its document: the continuation names one document
+    // and is resumed against another while a newer job holds the memo.
+    let (engine, doc) = endless_note();
+    let expected = engine.layout(&doc);
+    let other = Document::new(2).unwrap();
+    let mut session = LayoutSession::new(&engine);
+    let old = suspended_in_feedback(&mut session, &doc, 2);
+    let newer = suspended_in_feedback(&mut session, &doc, 3);
+    let before = session.counters();
+    assert!(matches!(session.resume(&other, old), Err(JobError::Stale)));
+    assert_eq!(session.counters(), before, "the memo is the newer job's");
+    assert_eq!(finish_suspended(&mut session, &doc, newer), expected);
+    // A continuation made on another session is not the memo's owner either.
+    let mut session = LayoutSession::new(&engine);
+    let newer = suspended_in_feedback(&mut session, &doc, 3);
+    let mut elsewhere = LayoutSession::new(&engine);
+    let foreign = suspended_in_feedback(&mut elsewhere, &doc, 2);
+    let before = session.counters();
+    assert!(matches!(
+        session.resume(&other, foreign),
+        Err(JobError::Stale)
+    ));
+    assert_eq!(session.counters(), before);
+    assert_eq!(finish_suspended(&mut session, &doc, newer), expected);
+}
+
+#[test]
+fn the_job_that_owns_the_memo_still_drops_it_when_its_document_is_not_the_one() {
+    // The owner's behaviour is as it was: a document edit can race a job and
+    // leave anything in the memo, so refusing the owner drops everything.
+    for case in 0..2 {
+        let (engine, doc) = endless_note();
+        let other = Document::new(2).unwrap();
+        let mut session = LayoutSession::new(&engine);
+        let owner = suspended_in_feedback(&mut session, &doc, 3);
+        assert!(session.counters().units > 0);
+        if case == 0 {
+            assert!(matches!(
+                session.resume(&other, owner),
+                Err(JobError::Stale)
+            ));
+        } else {
+            let body = doc.top(Domain::Body)[0];
+            doc.block(body).unwrap().text.insert(0, "edit ").unwrap();
+            doc.commit();
+            assert!(matches!(session.resume(&doc, owner), Err(JobError::Stale)));
+        }
+        assert_eq!(session.counters(), Default::default(), "case {case}");
+        assert_eq!(session.layout(&doc).unwrap(), engine.layout(&doc));
+    }
+}
+
 #[test]
 fn keep_lookahead_must_not_prepare_a_host_refused_by_the_digest() {
     let (engine, doc) = setup();
@@ -649,4 +742,218 @@ fn a_host_decode_is_one_bounded_atomic_unit_that_charges_its_cost_in_its_step() 
         );
     }
     assert_eq!(decodes, 1, "the host is decoded once");
+}
+
+// What a keep-with-next chain reads of the relations that own a block. The
+// chain passes over an annotation and over an image a float or note owns, and
+// ends at any other image or a table; a paragraph is a paragraph whatever
+// relation names it owner, because the flow lays it out (the region pass calls
+// such an owner invalid and places nothing). Whatever the chain reads must be
+// in the key of what it keeps: the body's paragraph memo and the running
+// digest. Each test edits relations through one session and compares every
+// layout with a full layout of the same document, diagnostics included.
+
+use reprise_doc::relation::SchemaId;
+use reprise_doc::{ColumnWidth, LayoutQuery, RelationId};
+
+fn owned_by(
+    engine: &Engine,
+    doc: &Document,
+    schema: SchemaId,
+    owner: NodeId,
+    anchor: NodeId,
+) -> RelationId {
+    let range = doc.add_range(anchor, 0..1, RangePolicy::FIXED).unwrap();
+    let relation = Relation::new(schema.clone()).owned_by(owner);
+    let relation = match schema {
+        s if s == builtin::NOTE => relation
+            .target("anchor", Target::Range(range))
+            .param("placement", Param::Text("page".into())),
+        s if s == builtin::FLOAT => relation
+            .target("anchor", Target::Range(range))
+            .param("side", Param::Text("top".into())),
+        _ => relation.target(
+            "line",
+            Target::Layout(LayoutQuery::LineContaining { range }),
+        ),
+    };
+    doc.add_relation(&engine.schemas, &relation).unwrap()
+}
+
+/// Lays `doc` out in `session`; it must be what a full layout is. Returns the
+/// blocks whose keep was not satisfied.
+fn laid_out_as_a_full_layout_is(
+    engine: &Engine,
+    doc: &Document,
+    session: &mut LayoutSession<'_>,
+    what: &str,
+) -> Vec<NodeId> {
+    let cached = session.layout(doc).unwrap();
+    let full = engine.layout(doc);
+    assert!(
+        cached == full,
+        "{what}: the session's layout is not a full one"
+    );
+    keep_unsatisfied(&full)
+}
+
+/// A running header `head` (keeps with the next), the block `middle` makes,
+/// and a paragraph of 5,000 bytes that keeps with the next and does not fit
+/// the header: the chain from `head` fails, unless it ends at the middle block.
+fn header_chain(
+    middle: impl FnOnce(&mut Engine, &Document) -> NodeId,
+) -> (Engine, Document, NodeId, NodeId) {
+    let (mut engine, doc, story, nodes) =
+        kept_header(&[("head".into(), true), ("word ".repeat(1000), true)]);
+    let block = middle(&mut engine, &doc);
+    doc.move_block(block, Some(story), 1).unwrap();
+    doc.commit();
+    (engine, doc, nodes[0], block)
+}
+
+#[test]
+fn a_paragraph_a_relation_names_owner_is_still_a_paragraph_to_the_keep_chain() {
+    // The re-review's finding: adding or removing a note or float relation
+    // owned by the paragraph the chain looks at makes no difference to the
+    // chain, in a session or not.
+    for schema in [builtin::NOTE, builtin::FLOAT] {
+        let (engine, doc, _, nodes) =
+            kept_header(&[("head".into(), true), ("word ".repeat(1000), true)]);
+        let anchor = doc.top(Domain::Body)[0];
+        let mut session = LayoutSession::new(&engine);
+        let plain = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "plain");
+        assert_eq!(plain, vec![nodes[0]], "the chain from the head fails");
+        let id = owned_by(&engine, &doc, schema.clone(), nodes[1], anchor);
+        doc.commit();
+        let owned = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "owner");
+        assert_eq!(owned, plain, "{schema:?}");
+        doc.delete_relation(id).unwrap();
+        doc.commit();
+        let gone = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "owner removed");
+        assert_eq!(gone, plain, "{schema:?}");
+    }
+}
+
+#[test]
+fn a_body_paragraph_a_relation_names_owner_is_still_a_paragraph_to_the_keep_chain() {
+    // The same in the body, whose paragraph memo has its own key: pages of ten
+    // lines, a filler of eight, a head that keeps with a paragraph that does
+    // not fit what is left of the page and keeps with the next.
+    for schema in [builtin::NOTE, builtin::FLOAT] {
+        let (engine, doc) = setup();
+        doc.set_page_template(
+            &PageTemplate::new("p", Dim::pt(200), Dim::pt(120))
+                .with_frame(frame("main", 0, 0, 200, 120)),
+        )
+        .unwrap();
+        block(&doc, &["fill"; 8].join("\n"));
+        let head = block(&doc, "head");
+        let long = block(&doc, &"word ".repeat(1000));
+        for node in [head, long] {
+            let keep = Style {
+                keep_with_next: Some(true),
+                ..Default::default()
+            };
+            doc.set_overrides(node, &keep).unwrap();
+        }
+        let anchor = block(&doc, "tail");
+        doc.commit();
+        let mut session = LayoutSession::new(&engine);
+        let plain = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "plain");
+        assert!(!plain.is_empty(), "the head's keep is not satisfied");
+        let id = owned_by(&engine, &doc, schema.clone(), long, anchor);
+        doc.commit();
+        let owned = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "owner");
+        assert_eq!(owned, plain, "{schema:?}");
+        doc.delete_relation(id).unwrap();
+        doc.commit();
+        let gone = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "owner removed");
+        assert_eq!(gone, plain, "{schema:?}");
+    }
+}
+
+fn plain_image(engine: &mut Engine, doc: &Document) -> NodeId {
+    let hash = engine
+        .assets
+        .insert(&include_bytes!("../../../fixtures/images/red-1x1.png")[..])
+        .unwrap();
+    doc.append_image("s", &reprise_doc::image::ImageData::new(hash), "image")
+        .unwrap()
+}
+
+#[test]
+fn an_image_a_float_or_note_owns_is_passed_over_by_the_keep_chain_in_both_directions() {
+    // An image the chain reaches ends it as fitting; one a note or float owns
+    // is left to the regions and the chain goes on to the paragraph after it,
+    // which does not fit. So owning it flips the verdict, and the memo must
+    // follow, whichever way the relation goes.
+    for schema in [builtin::NOTE, builtin::FLOAT] {
+        let (engine, doc, head, image) = header_chain(plain_image);
+        let anchor = doc.top(Domain::Body)[0];
+        let mut session = LayoutSession::new(&engine);
+        let plain = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "plain");
+        assert!(plain.is_empty());
+        let id = owned_by(&engine, &doc, schema.clone(), image, anchor);
+        doc.commit();
+        let owned = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "owned");
+        assert_eq!(owned, vec![head], "{schema:?}");
+        doc.delete_relation(id).unwrap();
+        doc.commit();
+        let gone = laid_out_as_a_full_layout_is(&engine, &doc, &mut session, "owner removed");
+        assert!(gone.is_empty(), "{schema:?}");
+    }
+}
+
+#[test]
+fn an_image_both_followed_and_owned_changes_the_keep_chain_when_only_the_owner_goes() {
+    // The digest already holds that an image is left out of the story when a
+    // relation places it, whichever one. The chain reads less than that, only
+    // whether a float or note owns it: removing that relation leaves the image
+    // placed by following a line, with the same verdict for the story and a
+    // different one for the chain.
+    let (engine, doc, head, image) = header_chain(plain_image);
+    let anchor = doc.top(Domain::Body)[0];
+    let mut session = LayoutSession::new(&engine);
+    let mut at = |what: &str| laid_out_as_a_full_layout_is(&engine, &doc, &mut session, what);
+    assert!(at("plain").is_empty());
+    let follow = owned_by(&engine, &doc, builtin::FOLLOW, image, anchor);
+    doc.commit();
+    assert!(at("followed").is_empty());
+    let float = owned_by(&engine, &doc, builtin::FLOAT, image, anchor);
+    doc.commit();
+    assert_eq!(at("followed and owned"), vec![head]);
+    doc.delete_relation(float).unwrap();
+    doc.commit();
+    assert!(at("only followed").is_empty());
+    doc.delete_relation(follow).unwrap();
+    doc.commit();
+    assert!(at("plain again").is_empty());
+}
+
+#[test]
+fn a_table_a_relation_names_owner_still_ends_the_keep_chain() {
+    // A table is laid out as one whatever owns its container, and the chain
+    // ends at it. The container is no region owner the region pass can place.
+    let (engine, doc, _, table) = header_chain(|_, doc| {
+        let table = doc
+            .append_table(two_columns([ColumnWidth::Content, ColumnWidth::Content]))
+            .unwrap();
+        let row = doc.append_table_row(table, false).unwrap();
+        let cell = doc.append_table_cell(row, 0).unwrap();
+        doc.append_cell_block(cell, BlockKind::Paragraph, "s", "cell")
+            .unwrap();
+        table
+    });
+    let anchor = doc.top(Domain::Body)[0];
+    let mut session = LayoutSession::new(&engine);
+    let mut at = |what: &str| laid_out_as_a_full_layout_is(&engine, &doc, &mut session, what);
+    assert!(at("plain").is_empty());
+    for schema in [builtin::NOTE, builtin::FLOAT] {
+        let id = owned_by(&engine, &doc, schema.clone(), table, anchor);
+        doc.commit();
+        assert!(at("owner").is_empty(), "{schema:?}");
+        doc.delete_relation(id).unwrap();
+        doc.commit();
+        assert!(at("owner removed").is_empty(), "{schema:?}");
+    }
 }

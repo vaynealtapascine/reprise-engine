@@ -237,6 +237,23 @@ pub(crate) enum Chain {
     TooLong,
 }
 
+/// What a keep-with-next chain makes of a block after the paragraph. It is the
+/// one thing the chain reads of a block that the block's own inputs do not
+/// hold (the relations that name it owner, its table role), so a key that
+/// holds a `Link` for every block the chain can reach holds all of it: the
+/// body's paragraph memo (`FlowKey`) and a running story's digest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Link {
+    /// A paragraph: composed in the frame, to see whether it fits.
+    Check,
+    /// An annotation, or an image a region relation places: not in the flow of
+    /// text, so the chain looks past it.
+    Pass,
+    /// A table, an image laid out in the flow or anything else: the chain
+    /// ends there, as fitting.
+    End,
+}
+
 /// A block that takes more than one unit.
 #[derive(Clone)]
 pub(crate) enum Active {

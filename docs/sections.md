@@ -1097,7 +1097,16 @@ makes it, and the unit that makes the page only finds it in the memo.
     everything the check reads of a block it does look at is an input of the
     digest, so the memo keyed by the digest is keyed by all of it (editing a
     block that only the look-ahead reads re-lays the paragraph out, and a
-    cached layout equals the full one). The check is a machine, not a call:
+    cached layout equals the full one). Besides a block's own inputs the check
+    reads one thing of it, how it counts (`flow::Link`): a paragraph is
+    checked, an annotation or an image a float or note owns is looked past, and
+    a table or any other image ends the chain as fitting. The relations that own
+    a block matter only for an image: a paragraph is laid out whatever relation
+    names it owner (the region pass reports that owner as invalid and places
+    nothing), so such an owner changes nothing for the chain, in a cached layout
+    or a full one. The link of each block is part of its digest item, and of the
+    body paragraph memo's key, so adding or removing the relation re-lays out
+    exactly what it affects. The check is a machine, not a call:
     each preparation stage of a member (a batch of at most the step's
     allowance of shaping requests, for a long one) and each composition of one
     is a unit of its own, charged to the story's composition like any other,
@@ -1130,7 +1139,10 @@ makes it, and the unit that makes the page only finds it in the memo.
     one) drops them, as does clearing the memo, so the continuation of an
     earlier job cannot go on: `LayoutSession::resume` returns `JobError::Stale`
     for it, though the document and the revision are as they were, and leaves
-    the newer job's memo alone. A host that wants to keep a job keeps it the
+    the newer job's memo alone. So does a continuation refused for its
+    document or revision: only the job that still owns the memo drops it then
+    (an edit can race a job and leave anything in it); an obsolete one is
+    refused and touches nothing. A host that wants to keep a job keeps it the
     only one. Memo state a job finds gone all the same ends the job the same
     way. Losing memo state never makes a job compose a story inline. What is
     left of `running_inline` is `Cursor::look`'s last resort (a page composing

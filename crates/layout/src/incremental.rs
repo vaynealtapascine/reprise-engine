@@ -399,8 +399,10 @@ pub(crate) struct FlowKey {
     /// documents. Everything else the transition reads from the plan is
     /// recorded with it, by frame address and provenance.
     physical: Option<Plan>,
-    /// The blocks keep-with-next lookahead may read, with their inputs.
-    lookahead: Vec<(NodeId, Option<Inputs>, bool)>,
+    /// The blocks keep-with-next lookahead may read, with their inputs and
+    /// what the chain makes of each (the relations that own it, its table
+    /// role): `flow::Link` is all of that the chain reads besides the inputs.
+    lookahead: Vec<(NodeId, Option<Inputs>, flow::Link)>,
 }
 impl FlowKey {
     /// `ahead` is what [`flow::Flow::keep_lookahead`] says the paragraph's
@@ -414,13 +416,7 @@ impl FlowKey {
         Self {
             lookahead: ahead
                 .into_iter()
-                .map(|n| {
-                    (
-                        n,
-                        Inputs::read(doc, n),
-                        !matches!(doc.table_role(n), Ok(None)),
-                    )
-                })
+                .map(|n| (n, Inputs::read(doc, n), flow.link(doc, n)))
                 .collect(),
             inputs: Inputs::read(doc, node),
             previous: flow.previous,
@@ -2069,16 +2065,23 @@ impl<'engine> LayoutSession<'engine> {
         doc: &'job Document,
         state: LayoutContinuation,
     ) -> Result<LayoutJob<'job, 'engine>, JobError> {
-        if !std::ptr::eq(state.document, doc) || state.revision != doc.revision() {
-            self.evaluation.clear();
-            return Err(JobError::Stale);
-        }
         // What a job has made and holds is the running memo's, for as long as
         // the job is the one the memo belongs to. Another job started on the
         // session (or the memo cleared) took it: this one has lost its
         // compositions and digests and cannot go on, however unchanged the
-        // document is. The memo is the newer job's, so it is left alone.
-        if !self.evaluation.running().holds(&state.epoch) {
+        // document is.
+        let owner = self.evaluation.running().holds(&state.epoch);
+        if !std::ptr::eq(state.document, doc) || state.revision != doc.revision() {
+            // An edit can race a job and leave anything in the memo, so the
+            // job that owns it drops it with the rest. A continuation that
+            // does not own it is refused and nothing else: the memo is a newer
+            // job's, which this one, old as its document is, must not destroy.
+            if owner {
+                self.evaluation.clear();
+            }
+            return Err(JobError::Stale);
+        }
+        if !owner {
             return Err(JobError::Stale);
         }
         self.document = Some(doc);

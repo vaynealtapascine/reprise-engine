@@ -11,7 +11,7 @@
 //! is composed once for every page that shows it.
 
 use super::{MAX_STORY_BLOCKS, MAX_STORY_TEXT, SlotId, role_of};
-use crate::flow::Cursor;
+use crate::flow::{Cursor, Link};
 use crate::inline::{FieldInstance, Reads};
 use crate::pages::FrameSource;
 use crate::regions::Plan;
@@ -56,6 +56,10 @@ pub(crate) struct Item {
     /// story. Whether an image is one depends on the relations that own it,
     /// which are no part of its inputs, so the verdict is part of the key.
     unsupported: bool,
+    /// What a keep-with-next chain makes of the block (see `flow::Link`): the
+    /// look-ahead reads the relations that own an image, and a table's role,
+    /// so the verdict is part of the key.
+    link: Link,
     /// For a table: its declared role (columns) and every row, cell and cell
     /// block under it, in document order. A table is composed from all of it,
     /// and none of it is in the container block's own inputs.
@@ -102,6 +106,10 @@ impl Digest {
     /// composition may read, lookahead included.
     pub(crate) fn nodes(&self) -> &[NodeId] {
         &self.nodes
+    }
+    /// What the keep look-ahead makes of the `at`th of [`Digest::nodes`].
+    pub(crate) fn link_at(&self, at: usize) -> Option<Link> {
+        self.items.get(at).map(|item| item.link)
     }
     /// Whether two digests hold the same inputs. Reads all of both.
     fn same_as(&self, other: &Digest) -> bool {
@@ -478,12 +486,16 @@ impl DigestBuild {
             _ => false,
         };
         let inputs = crate::incremental::Inputs::read(doc, node);
+        let link = Link::of(doc, node, || {
+            shared.classes(engine, doc).owners.contains(&node)
+        });
         if let Ok(Some(role @ reprise_doc::TableRole::Table(_))) = doc.table_role(node) {
             self.walk = Some(Walk {
                 node,
                 item: Item {
                     inputs,
                     unsupported,
+                    link,
                     table: Some(Table {
                         role: Some(role),
                         parts: Vec::new(),
@@ -503,6 +515,7 @@ impl DigestBuild {
         self.items.push(Item {
             inputs,
             unsupported,
+            link,
             table: None,
         });
         self.blocks = self.blocks.saturating_add(1);
