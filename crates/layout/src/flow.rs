@@ -32,6 +32,7 @@ mod keeps;
 pub(crate) mod paragraph;
 pub(crate) mod stage;
 
+use crate::ownership::{Class, Ownership};
 use crate::region::Bounded;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
@@ -115,7 +116,9 @@ pub(crate) struct Cursor {
     pos: usize,
     limit_hit: bool,
     pending: Vec<Pending>,
-    region_owners: std::collections::BTreeSet<NodeId>,
+    /// What the relations make of a block (`ownership.rs`): the only way the
+    /// flow learns it.
+    ownership: Ownership,
     previous: Option<NodeId>,
     /// The block in progress, between units of an incremental job.
     active: Option<Active>,
@@ -432,7 +435,7 @@ impl Cursor {
             // No frame to flow through: unreachable, but nothing may panic.
             limit_hit: thread_is_empty,
             pending: Vec::new(),
-            region_owners: crate::regions::owners(engine, doc),
+            ownership: Ownership::of(engine, doc, domain),
             upcoming: &[],
             keeps: Keeps::default(),
             catalog,
@@ -507,11 +510,13 @@ impl Cursor {
         self
     }
     /// The same cursor, with keep lookahead confined to the blocks of `scope`,
-    /// the digest of the story it composes (see `keeps.rs`).
+    /// the digest of the story it composes (see `keeps.rs`), and knowing of
+    /// the relations what that digest holds of them and no more.
     pub(crate) fn with_scope(
         mut self,
         scope: std::rc::Rc<crate::running::compose::Digest>,
     ) -> Self {
+        self.ownership = Ownership::keyed(scope.clone());
         self.keeps.scope = Some(scope);
         self
     }
@@ -643,7 +648,7 @@ impl Cursor {
             pos: self.pos,
             limit_hit: self.limit_hit,
             pending: self.pending,
-            region_owners: self.region_owners,
+            ownership: self.ownership,
             previous: self.previous,
             upcoming: &[],
             keeps: self.keeps,
@@ -692,7 +697,8 @@ pub(crate) struct Flow<'a> {
     /// The field values it composed with (folded into `log` when taken).
     field_log: std::cell::RefCell<crate::inline::Reads>,
     pub(crate) pending: Vec<Pending>,
-    pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
+    /// As [`Cursor::ownership`].
+    pub(crate) ownership: Ownership,
     pub(crate) previous: Option<NodeId>,
     /// Blocks after the current one, for speculative preparation.
     pub(crate) upcoming: &'a [NodeId],
@@ -947,24 +953,18 @@ impl Flow<'_> {
         let paragraph = || Some(Active::Paragraph(Box::new(paragraph::Paragraph::new(node))));
         match kind {
             BlockKind::Paragraph => return paragraph(),
-            BlockKind::Image => {
-                if !flow.region_owners.contains(&node) {
-                    let follows = doc.relations().iter().any(|(_, r)| {
-                        r.as_ref().is_ok_and(|r| {
-                            r.owner == Some(node)
-                                && r.schema == reprise_doc::relation::builtin::FOLLOW
-                        })
-                    });
-                    if !follows {
-                        return paragraph();
-                    }
+            BlockKind::Image => match flow.ownership.class(node) {
+                // A float or note places it: nothing here.
+                Class::Owner => {}
+                Class::Free => return paragraph(),
+                Class::Follower => {
                     if let Some(image) = flow.annotation(doc, node) {
                         flow.pending.push(image);
                     }
                 }
-            }
+            },
             BlockKind::Annotation => {
-                if !flow.region_owners.contains(&node)
+                if !flow.ownership.owns(node)
                     && let Some(annotation) = flow.annotation(doc, node)
                 {
                     flow.pending.push(annotation);
@@ -1074,7 +1074,7 @@ impl Flow<'_> {
             pos: self.pos,
             limit_hit: self.limit_hit,
             pending: self.pending,
-            region_owners: self.region_owners,
+            ownership: self.ownership,
             previous: self.previous,
             active: None,
             keeps: self.keeps,

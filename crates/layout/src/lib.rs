@@ -28,6 +28,7 @@ mod inline_display;
 mod list_marker;
 pub mod marks;
 mod notes;
+mod ownership;
 pub mod plugins;
 mod query;
 pub mod reading;

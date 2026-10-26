@@ -832,15 +832,16 @@ impl Evaluation {
         staged: flow::stage::Staged,
         ctx: &ResolutionContext,
         upcoming: &[NodeId],
-        owners: &BTreeSet<NodeId>,
     ) -> flow::stage::Finished {
         let mut batch: Vec<(Option<PrepareMiss>, flow::stage::Staged)> = vec![(None, staged)];
         // Only new text is worth speculating on: a block prepared before with
         // equal inputs is followed by blocks whose shaping is memoised too.
+        // Whatever relation names a paragraph owner, the flow lays it out
+        // (`Flow::begin_block`), so ownership has no part in which are worth
+        // preparing ahead.
         if !self.has_inputs(current.node, &current.key.inputs) {
             for &node in upcoming.iter().take(PREFETCH_BLOCKS.saturating_sub(1)) {
-                if owners.contains(&node)
-                    || doc.kind_of(node) != Some(BlockKind::Paragraph)
+                if doc.kind_of(node) != Some(BlockKind::Paragraph)
                     || !matches!(doc.table_role(node), Ok(None))
                 {
                     continue;

@@ -1113,6 +1113,25 @@ makes it, and the unit that makes the page only finds it in the memo.
     with the paragraph's composed lines held between units. A unit holds one
     composer call and one shaping request at most, as for a paragraph's own
     stages. The body flow checks its chains the same way.
+-   **Relation ownership.** Whether a float or note owns a block, which leaves
+    it to the region pass, or a follow relation places it, is no part of the
+    block's inputs, and composition acts on it in a few places: the flow passes
+    over an annotation or an image a float or note owns, composes an image only
+    a follow relation places for that relation, and a table's cell passes over
+    an annotation a float or note owns (so does not prepare it, which is also
+    why a diagnostic of its style is or is not reported). A composition that is
+    reused must not have been made with another answer, so the flow has one
+    source of it (`Ownership`, `ownership.rs`). The body's flow reads the
+    relations once, when it begins: every layout composes the body afresh. The
+    flow of a running story reads nothing of the relations; the story's digest
+    answers it. The digest classifies every annotation and image it holds, at
+    the top of the story and in the cells of its tables, when it is made, so a
+    float, note or follow relation added to or removed from one of them is a
+    different digest, and the story is composed again; one that names a block
+    the story does not hold leaves it alone. A story-owned float or note is
+    invalid whatever the flow does (`relation.owner-not-placeable`, reported
+    by the region pass alone). `tests/relation_reads.rs` lists the places in the
+    layout crate that read relations and fails for a new one.
 -   **Counts.** `StepWork` has `pages_made`, `region_units`, `region_blocks`
     and `digest_blocks`; `WorkCounters::running_inline` counts regions the
     flow had to make itself because the look-ahead had not. It is zero for

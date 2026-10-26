@@ -180,7 +180,7 @@ impl Flow<'_> {
                         continue;
                     }
                     if doc.kind_of(block) == Some(reprise_doc::BlockKind::Annotation) {
-                        if !self.region_owners.contains(&block)
+                        if !self.ownership.owns(block)
                             && let Some(annotation) = self.annotation(doc, block)
                         {
                             self.pending.push(annotation);

@@ -55,7 +55,7 @@ impl Flow<'_> {
                 .get(&node)
                 .and_then(|&at| scope.link_at(at))
                 .unwrap_or(Link::End),
-            _ => Link::of(doc, node, || self.region_owners.contains(&node)),
+            _ => Link::of(doc, node, || self.ownership.owns(node)),
         }
     }
 

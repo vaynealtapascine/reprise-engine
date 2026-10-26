@@ -250,15 +250,9 @@ impl Flow<'_> {
         };
         if staged.len() <= SHAPE_CHUNK_BYTES {
             let finished = match (self.evaluation, miss.as_ref()) {
-                (Some(e), Some(m)) if speculate => e.prepare_ahead(
-                    engine,
-                    doc,
-                    m,
-                    *staged,
-                    ctx,
-                    self.upcoming,
-                    &self.region_owners,
-                ),
+                (Some(e), Some(m)) if speculate => {
+                    e.prepare_ahead(engine, doc, m, *staged, ctx, self.upcoming)
+                }
                 _ => self.run_staged(*staged),
             };
             let (value, notes) = self.end_staged(miss, finished);

@@ -13,6 +13,7 @@
 use super::{MAX_STORY_BLOCKS, MAX_STORY_TEXT, SlotId, role_of};
 use crate::flow::{Cursor, Link};
 use crate::inline::{FieldInstance, Reads};
+use crate::ownership::{Class, Classes};
 use crate::pages::FrameSource;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
@@ -97,11 +98,22 @@ fn role_of_node(doc: &Document, node: NodeId) -> (Option<reprise_doc::TableRole>
 pub(crate) struct Digest {
     nodes: Vec<NodeId>,
     items: Vec<Item>,
+    /// What the relations make of the annotations and images the digest holds,
+    /// at the top of the story and in its tables' cells (a block no relation
+    /// names is not in it: it is `Class::Free`). It is all the composition
+    /// learns of ownership (`ownership.rs`): the flow of a story is answered
+    /// from here, never from the document, so the memo keyed by the digest is
+    /// keyed by every answer it was composed with.
+    classes: BTreeMap<NodeId, Class>,
     /// Blocks past the read caps, which are not composed.
     omitted: bool,
 }
 
 impl Digest {
+    /// What the relations make of `node`, a block the story holds.
+    pub(crate) fn class_of(&self, node: NodeId) -> Class {
+        self.classes.get(&node).copied().unwrap_or(Class::Free)
+    }
     /// The blocks the story is composed from, in order: the only ones the
     /// composition may read, lookahead included.
     pub(crate) fn nodes(&self) -> &[NodeId] {
@@ -113,7 +125,10 @@ impl Digest {
     }
     /// Whether two digests hold the same inputs. Reads all of both.
     fn same_as(&self, other: &Digest) -> bool {
-        self.nodes == other.nodes && self.omitted == other.omitted && self.items == other.items
+        self.nodes == other.nodes
+            && self.omitted == other.omitted
+            && self.items == other.items
+            && self.classes == other.classes
     }
 }
 
@@ -210,34 +225,6 @@ pub(crate) struct Request<'a> {
     pub page_size: (Length, Length),
     /// The label of `page`, which is not in the snapshot yet.
     pub label: &'a str,
-}
-
-/// How the document's relations classify blocks: read once per job, when a story
-/// first holds an image.
-#[derive(Debug, Default)]
-pub(crate) struct Classes {
-    /// Owners of floats and notes.
-    owners: std::collections::BTreeSet<NodeId>,
-    /// Blocks placed by following a line.
-    followers: std::collections::BTreeSet<NodeId>,
-}
-
-impl Classes {
-    fn of(engine: &Engine, doc: &Document) -> Self {
-        Self {
-            owners: crate::regions::owners(engine, doc),
-            followers: doc
-                .relations()
-                .into_iter()
-                .filter_map(|(_, r)| {
-                    let r = r.ok()?;
-                    (r.schema == reprise_doc::relation::builtin::FOLLOW)
-                        .then_some(r.owner)
-                        .flatten()
-                })
-                .collect(),
-        }
-    }
 }
 
 /// A [`Request`] that owns its data: what a look-ahead is asked to make.
@@ -347,6 +334,8 @@ pub(crate) struct DigestBuild {
     top_done: bool,
     nodes: Vec<NodeId>,
     items: Vec<Item>,
+    /// As [`Digest::classes`].
+    classes: BTreeMap<NodeId, Class>,
     /// Blocks and bytes of text taken so far, tables' parts included.
     blocks: usize,
     text: usize,
@@ -366,6 +355,10 @@ struct Walk {
     /// What the table has taken, the container included.
     blocks: usize,
     text: usize,
+    /// What the relations make of the annotations in its cells so far. They
+    /// join [`Digest::classes`] when the table is taken whole: a table the
+    /// story is cut in front of is not composed, and keys nothing.
+    classes: Vec<(NodeId, Class)>,
 }
 
 #[derive(Clone, Debug)]
@@ -384,6 +377,7 @@ impl DigestBuild {
             top_done: false,
             nodes: Vec::new(),
             items: Vec::new(),
+            classes: BTreeMap::new(),
             blocks: 0,
             text: 0,
             walk: None,
@@ -420,7 +414,7 @@ impl DigestBuild {
         while spent < room && !self.done {
             let left = room.saturating_sub(spent);
             if self.walk.is_some() {
-                let done = self.walk_step(doc, left, spent == 0);
+                let done = self.walk_step(shared, engine, doc, left, spent == 0);
                 spent = spent.saturating_add(done.units);
                 work.add(done);
                 if done.deferred {
@@ -477,18 +471,18 @@ impl DigestBuild {
             self.cut();
             return 0;
         }
-        let unsupported = match doc.block(node).map(|b| b.kind) {
+        let kind = doc.block(node).map(|b| b.kind);
+        let class = Self::read_class(shared, engine, doc, node);
+        if class != Class::Free {
+            self.classes.insert(node, class);
+        }
+        let unsupported = match kind {
             Ok(BlockKind::Annotation) => true,
-            Ok(BlockKind::Image) => {
-                let classes = shared.classes(engine, doc);
-                classes.owners.contains(&node) || classes.followers.contains(&node)
-            }
+            Ok(BlockKind::Image) => class != Class::Free,
             _ => false,
         };
         let inputs = crate::incremental::Inputs::read(doc, node);
-        let link = Link::of(doc, node, || {
-            shared.classes(engine, doc).owners.contains(&node)
-        });
+        let link = Link::of(doc, node, || class == Class::Owner);
         if let Ok(Some(role @ reprise_doc::TableRole::Table(_))) = doc.table_role(node) {
             self.walk = Some(Walk {
                 node,
@@ -508,6 +502,7 @@ impl DigestBuild {
                 }],
                 blocks: 1,
                 text: bytes,
+                classes: Vec::new(),
             });
             return 1;
         }
@@ -523,9 +518,31 @@ impl DigestBuild {
         1
     }
 
+    /// What the relations make of `node`, if the flow of the story will ask:
+    /// an annotation or an image. The caller records it in
+    /// [`Digest::classes`], which is the only place a story's composition
+    /// learns it.
+    fn read_class(shared: &Shared, engine: &Engine, doc: &Document, node: NodeId) -> Class {
+        if matches!(
+            doc.kind_of(node),
+            Some(BlockKind::Annotation | BlockKind::Image)
+        ) {
+            shared.classes(engine, doc).class(node)
+        } else {
+            Class::Free
+        }
+    }
+
     /// Reads on in the table being read, for up to `room` units; `fresh` when
     /// the step has spent none yet.
-    fn walk_step(&mut self, doc: &Document, room: usize, fresh: bool) -> DigestWork {
+    fn walk_step(
+        &mut self,
+        shared: &Shared,
+        engine: &Engine,
+        doc: &Document,
+        room: usize,
+        fresh: bool,
+    ) -> DigestWork {
         use reprise_doc::TableRole;
         let mut work = DigestWork::default();
         let Some(mut walk) = self.walk.take() else {
@@ -535,6 +552,7 @@ impl DigestBuild {
             // Every level is read: the table is taken whole.
             self.nodes.push(walk.node);
             self.items.push(walk.item);
+            self.classes.extend(walk.classes);
             self.blocks = self.blocks.saturating_add(walk.blocks);
             self.text = self.text.saturating_add(walk.text);
             work.units = 1;
@@ -590,6 +608,14 @@ impl DigestBuild {
                     reader: doc.children_reader(node),
                 });
             }
+            // The one thing composing a cell reads of the relations: whether
+            // a float or note owns its annotation (`Flow::table_rows`).
+            if doc.kind_of(node) == Some(BlockKind::Annotation) {
+                let class = Self::read_class(shared, engine, doc, node);
+                if class != Class::Free {
+                    walk.classes.push((node, class));
+                }
+            }
             if let Some(table) = walk.item.table.as_mut() {
                 table.parts.push(Part {
                     node,
@@ -617,6 +643,7 @@ impl DigestBuild {
         Digest {
             nodes: self.nodes,
             items: self.items,
+            classes: self.classes,
             omitted: self.omitted,
         }
     }
@@ -680,12 +707,13 @@ impl Shared {
         self.set_digest(build)
     }
 
-    /// The relations' classification of blocks, read once per job.
+    /// The relations' classification of blocks, read once per job. The digests
+    /// of the job copy out of it what their stories hold ([`Digest::classes`]).
     fn classes(&self, engine: &Engine, doc: &Document) -> Rc<Classes> {
         if let Some(c) = self.memo.borrow().classes.clone() {
             return c;
         }
-        let classes = Rc::new(Classes::of(engine, doc));
+        let classes = Rc::new(Classes::read(engine, doc));
         self.memo.borrow_mut().classes = Some(classes.clone());
         classes
     }
