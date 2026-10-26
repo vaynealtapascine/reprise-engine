@@ -1232,3 +1232,79 @@ separate pass. Neither retained review probe nor any existing assertion was weak
 
 The remaining working-tree changes after the gate are documentation/report updates.
 No processes were killed, and no merge or push was performed.
+
+## B3 fixes, round 5
+
+The required round-4 guard repair is confined to tests. Before changing the guard,
+ported the two saved probes from
+`G:/reprise-review/sections-b3-fixes4-guard-probes.rs` as rejection assertions.
+On 2026-10-27 both failed against `36f8ac6`'s guard: the proposed ownership read
+inside `Evaluation::prepare_ahead` and the fully qualified
+`reprise_doc::Document::relations(doc)` in paragraph composition were accepted.
+The two existing source guards passed. Evidence: `G:/tmp/sec5-guard-before.log`.
+
+The exemption now names an exact file and function (including its inherent impl),
+with a reason. Narrowing the guard was smaller than moving the existing readers:
+it changes no production code, module boundaries, composition behavior or keys.
+The allowed functions are:
+
+- `incremental.rs`: `PassKey::new` (authored/resolved region and final-pass memo
+  inputs), `LayoutJob::partial` (settled-state flag), and
+  `LayoutJob::record_graph` (dependency recording after evaluation).
+- `ownership.rs`: `Classes::read` (the single classification scan at the keyed
+  composition door).
+- `regions.rs`: `active` (whether the pass is needed) and
+  `allocate_with_sections` (region allocation and applied-placement owners).
+- `relations/mod.rs`: `begin` (final-pass relation dispatch).
+- `relations/resolve.rs`: `Resolver::resolve` (final-pass target resolution).
+- `relations/alignment.rs`: `run` (alignment application) and `refresh_guides`
+  (ordered relation construction in the final pass).
+- `sections/mod.rs`: `Table::resolve` (FLOAT-presence/FloatSpaces selection,
+  reflected in resolved frames and position inputs).
+
+Every exemption must still contain a read; stale entries fail. Sibling functions,
+other impls, trait impls, nested functions and inline modules cannot inherit one.
+In particular, `Evaluation::prepare_ahead` is not exempt despite sharing
+`incremental.rs` with legitimate readers.
+
+The guard parses Rust with test-only `syn` and `proc-macro2` dependencies (both
+already present in the lockfile; no package version changes). It recognizes the
+three access names `relations`, `resolve_relation` and `dead_relations` as method
+calls and qualified function paths, including function values, fully qualified
+paths, type aliases, raw identifiers and arbitrary token spacing/comments.
+Imports are rejected at their binding site even inside allowed functions; grouped
+imports, renames and `self as alias` cannot hide a later call. Opaque macro token
+trees are checked conservatively for these identifiers, including nested groups;
+comments and literal text do not count as accesses. As before this is a source
+guard test, not a Rust privacy or name-resolution guarantee.
+
+`relation_reads.rs` retains both original source guards and now has six negative
+regressions: the two ported review probes (including both `Document::relations`
+spellings), the spelling/function-alias matrix, the import-alias matrix, exact
+function-scope isolation, and opaque macro access. The ordinary `.relations()`
+paragraph control is retained. The import tests also exercise an otherwise allowed
+`PassKey::new`; scope controls show a real `PassKey::new` is accepted while nested
+or neighboring readers are rejected. A comment/string/raw-string control confirms
+that documentation text is ignored. All eight guard tests pass after the repair
+(`G:/tmp/sec5-guard-after.log`). No existing assertion was weakened.
+
+### Validation
+
+`cargo test --frozen -p reprise-layout` passed all **302 tests** (186 library,
+116 integration; zero failed or ignored), followed by the full workspace gate.
+Layout log: `G:/tmp/sec5-layout.log`.
+
+Full gate: `G:/tmp/gate-sections-fix.sh`, log
+`G:/tmp/gate-sections-fix5.log`, run under
+`CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 timeout 7000`.
+All **12 x `=== rc=0`**: types, wasmbuild, bindgen-web, bindgen-node, tsc,
+tsc-worker, smoke, worker-smoke, fmt, clippy, wasmcheck and test.
+**1,748 passed, 0 failed, 12 ignored**; `=== GATE DONE`, `gate exit 0`.
+Builds used `F:/reprise-target/eng-sections2-b2` and the gate's WASM sibling,
+`TMP=TEMP=G:/tmp`, the G: Cargo home, disabled debug information, four build
+jobs, `INSTA_UPDATE=no`, and the retained MSVC/Windows SDK library paths.
+
+No production source, existing snapshot, `.d.ts` or `API.txt` changed. The only
+lockfile changes add the two test-dependency edges to `reprise-layout`; no
+package versions changed. Only this validation record and `PROGRESS.md` were
+updated after the gate. No processes were killed, and no merge or push was made.

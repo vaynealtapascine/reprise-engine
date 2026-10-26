@@ -2,6 +2,21 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-27: sections B3 ownership-read guard, round 5
+
+Ported the two round-4 guard probes first and confirmed both bypasses were accepted
+by the old guard. Restricted exemptions to 11 reviewed reader functions and added
+Rust syntax parsing for method/associated-function reads, function values, imports
+and aliases, plus conservative macro-token checks. The two original guards and six
+new negative regressions pass; production behavior is unchanged. Details and the
+function inventory are in `docs/sections-stage-b3-report.md`, "B3 fixes, round 5".
+
+All 302 layout-crate tests passed, followed by the full gate: 12 successful stages,
+1,748 passed, zero failed, 12 ignored (`G:/tmp/gate-sections-fix5.log`). No production
+source, snapshots, `.d.ts` or `API.txt` changed. Two test-only dependencies reuse
+already-locked package versions. No merge or push; the earlier follow-up scope is
+unchanged.
+
 ## 2026-10-26: sections B3 ownership fixes, round 4
 
 Confirmed `a614597` closes composition's relation-ownership dependency through one
