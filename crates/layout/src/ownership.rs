@@ -2,7 +2,7 @@
 //! door through which composition reads that, in the body and in a running
 //! story.
 //!
-//! The flow treats three kinds of block by what owns them: an annotation a
+//! The flow treats annotations and images by what owns them: an annotation a
 //! float or note owns is left to the region pass, an image likewise, and an
 //! image a `follow` relation places is composed and left for that relation.
 //! Composing a table's cell reads the same thing of the annotations in it. None
@@ -20,8 +20,10 @@
 //! -   a **running story** is composed once and reused by every page that shows
 //!     it, by what its digest holds. Its flow does not read the relations at
 //!     all: it is answered by the digest ([`Digest::class_of`]), which read
-//!     them once, when it was made, for every annotation and image it holds,
-//!     and which is the key. A change of ownership is a change of the key.
+//!     them once, when it was made, for every annotation and image whose
+//!     classification composition consults (top-level annotations and images,
+//!     and annotations in table cells). Those answers are part of the key.
+//!     A change of ownership is a change of the key.
 //!
 //! The classes of the document (`Classes`) and the answers (`Ownership`) have
 //! no public way to be made from the relations except these two, and nothing

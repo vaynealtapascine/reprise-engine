@@ -5,7 +5,8 @@
 //! The first matrix of this class (`review_round3_matrix.rs`) was top-level
 //! only, and a table cell's annotation escaped it. This one puts the block
 //! everywhere composition reads it: at the top of the body and of a running
-//! header, and inside a table cell of each. Each block carries an undefined
+//! header, inside the first and later table cells of each, and below nested
+//! table containers (which composition rejects). Each block carries an undefined
 //! style, so preparing it says so (`style.parent-missing`), which a cached
 //! layout can only get right when it knows whether the flow prepared it.
 //! Every layout of a persistent session is compared, whole and diagnostics
@@ -31,6 +32,10 @@ enum Place {
     Header,
     BodyCell,
     HeaderCell,
+    BodyLaterCell,
+    HeaderLaterCell,
+    BodyNestedCell,
+    HeaderNestedCell,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -40,11 +45,15 @@ enum Kind {
     Image,
 }
 
-const PLACES: [Place; 4] = [
+const PLACES: [Place; 8] = [
     Place::Body,
     Place::Header,
     Place::BodyCell,
     Place::HeaderCell,
+    Place::BodyLaterCell,
+    Place::HeaderLaterCell,
+    Place::BodyNestedCell,
+    Place::HeaderNestedCell,
 ];
 const KINDS: [Kind; 3] = [Kind::Paragraph, Kind::Annotation, Kind::Image];
 
@@ -65,16 +74,36 @@ fn world(place: Place, kind: Kind) -> World {
         .insert(&include_bytes!("../../../fixtures/images/red-1x1.png")[..])
         .unwrap();
     let image = reprise_doc::image::ImageData::new(hash);
-    let in_cell = matches!(place, Place::BodyCell | Place::HeaderCell);
-    let in_header = matches!(place, Place::Header | Place::HeaderCell);
+    let in_cell = !matches!(place, Place::Body | Place::Header);
+    let in_header = matches!(
+        place,
+        Place::Header | Place::HeaderCell | Place::HeaderLaterCell | Place::HeaderNestedCell
+    );
     let (top, subject) = if in_cell {
         let table = doc
             .append_table(two_columns([ColumnWidth::Content, ColumnWidth::Content]))
             .unwrap();
         let row = doc.append_table_row(table, false).unwrap();
-        let cell = doc.append_table_cell(row, 0).unwrap();
+        let mut cell = doc.append_table_cell(row, 0).unwrap();
         doc.append_cell_block(cell, BlockKind::Paragraph, "s", "cell")
             .unwrap();
+        if matches!(place, Place::BodyLaterCell | Place::HeaderLaterCell) {
+            doc.append_table_cell(row, 1).unwrap();
+            let row = doc.append_table_row(table, false).unwrap();
+            let first = doc.append_table_cell(row, 0).unwrap();
+            doc.append_cell_block(first, BlockKind::Paragraph, "s", "earlier cell")
+                .unwrap();
+            cell = doc.append_table_cell(row, 1).unwrap();
+        }
+        if matches!(place, Place::BodyNestedCell | Place::HeaderNestedCell) {
+            let nested = doc
+                .append_table(two_columns([ColumnWidth::Content, ColumnWidth::Content]))
+                .unwrap();
+            let row = doc.append_table_row(nested, false).unwrap();
+            let inner = doc.append_table_cell(row, 0).unwrap();
+            doc.move_block(nested, Some(cell), 1).unwrap();
+            cell = inner;
+        }
         let subject = match kind {
             Kind::Paragraph => {
                 doc.append_cell_block(cell, BlockKind::Paragraph, MISSING, "subject")
@@ -200,6 +229,31 @@ fn toggled(
             &format!("{label}, {what} (step {step})"),
             bad,
         );
+        if matches!(place, Place::BodyNestedCell | Place::HeaderNestedCell) {
+            // Ordinary table flow never enters this subtree. The region pass
+            // can still prepare a body annotation/image explicitly owned by
+            // NOTE/FLOAT; a story owner cannot be placed by that pass.
+            if matches!(place, Place::HeaderNestedCell)
+                || relation.is_none()
+                || *schema == builtin::FOLLOW
+            {
+                assert_eq!(
+                    prepared(&now, w.subject),
+                    0,
+                    "{label}: rejected subtree prepared by ordinary flow"
+                );
+            }
+            assert!(
+                now.diagnostics
+                    .iter()
+                    .any(|d| d.code.as_str() == "layout.table-invalid"),
+                "{label}: nested table was not rejected"
+            );
+            if matches!(place, Place::HeaderNestedCell) {
+                assert_eq!(session.counters().running_compositions, 0, "{label}");
+                assert!(session.counters().running_reused > 0, "{label}");
+            }
+        }
         if prepared(&now, w.subject) != prepared(&last, w.subject) {
             seen.insert(format!("{place:?} {kind:?}"));
         }
@@ -228,9 +282,50 @@ fn ownership_of_a_block_anywhere_composition_reads_it_is_keyed() {
     );
     // Not vacuous: ownership does change what the flow prepares of an
     // annotation in a cell, in the body and in a running story.
-    for expected in ["BodyCell Annotation", "HeaderCell Annotation"] {
+    for expected in [
+        "BodyCell Annotation",
+        "HeaderCell Annotation",
+        "BodyLaterCell Annotation",
+        "HeaderLaterCell Annotation",
+    ] {
         assert!(seen.contains(expected), "{expected} not seen in {seen:?}");
     }
+}
+
+/// A cell's logical paragraph can be a break inside a shared physical host.
+/// Reading later chunks of that host must retain its inputs and classification.
+#[test]
+fn ownership_of_a_late_virtual_cell_paragraph_matches_full_layout() {
+    let mut bad = Vec::new();
+    for place in [Place::BodyCell, Place::HeaderCell] {
+        for schema in [builtin::NOTE, builtin::FLOAT, builtin::FOLLOW] {
+            for owned_first in [false, true] {
+                let mut w = world(place, Kind::Paragraph);
+                for _ in 0..70 {
+                    w.subject = w.doc.split_block(w.subject, 0).unwrap();
+                }
+                let label = format!("{place:?} virtual paragraph {schema:?} {owned_first}");
+                let mut relation = owned_first.then(|| owned_by(&w, &schema));
+                w.doc.commit();
+                let mut session = LayoutSession::new(&w.engine);
+                agrees(&w, &mut session, &label, &mut bad);
+                for _ in 0..3 {
+                    if let Some(id) = relation.take() {
+                        w.doc.delete_relation(id).unwrap();
+                    } else {
+                        relation = Some(owned_by(&w, &schema));
+                    }
+                    w.doc.commit();
+                    let full = agrees(&w, &mut session, &label, &mut bad);
+                    assert!(
+                        prepared(&full, w.subject) > 0,
+                        "{label}: paragraph not prepared"
+                    );
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
 /// An image or annotation two relations name owner: one goes, the other stays.

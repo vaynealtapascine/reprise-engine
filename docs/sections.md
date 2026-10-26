@@ -1124,12 +1124,15 @@ makes it, and the unit that makes the page only finds it in the memo.
     source of it (`Ownership`, `ownership.rs`). The body's flow reads the
     relations once, when it begins: every layout composes the body afresh. The
     flow of a running story reads nothing of the relations; the story's digest
-    answers it. The digest classifies every annotation and image it holds, at
-    the top of the story and in the cells of its tables, when it is made, so a
-    float, note or follow relation added to or removed from one of them is a
-    different digest, and the story is composed again; one that names a block
-    the story does not hold leaves it alone. A story-owned float or note is
-    invalid whatever the flow does (`relation.owner-not-placeable`, reported
+    answers it. The digest classifies top-level annotations and images, and
+    annotations in table cells, when it is made: these are the ownership
+    answers composition consults. A changed answer makes a different digest,
+    and the story is composed again. Paragraphs and cell images are composed
+    regardless of ownership; nested table containers are rejected without
+    composing their descendants, so ownership there does not change the
+    digest. A relation on a block outside the story leaves it alone. A
+    story-owned float or note is invalid whatever the flow does
+    (`relation.owner-not-placeable`, reported
     by the region pass alone). `tests/relation_reads.rs` lists the places in the
     layout crate that read relations and fails for a new one.
 -   **Counts.** `StepWork` has `pages_made`, `region_units`, `region_blocks`

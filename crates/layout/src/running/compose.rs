@@ -98,9 +98,9 @@ fn role_of_node(doc: &Document, node: NodeId) -> (Option<reprise_doc::TableRole>
 pub(crate) struct Digest {
     nodes: Vec<NodeId>,
     items: Vec<Item>,
-    /// What the relations make of the annotations and images the digest holds,
-    /// at the top of the story and in its tables' cells (a block no relation
-    /// names is not in it: it is `Class::Free`). It is all the composition
+    /// What the relations make of top-level annotations and images, and of
+    /// annotations in table cells (a block no relation names is not in it:
+    /// it is `Class::Free`). It is all the composition
     /// learns of ownership (`ownership.rs`): the flow of a story is answered
     /// from here, never from the document, so the memo keyed by the digest is
     /// keyed by every answer it was composed with.
