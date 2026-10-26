@@ -21,7 +21,7 @@ pub struct Authored {
 /// Live blocks in document order (children included), skipping any node that
 /// isn't a readable block.
 pub fn live_blocks(doc: &Document) -> Vec<NodeId> {
-    doc.document_order()
+    doc.authored_order()
         .into_iter()
         .filter(|&node| doc.block(node).is_ok())
         .collect()
@@ -98,7 +98,7 @@ pub fn visible_text(doc: &Document) -> String {
             // holds other blocks is still exported with its own text.
             let hidden = match doc.table_role(node).ok().flatten() {
                 Some(reprise_doc::TableRole::Table(_) | reprise_doc::TableRole::Row(_)) => true,
-                Some(reprise_doc::TableRole::Cell(_)) => !doc.children(Some(node)).is_empty(),
+                Some(reprise_doc::TableRole::Cell(_)) => !doc.children_of(node).is_empty(),
                 None => false,
             };
             !hidden

@@ -26,6 +26,7 @@ impl EditError {
             Reason::Fragment(reprise_doc::fragment::FragmentError::Limit(_)) => {
                 reprise_diag::Code::new("clipboard.limit")
             }
+            Reason::CopyLimit(_) => reprise_diag::Code::new("clipboard.limit"),
             Reason::Fragment(_) => reprise_diag::Code::new("clipboard.invalid"),
             Reason::TooManyCommands { .. }
             | Reason::TextTooLong { .. }
@@ -54,6 +55,12 @@ impl EditError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Reason {
+    #[error("an effective break already exists at {0}")]
+    BreakExists(NodeId),
+    #[error("{first} and {second} are in different traversal domains")]
+    CrossDomain { first: NodeId, second: NodeId },
+    #[error("invalid section edit: {0}")]
+    Section(String),
     #[error("commit direct document edits before this composite edit")]
     UncommittedEdit,
     #[error("isolated edit preflight supports physical tree depth up to {max}")]
@@ -66,6 +73,11 @@ pub enum Reason {
     MarksLimit,
     #[error(transparent)]
     Fragment(reprise_doc::fragment::FragmentError),
+    /// A fragment's sections envelope, or the fragment it travels in, is over
+    /// a limit (sections §14). Refused whole before any mutation, never
+    /// truncated; the name says which limit.
+    #[error("the copy exceeds the {0} limit")]
+    CopyLimit(&'static str),
     #[error("paste must be the only command in its transaction")]
     MixedPaste,
     #[error("a transaction takes at most {max} commands, not {count}")]

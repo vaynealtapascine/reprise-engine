@@ -30,6 +30,19 @@ pub(crate) struct ResolvedFrame {
 }
 
 impl ResolvedFrame {
+    pub fn from_layout(frame: &crate::FrameLayout) -> Self {
+        Self {
+            name: frame.name.clone(),
+            role: frame.role.clone(),
+            x: Length::ZERO,
+            y: Length::ZERO,
+            width: frame.rect.width,
+            depth: frame.rect.height,
+            transform: *frame.to_page.matrix(),
+            writing_mode: frame.writing_mode,
+        }
+    }
+
     /// The frame's extent in its own space: its origin is its start corner.
     pub fn rect(&self) -> Rect<FrameSpace> {
         Rect::new(Point::origin(), self.width, self.depth)
@@ -76,11 +89,15 @@ pub(crate) struct ResolvedTemplate {
     pub frames: Vec<ResolvedFrame>,
     /// Source physical rectangle before writing axes or path expansion.
     pub page_setup: Option<reprise_doc::page_setup::PageDimensions>,
+    pub thread: Option<Vec<usize>>,
 }
 
 impl ResolvedTemplate {
     /// The indices of the frames the main flow threads through, in order.
     pub fn main_thread(&self) -> Vec<usize> {
+        if let Some(thread) = &self.thread {
+            return thread.clone();
+        }
         (0..self.frames.len())
             .filter(|&i| self.frames[i].is_main_flow() && self.frames[i].takes_text())
             .collect()
@@ -190,13 +207,14 @@ fn builtin(medium: &Medium) -> ResolvedTemplate {
             height: Length::ZERO,
             frames: Vec::new(),
             page_setup: None,
+            thread: None,
         },
     }
 }
 
 /// Resolves every dimension. `Err` says why the template can't be used at
 /// all; `Ok` carries the diagnostics about frames that were clamped or empty.
-fn resolve_template(
+pub(crate) fn resolve_template(
     template: &PageTemplate,
     source: TemplateSource,
     medium: &Medium,
@@ -254,6 +272,7 @@ fn resolve_template(
         height,
         frames,
         page_setup: reprise_doc::page_setup::PageDimensions::from_template(template, medium).ok(),
+        thread: None,
     };
     if resolved.main_thread().is_empty() {
         return Err("it has no frame with room for the main flow".into());

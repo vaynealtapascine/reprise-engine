@@ -39,7 +39,7 @@ fn select(doc: &Document, a: (NodeId, usize), b: (NodeId, usize)) -> StableSelec
 }
 fn texts(e: &Editor) -> Vec<String> {
     let doc = e.document();
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|n| doc.block(n).unwrap().text.to_string())
         .collect()

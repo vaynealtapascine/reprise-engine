@@ -105,6 +105,10 @@ effects. Rejected transactions preserve authored state and undo history.
 
 A job charges one core work unit at a time: a paragraph/table or a staged pass.
 A unit can be substantial; `step(64)` is a count budget, not a millisecond promise.
+A step charges at most its budget, except when it runs the unit that decodes a
+long flow host of a running story: an atomic unit of at most 1,060,864 bytes of
+text, charged whole by that step (at most 5 units, so `used` may exceed the
+budget by 4; sections §11).
 Zero budget is a checked no-op; budgets above 100,000 are rejected. The job may
 yield early as soon as viewport demand is covered. `LayoutProgress` reports the
 producing pass, covered pages, complete/settled flags, outside-document demand,
@@ -128,7 +132,8 @@ releases it; WASM clients call `release_job` after completion/cancellation.
 | Authored state | `state`, `apply`, `insert_image`, `undo`, `redo` |
 | Resources | `declare_font`, `register_asset`, `resources`, `resource_bytes` |
 | Layout | `start_layout`; native job `step`, `cancel`, `display_page`; WASM `step`, `cancel`, `partial_page`, `release_job` |
-| Navigation | `move_cursor`, `caret_rect`, `hit_test`, `selection_rects` |
+| Navigation | `move_cursor`, `caret_rect`, `hit_test`, `selection_rects`; in running regions `hit_placed`, `caret_in`, `selection_rects_in` |
+| Sections | `page_sections`, `section_pages`, `page_label`, `page_regions`, `region_instances`, `page_fields` |
 | Clipboard | `copy` (native fragment bytes), `copy_as` (plain/HTML selection with loss reports), `paste`, `import_text` |
 | Export/persistence | `save`, `export` (plain/HTML/native/PDF) |
 | Presentation | `display_page`, `display_json`, `svg`, `png`, `glyph_outlines`, `reading_order`, `diagnostics` |
@@ -762,3 +767,92 @@ Problems appear in `diagnostics` and `diagnostics_for` as `layout.inline-*`,
 
 The reference worker adds request kinds `atom-rect` and `field-target`
 (responses `atom-rect` with `rect`, `field-target` with `target`).
+
+## Sections, stories and running regions (`docs/sections.md`)
+
+A document has one **body** and any number of **stories**: independent runs of
+blocks, edited with the ordinary text commands on their own block IDs. A story
+becomes a header, footer or background by being **bound** to a slot of a
+section. A section starts at a block; `first` is the leading section and always
+exists. `State.sections`, `State.stories` and `BlockState.starts` report them
+(raw values, parsed values and the resolved binding of every slot and variant).
+
+Commands, all inside `apply` or `batch` (so with `expected_revision` and one undo
+step), and all refused whole, writing nothing, if any part is invalid:
+
+-   `insert-break { at, break_kind, patch? }`: `at` is `{ position: "position",
+    node, offset }` (a UTF-8 byte offset in a paragraph; anywhere but its start
+    splits it, and the new paragraph is in `Applied.blocks`) or `{ position:
+    "before", node }`; `break_kind` is `section`, `page` or `column`. A section
+    copies the geometry properties of the section it is in; `patch` adds or
+    overrides properties.
+-   `remove-break { block }`.
+-   `set-section { section, patch?, clear? }`: `section` is `"first"` or the ID
+    of the block a section starts at. `patch` values are strings, booleans or
+    integers (a JSON number; an integer past 2^53 can't be sent from
+    JavaScript, and `State` reports such values as decimal strings).
+    `clear` removes keys.
+-   `create-story { blocks }` (`{ block_kind, text, style? }` each, at most
+    4,096): the new story's ID is in `Applied.stories`.
+-   `set-region { section, slot, variant, binding }`: `slot` is `header`,
+    `footer` or `background`, `variant` is `default`, `first` or `even`, and
+    `binding` is `{ state: "inherit" }` (the same as the previous section's),
+    `{ state: "none" }` or `{ state: "story", story }`.
+-   `create-region { section, slot, variant, from }`: makes a story, empty
+    (`{ source: "empty" }`) or a copy of one (`{ source: "copy-of", story }`),
+    and binds it in one step.
+-   `link-region { section, slot, variant }`: `set-region` with `inherit`.
+-   `delete-story { story }`: bindings to it stay and show nothing, with
+    `layout.running-missing`.
+
+Queries read the current complete layout (`bindings.layout-required` or
+`bindings.stale` otherwise; a page past the end is `bindings.invalid`). A layout
+with no sections is one section, `first`, with decimal numbers.
+
+-   `page_sections(page)`: `{ page, kind, owner, bands }`. `kind` is `content`,
+    `filler` (an odd or even start's blank page) or `note-continuation`;
+    `owner` is the section that made the page; each band is a run of body
+    frames with its own section, offset, depth and whether it was balanced.
+-   `section_pages(section)`: `{ owned, occupied }`, the pages the section made
+    and those with any of its text (a continuous section starts on its
+    predecessor's page). Page indexes, ascending.
+-   `page_label(page)`: `{ page, label, counter, kind }`. `counter` is a decimal
+    string and `label` is the counter in the section's number format.
+-   `page_regions(page)`: `[{ slot, variant, story, rect, clipped }]`.
+-   `region_instances(story)`: `[{ page, slot }]`, every page that shows it.
+-   `page_fields(page)`: `[{ node, atom, at, instance, text }]`: the fields on a
+    page (body, then each running region) and what each shows there. `instance`
+    is `{ kind: "single" }`, `{ kind: "page", page }` or `{ kind: "running",
+    page, slot, repeat }`.
+
+Navigation. A `RegionInstance { page, slot }` is **view state** the app holds,
+never document state; it stays valid only while a layout shows the story there,
+so ask again after a relayout. `hit_placed({ page, x, y, mode? })` returns
+`{ kind: "body", hit }` or `{ kind: "running", position, instance }`: a header or
+footer wins over the body inside its rectangle, and a background answers only
+for `mode: "background"` where nothing above it does. `caret_in({ instance,
+position })` returns `{ page, rect }`, and `selection_rects_in({ instance,
+selection })` the rectangles; if a relayout moved the story off `instance`, or
+removed its page, the nearest page that still shows it in that slot answers
+(`instance.page` is only context, so a page past the end of the layout is not
+refused; its slot and the position still are, and `hit_placed` still asks about
+a page that exists). `caret_rect`, `hit_test`
+and `selection_rects` are unchanged and body-only. Text in a story is edited with
+the ordinary commands on its block IDs; typing into an inherited header edits the
+story every section sharing it shows, and an app that wants an independent one
+first runs `create-region { from: copy-of }`.
+
+`copy` and `paste` carry a section's boundaries, bindings and stories in the
+fragment (`Fragment.sections`); `import_copy` carries all of it, orphan stories
+and the geometry mode included. `export` writes per-page `MediaBox`es,
+`/PageLabels` when the labels are exactly what a PDF numbering style writes,
+header/footer/watermark artifact subtypes, `<section>` HTML that imports back, and
+body-only plain text, each reporting what it left out as `export.sections` notes.
+
+The reference worker adds request kinds `page-sections`, `section-pages`,
+`page-label`, `page-regions`, `region-instances`, `page-fields`, `hit-placed`,
+`caret-in` and `selection-rects-in` (responses `page-sections` with `sections`,
+`section-pages` with `pages`, `page-label` with `label`, `page-regions` with
+`regions`, `region-instances` with `instances`, `page-fields` with `fields`,
+`placed-hit` with `hit`, `caret-rect` with `rect`, `selection-rects` with
+`rects`); the new commands go through the existing `edit` and `batch` requests.

@@ -1,0 +1,5 @@
+disallowed-methods = [
+  { path = "reprise_doc::Document::blocks", reason = "Choose top(Domain) explicitly" },
+  { path = "reprise_doc::Document::document_order", reason = "Choose order(Domain) or authored_order explicitly" },
+  { path = "reprise_doc::Document::children", reason = "Choose top(Domain), children_of or children_in explicitly" },
+]

@@ -28,12 +28,16 @@ mod inline_display;
 mod list_marker;
 pub mod marks;
 mod notes;
+mod ownership;
 pub mod plugins;
 mod query;
 pub mod reading;
+mod reads;
 mod region;
 mod regions;
 mod relations;
+mod running;
+mod sections;
 mod shaping;
 mod snapshot;
 pub mod solver;
@@ -54,11 +58,13 @@ use serde::{Deserialize, Serialize};
 
 pub use display::{DisplayOptions, PdfReadingBlock, PdfReadingRun};
 pub use inline::{AtomLayout, AtomPaint, AtomRole, FieldInstance};
+pub use running::{Artifact, SlotId};
 pub use shaping::SHAPE_CHUNK_BYTES;
 pub use snapshot::{
-    BlockLayout, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot, LineLayout, LineRef,
-    MarkerLayout, PageLayout, PositionedRun, RelationLayout, RelationStatus, RepeatedHeader,
-    Resolution, Subject, TargetLayout, TemplateSource, TemplateUsed,
+    Band, BlockLayout, ColumnRule, Diagnostic, FrameLayout, ImageLayout, LayoutSnapshot,
+    LineLayout, LineRef, MarkerLayout, PageDescriptor, PageKind, PageLayout, PositionedRun,
+    RelationLayout, RelationStatus, RepeatedHeader, Resolution, RunningInstance, SectionsLayout,
+    Subject, TargetLayout, TemplateSource, TemplateUsed,
 };
 
 /// Engine settings for the flow. Like the rest of the engine configuration
@@ -142,6 +148,14 @@ impl Engine {
         )
     }
 
+    /// Resolves section geometry and mode without composing text or writing authored state.
+    pub fn section_state(
+        &self,
+        doc: &Document,
+    ) -> std::collections::BTreeMap<reprise_doc::sections::SectionId, serde_json::Value> {
+        let template = template::resolve(self, doc, &mut Vec::new());
+        sections::Table::resolve(self, doc, &template).state()
+    }
     pub fn page_setup(&self, doc: &Document) -> PageSetupInfo {
         let mut diagnostics = Vec::new();
         let template = template::resolve(self, doc, &mut diagnostics);
@@ -199,6 +213,7 @@ impl Engine {
             blocks: Vec::new(),
             relations: Vec::new(),
             repeated_headers: Vec::new(),
+            sections: None,
             diagnostics: Vec::new(),
         };
         let template = template::resolve(self, doc, &mut snapshot.diagnostics);
@@ -210,3 +225,5 @@ impl Engine {
         regions::run(self, doc, &template, snapshot)
     }
 }
+
+mod pages;

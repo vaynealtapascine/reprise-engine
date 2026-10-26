@@ -45,7 +45,7 @@ fn edits(engine: &Engine, doc: &Document, label: &str) {
     for turn in 0..32 {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         let nodes: Vec<_> = doc
-            .document_order()
+            .order(reprise_doc::Domain::Body)
             .into_iter()
             .filter(|&n| doc.block(n).is_ok())
             .collect();
@@ -150,7 +150,7 @@ fn edits(engine: &Engine, doc: &Document, label: &str) {
             }
             13 => {
                 let paragraphs: Vec<_> = doc
-                    .blocks()
+                    .top(reprise_doc::Domain::Body)
                     .into_iter()
                     .filter(|&n| {
                         matches!(doc.table_role(n), Ok(None))
@@ -226,7 +226,7 @@ fn paragraphs(count: usize) -> Document {
 fn one_edit_in_a_thousand_paragraphs_only_shapes_and_composes_that_paragraph() {
     let engine = reprise_fixtures::engine();
     let doc = paragraphs(1000);
-    let nodes = doc.blocks();
+    let nodes = doc.top(reprise_doc::Domain::Body);
     let mut session = LayoutSession::new(&engine);
     check(&mut session, &engine, &doc, "initial thousand");
     let node = nodes[500];
@@ -379,7 +379,7 @@ fn viewport_first_partial_then_finishing_matches_full_layout() {
 fn jobs_and_yielded_results_reject_edits_merges_and_cancellation() {
     let engine = reprise_fixtures::engine();
     let doc = paragraphs(40);
-    let node = doc.blocks()[0];
+    let node = doc.top(reprise_doc::Domain::Body)[0];
     let mut session = LayoutSession::new(&engine);
     {
         let mut job = session.start(&doc, Viewport::Pages(0..1));
@@ -617,7 +617,7 @@ fn rectangle_demand_covers_its_page_before_background_completion() {
 fn line_height_edits_change_composition_without_reitemizing_or_reshaping() {
     let engine = reprise_fixtures::engine();
     let doc = paragraphs(30);
-    let node = doc.blocks()[0];
+    let node = doc.top(reprise_doc::Domain::Body)[0];
     let mut session = LayoutSession::new(&engine);
     check(&mut session, &engine, &doc, "height before");
     doc.set_overrides(

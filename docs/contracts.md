@@ -109,17 +109,18 @@ Codes in use:
 | Library | Codes |
 | --- | --- |
 | roles / lists | `role.unknown`, `list.definition-missing`, `list.definition-unreadable`, `list.definition-cycle`, `list.level-clamped`, `list.format-unknown`, `list.counter-range`, `list.limit` |
+| section / story | `section.property`, `section.geometry`, `section.template`, `section.columns-limit`, `section.columns-fit`, `section.column-narrow`, `section.continuous-new-page`, `section.band-limit`, `section.balance-approx`, `section.page-counter`, `section.page-number-range`, `section.region-slot`, `section.region-writing-mode`, `section.mode-unsupported`, `section.inactive`, `section.orphan-start`, `story.orphan`, `story.nested` |
 | font / shape | `font.fallback`, `font.missing`, `font.unreadable`, `font.nearest`, `font.chain-limit`, `font.synthetic`, `font.config`, `shape.bad-style-run`, `shape.script-depth`, `shape.bad-line` |
 | compose | `compose.overflow`, `compose.geometry-stalled`, `compose.fallback`, `compose.tab-unreachable`, `compose.tab-limit`, `compose.line-height-limit` |
-| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.paragraph-context`, `layout.annotation-revision`, `layout.inline-orphan-marker`, `layout.inline-orphan-record`, `layout.inline-kind`, `layout.field-unsettled`, `layout.field-target` |
+| layout | `layout.page-setup-invalid`, `layout.malformed-block`, `layout.style`, `layout.style-clamped`, `layout.text-unplaced`, `layout.frame-overflow`, `layout.unplaced`, `layout.template-unreadable`, `layout.template-unusable`, `layout.degenerate-frame`, `layout.page-limit`, `layout.transform-unusable`, `layout.path-invalid`, `layout.path-limit`, `layout.reading-cycle`, `layout.reading-conflict`, `layout.reading-missing`, `layout.reading-partial`, `layout.reading-limit`, `layout.reading-revision`, `layout.solver-infeasible`, `layout.solver-underconstrained`, `layout.solver-limit`, `layout.region-cycle`, `layout.region-limit`, `layout.region-parameter`, `layout.float-deferred`, `layout.float-unplaceable`, `layout.note-continued`, `layout.note-depth`, `layout.table-invalid`, `layout.table-limit`, `layout.table-span`, `layout.table-rowspan-split`, `layout.table-header-unrepeated`, `layout.image-record`, `layout.image-missing`, `layout.image-header`, `layout.image-limit`, `layout.image-size`, `layout.tab-leader-limit`, `layout.tab-leader-missing`, `layout.list-indent`, `layout.indent-clamped`, `layout.keep-unsatisfied`, `layout.paragraph-context`, `layout.annotation-revision`, `layout.inline-orphan-marker`, `layout.inline-orphan-record`, `layout.inline-kind`, `layout.field-unsettled`, `layout.field-target`, `layout.running-missing`, `layout.running-clipped`, `layout.story-unsupported` |
 | relations | `relation.unreadable`, `relation.unknown-schema`, `relation.not-applied`, `relation.missing-target`, `relation.rebound`, `relation.bad-target`, `relation.owner-not-placeable`, `relation.owner-deleted`, `relation.no-match`, `relation.pushed`, `relation.ambiguous`, `relation.target-deleted`, `relation.snapshot-unavailable`, `relation.self-reference`, `relation.rebind-limit`, `relation.no-frame`, `relation.alignment-invalid`, `relation.alignment-conflict`, `relation.alignment-limit`, `relation.alignment-cycle`, `relation.alignment-outside` |
 | style | `style.unparsed`, `style.expr-limit`, `style.type-error`, `style.unknown-function`, `style.function-failed`, `style.basis-unresolved`, `style.basis-indefinite`, `style.cycle`, `style.saturated`, `style.divide-by-zero`, `style.parent-cycle`, `style.parent-missing`, `style.chain-too-long`, `style.format-unreadable`, `style.format-limit`, `style.deleted`, `style.rename-cycle` |
 | format | `format.invalid`, `format.limit`, `format.cache-dropped`, `format.cache-ignored`, `format.asset-hash`, `format.font-hash`, `format.font-unreadable`, `format.font-missing`, `format.asset-missing`, `format.migrated`, `format.read-only` |
 | edit | `edit.page-setup-invalid`, `edit.limit`, `edit.invalid-command`, `edit.store` |
 | plugin | `plugin.invalid`, `plugin.abi`, `plugin.hash`, `plugin.capability`, `plugin.limit`, `plugin.fuel`, `plugin.trap`, `plugin.result`, `plugin.unavailable` |
-| clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped`, `clipboard.annotation-dropped` |
+| clipboard | `clipboard.invalid`, `clipboard.limit`, `clipboard.version`, `clipboard.html-approximated`, `clipboard.html-dropped`, `clipboard.resource-missing`, `clipboard.resource-hash`, `clipboard.relation-dropped`, `clipboard.style-clash`, `clipboard.range-affinity`, `clipboard.selection-table`, `clipboard.host-range-dropped`, `clipboard.annotation-dropped`, `clipboard.section-context`, `clipboard.section-dropped` |
 | pdf | `pdf.figure-alt-missing`, `pdf.reference-unlinked`, `pdf.heading-level`, `pdf.structure-depth`, `pdf.run-split`, `pdf.ua-not-met`, `pdf.link-unresolved` |
-| export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure`, `export.annotations` |
+| export | `export.relations`, `export.reading-order`, `export.transforms`, `export.notes-floats`, `export.tables`, `export.styles`, `export.bidi`, `export.fonts`, `export.assets`, `export.editing-structure`, `export.annotations`, `export.sections` |
 | annotation | `annotation.unreadable`, `annotation.limit`, `annotation.link-scheme`, `annotation.link-invalid`, `annotation.link-length`, `annotation.payload-invalid`, `annotation.empty`, `annotation.missing` |
 | bindings | `bindings.version`, `bindings.invalid`, `bindings.limit`, `bindings.id`, `bindings.stale`, `bindings.cancelled`, `bindings.layout-required`, `bindings.read-only`, `bindings.store`, `bindings.render`, `bindings.poisoned`, `bindings.missing-font`, `bindings.copy-source` |
 | sync (collaboration) | `sync.format`, `sync.feature`, `sync.invalid`, `sync.limit`, `sync.missing`, `sync.local-peer`, `sync.store`, `collab.malformed-node`, `collab.tree-tombstone`, `collab.hidden-content`, `collab.flow-depth` |
@@ -960,7 +961,10 @@ worker protocol, bounds, error meanings, packaging and host responsibilities.
   Compatible newer packages return `bindings.read-only`; the facade currently
   cannot lay out the core's `DocumentAt` view and never exposes it as editable.
 - Layout jobs are owned, single-threaded continuations of the same incremental
-  coordinator. Each `step(session, budget)` charges at most its explicit budget,
+  coordinator. Each `step(session, budget)` charges at most its explicit budget
+  (the one exception is the atomic decode of a running story's flow host, which
+  the step that runs it charges in full, at most 5 units, so at most 4 over; see
+  "Section additions", Scheduling),
   may stop early for the viewport and returns pass, coverage, completeness,
   settled/outside-document flags and work counters. Zero is a checked no-op.
   Partial pages are available only inside advertised coverage. Navigation,
@@ -1158,6 +1162,187 @@ Additive; the design is `docs/paragraph-styles.md`.
     live styles).
 -   **Package.** Required bit 13, `REQUIRED_PARAGRAPH_STYLES` (see
     `crates/format/SPEC.md`).
+
+## Section additions (01, 05, 06, 07, 11, 20, 24, 26, 27, 33, 35, 37, 38)
+
+Additive; the design is `docs/sections.md` (§16 lists these items). This
+section is the orchestrator's dedicated contract change for the sections
+workstream (Stage B slice C). It lands **before** any section behaviour, and
+changes no existing signature, serialisation or output. Documents with no
+sections, breaks, stories or geometry-mode record lay out, save, copy and
+serialise byte-identically.
+
+-   **Traversal domains** (`reprise-doc`).
+    -   `Domain::{Body, Story(NodeId)}`;
+    -   `Document::{order(Domain), top(Domain), authored_order(), stories(),
+        domain_of(NodeId)}`.
+    -   `blocks()`, `children(None)` and `document_order()` keep their
+        signatures and are now defined as the **body** domain. A *story* is a
+        content node with `kind = "story"` whose parent is the root. The body
+        domain skips story nodes and their subtrees. For documents without
+        stories this is exactly the previous result. The flow-text rule above
+        ("`children`, `parent_of`, `document_order` expand flows") applies
+        within each domain.
+    -   A `story` node that isn't directly under the root is outside every
+        domain. `is_live`, `block`, `locate` and every enumeration treat it,
+        and its subtree, as not live.
+-   **Start records** (`reprise-doc`). The flat root map `starts1` holds:
+    -   address keys `<addr>/active` and `<addr>/life`;
+    -   lifetime keys `<addr>/<life>/<prop>`.
+
+    An address is a block `NodeId`, or `first` (lifetime `0`). A lifetime is a
+    Loro operation ID minted by a staged write, and is never reused. Unknown
+    keys are retained and never rewritten. Interpretation is read-time only;
+    nothing is repaired.
+-   **Geometry mode** (`reprise-doc`). The flat root map `geometry1` holds
+    `v = 1` and `mode = paged | pageless`. A section key `mode` overrides it.
+    The viewport stays the engine's `Medium` input and is never stored.
+    `page-setup1` and its six keys are unchanged.
+-   **Snapshot** (`reprise-layout::snapshot`).
+    -   `LayoutSnapshot.sections: Option<SectionsLayout>`, with
+        `#[serde(default, skip_serializing_if = "Option::is_none")]`. It is
+        `None` unless the document has an effective section, break, story
+        binding or geometry-mode record.
+    -   `SectionsLayout { pages: Vec<PageDescriptor>, running:
+        Vec<RunningInstance>, rules: Vec<ColumnRule> }`.
+    -   `PageDescriptor { section, kind: Content | Filler | NoteContinuation,
+        counter: i64, label: String, bands: Vec<Band> }`.
+    -   `RunningInstance { page, slot, variant, story: NodeId, frame: usize,
+        blocks: Vec<BlockLayout>, clipped: bool }`. Running instances are
+        never in `blocks`, the reading order, or the editing kernel's body
+        queries, like `repeated_headers`.
+    -   `PageDescriptor.counter` is serialised as a canonical signed decimal
+        string, as every other 64-bit counter is (see "Decimal strings" above),
+        so JavaScript never loses precision. `RunningInstance.slot` is the slot
+        token; `frame` is a `usize` frame index, as in `LineLayout.frame`.
+    -   `PageLayout`, `snapshot.template` and every existing query keep their
+        signatures and meaning. Running frames are in `frames` with role
+        `Flow("reprise.running.<slot>")`, never `main`.
+-   **Field instances** (`reprise-layout::inline`, with inline's sign-off).
+    `FieldInstance` gains `Running { page: u32, slot: SlotId, repeat: u32 }`.
+    `SlotId` is a dense `u16` index into the running-slot registry. It is
+    in-process only and never serialised: every JSON form (snapshot, facade,
+    WASM, fragments) names a slot by its stable token (`header`, `footer`,
+    `background`, ...), so adding a slot never renumbers stored or exchanged
+    data. `FieldInstance::{Single, Page}` are unchanged.
+-   **Scheduling** (`reprise-layout::incremental`; `docs/sections.md` §11). The
+    running regions of a page are made by units of their own, charged to
+    `step(budget)` before the unit that makes the page. A job owns the digests
+    and the compositions it holds for a region allocation, in the session's
+    memo: starting another job on the session, or a layout, which is one, or
+    clearing the memo, ends every earlier job, and `LayoutSession::resume`
+    returns `JobError::Stale` for its continuation although the document and
+    its revision are unchanged. A job that finds memo state it made gone ends
+    the same way. Neither ever composes a story inline in place of it. A
+    paragraph of a running story that keeps with the next checks its chain
+    against the blocks of the story's digest only, a unit at a time (a
+    preparation stage or a composer call each), and the story's memo is keyed
+    by everything the check reads.
+
+    **Maximum atomic work.** Every unit is bounded by a constant of the
+    engine's limits except one, whose bound is stated here so that a host of
+    this contract (frames included) takes it knowingly: the **decode of a flow
+    host's text**, which cannot be split without making the CRDT layer's flow
+    reading incremental. It is one atomic unit: at most `MAX_HOST_BYTES`
+    (1,060,864 bytes: 1 MiB of text and the three-byte break marker of each of
+    4,096 blocks), alone in its look-ahead unit with only the host's first block
+    (a unit that has read anything else first stops in front of such a host,
+    and the next unit, which opens with it, decodes it), charged in full by the
+    step that runs it, at most **5 units** (`Step.used`, `StepWork.units`).
+    That is the only unit that may take a step past its budget: a step that
+    starts it with a unit of budget left charges at most 4 over (a budget of 1
+    still charges up to 5). No debt is carried into later calls.
+    Cancellation and staleness are observed before and after the step, never
+    inside the decode. A host with more text is not decoded at all: the story
+    is cut in front of it and reported clipped. That cutoff depends on how the
+    text is stored (paragraphs sharing a physical host), not on its content,
+    and is not a semantic boundary: a consumer takes what the digest holds and
+    what it reports omitted.
+-   **Navigation** (`reprise-edit`).
+    -   `Navigator::hit_placed(point) -> Option<PlacedHit>`, where `PlacedHit`
+        is `Body(Hit)` or `Running { position, instance: RegionInstance }`.
+        `PlacedHit` and `PageKind` are `#[non_exhaustive]`, so a frame chain's
+        hit and a canvas tile can be added without breaking a match;
+    -   `RegionInstance { page, slot }`;
+    -   `HitMode::{Normal, Background}`;
+    -   `Navigator::caret_in(instance, position)`;
+    -   `Navigator::selection_rects_in(instance, range)`.
+
+    `Navigator::hit`, `Caret` and `Selection` are unchanged and body-only. The
+    instance is caller view state, never document state.
+-   **Editing** (`reprise-edit`).
+    -   Commands: `InsertBreak`, `RemoveBreak`, `SetSection`, `CreateStory`,
+        `SetRegion`, `CreateRegion`, `DeleteStory`.
+    -   Errors: `Reason::BreakExists(NodeId)`, `Reason::CrossDomain {
+        first: NodeId, second: NodeId }` and `Reason::CopyLimit(&'static str)`.
+
+    Every command works inside a transaction, respects `expected_revision`,
+    and validates before staging. A refused command writes no root and adds no
+    undo step. Existing commands accept story `NodeId`s. A command whose
+    range spans two domains is refused with `CrossDomain`.
+-   **Fragments** (`reprise-doc::fragment`).
+    -   `Fragment.sections: Option<String>`, with `#[serde(default,
+        skip_serializing_if = "Option::is_none")]`. It's a version-1 JSON
+        envelope: `mode` (`partial` | `complete`), `boundaries` (each with
+        `active`, `break`, `start`, raw current-lifetime props and bindings),
+        `context`, `geometry`, `stories` and `dropped`.
+    -   Bounds: 16,384 boundaries; 64 keys per record, each value at most
+        2 KiB; **16,384 distinct transferred stories**, counted across the
+        whole envelope, each once however many references it has (bound,
+        running-only and orphan stories all count). The first draft's 256 is
+        replaced: the frames design needs room for thousands of chains
+        (orchestrator decision, Stage B part 3). These count within the
+        fragment's existing aggregate limits (size, blocks, resources), which
+        still apply.
+    -   Anything over a limit is refused before any mutation and never
+        truncated: a paste with `Reason::CopyLimit(name)` (code
+        `clipboard.limit`), naming the limit (`section boundaries`,
+        `section keys`, `section value`, `transferred stories`, or an
+        aggregate one); a copy with `FragmentError::Limit(name)`. A malformed
+        envelope is refused with `clipboard.invalid` before any mutation.
+        Older strict readers refuse the field rather than ignore it. Paste
+        mints fresh lifetimes; lifetimes never travel.
+    -   A binding is `{"t":"none"}`, `{"t":"story","label":…}` or
+        `{"t":"raw","value":…}` (a value that names no live story, kept as it
+        was). Each story entry also carries its `source` (its ID in the document
+        it was copied from), so a paste into that document refers to it
+        instead of copying it. `Pasted.stories` maps each source story to the
+        story the paste used.
+-   **Display** (`reprise-display`). An optional `artifact_kinds` map, from an
+    artifact run to `Header | Footer | Watermark`, sits beside the unchanged
+    artifact run list. Backends that ignore it draw exactly as before.
+    `Structure.page_labels` (one `PageLabel { style: Decimal | LowerRoman |
+    UpperRoman | LowerAlpha | UpperAlpha, number }` per page, or none) makes
+    the PDF backend write `/PageLabels`; both fields default to empty.
+-   **Facade** (`reprise`, `reprise-wasm`).
+    -   Commands: `insert_break`, `remove_break`, `set_section`,
+        `create_story`, `set_region`, `create_region`, `link_region`,
+        `delete_story`. `link_region` is facade sugar for the kernel's
+        `SetRegion { binding: Inherit }` ("same as previous"); it has no
+        kernel command of its own.
+    -   `State.sections`, `State.stories` and `BlockState.starts`. Each is left
+        out of JSON when empty or absent. `Applied.stories` (the IDs
+        `create_story` and `create_region` made) is left out when empty.
+    -   Wire forms (`docs/bindings.md`): a break's position is `{ position:
+        "position" | "before", ... }` and its kind is `break_kind` (the
+        command's own `kind` is its tag); a binding is `{ state: "inherit" |
+        "none" | "story" }`; `set_section` takes `"first"` or a block ID.
+    -   Placed navigation: `hit_placed`, `caret_in` and `selection_rects_in`,
+        over `RegionInstance { page, slot }`, which is view state.
+    -   Queries: `page_sections`, `section_pages`, `page_label`,
+        `page_regions`, `region_instances`, `page_fields`.
+    -   `set_page_setup` keeps its meaning: the document default.
+-   **Package.** Required bit 17, `REQUIRED_SECTIONS`. It declares any of:
+    -   a retained `starts1` root, including an emptied one and inactive or
+        unreadable keys;
+    -   a `story` node, live or tombstoned;
+    -   a retained `geometry1` root, including an emptied or malformed one.
+
+    Readers without the bit refuse with `format.invalid` /
+    `FormatError::RequiredFeatures`, and sync refuses with `sync.feature`.
+    Reads, empty patches and refused commands never create these roots.
+-   **Diagnostics.** The `section / story` row, and the additions to the
+    `layout` and `clipboard` rows, in the codes table above.
 
 Stable style ownership (review-fixes 1): native `Document::style_identity(name)`
 returns an opaque document-scoped owner token, and `style_reference(node)` returns

@@ -43,7 +43,7 @@ impl Document {
         // Each node is pushed once, from its one parent, so this ends.
         while let Some(id) = stack.pop() {
             let node = NodeId::tree(id);
-            if self.live(&tree, id) {
+            if self.live(&tree, id) && !self.is_story_node(id) {
                 let mut at = id;
                 let mut depth = 0;
                 while self.is_embedded(at) {
@@ -112,6 +112,7 @@ impl Document {
                 });
             }
         }
+        out.extend(self.section_audit());
         out
     }
 

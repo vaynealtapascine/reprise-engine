@@ -70,7 +70,7 @@ struct Seen {
 }
 
 fn seen(doc: &Document) -> Vec<Seen> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .map(|node| {
             let item = doc.list_item(node);
@@ -85,7 +85,7 @@ fn seen(doc: &Document) -> Vec<Seen> {
 }
 
 fn markers(doc: &Document) -> Vec<String> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .filter_map(|node| doc.list_item(node).map(|i| i.marker))
         .collect()
@@ -400,7 +400,10 @@ fn a_native_copy_keeps_roles_and_lists_and_pastes_fresh_definitions() {
     text_block(&doc, "Quoted.", Role::Quote);
     doc.commit();
     let original = seen(&doc);
-    let original_list = doc.list_item(doc.document_order()[1]).unwrap().list;
+    let original_list = doc
+        .list_item(doc.order(reprise_doc::Domain::Body)[1])
+        .unwrap()
+        .list;
 
     let schemas = SchemaRegistry::builtin();
     let bytes = copy_all(&doc, "source", &schemas, None, None)
@@ -418,7 +421,7 @@ fn a_native_copy_keeps_roles_and_lists_and_pastes_fresh_definitions() {
     assert_eq!(copied, original.as_slice());
     let pasted = editor
         .document()
-        .document_order()
+        .order(reprise_doc::Domain::Body)
         .into_iter()
         .filter_map(|n| editor.document().list_item(n))
         .last()
@@ -432,7 +435,7 @@ fn a_native_copy_keeps_roles_and_lists_and_pastes_fresh_definitions() {
 /// Marker and list of every item of `editor`'s document, in order.
 fn listed(editor: &Editor) -> Vec<(String, ListId)> {
     let doc = editor.document();
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .filter_map(|n| doc.list_item(n).map(|i| (i.marker, i.list)))
         .collect()

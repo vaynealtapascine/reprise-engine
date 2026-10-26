@@ -212,7 +212,7 @@ fn unsafe_and_malformed_addresses_are_refused_but_the_text_stays() {
     );
     let text: String = editor
         .document()
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|b| editor.document().block(b).unwrap().text.to_string())
         .collect::<Vec<_>>()
@@ -284,7 +284,11 @@ fn a_page_of_links_is_bounded_and_keeps_the_text() {
     let links = links_of(editor.document());
     assert_eq!(links.len(), 4096);
     let doc = editor.document();
-    let text = doc.block(doc.blocks()[0]).unwrap().text.to_string();
+    let text = doc
+        .block(doc.top(reprise_doc::Domain::Body)[0])
+        .unwrap()
+        .text
+        .to_string();
     assert!(text.contains("w5999") && text.contains("w0 "));
     assert!(
         import
@@ -644,7 +648,8 @@ fn a_hostile_native_fragment_is_refused_whole() {
                 .is_none_or(|decoded| decoded.paste(&mut editor, None, "elsewhere").is_err());
         assert!(refused, "{name}");
         assert!(
-            editor.document().blocks().is_empty() && !editor.document().has_annotations(),
+            editor.document().top(reprise_doc::Domain::Body).is_empty()
+                && !editor.document().has_annotations(),
             "{name}: nothing was written"
         );
     }
@@ -840,7 +845,7 @@ fn cross_paragraph_copy_remaps_internal_range_targets() {
         };
         assert_ne!(range, target);
         let extent = copy.range_extent(range).unwrap();
-        let copied = copy.blocks();
+        let copied = copy.top(reprise_doc::Domain::Body);
         assert_eq!(extent.start, (copied[0], 0));
         assert_eq!(extent.end, (*copied.last().unwrap(), 6));
         assert_eq!(copied.len(), if whole { 2 } else { 1 });

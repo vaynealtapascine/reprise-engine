@@ -10,7 +10,7 @@ use reprise_doc::{
 };
 use reprise_geom::{PageSpace, Rect};
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -149,6 +149,15 @@ pub struct WorkCounters {
     pub region_passes: usize,
     pub relation_passes: usize,
     pub reading_order_passes: usize,
+    /// Running-region compositions made, and reused from the running memo.
+    pub running_compositions: usize,
+    pub running_reused: usize,
+    /// Running-region compositions the flow made itself because the look-ahead
+    /// had not: zero when the scheduling units cover every page (sections §11).
+    pub running_inline: usize,
+    /// Deep comparisons of a story's digest with a cached one (the pointer
+    /// fast path is not one).
+    pub running_digest_compares: usize,
 }
 /// The work one [`LayoutJob::step`] did, as counters (never time). Hosts and
 /// tests use it to check the per-step bounds in `docs/incremental.md`.
@@ -177,9 +186,51 @@ pub struct StepWork {
     pub relations: usize,
     /// Paragraphs prepared speculatively ahead of the cursor.
     pub prefetched: usize,
+    /// Pages the flow made.
+    pub pages_made: usize,
+    /// Running-region look-ahead: units charged, story blocks started, and
+    /// story blocks read to make a digest.
+    pub region_units: usize,
+    pub region_blocks: usize,
+    pub digest_blocks: usize,
+    /// Child IDs a digest looked at, kept or not: the enumeration work, which
+    /// is bounded by the story's read budget, not by the story's size.
+    pub digest_inspected: usize,
+    /// Bytes of flow-host text a digest decoded. A host is decoded to the end
+    /// in one go, by a look-ahead unit of its own that does nothing else, at
+    /// most `MAX_HOST_BYTES` (1,060,864) bytes of it; the step that runs it
+    /// charges what the decode cost (at most 5 units), which is the one case of
+    /// a step charging more than its budget (by at most 4). Nothing is paid
+    /// back later.
+    pub digest_decoded: usize,
+}
+impl StepWork {
+    /// Adds `other`'s work to this one's.
+    pub(crate) fn absorb(&mut self, other: &StepWork) {
+        self.units = self.units.saturating_add(other.units);
+        self.adapter_requests = self.adapter_requests.saturating_add(other.adapter_requests);
+        self.shaped_bytes = self.shaped_bytes.saturating_add(other.shaped_bytes);
+        self.largest_request = self.largest_request.max(other.largest_request);
+        self.composer_calls = self.composer_calls.saturating_add(other.composer_calls);
+        self.composed_lines = self.composed_lines.saturating_add(other.composed_lines);
+        self.scanned_bytes = self.scanned_bytes.saturating_add(other.scanned_bytes);
+        self.largest_scan = self.largest_scan.max(other.largest_scan);
+        self.table_rows = self.table_rows.saturating_add(other.table_rows);
+        self.region_placements = self
+            .region_placements
+            .saturating_add(other.region_placements);
+        self.relations = self.relations.saturating_add(other.relations);
+        self.prefetched = self.prefetched.saturating_add(other.prefetched);
+        self.pages_made = self.pages_made.saturating_add(other.pages_made);
+        self.region_units = self.region_units.saturating_add(other.region_units);
+        self.region_blocks = self.region_blocks.saturating_add(other.region_blocks);
+        self.digest_blocks = self.digest_blocks.saturating_add(other.digest_blocks);
+        self.digest_inspected = self.digest_inspected.saturating_add(other.digest_inspected);
+        self.digest_decoded = self.digest_decoded.saturating_add(other.digest_decoded);
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Inputs {
+pub(crate) struct Inputs {
     kind: BlockKind,
     image: Option<String>,
     text: String,
@@ -193,7 +244,7 @@ struct Inputs {
     semantics: crate::list_marker::Semantics,
 }
 impl Inputs {
-    fn read(doc: &Document, node: NodeId) -> Option<Self> {
+    pub(crate) fn read(doc: &Document, node: NodeId) -> Option<Self> {
         let (block, reference) = doc.block_with_style_reference(node).ok()?;
         // The reference resolver's own walk, including the next missing or
         // cyclic name, so diagnostic changes cannot hide in reuse.
@@ -342,11 +393,16 @@ pub(crate) struct FlowKey {
     previous: Option<NodeId>,
     position: PositionKey,
     template: ResolvedTemplate,
-    // Geometry is the entire frozen input plan. It includes query results and
-    // relation-driven placements, not merely the authored relation IDs.
-    plan: Plan,
-    /// The blocks keep-with-next lookahead may read, with their inputs.
-    lookahead: Vec<(NodeId, Option<Inputs>, bool)>,
+    /// The page-owned physical planes (floats and notes across bands), whole:
+    /// they are projected into frames that may not exist yet, so a read of
+    /// them cannot be recorded by address. Empty, and absent, for most
+    /// documents. Everything else the transition reads from the plan is
+    /// recorded with it, by frame address and provenance.
+    physical: Option<Plan>,
+    /// The blocks keep-with-next lookahead may read, with their inputs and
+    /// what the chain makes of each (the relations that own it, its table
+    /// role): `flow::Link` is all of that the chain reads besides the inputs.
+    lookahead: Vec<(NodeId, Option<Inputs>, flow::Link)>,
 }
 impl FlowKey {
     /// `ahead` is what [`flow::Flow::keep_lookahead`] says the paragraph's
@@ -360,19 +416,13 @@ impl FlowKey {
         Self {
             lookahead: ahead
                 .into_iter()
-                .map(|n| {
-                    (
-                        n,
-                        Inputs::read(doc, n),
-                        !matches!(doc.table_role(n), Ok(None)),
-                    )
-                })
+                .map(|n| (n, Inputs::read(doc, n), flow.link(doc, n)))
                 .collect(),
             inputs: Inputs::read(doc, node),
             previous: flow.previous,
             position: flow.position_key(),
-            template: flow.template.clone(),
-            plan: flow.plan().clone(),
+            template: (*flow.template).clone(),
+            physical: flow.plan().physical_only(),
         }
     }
 }
@@ -404,6 +454,8 @@ struct PreparedEntry {
 #[derive(Clone)]
 struct FlowEntry {
     key: FlowKey,
+    /// What the transition read from the plan, beyond its key.
+    reads: Vec<crate::reads::PlanRead>,
     delta: Delta,
 }
 // Resolve authored inputs when deriving keys, rather than attempting to
@@ -508,7 +560,7 @@ impl PassKey {
             snapshot: normalized,
             pending: pending.to_vec(),
             relations,
-            order: doc.document_order(),
+            order: doc.order(reprise_doc::Domain::Body),
             owners,
             template: template.clone(),
             applied: applied.clone(),
@@ -542,13 +594,26 @@ struct Cache {
 pub(crate) struct Evaluation {
     cache: RefCell<Cache>,
     workers: Arc<dyn Workers>,
+    /// The running regions' memo, made on first use (it owns an `Evaluation`
+    /// of its own for story preparation, which would otherwise recurse).
+    running: RefCell<Option<Rc<crate::running::compose::Shared>>>,
 }
 impl Default for Evaluation {
     fn default() -> Self {
         Self {
             cache: RefCell::default(),
             workers: Arc::new(Serial),
+            running: RefCell::new(None),
         }
+    }
+}
+impl Evaluation {
+    /// The memo of running-region compositions, kept across jobs.
+    pub(crate) fn running(&self) -> Rc<crate::running::compose::Shared> {
+        self.running
+            .borrow_mut()
+            .get_or_insert_with(Default::default)
+            .clone()
     }
 }
 /// A preparation memo miss, between its start and end bookkeeping.
@@ -566,14 +631,21 @@ pub(crate) enum PrepareStart {
 }
 impl Evaluation {
     /// Drops every memo and counter, keeping the workers.
-    fn clear(&self) {
+    pub(crate) fn clear(&self) {
         *self.cache.borrow_mut() = Cache::default();
+        if let Some(running) = self.running.borrow().as_ref() {
+            running.clear();
+        }
     }
     pub(crate) fn workers(&self) -> Arc<dyn Workers> {
         self.workers.clone()
     }
     pub(crate) fn work(&self, f: impl FnOnce(&mut StepWork)) {
         f(&mut self.cache.borrow_mut().work);
+    }
+    /// The work counted since the last call, which starts again from zero.
+    pub(crate) fn take_work(&self) -> StepWork {
+        std::mem::take(&mut self.cache.borrow_mut().work)
     }
     pub(crate) fn scanned(&self, bytes: usize) {
         self.work(|w| {
@@ -760,15 +832,16 @@ impl Evaluation {
         staged: flow::stage::Staged,
         ctx: &ResolutionContext,
         upcoming: &[NodeId],
-        owners: &BTreeSet<NodeId>,
     ) -> flow::stage::Finished {
         let mut batch: Vec<(Option<PrepareMiss>, flow::stage::Staged)> = vec![(None, staged)];
         // Only new text is worth speculating on: a block prepared before with
         // equal inputs is followed by blocks whose shaping is memoised too.
+        // Whatever relation names a paragraph owner, the flow lays it out
+        // (`Flow::begin_block`), so ownership has no part in which are worth
+        // preparing ahead.
         if !self.has_inputs(current.node, &current.key.inputs) {
             for &node in upcoming.iter().take(PREFETCH_BLOCKS.saturating_sub(1)) {
-                if owners.contains(&node)
-                    || doc.kind_of(node) != Some(BlockKind::Paragraph)
+                if doc.kind_of(node) != Some(BlockKind::Paragraph)
                     || !matches!(doc.table_role(node), Ok(None))
                 {
                     continue;
@@ -909,16 +982,19 @@ impl Evaluation {
             },
         );
     }
+    #[allow(clippy::too_many_arguments)]
     fn allocate(
         &self,
         engine: &Engine,
         doc: &Document,
         template: &ResolvedTemplate,
         snapshot: &LayoutSnapshot,
-        fields: &crate::inline::FieldValues,
+        sections: &crate::sections::Table,
+        previous: &Plan,
+        collect: Option<&RefCell<Vec<crate::running::compose::Need>>>,
     ) -> Plan {
         let mut key = PassKey::new(engine, doc, snapshot, &[], template, &BTreeSet::new());
-        key.fields = fields.clone();
+        key.fields = previous.fields.clone();
         key.resolved = crate::inline::resolve_fields(doc, snapshot);
         if let Some(plan) = self
             .cache
@@ -930,12 +1006,26 @@ impl Evaluation {
         {
             return plan;
         }
-        {
-            let mut cache = self.cache.borrow_mut();
-            cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
+        let running = self.running();
+        let plan = crate::regions::allocate_with_sections(
+            engine,
+            doc,
+            template,
+            snapshot,
+            Some(self),
+            sections,
+            previous,
+            &running,
+            collect,
+        );
+        // Regions the memo lacked: this plan was made without them, and is
+        // neither kept nor counted. The look-ahead makes them and it is run
+        // again.
+        if collect.is_some_and(|c| !c.borrow().is_empty()) {
+            return plan;
         }
-        let plan = crate::regions::allocate(engine, doc, template, snapshot, Some(self), fields);
         let mut cache = self.cache.borrow_mut();
+        cache.counters.region_passes = cache.counters.region_passes.saturating_add(1);
         if cache.regions.len() >= 16 {
             cache.regions.remove(0);
         }
@@ -959,15 +1049,23 @@ impl Evaluation {
             snapshot: snapshot.clone(),
         });
     }
-    pub(crate) fn flow_hit(&self, node: NodeId, key: &FlowKey, engine: &Engine) -> Option<Delta> {
-        let mut cache = self.cache.borrow_mut();
-        let delta = cache
+    pub(crate) fn flow_hit(
+        &self,
+        node: NodeId,
+        key: &FlowKey,
+        holds: &dyn Fn(&[crate::reads::PlanRead]) -> bool,
+        engine: &Engine,
+    ) -> Option<Delta> {
+        let delta = self
+            .cache
+            .borrow()
             .flow
             .get(&node)?
             .iter()
-            .find(|e| &e.key == key)?
+            .find(|e| &e.key == key && holds(&e.reads))?
             .delta
             .clone();
+        let mut cache = self.cache.borrow_mut();
         if let Some(inputs) = &key.inputs {
             cache.graph.record(
                 Computation::Style(node),
@@ -1004,7 +1102,13 @@ impl Evaluation {
         cache.counters.reused_compositions = cache.counters.reused_compositions.saturating_add(1);
         Some(delta)
     }
-    pub(crate) fn flow_miss(&self, node: NodeId, key: FlowKey, delta: &Delta) {
+    pub(crate) fn flow_miss(
+        &self,
+        node: NodeId,
+        key: FlowKey,
+        reads: Vec<crate::reads::PlanRead>,
+        delta: &Delta,
+    ) {
         let mut cache = self.cache.borrow_mut();
         let mut reasons = BTreeSet::new();
         if let Some(old) = cache.flow.get(&node).and_then(|v| v.last()) {
@@ -1019,28 +1123,15 @@ impl Evaluation {
             if key.template != old.key.template {
                 reasons.insert(Dependency::Template);
             }
-            if key.plan != old.key.plan {
+            if key.physical != old.key.physical || reads != old.reads {
                 reasons.insert(Dependency::Computed(Computation::Regions));
             }
         } else {
             reasons.insert(Dependency::Node(node));
         }
-        let frame_count = key.template.frames.len().max(1);
-        let mut pages: BTreeSet<_> = delta
-            .blocks
-            .iter()
-            .flat_map(|b| &b.lines)
-            .map(|l| l.frame / frame_count)
-            .collect();
+        let mut pages = delta.block_pages.clone();
         if let Some(old) = cache.flow.get(&node).and_then(|v| v.last()) {
-            let old_count = old.key.template.frames.len().max(1);
-            pages.extend(
-                old.delta
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.lines)
-                    .map(|l| l.frame / old_count),
-            );
+            pages.extend(&old.delta.block_pages);
         }
         cache.counters.reflowed_pages.extend(pages);
         cache.counters.compositions = cache.counters.compositions.saturating_add(1);
@@ -1068,6 +1159,7 @@ impl Evaluation {
         }
         entries.push(FlowEntry {
             key,
+            reads,
             delta: delta.clone(),
         });
     }
@@ -1176,6 +1268,10 @@ impl PartialLayout<'_> {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Step {
+    /// The units charged: at most the budget, except by a step that runs the
+    /// decode of a long flow host of a running story's digest, which is one
+    /// atomic unit and charges its true cost (at most 5 units, so at most 4
+    /// over; see `StepWork::digest_decoded` and sections §11).
     pub used: usize,
     pub pass: Pass,
     pub viewport_ready: bool,
@@ -1196,8 +1292,19 @@ impl<'engine> LayoutSession<'engine> {
             document: None,
         }
     }
+    /// The session's running-region memo, for tests that act on it between
+    /// the steps of a job.
+    #[cfg(test)]
+    pub(crate) fn running_memo(&self) -> Rc<crate::running::compose::Shared> {
+        self.evaluation.running()
+    }
     pub fn counters(&self) -> WorkCounters {
-        self.evaluation.cache.borrow().counters.clone()
+        let mut counters = self.evaluation.cache.borrow().counters.clone();
+        let running = self.evaluation.running();
+        (counters.running_compositions, counters.running_reused) = running.counts();
+        counters.running_inline = running.inline_count();
+        counters.running_digest_compares = running.digest_compares();
+        counters
     }
     /// Lends the session an executor for pure preparation tasks (see
     /// `docs/incremental.md`, "Native workers"). Output, unit charging and
@@ -1218,6 +1325,7 @@ impl<'engine> LayoutSession<'engine> {
             self.evaluation.clear();
         }
         self.document = Some(doc);
+        self.evaluation.running().begin_job();
         {
             let mut cache = self.evaluation.cache.borrow_mut();
             cache.counters = WorkCounters::default();
@@ -1246,6 +1354,7 @@ pub struct LayoutJob<'job, 'engine> {
     base: LayoutSnapshot,
     snapshot: LayoutSnapshot,
     template: ResolvedTemplate,
+    sections: Arc<crate::sections::Table>,
     nodes: Vec<NodeId>,
     next_node: usize,
     cursor: Option<Cursor>,
@@ -1259,6 +1368,17 @@ pub struct LayoutJob<'job, 'engine> {
     pass: Pass,
     cancelled: bool,
     terminal: Rc<Cell<Option<JobError>>>,
+    /// The regions of a page the allocation made, being made (sections §11).
+    region_ahead: Option<Box<crate::flow::ahead::Ahead>>,
+    /// What the last region allocation found missing, not made yet: all of it,
+    /// in the order the allocation asked.
+    region_needs: VecDeque<crate::running::compose::Need>,
+    /// What this feedback pass has made. A need that comes back after being
+    /// made means the memo lost it under the job.
+    region_made: HashSet<crate::running::compose::Need>,
+    /// The running memo's epoch this job was made under: what it has made and
+    /// holds there is its own, and gone once another job starts.
+    epoch: Rc<()>,
 }
 impl<'job, 'engine> LayoutJob<'job, 'engine> {
     fn new(
@@ -1283,6 +1403,7 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             blocks: Vec::new(),
             relations: Vec::new(),
             repeated_headers: Vec::new(),
+            sections: None,
             diagnostics: Vec::new(),
         };
         let template = crate::template::resolve(engine, doc, &mut base.diagnostics);
@@ -1291,10 +1412,21 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             name: template.name.clone(),
             source: template.source,
         };
+        let sections = crate::sections::Table::resolve(engine, doc, &template);
+        base.diagnostics.extend(sections.diagnostics.clone());
         let mut snapshot = base.clone();
         let plan = Plan::default();
-        let cursor = Cursor::new(engine, doc, &template, &mut snapshot, &plan);
+        let cursor = Cursor::new_stepped(
+            engine,
+            doc,
+            &template,
+            &mut snapshot,
+            &plan,
+            sections.clone(),
+            session.evaluation.running(),
+        );
         let active = crate::regions::active(engine, doc);
+        let epoch = session.evaluation.running().epoch();
         Self {
             session,
             doc,
@@ -1303,7 +1435,8 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             base,
             snapshot,
             template,
-            nodes: doc.blocks(),
+            sections,
+            nodes: doc.top(reprise_doc::Domain::Body),
             next_node: 0,
             cursor: Some(cursor),
             pending: Vec::new(),
@@ -1316,6 +1449,10 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             pass: Pass::Flow,
             cancelled: false,
             terminal: Rc::new(Cell::new(None)),
+            region_ahead: None,
+            region_needs: VecDeque::new(),
+            region_made: HashSet::new(),
+            epoch,
         }
     }
     pub fn revision(&self) -> &Revision {
@@ -1364,7 +1501,12 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         let was_ready = self.viewport_ready();
         let mut used = 0usize;
         self.session.evaluation.cache.borrow_mut().work = StepWork::default();
+        // What the stories' own preparation did is counted with the step.
+        self.session.evaluation.running().take_work();
         while used < budget && self.pass != Pass::Complete {
+            if self.session.evaluation.running().lost() {
+                return Err(self.abandon());
+            }
             let engine = self.session.engine;
             let mut charged = 1usize;
             match self.pass {
@@ -1395,15 +1537,32 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                             self.cursor = Some(cursor);
                             charged = units;
                         }
-                    } else {
-                        if let Some(cursor) = self.cursor.take() {
-                            self.pending = cursor.finish(
-                                engine,
-                                &self.template,
-                                &mut self.snapshot,
-                                &self.plan,
-                            );
+                    } else if let Some(cursor) = self.cursor.take() {
+                        // The pages the plan asks for, past the last the
+                        // text reached: one a unit, regions first.
+                        match cursor.finish_unit(
+                            engine,
+                            self.doc,
+                            &self.template,
+                            &mut self.snapshot,
+                            &self.plan,
+                            Some(&self.session.evaluation),
+                            budget.saturating_sub(used),
+                        ) {
+                            Ok((cursor, units)) => {
+                                self.cursor = Some(cursor);
+                                charged = units;
+                            }
+                            Err(pending) => {
+                                self.pending = pending;
+                                self.pass = if self.active {
+                                    Pass::RegionFeedback
+                                } else {
+                                    Pass::Relations
+                                };
+                            }
                         }
+                    } else {
                         self.pass = if self.active {
                             Pass::RegionFeedback
                         } else {
@@ -1412,35 +1571,107 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                     }
                 }
                 Pass::RegionFeedback => {
+                    // The allocation composes nothing. It asks, in one pass, for
+                    // every composition the memo lacks (the regions of every page
+                    // it makes); each is made here a unit at a time and held, past
+                    // the cap of the memo, until an allocation finds all it needs.
+                    if let Some(mut ahead) = self.region_ahead.take() {
+                        let running = self.session.evaluation.running();
+                        let (units, done) = ahead.step(
+                            &running,
+                            engine,
+                            self.doc,
+                            &self.plan,
+                            Some(&self.session.evaluation),
+                            budget.saturating_sub(used),
+                        );
+                        charged = units.max(1);
+                        if done {
+                            self.region_made.insert(ahead.need().clone());
+                        } else {
+                            self.region_ahead = Some(ahead);
+                        }
+                        used = used.saturating_add(charged);
+                        self.charge(charged);
+                        continue;
+                    }
+                    if let Some(need) = self.region_needs.pop_front() {
+                        self.region_ahead = Some(Box::new(crate::flow::ahead::Ahead::held(need)));
+                        used = used.saturating_add(charged);
+                        self.charge(charged);
+                        continue;
+                    }
+                    let collected = RefCell::new(Vec::new());
                     let next = self.session.evaluation.allocate(
                         engine,
                         self.doc,
                         &self.template,
                         &self.snapshot,
-                        &self.plan.fields,
+                        &self.sections,
+                        &self.plan,
+                        Some(&collected),
                     );
+                    let mut asked = HashSet::new();
+                    let (mut missing, mut again) = (VecDeque::new(), false);
+                    for need in collected.into_inner() {
+                        if !asked.insert(need.clone()) {
+                            continue;
+                        }
+                        if self.region_made.contains(&need) {
+                            again = true;
+                        } else {
+                            missing.push_back(need);
+                        }
+                    }
+                    if again {
+                        // The job made this and the memo no longer has it: what
+                        // it holds was dropped under it. Nothing here may stand
+                        // in for that by composing, which is what the units are
+                        // for; the job is abandoned and a new one starts over
+                        // (the next iteration of this loop ends it).
+                        self.session.evaluation.running().lose();
+                    }
+                    if !missing.is_empty() || again {
+                        // Something to make, and the allocation is run again once
+                        // it is. Every round makes at least one thing not made
+                        // before, so the rounds end.
+                        self.region_needs = missing;
+                        used = used.saturating_add(charged);
+                        self.charge(charged);
+                        continue;
+                    }
+                    self.region_made.clear();
+                    self.session.evaluation.running().release_held();
                     let outcome =
                         crate::regions::feedback(&self.plan, &next, &self.history, self.iteration);
                     if outcome == crate::regions::Feedback::Continue {
                         self.history.push(std::mem::replace(&mut self.plan, next));
                         self.iteration = self.iteration.saturating_add(1);
                         self.snapshot = self.base.clone();
-                        self.cursor = Some(Cursor::new(
+                        self.cursor = Some(Cursor::new_stepped(
                             engine,
                             self.doc,
                             &self.template,
                             &mut self.snapshot,
                             &self.plan,
+                            self.sections.clone(),
+                            self.session.evaluation.running(),
                         ));
                         self.next_node = 0;
                         self.pass = Pass::Flow;
                     } else {
+                        let applied = if outcome == crate::regions::Feedback::Converged {
+                            next.applied_for(&self.snapshot)
+                        } else {
+                            self.plan.applied_for(&self.snapshot)
+                        };
                         crate::regions::finish_feedback(
                             &mut self.snapshot,
                             &self.plan,
                             next,
                             outcome,
                         );
+                        self.plan.applied = applied;
                         crate::inline::field_notes(self.doc, &mut self.snapshot);
                         self.pass = Pass::Relations;
                     }
@@ -1497,6 +1728,10 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                         &mut self.snapshot,
                         std::mem::take(&mut self.pending),
                     );
+                    // The section diagnostics go to their sorted place before the
+                    // final pass is kept, so a job that hits it returns the same
+                    // layout a full one makes.
+                    self.sections.sort_diagnostics(&mut self.snapshot);
                     if let Some(key) = self.final_key.take() {
                         self.session.evaluation.finish(key, &self.snapshot);
                     }
@@ -1515,6 +1750,13 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
                 break;
             }
         }
+        {
+            let running = self.session.evaluation.running().take_work();
+            self.session.evaluation.work(|w| w.absorb(&running));
+        }
+        if self.session.evaluation.running().lost() {
+            return Err(self.abandon());
+        }
         self.current()?;
         Ok(Step {
             used,
@@ -1522,6 +1764,20 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
             viewport_ready: self.viewport_ready(),
             complete: self.pass == Pass::Complete,
         })
+    }
+    /// Ends the job because the memo no longer has what the job made and
+    /// depends on. The job is stale like one whose document changed: the memo
+    /// is dropped and the caller starts a new job.
+    fn abandon(&mut self) -> JobError {
+        self.terminal.set(Some(JobError::Stale));
+        self.session.evaluation.clear();
+        JobError::Stale
+    }
+    /// Counts `units` charged to the job.
+    fn charge(&self, units: usize) {
+        let mut cache = self.session.evaluation.cache.borrow_mut();
+        cache.counters.units = cache.counters.units.saturating_add(units);
+        cache.work.units = cache.work.units.saturating_add(units);
     }
     /// The work the most recent [`step`](Self::step) did, as counters.
     pub fn step_work(&self) -> StepWork {
@@ -1538,6 +1794,11 @@ impl<'job, 'engine> LayoutJob<'job, 'engine> {
         }
         if self.pass != Pass::Complete {
             snapshot.pages.truncate(sealed);
+            if let Some(sections) = &mut snapshot.sections {
+                sections.pages.truncate(sealed);
+                sections.rules.retain(|r| r.page < sealed);
+                sections.running.retain(|r| r.page < sealed);
+            }
             snapshot.frames.retain(|f| f.page < sealed);
             snapshot.blocks.retain_mut(|b| {
                 b.lines.retain(|l| snapshot.frames.get(l.frame).is_some());
@@ -1762,6 +2023,7 @@ pub struct LayoutContinuation {
     base: LayoutSnapshot,
     snapshot: LayoutSnapshot,
     template: ResolvedTemplate,
+    sections: Arc<crate::sections::Table>,
     nodes: Vec<NodeId>,
     next_node: usize,
     cursor: Option<Cursor>,
@@ -1775,6 +2037,16 @@ pub struct LayoutContinuation {
     pass: Pass,
     cancelled: bool,
     terminal: Rc<Cell<Option<JobError>>>,
+    region_ahead: Option<Box<crate::flow::ahead::Ahead>>,
+    /// What the last region allocation found missing, not made yet: all of it,
+    /// in the order the allocation asked.
+    region_needs: VecDeque<crate::running::compose::Need>,
+    /// What this feedback pass has made. A need that comes back after being
+    /// made means the memo lost it under the job.
+    region_made: HashSet<crate::running::compose::Need>,
+    /// The running memo's epoch this job was made under: what it has made and
+    /// holds there is its own, and gone once another job starts.
+    epoch: Rc<()>,
 }
 impl<'engine> LayoutSession<'engine> {
     pub fn from_cache(engine: &'engine Engine, cache: LayoutCache) -> Self {
@@ -1794,8 +2066,23 @@ impl<'engine> LayoutSession<'engine> {
         doc: &'job Document,
         state: LayoutContinuation,
     ) -> Result<LayoutJob<'job, 'engine>, JobError> {
+        // What a job has made and holds is the running memo's, for as long as
+        // the job is the one the memo belongs to. Another job started on the
+        // session (or the memo cleared) took it: this one has lost its
+        // compositions and digests and cannot go on, however unchanged the
+        // document is.
+        let owner = self.evaluation.running().holds(&state.epoch);
         if !std::ptr::eq(state.document, doc) || state.revision != doc.revision() {
-            self.evaluation.clear();
+            // An edit can race a job and leave anything in the memo, so the
+            // job that owns it drops it with the rest. A continuation that
+            // does not own it is refused and nothing else: the memo is a newer
+            // job's, which this one, old as its document is, must not destroy.
+            if owner {
+                self.evaluation.clear();
+            }
+            return Err(JobError::Stale);
+        }
+        if !owner {
             return Err(JobError::Stale);
         }
         self.document = Some(doc);
@@ -1807,6 +2094,7 @@ impl<'engine> LayoutSession<'engine> {
             base: state.base,
             snapshot: state.snapshot,
             template: state.template,
+            sections: state.sections,
             nodes: state.nodes,
             next_node: state.next_node,
             cursor: state.cursor,
@@ -1820,6 +2108,10 @@ impl<'engine> LayoutSession<'engine> {
             pass: state.pass,
             cancelled: state.cancelled,
             terminal: state.terminal,
+            region_ahead: state.region_ahead,
+            region_needs: state.region_needs,
+            region_made: state.region_made,
+            epoch: state.epoch,
         })
     }
 }
@@ -1832,6 +2124,7 @@ impl LayoutJob<'_, '_> {
             base: self.base,
             snapshot: self.snapshot,
             template: self.template,
+            sections: self.sections,
             nodes: self.nodes,
             next_node: self.next_node,
             cursor: self.cursor,
@@ -1845,6 +2138,10 @@ impl LayoutJob<'_, '_> {
             pass: self.pass,
             cancelled: self.cancelled,
             terminal: self.terminal,
+            region_ahead: self.region_ahead,
+            region_needs: self.region_needs,
+            region_made: self.region_made,
+            epoch: self.epoch,
         }
     }
 }

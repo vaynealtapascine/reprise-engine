@@ -26,7 +26,9 @@ impl Notes {
         relation: &Relation,
         anchor: LineRef,
         evaluation: Option<&crate::incremental::Evaluation>,
+        sections: &crate::sections::Table,
         fields: &crate::inline::FieldValues,
+        running: Option<&crate::running::attach::Ctx<'_>>,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(anchor_line) = scratch.line(anchor).cloned() else {
@@ -35,6 +37,37 @@ impl Notes {
         let Some(anchor_frame) = scratch.frame(anchor_line.frame).cloned() else {
             return;
         };
+        let anchor_owner = scratch
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.get(anchor_frame.page))
+            .map(|p| p.section);
+        let placement_hint = match relation.params.get("placement") {
+            Some(Param::Text(p)) => NotePlacement::parse(p),
+            _ => None,
+        };
+        let initial_owner = if placement_hint == Some(NotePlacement::End) {
+            let last = scratch
+                .blocks
+                .iter()
+                .flat_map(|b| &b.lines)
+                .filter_map(|l| scratch.frame(l.frame))
+                .filter(|f| matches!(&f.role, FrameRole::Flow(_)))
+                .map(|f| f.page)
+                .max()
+                .unwrap_or(0);
+            scratch
+                .sections
+                .as_ref()
+                .and_then(|s| s.pages.get(last))
+                .map(|p| p.section)
+        } else {
+            anchor_owner
+        };
+        let section_template = initial_owner
+            .and_then(|id| sections.get(id))
+            .map(|s| s.template.clone());
+        let template = section_template.as_deref().unwrap_or(template);
         let Some((ti, area)) = template
             .frames
             .iter()
@@ -49,6 +82,7 @@ impl Notes {
             ));
             return;
         };
+        let mut area = area.clone();
         let placement = match relation.params.get("placement") {
             Some(Param::Text(p)) => NotePlacement::parse(p),
             None => Some(NotePlacement::Page),
@@ -78,6 +112,16 @@ impl Notes {
             anchor_frame.page
         };
         let first_page = page;
+        let mut carry_owner = if placement == NotePlacement::End {
+            scratch
+                .sections
+                .as_ref()
+                .and_then(|s| s.pages.get(page.saturating_sub(1)))
+                .map(|p| p.section)
+        } else {
+            anchor_owner
+        };
+
         let Some(prepared) = prepare(
             engine,
             doc,
@@ -93,10 +137,62 @@ impl Notes {
         let mut start = 0;
         let mut lines = Vec::new();
         let mut completed = false;
-        while ensure_page(engine, template, scratch, page) {
-            let index = page
-                .saturating_mul(template.frames.len())
-                .saturating_add(ti);
+        loop {
+            if sections.enabled
+                && scratch
+                    .sections
+                    .as_ref()
+                    .and_then(|s| s.pages.get(page))
+                    .is_some_and(|p| p.kind == crate::PageKind::Filler)
+            {
+                page = page.saturating_add(1);
+                continue;
+            }
+            let allocated = if sections.enabled {
+                carry_owner.is_some_and(|owner| {
+                    crate::pages::PageFactory::ensure_section(
+                        engine,
+                        sections,
+                        owner,
+                        crate::PageKind::NoteContinuation,
+                        scratch,
+                        page,
+                        running,
+                    )
+                })
+            } else {
+                ensure_page(engine, template, scratch, page)
+            };
+            if !allocated {
+                break;
+            }
+            if sections.enabled {
+                carry_owner = scratch
+                    .sections
+                    .as_ref()
+                    .and_then(|s| s.pages.get(page))
+                    .map(|p| p.section);
+            }
+            let index = if sections.enabled {
+                scratch
+                    .frames
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| {
+                        f.page == page && f.role == FrameRole::Notes && f.rect.height > Length::ZERO
+                    })
+                    .map(|(i, _)| i)
+            } else {
+                crate::pages::PageFactory::index(scratch, page, ti)
+            };
+            let Some(index) = index else {
+                break;
+            };
+            if sections.enabled
+                && let Some(frame) = scratch.frame(index)
+            {
+                area = crate::template::ResolvedFrame::from_layout(frame);
+            }
             let previous = self.used.get(&index).copied().unwrap_or_default();
             let used = previous
                 + if previous > Length::ZERO {
@@ -106,8 +202,18 @@ impl Notes {
                 };
             let mut capacity = area.depth;
             if let Some(inverse) = area.to_page().inverse() {
-                for (float_frame, boxes) in &out.exclusions {
-                    let Some(frame) = scratch.frame(*float_frame).filter(|f| f.page == page) else {
+                let catalog = crate::pages::Catalog::from_snapshot(scratch);
+                for (float_frame, entry) in out.exclusions.iter().chain(&out.physical_exclusions) {
+                    let Some(float_index) = catalog.index(float_frame) else {
+                        continue;
+                    };
+                    let Some(reference) = catalog.reference(float_index) else {
+                        continue;
+                    };
+                    let Some(boxes) = entry.for_frame(reference) else {
+                        continue;
+                    };
+                    let Some(frame) = scratch.frame(float_index).filter(|f| f.page == page) else {
                         continue;
                     };
                     for rect in boxes {
@@ -173,12 +279,12 @@ impl Notes {
                 &Subject::Node(owner),
                 &mut out.diagnostics,
                 evaluation,
-                &crate::inline::FieldEnv {
+                &crate::inline::FieldEnv::at(
                     page,
-                    pages: page.saturating_add(1),
-                    instance: crate::FieldInstance::Single,
-                    values: Some(fields),
-                },
+                    page.saturating_add(1),
+                    crate::FieldInstance::Single,
+                    Some(fields),
+                ),
             );
             if !composed.lines.is_empty() {
                 if overflow {
@@ -232,14 +338,14 @@ impl Notes {
 
     /// Align all notes on a page to the area's bottom and reserve intersected
     /// body depth. This is allocation, not mutation of authored frame geometry.
-    pub fn finish(self, template: &ResolvedTemplate, out: &mut Plan) {
-        let frames = template.frames.len();
+    pub fn finish(self, snapshot: &LayoutSnapshot, out: &mut Plan) {
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
         for (index, used) in self.used {
-            let Some(area) = template.frames.get(index % frames.max(1)) else {
+            let Some(area) = snapshot.frame(index) else {
                 continue;
             };
-            let occupied = used.min(area.depth);
-            let by = (area.depth - occupied).max(Length::ZERO);
+            let occupied = used.min(area.rect.height);
+            let by = (area.rect.height - occupied).max(Length::ZERO);
             for block in &mut out.blocks {
                 for line in &mut block.lines {
                     if line.frame == index {
@@ -253,41 +359,50 @@ impl Notes {
                 }
                 block.sync_image();
             }
-            let page = index / frames.max(1);
+            let page = area.page;
+            if snapshot.sections.is_some() {
+                if let Some(source) = catalog.reference(index) {
+                    out.note_areas.insert(
+                        source.address.clone(),
+                        crate::pages::Entry::new(
+                            source,
+                            reprise_geom::Rect::new(
+                                Point::new(Length::ZERO, by),
+                                area.rect.width,
+                                occupied,
+                            ),
+                        ),
+                    );
+                }
+                continue;
+            }
             // Project the occupied notes box to each body's logical space.
             // Conservatively reserve from the earliest intersecting corner.
-            for (i, body) in template
-                .frames
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| f.is_main_flow())
-            {
-                let Some(inverse) = body.to_page().inverse() else {
+            for (i, body) in crate::pages::PageFactory::body_frames(snapshot, page) {
+                let Some(inverse) = body.to_page.inverse() else {
                     continue;
                 };
                 let corners = [
                     Point::new(Length::ZERO, by),
-                    Point::new(area.width, by),
-                    Point::new(Length::ZERO, area.depth),
-                    Point::new(area.width, area.depth),
+                    Point::new(area.rect.width, by),
+                    Point::new(Length::ZERO, area.rect.height),
+                    Point::new(area.rect.width, area.rect.height),
                 ];
                 let mapped: Vec<_> = corners
                     .into_iter()
-                    .map(|p| inverse.apply(area.to_page().apply(p)))
+                    .map(|p| inverse.apply(area.to_page.apply(p)))
                     .collect();
                 let left = mapped.iter().map(|p| p.x).min().unwrap_or_default();
                 let right = mapped.iter().map(|p| p.x).max().unwrap_or_default();
                 let top = mapped.iter().map(|p| p.y).min().unwrap_or_default();
                 let bottom = mapped.iter().map(|p| p.y).max().unwrap_or_default();
                 if right > Length::ZERO
-                    && left < body.width
+                    && left < body.rect.width
                     && bottom > Length::ZERO
-                    && top < body.depth
+                    && top < body.rect.height
+                    && let Some(frame) = catalog.reference(i)
                 {
-                    out.reservations.insert(
-                        page.saturating_mul(frames).saturating_add(i),
-                        body.depth - top.max(Length::ZERO),
-                    );
+                    out.reserve(frame, body.rect.height - top.max(Length::ZERO));
                 }
             }
         }

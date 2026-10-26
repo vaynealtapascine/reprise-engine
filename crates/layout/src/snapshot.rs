@@ -49,6 +49,86 @@ pub struct LayoutSnapshot {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub repeated_headers: Vec<RepeatedHeader>,
     pub diagnostics: Vec<Diagnostic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sections: Option<SectionsLayout>,
+}
+
+/// Derived section metadata; absent on the legacy layout path.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct SectionsLayout {
+    pub pages: Vec<PageDescriptor>,
+    pub running: Vec<RunningInstance>,
+    pub rules: Vec<ColumnRule>,
+    /// What running regions reported while their pages were made, in page
+    /// order. Layout adds it to `diagnostics` once, de-duplicated, when flow
+    /// ends. Derived; not serialised.
+    #[serde(skip)]
+    pub(crate) notes: Vec<Diagnostic>,
+}
+/// What a page is for. Non-exhaustive: a canvas tile is a further kind (the
+/// frames design adds one), so match with a wildcard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum PageKind {
+    Content,
+    Filler,
+    NoteContinuation,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PageDescriptor {
+    #[serde(serialize_with = "section_token")]
+    pub section: reprise_doc::sections::SectionId,
+    pub kind: PageKind,
+    #[serde(serialize_with = "counter_decimal")]
+    pub counter: i64,
+    pub label: String,
+    pub bands: Vec<Band>,
+    /// The extra top and bottom margin the running regions took from this
+    /// page's body, beyond the authored margins. Derived; not serialised.
+    #[serde(skip)]
+    pub(crate) reserve: (Length, Length),
+    /// The page is its owner's first content page (it takes the `first`
+    /// variant). Derived; not serialised.
+    #[serde(skip)]
+    pub(crate) first_owned: bool,
+}
+fn section_token<S: serde::Serializer>(
+    value: &reprise_doc::sections::SectionId,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&value.to_string())
+}
+fn counter_decimal<S: serde::Serializer>(value: &i64, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&value.to_string())
+}
+/// A body band's owner and exact logical frame indices for this pass.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Band {
+    #[serde(serialize_with = "section_token")]
+    pub section: reprise_doc::sections::SectionId,
+    pub life: String,
+    pub frames: Vec<usize>,
+    pub body: Rect<PageSpace>,
+    pub offset: Length,
+    pub depth: Length,
+    pub balanced: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RunningInstance {
+    pub page: usize,
+    pub slot: String,
+    pub variant: String,
+    pub story: NodeId,
+    pub frame: usize,
+    pub blocks: Vec<BlockLayout>,
+    pub clipped: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ColumnRule {
+    pub page: usize,
+    pub band: usize,
+    pub rect: Rect<PageSpace>,
 }
 
 /// One repeated copy of a table's header rows on a continuation frame. The

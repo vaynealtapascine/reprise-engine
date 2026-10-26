@@ -18,7 +18,7 @@ fn phase_timing() {
         }
         doc.commit();
         println!("paragraphs {n} construct {:?}", t.elapsed());
-        let nodes = doc.blocks();
+        let nodes = doc.top(reprise_doc::Domain::Body);
         let t = Instant::now();
         for _ in 0..10 {
             for &node in &nodes {

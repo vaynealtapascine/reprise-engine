@@ -154,6 +154,26 @@ extern "C" {
     pub type BooleanPayload;
     #[wasm_bindgen(typescript_type = "Payload<number>")]
     pub type HandlePayload;
+    #[wasm_bindgen(typescript_type = "Payload<PageSections>")]
+    pub type PageSectionsPayload;
+    #[wasm_bindgen(typescript_type = "Payload<SectionPages>")]
+    pub type SectionPagesPayload;
+    #[wasm_bindgen(typescript_type = "Payload<PageLabel>")]
+    pub type PageLabelPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Array<PageRegion>>")]
+    pub type ListPageRegionPayload;
+    #[wasm_bindgen(typescript_type = "Payload<Array<RegionInstance>>")]
+    pub type ListRegionInstancePayload;
+    #[wasm_bindgen(typescript_type = "Payload<Array<PageField>>")]
+    pub type ListPageFieldPayload;
+    #[wasm_bindgen(typescript_type = "Payload<HitPlaced>")]
+    pub type HitPlacedPayload;
+    #[wasm_bindgen(typescript_type = "Payload<PlacedHit>")]
+    pub type PlacedHitPayload;
+    #[wasm_bindgen(typescript_type = "Payload<CaretIn>")]
+    pub type CaretInPayload;
+    #[wasm_bindgen(typescript_type = "Payload<SelectionIn>")]
+    pub type SelectionInPayload;
 }
 thread_local! {
     static PANIC_HANDLER: std::cell::RefCell<Option<js_sys::Function>> =
@@ -722,6 +742,41 @@ impl WasmDocument {
     }
     pub fn marks(&self, page: u32) -> Result<MarksPagePayload, JsValue> {
         Ok(encode(self.inner.marks(page))?.unchecked_into())
+    }
+    /// Who owns page `page` and the bands of body text on it.
+    pub fn page_sections(&self, page: u32) -> Result<PageSectionsPayload, JsValue> {
+        Ok(encode(self.inner.page_sections(page))?.unchecked_into())
+    }
+    /// The pages a section made and those with any of its text.
+    pub fn section_pages(&self, request: &StringPayload) -> Result<SectionPagesPayload, JsValue> {
+        Ok(encode(self.inner.section_pages(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn page_label(&self, page: u32) -> Result<PageLabelPayload, JsValue> {
+        Ok(encode(self.inner.page_label(page))?.unchecked_into())
+    }
+    pub fn page_regions(&self, page: u32) -> Result<ListPageRegionPayload, JsValue> {
+        Ok(encode(self.inner.page_regions(page))?.unchecked_into())
+    }
+    pub fn region_instances(
+        &self,
+        request: &StringPayload,
+    ) -> Result<ListRegionInstancePayload, JsValue> {
+        Ok(encode(self.inner.region_instances(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn page_fields(&self, page: u32) -> Result<ListPageFieldPayload, JsValue> {
+        Ok(encode(self.inner.page_fields(page))?.unchecked_into())
+    }
+    pub fn hit_placed(&self, request: &HitPlacedPayload) -> Result<PlacedHitPayload, JsValue> {
+        Ok(encode(self.inner.hit_placed(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn caret_in(&self, request: &CaretInPayload) -> Result<PageRectPayload, JsValue> {
+        Ok(encode(self.inner.caret_in(&decode(request.as_ref())?))?.unchecked_into())
+    }
+    pub fn selection_rects_in(
+        &self,
+        request: &SelectionInPayload,
+    ) -> Result<ListPageRectPayload, JsValue> {
+        Ok(encode(self.inner.selection_rects_in(&decode(request.as_ref())?))?.unchecked_into())
     }
     pub fn annotation(
         &self,

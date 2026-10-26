@@ -136,6 +136,12 @@ pub struct Fragment {
     /// gives them fresh IDs. A `base` outside the fragment is dropped.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lists: BTreeMap<crate::ListId, crate::ListDefinition>,
+    /// The sections envelope (sections §14): a version-1 JSON document, kept as
+    /// text so a reader that doesn't know it refuses the fragment (the
+    /// struct denies unknown fields) rather than ignore it. See
+    /// [`crate::fragment_sections::Envelope`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sections: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -348,6 +354,55 @@ impl Document {
         schemas: &SchemaRegistry,
         scope: CopyScope,
     ) -> Result<Fragment, FragmentError> {
+        self.copy_fragment_with(
+            source,
+            selection,
+            schemas,
+            scope,
+            scope == CopyScope::Document,
+        )
+    }
+
+    /// As [`Document::copy_fragment_scoped`], with `orphans` saying whether a
+    /// complete copy also carries the stories no binding names.
+    fn copy_fragment_with(
+        &self,
+        source: &str,
+        selection: &[CopyBlock],
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
+        orphans: bool,
+    ) -> Result<Fragment, FragmentError> {
+        let mut fragment = self.copy_blocks(source, selection, schemas, scope)?;
+        self.attach_sections(source, &mut fragment, schemas, scope, orphans, selection)?;
+        fragment.validate()?;
+        Ok(fragment)
+    }
+
+    /// [`Document::copy_fragment_scoped`] without a sections envelope: for a
+    /// caller that wants the blocks and their ranges and nothing of the
+    /// sections around them.
+    pub fn copy_fragment_bare(
+        &self,
+        source: &str,
+        selection: &[CopyBlock],
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
+    ) -> Result<Fragment, FragmentError> {
+        let fragment = self.copy_blocks(source, selection, schemas, scope)?;
+        fragment.validate()?;
+        Ok(fragment)
+    }
+
+    /// The blocks of `selection` and what they carry, without the sections
+    /// envelope: what one story's copy is, and the body's before it is attached.
+    pub(crate) fn copy_blocks(
+        &self,
+        source: &str,
+        selection: &[CopyBlock],
+        schemas: &SchemaRegistry,
+        scope: CopyScope,
+    ) -> Result<Fragment, FragmentError> {
         let bad = |e: DocError| FragmentError::Invalid(e.to_string());
         let mut fragment = Fragment {
             version: FRAGMENT_VERSION,
@@ -361,6 +416,7 @@ impl Document {
             page_setup_patch: None,
             notes: Vec::new(),
             lists: BTreeMap::new(),
+            sections: None,
         };
         let mut cuts = BTreeMap::new();
         let mut todo: Vec<_> = selection
@@ -463,7 +519,7 @@ impl Document {
             cuts.insert(node, bytes);
             if cut.is_none() {
                 todo.extend(
-                    self.children(Some(node))
+                    self.children_of(node)
                         .into_iter()
                         .rev()
                         .map(|n| (n, None, Some(node), depth + 1)),
@@ -501,7 +557,7 @@ impl Document {
         let tree = self.tree("ranges");
         let mut ids = tree.nodes();
         ids.sort();
-        let order = self.document_order();
+        let order = self.range_order();
         for id in ids {
             if !self.live(&tree, id) {
                 continue;
@@ -673,7 +729,6 @@ impl Document {
                 });
             }
         }
-        fragment.validate()?;
         Ok(fragment)
     }
 
@@ -682,7 +737,18 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
     ) -> Result<Fragment, FragmentError> {
-        self.copy_all_scoped(source, schemas, CopyScope::Clipboard)
+        self.copy_all_scoped(source, schemas, CopyScope::Clipboard, false)
+    }
+
+    /// [`Document::copy_all_fragment`] for a document that was just read from
+    /// another format (an import), whose stories are all authored content:
+    /// the ones no binding names travel too, and stay unbound.
+    pub fn copy_imported_fragment(
+        &self,
+        source: &str,
+        schemas: &SchemaRegistry,
+    ) -> Result<Fragment, FragmentError> {
+        self.copy_all_scoped(source, schemas, CopyScope::Clipboard, true)
     }
 
     /// The whole document as a fragment to rebuild it elsewhere (a duplicate):
@@ -692,7 +758,7 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
     ) -> Result<Fragment, FragmentError> {
-        self.copy_all_scoped(source, schemas, CopyScope::Document)
+        self.copy_all_scoped(source, schemas, CopyScope::Document, true)
     }
 
     fn copy_all_scoped(
@@ -700,13 +766,14 @@ impl Document {
         source: &str,
         schemas: &SchemaRegistry,
         scope: CopyScope,
+        orphans: bool,
     ) -> Result<Fragment, FragmentError> {
         let selection: Vec<_> = self
-            .blocks()
+            .top(crate::Domain::Body)
             .into_iter()
             .map(|node| CopyBlock { node, bytes: None })
             .collect();
-        let mut fragment = self.copy_fragment_scoped(source, &selection, schemas, scope)?;
+        let mut fragment = self.copy_fragment_with(source, &selection, schemas, scope, orphans)?;
         // A full-document copy also carries unreferenced authored definitions.
         // Tombstones belong to history and are intentionally not replayed.
         for (id, read) in self.lists() {

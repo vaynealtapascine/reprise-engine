@@ -467,6 +467,72 @@ mod annotation_tests {
 }
 
 #[cfg(test)]
+mod section_tests {
+    use super::*;
+    use reprise_doc::sections::{BreakKind, SectionProperties};
+    use reprise_doc::{BlockKind, Document, NewBlock, PersistenceMode};
+
+    #[test]
+    fn real_old_reader_refuses_retained_sections_and_story_tombstones() {
+        let old = crate::features::KNOWN_REQUIRED & !crate::features::REQUIRED_SECTIONS;
+        for variant in 0..4 {
+            let doc = Document::new(1).unwrap();
+            let save = || {
+                crate::Package::new(&doc, DocumentId([7; 16]), PersistenceMode::History)
+                    .unwrap()
+                    .save()
+                    .unwrap()
+            };
+            Container::decode_known(&save(), Limits::default(), old).unwrap();
+            match variant {
+                0 => {
+                    let block = doc.append_block(BlockKind::Paragraph, "", "body").unwrap();
+                    let life = doc.mint_lifetime(block).unwrap();
+                    doc.activate_start(block, &life, BreakKind::Section, &SectionProperties::new())
+                        .unwrap();
+                    doc.deactivate_start(block).unwrap();
+                }
+                1 => {
+                    let story = doc
+                        .create_story(&[NewBlock::new(BlockKind::Paragraph, "", "header")])
+                        .unwrap();
+                    doc.delete_block(story).unwrap();
+                }
+                2 => {
+                    doc.set_geometry_mode("pageless").unwrap();
+                }
+                _ => {
+                    doc.write_section_properties(
+                        reprise_doc::sections::SectionId::First,
+                        "0",
+                        &std::collections::BTreeMap::from([(
+                            "unknown".into(),
+                            serde_json::json!("retained"),
+                        )]),
+                        &[],
+                    )
+                    .unwrap();
+                    doc.write_section_properties(
+                        reprise_doc::sections::SectionId::First,
+                        "0",
+                        &SectionProperties::new(),
+                        &["unknown".into()],
+                    )
+                    .unwrap();
+                }
+            }
+            doc.commit();
+            let bytes = save();
+            assert!(
+                matches!(Container::decode_known(&bytes, Limits::default(), old), Err(FormatError::RequiredFeatures(bits)) if bits == crate::features::REQUIRED_SECTIONS)
+            );
+            Container::decode_known(&bytes, Limits::default(), crate::features::KNOWN_REQUIRED)
+                .unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
 mod paragraph_style_tests {
     use super::*;
     use reprise_doc::{BlockKind, Document, PersistenceMode, Style, StylePatch};

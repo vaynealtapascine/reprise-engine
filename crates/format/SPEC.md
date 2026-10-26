@@ -74,7 +74,7 @@ recomputed, except where a section below says history keeps it.
 | 14 | `REQUIRED_BLOCK_SEMANTICS` | required | Paragraph roles, list membership and definitions |
 | 15 | `REQUIRED_INLINE_OBJECTS` | required | Inline object records |
 | 16 | `REQUIRED_ANNOTATIONS` | required | Links and comment anchors |
-| 17 | none | none | **Reserved** for sections (work in progress); no constant is defined and no reader may assign it another meaning |
+| 17 | `REQUIRED_SECTIONS` | required | Retained `starts1` or `geometry1` root (emptied, inactive or malformed included), or a `story` node, live or tombstoned |
 | 18 | `REQUIRED_STYLE_IDENTITIES` | required | Durable style owners (`styles2`) |
 | 19 | none | none | **Reserved** for frames: chains (design on `ws/frames`); no constant is defined and no reader may assign it another meaning |
 | 20 | `REQUIRED_RANGE_ENDPOINTS` | required | Retained cross-paragraph range endpoints (`end-node1`) in distinct text hosts |
@@ -84,7 +84,8 @@ recomputed, except where a section below says history keeps it.
 
 `KNOWN_REQUIRED` is the union of every required constant above; `KNOWN_OPTIONAL` is
 `OPTIONAL_TABLE_HEADERS`. A package that sets a required bit outside `KNOWN_REQUIRED`,
-bits 17, 19, 22 and 23 included, is `RequiredFeatures`.
+bits 19, 22 and 23 included, is `RequiredFeatures`. (Bit 17 is `REQUIRED_SECTIONS`, known
+here.)
 
 ### Reserved root names
 
@@ -341,7 +342,20 @@ removed (tombstoned), unreadable and future-kind records. An older reader would
 show such ranges as bare ranges and copy them without their data, so it must
 refuse the package. Documents without annotations keep their old required mask.
 See `docs/annotations.md`. Bits 14 and 15 belong to block semantics and inline objects;
-bit 17 is reserved for sections.
+bit 17 belongs to sections (next section).
+
+## Sections feature (required bit 17)
+
+`REQUIRED_SECTIONS` (`1 << 17`) is declared whenever the document retains any of:
+a `starts1` root (section and break records with operation lifetimes), including an
+emptied one and inactive, superseded or unreadable keys; a `geometry1` root (the
+geometry mode), including an emptied or malformed one; or a `story` node under the
+root, live or tombstoned. It is recomputed from the live store on every save and
+never cleared by history, and reads, empty patches and refused commands create none
+of these roots. An older reader would lay the body out ignoring section geometry
+and silently drop stories, so it refuses: `RequiredFeatures` for a package, and the
+same bit in a sync packet's feature word is refused with `sync.feature`. Section
+semantics are in `docs/sections.md`.
 
 ## Stable style owners and built-in semantics (required bit 18)
 

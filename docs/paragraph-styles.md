@@ -193,7 +193,12 @@ of a long document costs at most one frame's worth of trial compositions per
 paragraph. Tables and flowed images end a chain (they are treated as
 fitting); annotations placed by relations are skipped. Lookahead reads the following blocks; the flow memo key includes
 their inputs for exactly the blocks the chain may read, so incremental layout
-re-lays a heading when the paragraph after it changes.
+re-lays a heading when the paragraph after it changes. In a running story the
+chain ranges over the blocks of the story's digest and no others (a block past
+the read limits is neither read nor prepared for it), and the story's memo is
+keyed by the digest. The trial is a step at a time: preparing a following block
+(a batch of shaping requests, for a long one) and composing it are units of
+their own (`docs/incremental.md`, "Work units and the budget").
 
 ## Unset per property: one representation
 

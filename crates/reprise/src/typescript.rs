@@ -39,6 +39,19 @@ pub fn declarations() -> String {
     text.push_str(&PageTemplateSource::decl(&cfg));
     text.push_str("\nexport ");
     text.push_str(&State::decl(&cfg));
+    for declaration in [
+        SectionState::decl(&cfg),
+        SectionBinding::decl(&cfg),
+        StoryState::decl(&cfg),
+        StoryBinding::decl(&cfg),
+        SectionStart::decl(&cfg),
+    ] {
+        text.push_str(
+            "
+export ",
+        );
+        text.push_str(&declaration);
+    }
     text.push('\n');
     text.push_str("export ");
     text.push_str(&Clock::decl(&cfg));
@@ -449,6 +462,32 @@ pub fn declarations() -> String {
         InlinePatch::decl(&cfg),
         InlineEntry::decl(&cfg),
         FieldTarget::decl(&cfg),
+    ] {
+        text.push_str("export ");
+        text.push_str(&decl);
+        text.push('\n');
+    }
+    // Sections: commands, queries and navigation in running regions.
+    for decl in [
+        BreakKind::decl(&cfg),
+        BreakPosition::decl(&cfg),
+        StoryBlock::decl(&cfg),
+        RegionBinding::decl(&cfg),
+        StoryFrom::decl(&cfg),
+        SectionPageKind::decl(&cfg),
+        PageBand::decl(&cfg),
+        PageSections::decl(&cfg),
+        SectionPages::decl(&cfg),
+        PageLabel::decl(&cfg),
+        PageRegion::decl(&cfg),
+        RegionInstance::decl(&cfg),
+        FieldPlace::decl(&cfg),
+        PageField::decl(&cfg),
+        PlacedMode::decl(&cfg),
+        HitPlaced::decl(&cfg),
+        PlacedHit::decl(&cfg),
+        CaretIn::decl(&cfg),
+        SelectionIn::decl(&cfg),
     ] {
         text.push_str("export ");
         text.push_str(&decl);

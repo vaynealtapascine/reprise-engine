@@ -768,7 +768,7 @@ fn delta_packet_bytes_are_pinned() {
     let fresh = reprise_doc::Document::new(2).unwrap();
     fresh.import_packet(&packet).unwrap();
     let actual: Vec<_> = fresh
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|id| (id.to_string(), fresh.block(id).unwrap().text.to_string()))
         .collect();

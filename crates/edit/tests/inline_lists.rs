@@ -44,7 +44,7 @@ fn item() -> (Editor, NodeId) {
 /// `1. ab[X]cd[Y]ef`. Reads the objects' records, not just the characters.
 fn view(editor: &Editor) -> Vec<String> {
     let doc = editor.document();
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .filter(|&n| doc.block(n).is_ok())
         .map(|n| {
@@ -84,7 +84,7 @@ fn enter_in_an_item_splits_its_objects_and_keeps_the_list() {
     assert_eq!(view(&editor), ["1. ab[X]", "2. cd[Y]ef"]);
     // Both halves are items of the same list.
     let doc = editor.document();
-    let order = doc.document_order();
+    let order = doc.order(reprise_doc::Domain::Body);
     assert_eq!(
         doc.list_item(order[0]).unwrap().list,
         doc.list_item(order[1]).unwrap().list
@@ -116,7 +116,7 @@ fn backspace_joins_two_items_with_objects_in_both() {
             at: "ab".len() + OBJECT.len_utf8(),
         })
         .unwrap();
-    let second = editor.document().document_order()[1];
+    let second = editor.document().order(reprise_doc::Domain::Body)[1];
     // The first Backspace takes the marker off the second item, the next
     // joins it: the objects of both land in one paragraph, in order.
     editor
@@ -182,7 +182,7 @@ fn deleting_across_an_item_boundary_keeps_the_records_in_step() {
             at: "ab".len() + OBJECT.len_utf8(),
         })
         .unwrap();
-    let order = editor.document().document_order();
+    let order = editor.document().order(reprise_doc::Domain::Body);
     let (first, second) = (order[0], order[1]);
     // Join them directly, then delete the first object with its neighbours.
     editor

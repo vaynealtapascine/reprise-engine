@@ -40,7 +40,7 @@ impl Rng {
 }
 
 fn live(doc: &Document) -> Vec<reprise_doc::NodeId> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .filter(|&n| doc.block(n).is_ok())
         .collect()

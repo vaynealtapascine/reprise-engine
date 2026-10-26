@@ -39,6 +39,14 @@ pub struct Report {
     pub figure_alts: Vec<String>,
     /// For each table cell role (`TD` or `TH`): its attributes as text.
     pub cell_attrs: Vec<String>,
+    /// Each page's `/MediaBox` as `[x0, y0, x1, y1]`, in page order.
+    pub media_boxes: Vec<[f32; 4]>,
+    /// The catalog's `/PageLabels`, as `(first page index, style, prefix, start)`
+    /// per range, in order. Empty when the catalog has none.
+    pub page_labels: Vec<(i64, String, String, i64)>,
+    /// How many artifact sequences carry each `/Subtype` (`Header`, `Footer`,
+    /// `Watermark`), read from the content streams.
+    pub artifact_subtypes: BTreeMap<String, usize>,
 }
 
 fn dict<'a>(doc: &'a Document, object: &'a Object) -> Option<&'a Dictionary> {
@@ -67,6 +75,7 @@ enum Mark {
 struct PageMarks {
     mcids: BTreeMap<i64, Option<String>>,
     artifacts: usize,
+    subtypes: Vec<String>,
 }
 
 fn page_marks(doc: &Document, page: ObjectId) -> PageMarks {
@@ -75,6 +84,7 @@ fn page_marks(doc: &Document, page: ObjectId) -> PageMarks {
     let mut marks = PageMarks {
         mcids: BTreeMap::new(),
         artifacts: 0,
+        subtypes: Vec::new(),
     };
     let mut depth = 0usize; // q/Q nesting, to catch marked content straddling it
     let mut mark_depths: Vec<usize> = Vec::new();
@@ -100,6 +110,14 @@ fn page_marks(doc: &Document, page: ObjectId) -> PageMarks {
                     (_, None) if nested => Mark::Other,
                     (b"Artifact", _) => {
                         marks.artifacts += 1;
+                        if let Some(subtype) = props
+                            .and_then(|d| d.get(b"Subtype").ok())
+                            .and_then(|o| o.as_name().ok())
+                        {
+                            marks
+                                .subtypes
+                                .push(String::from_utf8_lossy(subtype).into_owned());
+                        }
                         Mark::Artifact
                     }
                     (_, Some(mcid)) => {
@@ -171,14 +189,51 @@ pub fn check(bytes: &[u8]) -> Report {
         }
     }
 
+    // Page labels: a number tree of `[index, dict, index, dict, ...]`.
+    if let Some(tree) = catalog.get(b"PageLabels").ok().and_then(|o| dict(&doc, o))
+        && let Ok(nums) = tree.get(b"Nums").and_then(|n| n.as_array())
+    {
+        for pair in nums.chunks(2) {
+            let index = pair[0].as_i64().unwrap();
+            let label = dict(&doc, &pair[1]).unwrap();
+            report.page_labels.push((
+                index,
+                label
+                    .get(b"S")
+                    .ok()
+                    .and_then(|o| o.as_name().ok())
+                    .map(|n| String::from_utf8_lossy(n).into_owned())
+                    .unwrap_or_default(),
+                label.get(b"P").map(text).unwrap_or_default(),
+                label
+                    .get(b"St")
+                    .ok()
+                    .and_then(|o| o.as_i64().ok())
+                    .unwrap_or(1),
+            ));
+        }
+    }
+
     // Pages.
     let pages: Vec<(u32, ObjectId)> = doc.get_pages().into_iter().collect();
     let mut marks: BTreeMap<ObjectId, PageMarks> = BTreeMap::new();
     for (_, id) in &pages {
         let m = page_marks(&doc, *id);
         report.artifacts += m.artifacts;
+        for subtype in &m.subtypes {
+            *report.artifact_subtypes.entry(subtype.clone()).or_default() += 1;
+        }
         marks.insert(*id, m);
         let page = doc.get_dictionary(*id).unwrap();
+        if let Ok(array) = page.get(b"MediaBox").and_then(|o| o.as_array()) {
+            let n = |i: usize| {
+                array
+                    .get(i)
+                    .and_then(|o| o.as_float().ok())
+                    .unwrap_or(f32::NAN)
+            };
+            report.media_boxes.push([n(0), n(1), n(2), n(3)]);
+        }
         if let Ok(annots) = page.get(b"Annots").and_then(|a| a.as_array()) {
             for a in annots {
                 let d = dict(&doc, a).unwrap();

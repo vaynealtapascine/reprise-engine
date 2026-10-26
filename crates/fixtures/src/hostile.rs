@@ -162,8 +162,13 @@ pub fn all() -> Result<Vec<Fixture>, DocError> {
         inline_storm()?,
         inline_storm_readable()?,
         inline_fields_with_oscillating_regions()?,
+        sections_retained_hostile()?,
         metadata_depth_1024()?,
         metadata_depth_4096()?,
+        // Dedicated until S9 carried sections through the shared roundtrip.
+        sections_geometry_hostile()?,
+        sections_bands_hostile()?,
+        sections_regions_hostile()?,
     ])
 }
 
@@ -1193,7 +1198,7 @@ pub fn concurrent_templates() -> Result<Fixture, DocError> {
     taller.frames[0].height = Dim::pt(40);
     other.define_page_template(&taller)?;
     other.define_page_template(&PageTemplate::new("extra", Dim::pt(200), Dim::pt(200)))?;
-    let first = doc.blocks()[0];
+    let first = doc.top(reprise_doc::Domain::Body)[0];
     other.block(first)?.text.insert(0, "Edited. ")?;
 
     doc.merge(&other)?;
@@ -2161,7 +2166,7 @@ pub fn image_oversized() -> Result<Fixture, DocError> {
     )?;
     let node = fixture
         .doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .next()
         .ok_or_else(|| DocError::Store("missing fixture image".into()))?;
@@ -2267,7 +2272,7 @@ pub fn image_unreadable() -> Result<Fixture, DocError> {
     )?;
     let node = fixture
         .doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .next()
         .ok_or_else(|| DocError::Store("missing fixture image".into()))?;
@@ -2577,7 +2582,7 @@ pub fn collab_hostile_peer() -> Result<Fixture, DocError> {
     paragraph_with_note(&doc, "A noted paragraph whose note is torn out.", "noted")?;
     doc.commit();
     let note = doc
-        .blocks()
+        .top(reprise_doc::Domain::Body)
         .into_iter()
         .find(|&n| doc.kind_of(n) == Some(BlockKind::Annotation))
         .ok_or_else(|| DocError::Store("missing fixture note".into()))?;
@@ -3266,6 +3271,172 @@ pub fn annotation_storm() -> Result<Fixture, DocError> {
     })
 }
 
+/// Section geometry, zero-weight threading, hostile bounds, parity and ownership.
+pub fn sections_geometry_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
+    let doc = document()?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(Length::from_pt(612)),
+        height: Some(Length::from_pt(792)),
+        top: Some(Length::from_pt(72)),
+        right: Some(Length::from_pt(72)),
+        bottom: Some(Length::from_pt(72)),
+        left: Some(Length::from_pt(72)),
+    })?;
+
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &SectionProperties::from([
+            ("width".into(), (-1).into()),
+            ("left".into(), (14_745_600).into()),
+            ("right".into(), (14_745_600).into()),
+            ("columns.count".into(), (1000).into()),
+            ("columns.gap".into(), (0).into()),
+            ("template".into(), ("missing-spatial-template").into()),
+            ("mode".into(), ("pageless").into()),
+            ("numbering.format".into(), ("future-format").into()),
+        ]),
+        &[],
+    )?;
+    doc.append_block(BlockKind::Paragraph, "body", "cap")?;
+    let b = doc.append_block(BlockKind::Paragraph, "body", "weighted rtl")?;
+    let c = doc.append_block(BlockKind::Paragraph, "body", "landscape")?;
+    let life = doc.mint_lifetime(b)?;
+    doc.activate_start(
+        b,
+        &life,
+        BreakKind::Section,
+        &SectionProperties::from([
+            ("start".into(), ("odd-page").into()),
+            ("columns.widths".into(), ("1,0,2").into()),
+            ("columns.rule".into(), (1024).into()),
+            ("direction".into(), ("rtl").into()),
+            ("numbering.restart".into(), ("-2").into()),
+        ]),
+    )?;
+    let life = doc.mint_lifetime(c)?;
+    doc.activate_start(
+        c,
+        &life,
+        BreakKind::Section,
+        &SectionProperties::from([("orientation".into(), ("landscape").into())]),
+    )?;
+    doc.commit();
+    Ok(Fixture::new(
+        "sections_geometry_hostile",
+        doc,
+        &[
+            "section.property",
+            "section.geometry",
+            "section.columns-limit",
+            "section.template",
+            "section.mode-unsupported",
+            "section.column-narrow",
+            "compose.overflow",
+        ],
+    ))
+}
+
+/// Inactive section generations must never alter legacy body geometry. The
+/// effective geometry fixture is exercised separately until S9 transports
+/// section boundaries through the shared suite's complete-copy roundtrip.
+pub fn sections_retained_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::sections::{BreakKind, SectionProperties};
+    let doc = document()?;
+    doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "Retained geometry stays inert.",
+    )?;
+    let tail = doc.append_block(
+        BlockKind::Paragraph,
+        "body",
+        "The body keeps its ordinary frames.",
+    )?;
+    for count in [1000, 0, -1, i32::MAX] {
+        let life = doc.mint_lifetime(tail)?;
+        doc.activate_start(
+            tail,
+            &life,
+            BreakKind::Section,
+            &SectionProperties::from([
+                ("columns.count".into(), count.into()),
+                ("columns.widths".into(), "1,0,2147483647".into()),
+                ("width".into(), (-1).into()),
+                ("start".into(), "odd-page".into()),
+                ("future.geometry".into(), "retained".into()),
+            ]),
+        )?;
+        doc.deactivate_start(tail)?;
+    }
+    doc.commit();
+    Ok(Fixture::new("sections_retained_hostile", doc, &[]))
+}
+
+/// Effective continuous bands. In `all()` since S9 carried sections through the clipboard.
+pub fn sections_bands_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
+    let doc = document()?;
+    doc.define_style(
+        "band",
+        &Style {
+            family: Some("Source Serif Pro".into()),
+            size: Some(LengthExpr::Pt(Length::from_pt(10))),
+            line_height: Some(LengthExpr::Pt(Length::from_pt(12))),
+            ..Style::default()
+        },
+    )?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(Length::from_pt(200)),
+        height: Some(Length::from_pt(200)),
+        top: Some(Length::from_pt(10)),
+        right: Some(Length::from_pt(10)),
+        bottom: Some(Length::from_pt(10)),
+        left: Some(Length::from_pt(10)),
+    })?;
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &SectionProperties::from([("columns.count".into(), 1.into())]),
+        &[],
+    )?;
+    doc.append_block(BlockKind::Paragraph, "band", "a")?;
+    let b = doc.append_block(BlockKind::Paragraph, "band", "b\nb\nb\nb")?;
+    let c = doc.append_block(BlockKind::Paragraph, "band", "c")?;
+    for (node, properties) in [
+        (
+            b,
+            SectionProperties::from([
+                ("start".into(), "continuous".into()),
+                ("columns.widths".into(), "1,2".into()),
+                ("columns.gap".into(), 10240.into()),
+                ("columns.rule".into(), 1024.into()),
+                ("left".into(), 30720.into()),
+                ("right".into(), 40960.into()),
+                ("top".into(), 61440.into()),
+                ("bottom".into(), 61440.into()),
+                ("direction".into(), "rtl".into()),
+                ("numbering.restart".into(), "-7".into()),
+            ]),
+        ),
+        (
+            c,
+            SectionProperties::from([
+                ("start".into(), "continuous".into()),
+                ("columns.count".into(), 1.into()),
+                ("left".into(), 8192.into()),
+                ("right".into(), 9216.into()),
+            ]),
+        ),
+    ] {
+        let life = doc.mint_lifetime(node)?;
+        doc.activate_start(node, &life, BreakKind::Section, &properties)?;
+    }
+    doc.commit();
+    Ok(Fixture::new("sections_bands_hostile", doc, &[]))
+}
+
 /// Source history cannot enter an independent copy when the host rewrites
 /// its outer routing ID: the frame carries the durable source identity.
 pub fn foreign_copy_snapshot() -> Result<Fixture, DocError> {
@@ -3525,6 +3696,111 @@ pub fn inline_fields_with_oscillating_regions() -> Result<Fixture, DocError> {
         "inline_fields_with_oscillating_regions",
         doc,
         &["layout.region-cycle"],
+    ))
+}
+
+/// Running regions: variants, a tall clipped header, an empty story, a
+/// background, a deleted story, a story holding a note, bad distances and keys.
+/// In `all()` since S9 carried sections through the shared roundtrip.
+pub fn sections_regions_hostile() -> Result<Fixture, DocError> {
+    use reprise_doc::NewBlock;
+    use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
+    let doc = document()?;
+    doc.set_page_setup_patch(reprise_doc::page_setup::PageSetupPatch {
+        width: Some(Length::from_pt(300)),
+        height: Some(Length::from_pt(300)),
+        top: Some(Length::from_pt(36)),
+        right: Some(Length::from_pt(36)),
+        bottom: Some(Length::from_pt(36)),
+        left: Some(Length::from_pt(36)),
+    })?;
+    let story = |texts: &[&str]| -> Result<NodeId, DocError> {
+        let blocks: Vec<_> = texts
+            .iter()
+            .map(|t| NewBlock::new(BlockKind::Paragraph, "body", t))
+            .collect();
+        doc.create_story(&blocks)
+    };
+    let head = story(&["Running head", "second line", "third line"])?;
+    let tall = story(&[&"tall first-page header ".repeat(400)])?;
+    let nothing = doc.create_story(&[])?;
+    let foot = story(&["Footer"])?;
+    let mark = story(&["DRAFT"])?;
+    let ghost = story(&["deleted"])?;
+    let unsupported = doc.create_story(&[
+        NewBlock::new(BlockKind::Paragraph, "body", "supported"),
+        NewBlock::new(BlockKind::Annotation, "note", "a note in a story"),
+    ])?;
+    doc.delete_block(ghost)?;
+    let bind = |story: NodeId| story.to_string();
+    doc.write_section_properties(
+        SectionId::First,
+        "0",
+        &SectionProperties::from([
+            ("region.header.default".into(), bind(head).into()),
+            ("region.header.first".into(), bind(tall).into()),
+            ("region.header.even".into(), bind(nothing).into()),
+            ("region.footer.default".into(), bind(foot).into()),
+            ("region.background.default".into(), bind(mark).into()),
+            ("region.first".into(), true.into()),
+            ("region.even".into(), true.into()),
+            ("header.distance".into(), 2048.into()),
+        ]),
+        &[],
+    )?;
+    let nodes: Vec<_> = (0..5)
+        .map(|i| {
+            doc.append_block(
+                BlockKind::Paragraph,
+                "body",
+                &format!("Page {i} body text."),
+            )
+        })
+        .collect::<Result<_, _>>()?;
+    for node in &nodes[1..3] {
+        let life = doc.mint_lifetime(*node)?;
+        doc.activate_start(
+            *node,
+            &life,
+            BreakKind::Page,
+            &SectionProperties::from([("break".into(), "page".into())]),
+        )?;
+    }
+    for (node, own) in [
+        (
+            nodes[3],
+            SectionProperties::from([
+                ("break".into(), "section".into()),
+                ("region.header.default".into(), bind(ghost).into()),
+                ("region.footer.default".into(), "".into()),
+                ("header.distance".into(), (-5).into()),
+                ("region.header.writing-mode".into(), "vertical-rl".into()),
+                ("region.margin.default".into(), "bogus".into()),
+            ]),
+        ),
+        (
+            nodes[4],
+            SectionProperties::from([
+                ("break".into(), "section".into()),
+                ("region.header.default".into(), bind(unsupported).into()),
+            ]),
+        ),
+    ] {
+        let life = doc.mint_lifetime(node)?;
+        doc.activate_start(node, &life, BreakKind::Section, &own)?;
+    }
+    doc.commit();
+    Ok(Fixture::new(
+        "sections_regions_hostile",
+        doc,
+        &[
+            "layout.running-clipped",
+            "layout.running-missing",
+            "layout.story-unsupported",
+            "section.property",
+            "section.region-writing-mode",
+            "section.region-slot",
+        ],
     ))
 }
 

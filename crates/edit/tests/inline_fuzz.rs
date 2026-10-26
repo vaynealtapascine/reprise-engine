@@ -44,7 +44,7 @@ fn make_object(rng: &mut Rng, asset: &str) -> InlineObject {
 
 /// The paragraphs of a document, in order.
 fn paragraphs(doc: &Document) -> Vec<NodeId> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .filter(|&n| doc.block(n).is_ok())
         .collect()

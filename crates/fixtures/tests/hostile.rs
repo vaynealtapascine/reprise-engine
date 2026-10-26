@@ -248,7 +248,7 @@ hostile_tests!(
 
 #[test]
 fn every_fixture_has_a_test() {
-    assert_eq!(hostile::all().expect("fixtures build").len(), 110);
+    assert_eq!(hostile::all().expect("fixtures build").len(), 114);
 }
 
 hostile_tests!(
@@ -531,7 +531,7 @@ fn debug_explainability() {
 
 /// The `style.*` codes of every block, in document order, in a context.
 fn style_codes(doc: &Document, context: &ResolutionContext) -> Vec<Vec<String>> {
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|node| {
             doc.computed_style_in(node, context)
@@ -554,7 +554,7 @@ fn every_block_is_laid_out(fixture: &Fixture) {
     let snapshot = fixture.engine.layout(&fixture.doc);
     assert_eq!(
         snapshot.blocks.len(),
-        fixture.doc.blocks().len(),
+        fixture.doc.top(reprise_doc::Domain::Body).len(),
         "{}: every block is laid out",
         fixture.name
     );
@@ -584,7 +584,7 @@ fn style_expressions_report_and_fall_back() {
             &["style.unparsed"],
         ])
     );
-    for node in fixture.doc.blocks() {
+    for node in fixture.doc.top(reprise_doc::Domain::Body) {
         assert_eq!(
             size_of(&fixture.doc, node, &default),
             Length::from_pt(10),
@@ -643,7 +643,7 @@ fn style_bases_that_are_missing_or_indefinite_are_reported() {
             &[],
         ])
     );
-    let blocks = fixture.doc.blocks();
+    let blocks = fixture.doc.top(reprise_doc::Domain::Body);
     assert_eq!(
         size_of(&fixture.doc, blocks[1], &context),
         Length::from_pt(11)
@@ -1029,14 +1029,18 @@ fn incremental_page_seam() {
 #[test]
 fn editing_concurrent_delete_undo() {
     let fixture = hostile::editing_concurrent_delete_undo().unwrap();
-    let node = fixture.doc.blocks()[0];
+    let node = fixture.doc.top(reprise_doc::Domain::Body)[0];
     assert_eq!(
         fixture.doc.block(node).unwrap().text.to_string(),
         "anchor office e\u{301} \u{5D0}\u{5D1}"
     );
     assert_eq!(
-        fixture.doc.blocks(),
-        fixture.replica.as_ref().unwrap().blocks()
+        fixture.doc.top(reprise_doc::Domain::Body),
+        fixture
+            .replica
+            .as_ref()
+            .unwrap()
+            .top(reprise_doc::Domain::Body)
     );
     check(fixture);
 }
@@ -1045,8 +1049,8 @@ fn editing_concurrent_delete_undo() {
 fn editing_half_invalid() {
     use reprise_edit::{Command, Editor, Reason, Transaction};
     let fixture = hostile::editing_half_invalid().unwrap();
-    let node = fixture.doc.blocks()[0];
-    let keep = fixture.doc.blocks()[1];
+    let node = fixture.doc.top(reprise_doc::Domain::Body)[0];
+    let keep = fixture.doc.top(reprise_doc::Domain::Body)[1];
     let before = fixture.doc.revision();
     let mut editor = Editor::new(fixture.doc, reprise_doc::SchemaRegistry::builtin());
     let error = editor
@@ -1090,7 +1094,7 @@ fn editing_empty_block() {
     let fixture = hostile::editing_empty_block().unwrap();
     let snapshot = fixture.engine.layout(&fixture.doc);
     let nav = Navigator::semantic(&snapshot, &fixture.doc);
-    let caret = Caret::new(fixture.doc.blocks()[0], 0);
+    let caret = Caret::new(fixture.doc.top(reprise_doc::Domain::Body)[0], 0);
     for movement in [
         Movement::VisualLeft,
         Movement::VisualRight,
@@ -1174,9 +1178,200 @@ hostile_tests!(plumbing_mark_facts);
 
 hostile_tests!(list_semantics_storm);
 hostile_tests!(annotation_storm);
+
+#[test]
+fn sections_geometry_hostile() {
+    let fixture = hostile::sections_geometry_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let sections = snapshot.sections.as_ref().unwrap();
+    assert_eq!(sections.pages.len(), 4);
+    assert_eq!(
+        sections.pages.iter().map(|p| p.counter).collect::<Vec<_>>(),
+        vec![1, 2, -2, -1]
+    );
+    assert_eq!(sections.pages[1].kind, reprise_layout::PageKind::Filler);
+    assert_eq!(snapshot.pages[0].width, Length::from_pt(612));
+    assert_eq!(snapshot.pages[0].height, Length::from_pt(792));
+    assert_eq!(snapshot.pages[3].width, Length::from_pt(792));
+    assert_eq!(snapshot.pages[3].height, Length::from_pt(612));
+    assert_eq!(sections.pages[0].bands[0].frames.len(), 64);
+    assert_eq!(sections.pages[2].bands[0].frames.len(), 3);
+    let frames = &sections.pages[2].bands[0].frames;
+    assert_eq!(
+        frames
+            .iter()
+            .map(|i| snapshot.frames[*i].rect.width)
+            .collect::<Vec<_>>(),
+        vec![Length::from_pt(144), Length::ZERO, Length::from_pt(288)]
+    );
+    assert_eq!(sections.rules.len(), 2);
+    assert!(snapshot.frames.iter().all(|f| f.page != 1));
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|page| page.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}
+
+#[test]
+fn sections_retained_hostile() {
+    let fixture = hostile::sections_retained_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    assert!(snapshot.sections.is_none());
+    assert_eq!(snapshot.pages.len(), 1);
+    assert_eq!(snapshot.pages[0].width, Length::from_pt(420));
+    assert_eq!(snapshot.pages[0].height, Length::from_pt(300));
+    assert_eq!(snapshot.blocks.len(), 2);
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|p| p.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}
+
+#[test]
+fn sections_bands_hostile() {
+    let fixture = hostile::sections_bands_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let metadata = snapshot.sections.as_ref().unwrap();
+    assert_eq!(metadata.pages.len(), 1);
+    let page = &metadata.pages[0];
+    assert_eq!(page.section, reprise_doc::sections::SectionId::First);
+    assert_eq!(page.counter, 1);
+    assert_eq!(
+        page.bands
+            .iter()
+            .map(|b| (b.offset, b.depth, b.balanced))
+            .collect::<Vec<_>>(),
+        vec![
+            (Length::ZERO, Length::from_pt(12), true),
+            (Length::from_pt(12), Length::from_pt(24), true),
+            (Length::from_pt(36), Length::from_pt(144), false)
+        ]
+    );
+    assert_eq!(
+        page.bands
+            .iter()
+            .map(|b| b.frames.len())
+            .collect::<Vec<_>>(),
+        [1, 2, 1]
+    );
+    let b = &page.bands[1];
+    assert_eq!(snapshot.frames[b.frames[0]].rect.width, Length::from_pt(40));
+    assert_eq!(snapshot.frames[b.frames[1]].rect.width, Length::from_pt(80));
+    assert_eq!(metadata.rules.len(), 1);
+    assert_eq!(metadata.rules[0].rect.origin.x, Length(114 * 1024 + 512));
+    assert_eq!(metadata.rules[0].rect.origin.y, Length::from_pt(22));
+    assert_eq!(metadata.rules[0].rect.height, Length::from_pt(24));
+    let mut session = reprise_layout::incremental::LayoutSession::new(&fixture.engine);
+    assert_eq!(snapshot, session.layout(&fixture.doc).unwrap());
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|p| p.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}
+
 hostile_tests!(foreign_copy_snapshot);
 hostile_tests!(inline_bidi);
 hostile_tests!(inline_storm);
 hostile_tests!(inline_storm_readable);
+
+#[test]
+fn sections_regions_hostile() {
+    let fixture = hostile::sections_regions_hostile().unwrap();
+    let snapshot = fixture.engine.layout(&fixture.doc);
+    let sections = snapshot.sections.as_ref().unwrap();
+    assert_eq!(snapshot.pages.len(), 5);
+    let shown = |page: usize, slot: &str| -> Option<String> {
+        sections
+            .running
+            .iter()
+            .find(|r| r.page == page && r.slot == slot)
+            .map(|r| r.variant.clone())
+    };
+    // Page 1 takes the (clipped) first-page header, page 2 the empty even
+    // header, page 3 the default; the footer follows the first section.
+    assert_eq!(shown(0, "header").as_deref(), Some("first"));
+    assert_eq!(shown(1, "header").as_deref(), Some("even"));
+    assert_eq!(shown(2, "header").as_deref(), Some("default"));
+    assert_eq!(shown(0, "footer").as_deref(), Some("default"));
+    assert_eq!(shown(0, "background").as_deref(), Some("default"));
+    // A deleted story renders empty; an explicit none hides the footer.
+    assert_eq!(shown(3, "header"), None);
+    assert_eq!(shown(3, "footer"), None);
+    assert!(shown(4, "header").is_some());
+    let first_header = sections
+        .running
+        .iter()
+        .find(|r| r.page == 0 && r.slot == "header")
+        .unwrap();
+    assert!(first_header.clipped);
+    // 300 pt pages with 36 pt margins: D = 228 and the body keeps a quarter,
+    // 57 pt. The header (distance 2 pt) may take 300 - 36 - 57 - 2 = 205 pt:
+    // as many whole lines as fit. It then needs 2 pt more than those lines, so
+    // the body starts exactly there, and the footer, whose cap is what remains
+    // above the body's quarter, is clipped.
+    let lines = first_header.blocks[0].lines.len();
+    let line = first_header.blocks[0].lines[0].rect.height;
+    assert_eq!(
+        Length(205 * 1024 / line.0 * line.0),
+        line.mul_ratio(lines as i32, 1)
+    );
+    let used = line.mul_ratio(lines as i32, 1);
+    let header_frame = &snapshot.frames[first_header.frame];
+    assert_eq!(header_frame.rect.height, used);
+    let top = Length::from_pt(2) + used;
+    let band = &sections.pages[0].bands[0];
+    assert_eq!(band.body.origin.y, top);
+    let body_frame = snapshot
+        .frames
+        .iter()
+        .find(|f| f.page == 0 && f.role == reprise_doc::FrameRole::Flow("main".into()))
+        .unwrap();
+    assert_eq!(
+        body_frame.to_page.apply(reprise_geom::Point::origin()).y,
+        top
+    );
+    assert!(body_frame.rect.height >= Length::from_pt(57));
+    assert_eq!(
+        body_frame.rect.height,
+        snapshot.pages[0].height
+            - top
+            - Length::from_pt(36)
+                .max(snapshot.pages[0].height - (band.body.origin.y + band.body.height))
+    );
+    let footer = sections
+        .running
+        .iter()
+        .find(|r| r.page == 0 && r.slot == "footer")
+        .unwrap();
+    assert!(footer.clipped);
+    let content: Vec<_> = snapshot
+        .to_display_lists(DisplayOptions::default())
+        .iter()
+        .map(|p| p.content_only())
+        .collect();
+    insta::assert_snapshot!(
+        format!("content_{}", fixture.name),
+        serde_json::to_string_pretty(&content).unwrap()
+    );
+    check(fixture);
+}
 
 hostile_tests!(metadata_depth_1024, metadata_depth_4096);

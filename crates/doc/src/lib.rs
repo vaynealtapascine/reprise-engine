@@ -28,6 +28,8 @@ mod annotation_restore;
 #[cfg(test)]
 mod annotation_tests;
 mod changes;
+mod domain;
+pub use domain::{ChildReader, DECODE_UNIT_BYTES, Domain, ReadLimits, ReadStep};
 pub mod codes;
 pub mod context;
 mod edit;
@@ -37,6 +39,7 @@ mod flow;
 mod flow_tests;
 pub mod formatting;
 pub mod fragment;
+pub mod fragment_sections;
 pub mod function;
 mod history;
 #[cfg(any(test, feature = "hostile-peer"))]
@@ -67,6 +70,7 @@ pub mod relation;
 mod relation_tests;
 mod resolve;
 pub mod roles;
+pub mod sections;
 mod structure;
 mod style;
 mod style_graph;
@@ -615,9 +619,9 @@ impl Document {
         Ok(NodeId::tree(id))
     }
 
-    /// Top-level blocks in document order.
+    /// Body-domain alias of [`Document::top`].
     pub fn blocks(&self) -> Vec<NodeId> {
-        self.children(None)
+        self.top(Domain::Body)
     }
 
     pub fn block(&self, id: NodeId) -> Result<Block, DocError> {
@@ -812,6 +816,9 @@ impl Document {
         ) else {
             return RangeState::Missing { node: Some(node) };
         };
+        if self.domain_of(node) != self.domain_of(end_node) {
+            return RangeState::Missing { node: Some(node) };
+        }
         let end = match self.range_node_cmp(node, end_node) {
             std::cmp::Ordering::Equal => e.offset().max(s.offset()),
             // The end is in a later paragraph: this paragraph's part.
@@ -834,7 +841,7 @@ impl Document {
         if a.node == b.node {
             return self.flow_cmp(a, b);
         }
-        let order = self.document_order();
+        let order = self.range_order();
         order
             .iter()
             .position(|n| *n == a)

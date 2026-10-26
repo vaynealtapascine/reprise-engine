@@ -1,0 +1,25 @@
+#!/bin/bash
+# Copy of gate-integrate's prescribed checks, scoped to this worktree. Builds go to F: (G: was saturated by parallel builds during B2).
+set -euo pipefail
+cd F:/reprise-wt/eng-sections2
+export TMP=F:/reprise-target/b2-tmp TEMP=F:/reprise-target/b2-tmp CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+export CARGO_BUILD_JOBS=4 RUSTC_WRAPPER=''
+T=F:/reprise-target/eng-sections2-b2; export CARGO_TARGET_DIR=$T
+step() { local name="$1"; shift; echo "=== $name"; "$@"; echo '=== rc=0'; }
+step types cargo run -q -p reprise --example generate_types
+step wasmbuild env RUSTFLAGS='-C link-arg=-zstack-size=1048576' CARGO_TARGET_DIR=F:/reprise-target/eng-sections2-b2-wasm cargo build -q --target wasm32-unknown-unknown -p reprise-wasm
+W=F:/reprise-target/eng-sections2-b2-wasm/wasm32-unknown-unknown/debug/reprise_wasm.wasm
+step bindgen-web wasm-bindgen "$W" --target web --typescript --out-dir "$T/pkg-web"
+cp "$T/pkg-web/reprise_wasm.d.ts" crates/reprise-wasm/ts/reprise_wasm.d.ts
+step bindgen-node wasm-bindgen "$W" --target nodejs --typescript --out-dir "$T/pkg-node"
+step tsc tsc -p crates/reprise-wasm/ts/tsconfig.json
+step tsc-worker tsc -p crates/reprise-wasm/ts/tsconfig.json --noEmit false --module commonjs --moduleResolution node --outDir "$T/worker-cjs"
+step smoke node crates/reprise-wasm/ts/smoke.cjs "$T/pkg-node"
+step worker-smoke node crates/reprise-wasm/ts/worker-smoke.cjs "$T/pkg-node" "$T/worker-cjs/worker.js"
+step sections-native cargo run -p reprise --example sections_parity -- "$T/sections-parity"
+step sections-wasm node tools/sections-parity.cjs "$T/pkg-node" "$T/sections-parity"
+step fmt cargo fmt --all -- --check
+step clippy cargo clippy --workspace --all-targets -- -D warnings
+step wasmcheck cargo check --target wasm32-unknown-unknown -p reprise-layout -p reprise-display -p reprise-fixtures -p reprise-format -p reprise-edit -p reprise-plugin -p reprise-clipboard -p reprise -p reprise-wasm
+step test timeout --kill-after=10s 3600 cargo test --workspace --no-fail-fast
+echo '=== GATE DONE'

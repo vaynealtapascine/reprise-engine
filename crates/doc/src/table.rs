@@ -206,7 +206,7 @@ impl Document {
         Ok(node)
     }
 
-    fn table_block(
+    pub(crate) fn table_block(
         &self,
         parent: Option<NodeId>,
         kind: BlockKind,
@@ -238,7 +238,7 @@ mod tests {
         let text = doc
             .append_cell_block(cell, BlockKind::Paragraph, "", "λ")
             .unwrap();
-        assert_eq!(doc.children(Some(table)), vec![row]);
+        assert_eq!(doc.children_of(table), vec![row]);
         assert_eq!(doc.parent_of(text), Some(Some(cell)));
         let other = doc.fork(2).unwrap();
         assert_eq!(

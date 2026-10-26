@@ -16,7 +16,7 @@ fn para(doc: &Document, text: &str) -> NodeId {
 }
 
 fn texts(doc: &Document) -> Vec<String> {
-    doc.blocks()
+    doc.top(reprise_doc::Domain::Body)
         .into_iter()
         .map(|b| doc.block(b).unwrap().text.to_string())
         .collect()
@@ -56,19 +56,23 @@ fn a_deleted_block_is_gone_for_every_question_and_can_be_restored() {
     let (a, b, c) = (para(&doc, "a"), para(&doc, "b"), para(&doc, "c"));
     let r = doc.add_range(b, 0..1, RangePolicy::FIXED).unwrap();
     doc.delete_block(b).unwrap();
-    assert_eq!(doc.blocks(), [a, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, c]);
     assert!(doc.block(b).is_err());
     assert!(!doc.is_live(b));
     assert!(doc.is_soft_deleted(b));
-    assert_eq!(doc.document_order(), [a, c]);
-    assert_eq!(doc.children(None), [a, c]);
+    assert_eq!(doc.order(reprise_doc::Domain::Body), [a, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, c]);
     assert_eq!(doc.parent_of(b), None);
     assert_eq!(doc.kind_of(b), None);
     assert_eq!(doc.resolve_range(r), RangeState::Missing { node: Some(b) });
     assert!(doc.delete_block(b).is_err(), "already deleted");
 
     doc.restore_block(b).unwrap();
-    assert_eq!(doc.blocks(), [a, b, c], "same ID, same place");
+    assert_eq!(
+        doc.top(reprise_doc::Domain::Body),
+        [a, b, c],
+        "same ID, same place"
+    );
     assert_eq!(
         doc.resolve_range(r),
         RangeState::Valid {
@@ -91,14 +95,14 @@ fn a_flagged_block_takes_its_subtree_and_brings_it_back() {
             &NewBlock::new(BlockKind::Paragraph, "body", "child"),
         )
         .unwrap();
-    assert_eq!(doc.children(Some(parent)), [child]);
-    assert_eq!(doc.document_order(), [parent, child]);
+    assert_eq!(doc.children_of(parent), [child]);
+    assert_eq!(doc.order(reprise_doc::Domain::Body), [parent, child]);
     doc.delete_block(parent).unwrap();
     assert!(!doc.is_live(child), "its subtree is gone with it");
-    assert_eq!(doc.document_order(), []);
-    assert_eq!(doc.children(Some(parent)), []);
+    assert_eq!(doc.order(reprise_doc::Domain::Body), []);
+    assert_eq!(doc.children_of(parent), []);
     doc.restore_block(parent).unwrap();
-    assert_eq!(doc.document_order(), [parent, child]);
+    assert_eq!(doc.order(reprise_doc::Domain::Body), [parent, child]);
     assert_eq!(doc.parent_of(child), Some(Some(parent)));
 }
 
@@ -109,13 +113,13 @@ fn undo_of_a_deletion_is_the_same_node_in_the_same_place() {
     let mut undo = doc.undo_stack();
     doc.delete_block(b).unwrap();
     doc.commit_step();
-    assert_eq!(doc.blocks(), [a, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, c]);
     assert!(undo.undo().unwrap());
-    assert_eq!(doc.blocks(), [a, b, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, b, c]);
     assert!(undo.redo().unwrap());
-    assert_eq!(doc.blocks(), [a, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, c]);
     assert!(undo.undo().unwrap());
-    assert_eq!(doc.blocks(), [a, b, c]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, b, c]);
     assert!(!undo.can_undo());
 }
 
@@ -181,10 +185,14 @@ fn undo_after_a_concurrent_edit_inside_the_deleted_block_keeps_that_edit() {
     // The other peer types into the block while it is deleted here.
     two.block(b).unwrap().text.insert(5, ", world").unwrap();
     exchange(&one, &two);
-    assert_eq!(one.blocks(), [a], "a concurrent edit does not resurrect");
-    assert_eq!(two.blocks(), [a]);
+    assert_eq!(
+        one.top(reprise_doc::Domain::Body),
+        [a],
+        "a concurrent edit does not resurrect"
+    );
+    assert_eq!(two.top(reprise_doc::Domain::Body), [a]);
     assert!(undo.undo().unwrap());
-    assert_eq!(one.blocks(), [a, b]);
+    assert_eq!(one.top(reprise_doc::Domain::Body), [a, b]);
     assert_eq!(
         one.block(b).unwrap().text.to_string(),
         "hello, world",
@@ -207,8 +215,12 @@ fn a_concurrent_move_and_delete_converge_on_both_replicas() {
         } else {
             exchange(&two, &one);
         }
-        assert_eq!(one.blocks(), two.blocks(), "replicas agree");
-        let live = one.blocks();
+        assert_eq!(
+            one.top(reprise_doc::Domain::Body),
+            two.top(reprise_doc::Domain::Body),
+            "replicas agree"
+        );
+        let live = one.top(reprise_doc::Domain::Body);
         assert!(
             live == [a, c],
             "a concurrent move cannot clear the deletion flag: {live:?}"
@@ -226,8 +238,11 @@ fn concurrent_restores_converge_and_keep_the_id() {
     one.restore_block(b).unwrap();
     two.restore_block(b).unwrap();
     exchange(&one, &two);
-    assert_eq!(one.blocks(), two.blocks());
-    assert!(one.is_live(b) && one.blocks().contains(&a));
+    assert_eq!(
+        one.top(reprise_doc::Domain::Body),
+        two.top(reprise_doc::Domain::Body)
+    );
+    assert!(one.is_live(b) && one.top(reprise_doc::Domain::Body).contains(&a));
 }
 
 #[test]
@@ -253,8 +268,8 @@ fn concurrent_delete_and_restore_converge_by_map_lww() {
         );
         one.restore_block(b).unwrap();
         exchange(&one, &two);
-        assert_eq!(one.blocks(), [b]);
-        assert_eq!(two.blocks(), [b]);
+        assert_eq!(one.top(reprise_doc::Domain::Body), [b]);
+        assert_eq!(two.top(reprise_doc::Domain::Body), [b]);
     }
 }
 
@@ -276,9 +291,9 @@ fn independently_deleted_children_stay_deleted_when_parent_is_restored() {
         "cannot restore under a deleted parent"
     );
     doc.restore_block(parent).unwrap();
-    assert!(doc.children(Some(parent)).is_empty());
+    assert!(doc.children_of(parent).is_empty());
     doc.restore_block(child).unwrap();
-    assert_eq!(doc.children(Some(parent)), [child]);
+    assert_eq!(doc.children_of(parent), [child]);
 }
 
 #[test]
@@ -307,13 +322,16 @@ fn replicas_delete_and_restore_independently() {
     one.delete_block(a).unwrap();
     two.delete_block(b).unwrap();
     exchange(&one, &two);
-    assert_eq!(one.blocks(), []);
-    assert_eq!(two.blocks(), []);
+    assert_eq!(one.top(reprise_doc::Domain::Body), []);
+    assert_eq!(two.top(reprise_doc::Domain::Body), []);
     one.restore_block(b).unwrap();
     two.restore_block(a).unwrap();
     exchange(&one, &two);
-    assert_eq!(one.blocks().len(), 2);
-    assert_eq!(one.blocks(), two.blocks());
+    assert_eq!(one.top(reprise_doc::Domain::Body).len(), 2);
+    assert_eq!(
+        one.top(reprise_doc::Domain::Body),
+        two.top(reprise_doc::Domain::Body)
+    );
 }
 
 #[test]
@@ -324,17 +342,21 @@ fn staged_blocks_are_invisible_until_placed_and_keep_their_id_through_undo() {
     let staged = doc
         .stage_block(&NewBlock::new(BlockKind::Paragraph, "body", "new"))
         .unwrap();
-    assert_eq!(doc.blocks(), [a]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a]);
     assert!(doc.is_soft_deleted(staged));
     assert_eq!(undo.undo_count(), 0, "staging is outside the history");
     doc.activate_block_at(staged, None, 1).unwrap();
     doc.commit_step();
-    assert_eq!(doc.blocks(), [a, staged]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a, staged]);
     assert_eq!(undo.undo_count(), 1);
     undo.undo().unwrap();
-    assert_eq!(doc.blocks(), [a]);
+    assert_eq!(doc.top(reprise_doc::Domain::Body), [a]);
     undo.redo().unwrap();
-    assert_eq!(doc.blocks(), [a, staged], "redo brings back the same ID");
+    assert_eq!(
+        doc.top(reprise_doc::Domain::Body),
+        [a, staged],
+        "redo brings back the same ID"
+    );
     assert_eq!(doc.block(staged).unwrap().text.to_string(), "new");
 }
 

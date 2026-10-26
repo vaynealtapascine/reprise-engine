@@ -322,7 +322,7 @@ fn objects_inside_table_cells_import_and_round_trip() {
         .unwrap();
     let doc = editor.document();
     let found: Vec<_> = doc
-        .document_order()
+        .order(reprise_doc::Domain::Body)
         .into_iter()
         .filter_map(|n| doc.inline_objects(n).ok())
         .flatten()

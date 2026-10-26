@@ -41,6 +41,8 @@ pub const REQUIRED_INLINE_OBJECTS: u64 = 1 << 15;
 /// would otherwise show as bare ranges and copy without their data. Bits 14
 /// and 15 belong to lists and inline objects (fixed at integration).
 pub const REQUIRED_ANNOTATIONS: u64 = 1 << 16;
+/// Retained sections, independent stories and geometry mode.
+pub const REQUIRED_SECTIONS: u64 = 1 << 17;
 /// Durable style owners, editable labels and versioned built-in references.
 pub const REQUIRED_STYLE_IDENTITIES: u64 = 1 << 18;
 /// Retained portable range endpoints in distinct text hosts.
@@ -57,6 +59,7 @@ pub const KNOWN_REQUIRED: u64 = REQUIRED_TABLE_SPANS
     | REQUIRED_BLOCK_SEMANTICS
     | REQUIRED_INLINE_OBJECTS
     | REQUIRED_ANNOTATIONS
+    | REQUIRED_SECTIONS
     | REQUIRED_STYLE_IDENTITIES
     | REQUIRED_RANGE_ENDPOINTS
     | REQUIRED_STYLE_REFERENCE_CONTEXTS;
@@ -70,6 +73,9 @@ const MAX_SCANNED_NODES: usize = 1 << 22;
 /// The table feature bits `document` needs.
 pub fn table_features(document: &Document) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
+    if document.has_sections() {
+        flags.required |= REQUIRED_SECTIONS;
+    }
     if document.has_style_identities() {
         flags.required |= REQUIRED_STYLE_IDENTITIES;
     }
@@ -103,7 +109,7 @@ pub fn table_features(document: &Document) -> FeatureFlags {
     if document.has_text_emphasis() {
         flags.required |= REQUIRED_TEXT_EMPHASIS;
     }
-    let mut stack: Vec<NodeId> = document.blocks();
+    let mut stack: Vec<NodeId> = document.authored_order();
     let mut visited = 0usize;
     while let Some(node) = stack.pop() {
         visited += 1;
@@ -132,7 +138,6 @@ pub fn table_features(document: &Document) -> FeatureFlags {
         if flags.required & REQUIRED_TABLE_SPANS != 0 && flags.optional != 0 {
             break;
         }
-        stack.extend(document.children(Some(node)));
     }
     flags
 }
@@ -329,5 +334,23 @@ mod reference_context_tests {
             matches!(Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED & !REQUIRED_STYLE_REFERENCE_CONTEXTS), Err(crate::FormatError::RequiredFeatures(bits)) if bits == REQUIRED_STYLE_REFERENCE_CONTEXTS)
         );
         Container::decode_known(&bytes, Limits::default(), KNOWN_REQUIRED).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// SPEC.md's registry: bits 17 (sections) and 20 and 21 are assigned,
+    /// 19 and 22 are reserved for frames and no reader may assign them a
+    /// meaning, so a package that sets either is refused.
+    #[test]
+    fn known_required_holds_the_assigned_bits_and_neither_reserved_one() {
+        let assigned: u64 = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21]
+            .iter()
+            .fold(0, |mask, bit| mask | (1 << bit));
+        assert_eq!(KNOWN_REQUIRED, assigned);
+        assert_eq!(REQUIRED_SECTIONS, 1 << 17);
+        assert_eq!(KNOWN_REQUIRED & ((1 << 19) | (1 << 22)), 0);
     }
 }

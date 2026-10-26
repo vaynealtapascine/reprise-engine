@@ -49,7 +49,7 @@ fn copy_all_preserves_page_setup_and_paste_undo_restores_the_empty_targets_page(
     );
     assert_eq!(editor.undo_count(), 1);
     editor.undo().unwrap();
-    assert!(editor.document().blocks().is_empty());
+    assert!(editor.document().top(reprise_doc::Domain::Body).is_empty());
     assert_eq!(editor.document().page_setup_patch().unwrap(), original);
     editor.redo().unwrap();
     assert_eq!(
@@ -70,7 +70,7 @@ fn partial_copies_omit_page_setup_and_nonempty_targets_keep_their_page() {
         .copy_fragment(
             "source",
             &[CopyBlock {
-                node: source.blocks()[0],
+                node: source.top(reprise_doc::Domain::Body)[0],
                 bytes: None,
             }],
             &SchemaRegistry::builtin(),
@@ -115,7 +115,7 @@ fn hostile_fragment_page_metadata_is_refused_without_staging_or_undo() {
         assert_eq!(error.note().code.as_str(), "clipboard.invalid");
         assert_eq!(error.note().severity, reprise_diag::Severity::Error);
         assert_eq!(editor.document().revision(), revision);
-        assert!(editor.document().blocks().is_empty());
+        assert!(editor.document().top(reprise_doc::Domain::Body).is_empty());
         assert!(!editor.document().has_page_setup());
         assert_eq!(editor.undo_count(), 0);
     }

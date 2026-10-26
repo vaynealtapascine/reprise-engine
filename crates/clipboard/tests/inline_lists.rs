@@ -78,7 +78,7 @@ type SeenBlock = (Option<String>, String, Vec<SeenObject>);
 
 /// What a reader sees of each block of `doc`, in order.
 fn seen(doc: &Document) -> Vec<SeenBlock> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .filter(|&n| doc.block(n).is_ok())
         .map(|n| {
@@ -170,7 +170,7 @@ fn a_native_copy_pastes_items_and_objects_with_fresh_identity() {
     let (kept, copied) = all.split_at(all.len() / 2);
     assert_eq!(kept, copied, "the paste repeats what was copied");
     // Fresh identities: no object of the copy shares an id with the source.
-    let order = doc.document_order();
+    let order = doc.order(reprise_doc::Domain::Body);
     let pasted_ids: Vec<_> = order[order.len() / 2..]
         .iter()
         .flat_map(|&n| doc.inline_objects(n).unwrap())

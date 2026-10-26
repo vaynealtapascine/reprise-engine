@@ -1166,7 +1166,7 @@ pub(crate) struct DocOrder {
 
 impl DocOrder {
     fn read(doc: &Document) -> Self {
-        let order = doc.document_order();
+        let order = doc.range_order();
         let position = order.iter().enumerate().map(|(i, n)| (*n, i)).collect();
         Self { order, position }
     }

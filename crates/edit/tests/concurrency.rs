@@ -44,7 +44,7 @@ fn text(seed: u64, i: u64) -> String {
 }
 
 fn dump(doc: &Document) -> Vec<(NodeId, Option<NodeId>, String)> {
-    doc.document_order()
+    doc.order(reprise_doc::Domain::Body)
         .into_iter()
         .map(|id| {
             let text = doc
@@ -259,7 +259,7 @@ fn concurrent_moves_that_would_form_a_cycle() {
                 )
             },
         );
-        let order = a.document().document_order();
+        let order = a.document().order(reprise_doc::Domain::Body);
         let unique: BTreeSet<_> = order.iter().collect();
         assert_eq!(unique.len(), order.len(), "no node is visited twice");
         assert!(order.contains(&ids[2]));

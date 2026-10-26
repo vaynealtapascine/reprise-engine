@@ -74,8 +74,15 @@ impl Features {
     pub const STYLE_REFERENCE_CONTEXTS: Features = Features(1 << 7);
     /// Everything accepted at the untrusted packet boundary. Binary snapshots
     /// remain a legacy persistence API, not a safe network packet format.
-    pub const SUPPORTED: Features =
-        Features(1 | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7));
+    pub const SUPPORTED: Features = Features(
+        1 | (1 << 2)
+            | (1 << 3)
+            | (1 << 4)
+            | (1 << 5)
+            | (1 << 6)
+            | (1 << 7)
+            | crate::sections::REQUIRED_SECTIONS,
+    );
 
     const NAMES: [(Features, &'static str); 8] = [
         (Features::DELTA_JSON, "delta-json"),
@@ -324,7 +331,8 @@ pub fn read_header(bytes: &[u8]) -> Result<(PacketHeader, &[u8]), SyncError> {
             | Features::STYLE_IDENTITIES.0
             | Features::LEGACY_BUILTINS.0
             | Features::RANGE_ENDPOINTS.0
-            | Features::STYLE_REFERENCE_CONTEXTS.0)
+            | Features::STYLE_REFERENCE_CONTEXTS.0
+            | crate::sections::REQUIRED_SECTIONS)
         != needed.0
     {
         return Err(invalid("packet features don't match its kind"));
@@ -456,6 +464,11 @@ impl Document {
                     } else {
                         0
                     }
+                    | if self.has_sections() {
+                        crate::sections::REQUIRED_SECTIONS
+                    } else {
+                        0
+                    }
                     | if self.has_style_identities() {
                         Features::STYLE_IDENTITIES.0
                     } else {
@@ -496,7 +509,8 @@ impl Document {
                         | Features::STYLE_IDENTITIES.0
                         | Features::LEGACY_BUILTINS.0
                         | Features::RANGE_ENDPOINTS.0
-                        | Features::STYLE_REFERENCE_CONTEXTS.0)),
+                        | Features::STYLE_REFERENCE_CONTEXTS.0
+                        | crate::sections::REQUIRED_SECTIONS)),
         );
         write_packet(&header, body)
     }

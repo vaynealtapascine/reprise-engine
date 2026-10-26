@@ -5,7 +5,8 @@ import type { Payload, Create, Open, Transaction, LayoutOptions, LayoutProgress,
   DisplayPage, MarksPage, State, Bytes, SyncUpdate, ErrorPayload, FontDeclaration, FontSettings, AssetDeclaration, ImageInsert, SyncRequest, SyncPacket, SyncReport, SyncInfo,
   Selection, StableSelection, Presence, Awareness, PresenceView, EditReport, Applied,
   OutlineEntry, ImportCopy, Batch, BatchReport, ReplaceSelection, ReplaceText, Replaced, DiagnosticFilter, DiagnosticList, Face,
-  Annotation, AnnotationList, AnnotationsAt, AnnotationsIn, AnnotationKind, AnnotationGeometry, PageLinks, FieldTarget, PageRect } from "./types.js";
+  Annotation, AnnotationList, AnnotationsAt, AnnotationsIn, AnnotationKind, AnnotationGeometry, PageLinks, FieldTarget, PageRect,
+  PageSections, SectionPages, PageLabel, PageRegion, RegionInstance, PageField, HitPlaced, PlacedHit, CaretIn, SelectionIn } from "./types.js";
 
 type Request = Payload<{ id: string } & (
   | { kind: "create"; request: Payload<Create> }
@@ -35,6 +36,15 @@ type Request = Payload<{ id: string } & (
   | { kind: "page-links"; page: number }
   | { kind: "atom-rect"; request: Payload<FieldTarget> }
   | { kind: "field-target"; request: Payload<FieldTarget> }
+  | { kind: "page-sections"; page: number }
+  | { kind: "section-pages"; request: Payload<string> }
+  | { kind: "page-label"; page: number }
+  | { kind: "page-regions"; page: number }
+  | { kind: "region-instances"; request: Payload<string> }
+  | { kind: "page-fields"; page: number }
+  | { kind: "hit-placed"; request: Payload<HitPlaced> }
+  | { kind: "caret-in"; request: Payload<CaretIn> }
+  | { kind: "selection-rects-in"; request: Payload<SelectionIn> }
   | { kind: "save" }
   | { kind: "sync-export"; request?: Payload<SyncRequest> }
   | { kind: "sync-info" }
@@ -65,6 +75,15 @@ export type Response = Payload<{ id: string } & (
   | { kind: "page-links"; links: Payload<PageLinks> }
   | { kind: "atom-rect"; rect: Payload<PageRect> }
   | { kind: "field-target"; target: Payload<string> }
+  | { kind: "page-sections"; sections: Payload<PageSections> }
+  | { kind: "section-pages"; pages: Payload<SectionPages> }
+  | { kind: "page-label"; label: Payload<PageLabel> }
+  | { kind: "page-regions"; regions: Payload<PageRegion[]> }
+  | { kind: "region-instances"; instances: Payload<RegionInstance[]> }
+  | { kind: "page-fields"; fields: Payload<PageField[]> }
+  | { kind: "placed-hit"; hit: Payload<PlacedHit> }
+  | { kind: "caret-rect"; rect: Payload<PageRect> }
+  | { kind: "selection-rects"; rects: Payload<PageRect[]> }
   | { kind: "saved"; content: Payload<Bytes> }
   | { kind: "sync"; update: Payload<SyncUpdate> }
   | { kind: "sync-packet"; packet: Payload<SyncPacket> }
@@ -162,6 +181,15 @@ scope.onmessage = (event: MessageEvent<Request>) => {
         case "page-links": post({ id, kind: "page-links", links: current().page_links(data.page) }); break;
         case "atom-rect": post({ id, kind: "atom-rect", rect: current().atom_rect(data.request) }); break;
         case "field-target": post({ id, kind: "field-target", target: current().field_target(data.request) }); break;
+        case "page-sections": post({ id, kind: "page-sections", sections: current().page_sections(data.page) }); break;
+        case "section-pages": post({ id, kind: "section-pages", pages: current().section_pages(data.request) }); break;
+        case "page-label": post({ id, kind: "page-label", label: current().page_label(data.page) }); break;
+        case "page-regions": post({ id, kind: "page-regions", regions: current().page_regions(data.page) }); break;
+        case "region-instances": post({ id, kind: "region-instances", instances: current().region_instances(data.request) }); break;
+        case "page-fields": post({ id, kind: "page-fields", fields: current().page_fields(data.page) }); break;
+        case "hit-placed": post({ id, kind: "placed-hit", hit: current().hit_placed(data.request) }); break;
+        case "caret-in": post({ id, kind: "caret-rect", rect: current().caret_in(data.request) }); break;
+        case "selection-rects-in": post({ id, kind: "selection-rects", rects: current().selection_rects_in(data.request) }); break;
         case "save": { release(); const content = current().save(); post({ id, kind: "saved", content }, [content.data.bytes.buffer]); break; }
         case "sync-export": {
           if (data.request) {

@@ -500,6 +500,48 @@ console.log("page setup WASM smoke passed");
   console.log("inline objects WASM smoke passed");
 }
 
+// Sections: breaks, stories and bindings as commands; labels, owners, regions and
+// navigation in a running region as queries (sections S11).
+{
+  const sw = new wasm.Workspace();
+  const sd = sw.create(p({ document_id: "30112233445566778899aabbccddeeff", peer_id: "31" }));
+  const plain = { families: null, size: null, line_height: null };
+  const made = sd.apply(p({ commands: [0, 1, 2].map(i => ({ kind: "insert-block", parent: null, index: i, block_kind: "paragraph", text: "section smoke " + i, style: plain })) })).data.blocks;
+  const story = sd.apply(p({ commands: [{ kind: "create-story", blocks: [{ block_kind: "paragraph", text: "Running head", style: null }] }] })).data.stories[0];
+  assert.ok(story);
+  const applied = sd.apply(p({ commands: [
+    { kind: "set-region", section: "first", slot: "header", variant: "default", binding: { state: "story", story } },
+    { kind: "insert-break", at: { position: "before", node: made[1] }, break_kind: "page" },
+    { kind: "set-section", section: "first", patch: { "numbering.format": "lower-roman" }, clear: null },
+  ] }));
+  assert.equal(applied.data.stories, undefined, "left out when no command made a story");
+  assert.equal(sd.state().data.stories.length, 1);
+  assert.equal(sd.state().data.sections[0].bindings.find(b => b.slot === "header" && b.variant === "default").story, story);
+  assert.throws(() => sd.page_label(0), e => e.data.code === "bindings.layout-required");
+  finish(sd);
+  assert.equal(sd.page_label(0).data.label, "i");
+  assert.equal(sd.page_label(1).data.label, "ii");
+  assert.equal(sd.page_label(1).data.counter, "2");
+  assert.equal(sd.page_sections(1).data.owner, "first");
+  assert.deepEqual(sd.section_pages(p("first")).data.owned, [0, 1]);
+  assert.deepEqual(sd.region_instances(p(story)).data, [{ page: 0, slot: "header" }, { page: 1, slot: "header" }]);
+  const [region] = sd.page_regions(0).data;
+  assert.equal(region.slot, "header"); assert.equal(region.story, story);
+  const hit = sd.hit_placed(p({ page: 0, x: region.rect.x + (region.rect.width >> 1), y: region.rect.y + (region.rect.height >> 1) })).data;
+  assert.equal(hit.kind, "running");
+  assert.deepEqual(hit.instance, { page: 0, slot: "header" });
+  const at = sd.caret_in(p({ instance: hit.instance, position: hit.position })).data;
+  assert.equal(at.page, 0);
+  const head = sd.state().data.stories[0].blocks[0].id;
+  const edge = (offset) => ({ node: head, offset, affinity: "downstream" });
+  assert.ok(sd.selection_rects_in(p({ instance: hit.instance, selection: { anchor: edge(0), focus: edge(7) } })).data.length > 0);
+  assert.throws(() => sd.page_label(99), e => e.data.code === "bindings.invalid");
+  assert.throws(() => sd.section_pages(p("nope")), e => e.data.code === "bindings.id");
+  assert.throws(() => sd.apply(p({ commands: [{ kind: "set-region", section: "first", slot: "header", variant: "default", binding: { state: "weird" } }] })), e => e.data.code === "bindings.invalid");
+  sd.free(); sw.free();
+  console.log("sections WASM smoke passed");
+}
+
 // Pass the native deep_metadata test's output folder as the third argument.
 // This runs in the same debug WASM module built with a 1 MiB stack.
 if (process.argv[3]) {

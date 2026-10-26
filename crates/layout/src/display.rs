@@ -126,6 +126,18 @@ pub struct PdfReadingBlock {
     pub runs: Vec<PdfReadingRun>,
 }
 
+/// The addresses a PDF export needs of a layout: the authored runs by line,
+/// the derived copies (repeated table headers and running regions), and which
+/// of those copies a running region owns, by the slot it is in.
+type PdfAddresses = (
+    std::collections::BTreeMap<crate::LineRef, Vec<PdfReadingRun>>,
+    Vec<reprise_display::pdf::ReadingRun>,
+    std::collections::BTreeMap<
+        reprise_display::pdf::ReadingRun,
+        reprise_display::pdf::tags::ArtifactKind,
+    >,
+);
+
 impl LayoutSnapshot {
     /// One display list per page.
     pub fn to_display_lists(&self, options: DisplayOptions) -> Vec<DisplayList> {
@@ -174,22 +186,61 @@ impl LayoutSnapshot {
         self.pdf_addresses().1
     }
 
-    /// Addresses of the authored runs by line, and of the repeated header copies.
-    fn pdf_addresses(
+    /// Which of [`Self::pdf_artifact_runs`] belong to a running region: a
+    /// header, a footer or a background (a watermark), by the slot of the
+    /// instance that draws them. The rest are plain artifacts.
+    pub fn pdf_artifact_kinds(
         &self,
-    ) -> (
-        std::collections::BTreeMap<crate::LineRef, Vec<PdfReadingRun>>,
-        Vec<reprise_display::pdf::ReadingRun>,
-    ) {
+    ) -> std::collections::BTreeMap<
+        reprise_display::pdf::ReadingRun,
+        reprise_display::pdf::tags::ArtifactKind,
+    > {
+        self.pdf_addresses().2
+    }
+
+    /// Addresses of the authored runs by line, and of the repeated header copies.
+    fn pdf_addresses(&self) -> PdfAddresses {
+        use reprise_display::pdf::tags::ArtifactKind;
         use std::collections::BTreeMap;
         let mut addresses = BTreeMap::<crate::LineRef, Vec<PdfReadingRun>>::new();
         let mut copies = Vec::new();
+        let mut kinds = BTreeMap::new();
+        fn copy(
+            copies: &mut Vec<reprise_display::pdf::ReadingRun>,
+            kinds: &mut BTreeMap<reprise_display::pdf::ReadingRun, ArtifactKind>,
+            run: reprise_display::pdf::ReadingRun,
+            kind: Option<ArtifactKind>,
+        ) {
+            if let Some(kind) = kind {
+                kinds.insert(run.clone(), kind);
+            }
+            copies.push(run);
+        }
         let mut groups = vec![0usize; self.pages.len()];
-        for (frame_index, frame) in self.frames.iter().enumerate() {
+        let running = self.running_frames();
+        let order: Vec<usize> = (0..self.pages.len())
+            .flat_map(|page| self.paint_order(page))
+            .collect();
+        for frame_index in order {
+            let Some(frame) = self.frames.get(frame_index) else {
+                continue;
+            };
             let Some(group) = groups.get_mut(frame.page) else {
                 continue;
             };
             let mut child = 0usize;
+            let own = running
+                .get(&frame_index)
+                .into_iter()
+                .flat_map(|i| i.blocks.iter());
+            let kind = running
+                .get(&frame_index)
+                .and_then(|i| match i.slot.as_str() {
+                    "header" => Some(ArtifactKind::Header),
+                    "footer" => Some(ArtifactKind::Footer),
+                    "background" => Some(ArtifactKind::Watermark),
+                    _ => None,
+                });
             for block in &self.blocks {
                 for (line_index, line) in block
                     .lines
@@ -273,20 +324,29 @@ impl LayoutSnapshot {
                     }
                 }
             }
-            // Repeated header copies follow the authored items of the group.
-            for block in self
+            // Repeated header copies follow the authored items of the group; a
+            // running region's blocks are all of its own group. Both are
+            // derived copies, not content.
+            for (block, kind) in self
                 .repeated_headers
                 .iter()
                 .filter(|h| h.frame == frame_index)
                 .flat_map(|h| h.blocks.iter())
+                .map(|b| (b, None))
+                .chain(own.map(|b| (b, kind)))
             {
                 for line in block.lines.iter().filter(|l| l.frame == frame_index) {
                     child = child.saturating_add(background_items(block, line));
                     if block.image.is_some() {
-                        copies.push(reprise_display::pdf::ReadingRun {
-                            page: frame.page,
-                            path: vec![*group, child],
-                        });
+                        copy(
+                            &mut copies,
+                            &mut kinds,
+                            reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path: vec![*group, child],
+                            },
+                            kind,
+                        );
                         child = child.saturating_add(1);
                     }
                     for run in line.marker.iter().flat_map(|m| &m.runs) {
@@ -294,10 +354,15 @@ impl LayoutSnapshot {
                         if glyph_transform(frame.writing_mode, run.upright).is_some() {
                             path.push(0);
                         }
-                        copies.push(reprise_display::pdf::ReadingRun {
-                            page: frame.page,
-                            path,
-                        });
+                        copy(
+                            &mut copies,
+                            &mut kinds,
+                            reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path,
+                            },
+                            kind,
+                        );
                         child = child.saturating_add(1);
                     }
                     for run in text_runs(line).iter() {
@@ -305,10 +370,15 @@ impl LayoutSnapshot {
                         if glyph_transform(frame.writing_mode, run.upright).is_some() {
                             path.push(0);
                         }
-                        copies.push(reprise_display::pdf::ReadingRun {
-                            page: frame.page,
-                            path,
-                        });
+                        copy(
+                            &mut copies,
+                            &mut kinds,
+                            reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path,
+                            },
+                            kind,
+                        );
                         child = child.saturating_add(
                             1 + decoration_paths(run, line, frame.writing_mode).len(),
                         );
@@ -321,18 +391,53 @@ impl LayoutSnapshot {
                         if matches!(item, Item::Group { .. }) {
                             path.push(0);
                         }
-                        copies.push(reprise_display::pdf::ReadingRun {
-                            page: frame.page,
-                            path,
-                        });
+                        copy(
+                            &mut copies,
+                            &mut kinds,
+                            reprise_display::pdf::ReadingRun {
+                                page: frame.page,
+                                path,
+                            },
+                            kind,
+                        );
                         child = child.saturating_add(1);
                     }
                 }
             }
             *group = group.saturating_add(1);
         }
-        (addresses, copies)
+        (addresses, copies, kinds)
     }
+    /// The running regions' instances by their frame.
+    fn running_frames(&self) -> std::collections::BTreeMap<usize, &crate::RunningInstance> {
+        self.sections
+            .iter()
+            .flat_map(|s| s.running.iter())
+            .map(|r| (r.frame, r))
+            .collect()
+    }
+
+    /// The frames of `page` in the order they are drawn: regions that paint
+    /// below the body (a background), then the body's frames in the snapshot's
+    /// order, then regions that paint above it (headers and footers). A page
+    /// with no regions is its frames in the snapshot's order.
+    pub(crate) fn paint_order(&self, page: usize) -> Vec<usize> {
+        let layer = |index: usize| match self.frames.get(index).map(|f| &f.role) {
+            Some(reprise_doc::FrameRole::Flow(name)) => crate::running::slot_of_role(name)
+                .and_then(|slot| crate::running::SLOTS.get(usize::from(slot.0)))
+                .map_or(1u8, |spec| match spec.paint {
+                    crate::running::Paint::Below => 0,
+                    crate::running::Paint::Above => 2,
+                }),
+            _ => 1,
+        };
+        let mut order: Vec<usize> = (0..self.frames.len())
+            .filter(|&i| self.frames[i].page == page)
+            .collect();
+        order.sort_by_key(|&i| layer(i));
+        order
+    }
+
     /// The display list of one page; empty if there is no such page.
     pub fn to_display_list(&self, page: usize, options: DisplayOptions) -> DisplayList {
         let Some(size) = self.pages.get(page) else {
@@ -343,22 +448,28 @@ impl LayoutSnapshot {
             };
         };
         let mut items = Vec::new();
-        for (index, frame) in self.frames.iter().enumerate() {
-            if frame.page != page {
+        let running = self.running_frames();
+        for index in self.paint_order(page) {
+            let Some(frame) = self.frames.get(index) else {
                 continue;
-            }
+            };
             let mut children = Vec::new();
             if options.debug && options.boxes {
                 children.push(debug_path(Path::rect(r(frame.rect)), FRAME));
             }
             // Repeated table headers are drawn after the authored blocks, so the
-            // indices of authored items in this group do not move.
+            // indices of authored items in this group do not move. A running
+            // region's blocks are in its own frame's group only.
             let copies = self
                 .repeated_headers
                 .iter()
                 .filter(|h| h.frame == index)
                 .flat_map(|h| h.blocks.iter());
-            for block in self.blocks.iter().chain(copies) {
+            let own = running
+                .get(&index)
+                .into_iter()
+                .flat_map(|i| i.blocks.iter());
+            for block in self.blocks.iter().chain(copies).chain(own) {
                 let lines: Vec<&LineLayout> =
                     block.lines.iter().filter(|l| l.frame == index).collect();
                 if options.debug
@@ -452,9 +563,23 @@ impl LayoutSnapshot {
             }
             items.push(Item::Group {
                 transform: *frame.to_page.matrix(),
-                clip: None,
+                // A running region is drawn clipped to its frame: an oversized
+                // first line is cut, not spilled over the body.
+                clip: running
+                    .contains_key(&index)
+                    .then(|| Path::rect(r(frame.rect))),
                 items: children,
             });
+        }
+        if let Some(sections) = &self.sections {
+            for rule in sections.rules.iter().filter(|r| r.page == page) {
+                items.push(Item::Path {
+                    path: Path::rect(rule.rect),
+                    fill: Some(Color::BLACK),
+                    stroke: None,
+                    layer: Layer::Content,
+                });
+            }
         }
         if options.debug && options.relations {
             items.extend(self.relation_links(page));

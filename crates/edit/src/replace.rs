@@ -65,11 +65,14 @@ fn invalid(error: FragmentError) -> EditError {
     }
 }
 
-/// Live caret blocks in document order, with their rank.
-fn order(doc: &Document) -> Result<(Vec<NodeId>, BTreeMap<NodeId, usize>), EditError> {
+/// Live caret blocks of `domain` in its order, with their rank.
+fn order(
+    doc: &Document,
+    domain: reprise_doc::Domain,
+) -> Result<(Vec<NodeId>, BTreeMap<NodeId, usize>), EditError> {
     let mut nodes = Vec::new();
     let mut rank = BTreeMap::new();
-    let mut stack: Vec<NodeId> = doc.blocks();
+    let mut stack: Vec<NodeId> = doc.top(domain);
     stack.reverse();
     let mut seen = BTreeSet::new();
     while let Some(node) = stack.pop() {
@@ -83,7 +86,7 @@ fn order(doc: &Document) -> Result<(Vec<NodeId>, BTreeMap<NodeId, usize>), EditE
             rank.insert(node, nodes.len());
             nodes.push(node);
         }
-        stack.extend(doc.children(Some(node)).into_iter().rev());
+        stack.extend(doc.children_of(node).into_iter().rev());
     }
     Ok((nodes, rank))
 }
@@ -249,12 +252,26 @@ impl Editor {
             command: None,
             reason: Reason::SelectionGone,
         })?;
+        if self.doc.domain_of(resolved.anchor.node) != self.doc.domain_of(resolved.focus.node) {
+            return Err(EditError {
+                command: None,
+                reason: Reason::CrossDomain {
+                    first: resolved.anchor.node,
+                    second: resolved.focus.node,
+                },
+            });
+        }
         // A selection inside one block, the common case of typing over a
         // word, needs no document order.
         let (nodes, rank) = if resolved.anchor.node == resolved.focus.node {
             (Vec::new(), BTreeMap::new())
         } else {
-            order(&self.doc)?
+            // Both ends share a domain; a focus elsewhere has no rank below.
+            let domain = self.doc.domain_of(resolved.anchor.node).ok_or(EditError {
+                command: None,
+                reason: Reason::SelectionGone,
+            })?;
+            order(&self.doc, domain)?
         };
         let key = |c: &crate::Caret| {
             if resolved.anchor.node == resolved.focus.node {

@@ -77,6 +77,12 @@ pub struct Open {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct State {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<SectionState>>", optional)]
+    pub sections: Vec<SectionState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<StoryState>>", optional)]
+    pub stories: Vec<StoryState>,
     pub document_id: String,
     pub peer_id: String,
     pub revision: Vec<Clock>,
@@ -154,6 +160,9 @@ pub struct Clock {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Block {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub starts: Option<SectionStart>,
     pub id: String,
     pub parent: Option<String>,
     pub kind: BlockKind,
@@ -548,6 +557,66 @@ pub enum Command {
         at: u32,
         patch: InlinePatch,
     },
+    /// Starts a section, page or column at a position (sections §5). At byte 0
+    /// of a paragraph, or before a block, it is written on that block; anywhere
+    /// else the paragraph is split first and the new paragraph carries it. A
+    /// section's `patch` is copied properties (`columns.count`, `width`, ...);
+    /// integers are JSON numbers. The new paragraph, if any, is in
+    /// `Applied.blocks`.
+    InsertBreak {
+        at: BreakPosition,
+        break_kind: BreakKind,
+        #[serde(default)]
+        #[ts(type = "Record<string, string | number | boolean>", optional)]
+        patch: Option<serde_json::Map<String, serde_json::Value>>,
+    },
+    /// Removes the effective break at a block. Undo brings it back.
+    RemoveBreak {
+        block: String,
+    },
+    /// Sets (`patch`) and clears (`clear`) properties of the section with ID
+    /// `section`: `"first"` or the block it starts at.
+    SetSection {
+        section: String,
+        #[serde(default)]
+        #[ts(type = "Record<string, string | number | boolean>", optional)]
+        patch: Option<serde_json::Map<String, serde_json::Value>>,
+        #[serde(default)]
+        #[ts(optional)]
+        clear: Option<Vec<String>>,
+    },
+    /// Makes a story from blocks. Its ID is in `Applied.stories`; bind it with
+    /// `set-region`.
+    CreateStory {
+        blocks: Vec<StoryBlock>,
+    },
+    /// Binds a section's running region (`slot` is `header`, `footer` or
+    /// `background`; `variant` is `default`, `first` or `even`) to a story, to
+    /// nothing, or back to the previous section's.
+    SetRegion {
+        section: String,
+        slot: String,
+        variant: String,
+        binding: RegionBinding,
+    },
+    /// Makes a story, empty or a copy of another, and binds it in one step.
+    CreateRegion {
+        section: String,
+        slot: String,
+        variant: String,
+        from: StoryFrom,
+    },
+    /// "Same as previous" for one region: `set-region` with `inherit`.
+    LinkRegion {
+        section: String,
+        slot: String,
+        variant: String,
+    },
+    /// Deletes a story. Sections that bound it show nothing there and report
+    /// `layout.running-missing`.
+    DeleteStory {
+        story: String,
+    },
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default, deny_unknown_fields)]
@@ -642,6 +711,10 @@ pub struct Applied {
     pub diagnostics: Vec<Diagnostic>,
     /// The annotations `add-annotation` created, in command order.
     pub annotations: Vec<String>,
+    /// The stories `create-story` and `create-region` made, in command order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub stories: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -1790,6 +1863,50 @@ pub struct PageLinks {
     pub links: Vec<PageLink>,
     pub truncated: bool,
 }
+
+/// Current-lifetime values retain unknown keys. Raw i64s use decimal strings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionState {
+    pub id: String,
+    pub life: String,
+    pub first_block: Option<String>,
+    pub end: Option<String>,
+    #[ts(type = "Record<string, unknown>")]
+    pub own: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "unknown", optional)]
+    pub resolved: Option<serde_json::Value>,
+    pub bindings: Vec<SectionBinding>,
+    pub unknown_keys: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionBinding {
+    pub slot: String,
+    pub variant: String,
+    pub authored: String,
+    pub story: Option<String>,
+    pub resolved: Option<String>,
+    pub from_section: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct StoryState {
+    pub id: String,
+    pub bound_by: Vec<StoryBinding>,
+    pub blocks: Vec<Block>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct StoryBinding {
+    pub section: String,
+    pub slot: String,
+    pub variant: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionStart {
+    pub kind: String,
+    pub life: String,
+    #[ts(type = "Record<string, unknown>")]
+    pub own: serde_json::Value,
+}
 /// Where an inline object sits relative to the line's baseline (default
 /// `baseline`; `docs/inline.md`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1837,4 +1954,185 @@ pub struct InlineEntry {
 pub struct FieldTarget {
     pub node: String,
     pub at: u32,
+}
+
+// ---- Sections: commands, queries and navigation (sections §5, §12, §17) ----
+
+/// What a break starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum BreakKind {
+    Section,
+    Page,
+    Column,
+}
+/// Where `insert-break` starts something.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "position", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum BreakPosition {
+    /// A UTF-8 byte offset in a paragraph.
+    Position { node: String, offset: u32 },
+    /// The leading edge of any top-level block of the body.
+    Before { node: String },
+}
+/// A block of a new story.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct StoryBlock {
+    pub block_kind: BlockKind,
+    pub text: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub style: Option<String>,
+}
+/// What a region is bound to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "state", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum RegionBinding {
+    /// The same as the previous section's.
+    Inherit,
+    /// Explicitly nothing.
+    None,
+    Story {
+        story: String,
+    },
+}
+/// Where `create-region` gets its story.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "source", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum StoryFrom {
+    Empty,
+    CopyOf { story: String },
+}
+/// What a page is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum SectionPageKind {
+    Content,
+    Filler,
+    NoteContinuation,
+}
+/// One band of body frames on a page, and the section that owns it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageBand {
+    pub section: String,
+    pub life: String,
+    pub rect: Rect,
+    pub offset: i32,
+    pub depth: i32,
+    pub balanced: bool,
+}
+/// The sections on a page: its owner, which made the page, and the bands of
+/// body text, each in the section that owns it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageSections {
+    pub page: u32,
+    pub kind: SectionPageKind,
+    pub owner: String,
+    pub bands: Vec<PageBand>,
+}
+/// The pages of a section: those it made (`owned`) and those with any of its
+/// text (`occupied`: a continuous section starts on its predecessor's page).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SectionPages {
+    pub owned: Vec<u32>,
+    pub occupied: Vec<u32>,
+}
+/// A page's number, as a counter and as the label its section's format makes.
+/// The counter is a canonical signed decimal string.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageLabel {
+    pub page: u32,
+    pub label: String,
+    pub counter: String,
+    pub kind: SectionPageKind,
+}
+/// One running region on a page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageRegion {
+    pub slot: String,
+    pub variant: String,
+    pub story: String,
+    /// The region's frame on the page.
+    pub rect: Rect,
+    /// Some of its content did not fit and was left out.
+    pub clipped: bool,
+}
+/// One placement of a story: a page and a slot. It is view state, never
+/// document state; ask again after a relayout.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RegionInstance {
+    pub page: u32,
+    pub slot: String,
+}
+/// Which placement of its paragraph a field is in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum FieldPlace {
+    /// Placed once, wherever flow puts it.
+    Single,
+    /// One page's copy of shared content.
+    Page { page: u32 },
+    /// A running region's content on one page and slot.
+    Running {
+        page: u32,
+        slot: String,
+        repeat: u32,
+    },
+}
+/// One field of a page and what it shows there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PageField {
+    /// The paragraph holding it: a body block or a story block.
+    pub node: String,
+    pub atom: String,
+    /// Its U+FFFC, as a UTF-8 byte offset in `node`.
+    pub at: u32,
+    pub instance: FieldPlace,
+    pub text: String,
+}
+/// How a hit test treats a background.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlacedMode {
+    /// Headers and footers win over the body in their rectangles.
+    #[default]
+    Normal,
+    /// A background is hit too, when nothing above it is.
+    Background,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct HitPlaced {
+    pub page: u32,
+    pub x: i32,
+    pub y: i32,
+    #[serde(default)]
+    #[ts(optional)]
+    pub mode: Option<PlacedMode>,
+}
+/// What a point on a page means: body text, or a position in a running region.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PlacedHit {
+    Body {
+        hit: Hit,
+    },
+    Running {
+        position: Caret,
+        instance: RegionInstance,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CaretIn {
+    pub instance: RegionInstance,
+    pub position: Caret,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SelectionIn {
+    pub instance: RegionInstance,
+    pub selection: Selection,
 }

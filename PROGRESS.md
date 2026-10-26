@@ -2,6 +2,35 @@
 
 The hand-off log. Newest first.
 
+## 2026-10-27: sections B3 ownership-read guard, round 5
+
+Ported the two round-4 guard probes first and confirmed both bypasses were accepted
+by the old guard. Restricted exemptions to 11 reviewed reader functions and added
+Rust syntax parsing for method/associated-function reads, function values, imports
+and aliases, plus conservative macro-token checks. The two original guards and six
+new negative regressions pass; production behavior is unchanged. Details and the
+function inventory are in `docs/sections-stage-b3-report.md`, "B3 fixes, round 5".
+
+All 302 layout-crate tests passed, followed by the full gate: 12 successful stages,
+1,748 passed, zero failed, 12 ignored (`G:/tmp/gate-sections-fix5.log`). No production
+source, snapshots, `.d.ts` or `API.txt` changed. Two test-only dependencies reuse
+already-locked package versions. No merge or push; the earlier follow-up scope is
+unchanged.
+
+## 2026-10-26: sections B3 ownership fixes, round 4
+
+Confirmed `a614597` closes composition's relation-ownership dependency through one
+accessor and digest-backed running-story answers. `37373d5` extends the complete-snapshot
+matrix to later table cells, rejected nested table descendants and shared-host logical
+paragraphs, and clarifies which nested kinds read ownership. Corrected the round-3
+table-path audit and recorded the reader inventory in
+`docs/sections-stage-b3-report.md` under "B3 fixes, round 4".
+
+Full gate: 12 successful stages, 1,742 passed, zero failed, 12 ignored; no snapshot,
+dependency, `.d.ts` or `API.txt` drift. Log: `G:/tmp/gate-sections-fix4.log`.
+No additional production fix was needed; the earlier S12/follow-up scope remains as
+tracked in the sections report. No merge or push.
+
 ## 2026-10-17: foundations wave 1, review fixes 1, and a docs sync
 
 **Foundations wave 1 (merged on main).** Five reusable building blocks, each with a

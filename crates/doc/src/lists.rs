@@ -874,75 +874,80 @@ impl Document {
         }
         let mut resolved: BTreeMap<ListId, ResolvedList> = BTreeMap::new();
         let mut counters: BTreeMap<ListId, [Option<i64>; LEVELS]> = BTreeMap::new();
-        for node in self.document_order() {
-            let Ok(meta) = self.meta_of(node) else {
-                continue;
-            };
-            let Some(membership) = read_membership(&meta) else {
-                continue;
-            };
-            let mut notes = Vec::new();
-            let kind = get_str(&meta, "kind").and_then(|k| BlockKind::parse(&k));
-            if !matches!(kind, Some(BlockKind::Paragraph | BlockKind::Annotation)) {
-                continue;
-            }
-            let Some(list) = membership.list else {
-                out.notes.entry(node).or_default().push(Note::warning(
-                    codes::LIST_DEFINITION_MISSING,
-                    "the item's list ID can't be read; it is a plain paragraph",
-                ));
-                continue;
-            };
-            let levels = match resolved
-                .entry(list)
-                .or_insert_with(|| self.resolve_list(list))
-            {
-                Ok((levels, list_notes)) => {
-                    notes.extend(list_notes.iter().cloned());
-                    levels
-                }
-                Err(note) => {
-                    out.notes.entry(node).or_default().push(note.clone());
+        let domains = std::iter::once(crate::Domain::Body)
+            .chain(self.stories().into_iter().map(crate::Domain::Story));
+        for domain in domains {
+            counters.clear();
+            for node in self.order(domain) {
+                let Ok(meta) = self.meta_of(node) else {
+                    continue;
+                };
+                let Some(membership) = read_membership(&meta) else {
+                    continue;
+                };
+                let mut notes = Vec::new();
+                let kind = get_str(&meta, "kind").and_then(|k| BlockKind::parse(&k));
+                if !matches!(kind, Some(BlockKind::Paragraph | BlockKind::Annotation)) {
                     continue;
                 }
-            };
-            let level = membership.level.clamp(0, i64::from(MAX_LEVEL)) as u8;
-            if i64::from(level) != membership.level {
-                notes.push(Note::warning(
-                    codes::LIST_LEVEL_CLAMPED,
-                    format!("list level {} is outside 0 to 8; clamped", membership.level),
-                ));
-            }
-            let index = usize::from(level);
-            let Some(spec) = levels.get(index) else {
-                continue;
-            };
-            let values = counters.entry(list).or_insert([None; LEVELS]);
-            let value = membership
-                .restart
-                .unwrap_or_else(|| values[index].map_or(spec.start, |v| v.saturating_add(1)));
-            values[index] = Some(value);
-            for deeper in values.iter_mut().skip(index + 1) {
-                *deeper = None;
-            }
-            let marker = render_marker(&spec.text, values, levels, &mut notes);
-            out.sequence.push(node);
-            out.items.insert(
-                node,
-                ListItem {
-                    list,
-                    level,
-                    value,
-                    restart: membership.restart.is_some(),
-                    marker,
-                    format: spec.format.clone(),
-                    indent: spec.indent,
-                    hanging: spec.hanging,
-                    marker_style: spec.marker.clone(),
-                },
-            );
-            if !notes.is_empty() {
-                out.notes.entry(node).or_default().extend(notes);
+                let Some(list) = membership.list else {
+                    out.notes.entry(node).or_default().push(Note::warning(
+                        codes::LIST_DEFINITION_MISSING,
+                        "the item's list ID can't be read; it is a plain paragraph",
+                    ));
+                    continue;
+                };
+                let levels = match resolved
+                    .entry(list)
+                    .or_insert_with(|| self.resolve_list(list))
+                {
+                    Ok((levels, list_notes)) => {
+                        notes.extend(list_notes.iter().cloned());
+                        levels
+                    }
+                    Err(note) => {
+                        out.notes.entry(node).or_default().push(note.clone());
+                        continue;
+                    }
+                };
+                let level = membership.level.clamp(0, i64::from(MAX_LEVEL)) as u8;
+                if i64::from(level) != membership.level {
+                    notes.push(Note::warning(
+                        codes::LIST_LEVEL_CLAMPED,
+                        format!("list level {} is outside 0 to 8; clamped", membership.level),
+                    ));
+                }
+                let index = usize::from(level);
+                let Some(spec) = levels.get(index) else {
+                    continue;
+                };
+                let values = counters.entry(list).or_insert([None; LEVELS]);
+                let value = membership
+                    .restart
+                    .unwrap_or_else(|| values[index].map_or(spec.start, |v| v.saturating_add(1)));
+                values[index] = Some(value);
+                for deeper in values.iter_mut().skip(index + 1) {
+                    *deeper = None;
+                }
+                let marker = render_marker(&spec.text, values, levels, &mut notes);
+                out.sequence.push(node);
+                out.items.insert(
+                    node,
+                    ListItem {
+                        list,
+                        level,
+                        value,
+                        restart: membership.restart.is_some(),
+                        marker,
+                        format: spec.format.clone(),
+                        indent: spec.indent,
+                        hanging: spec.hanging,
+                        marker_style: spec.marker.clone(),
+                    },
+                );
+                if !notes.is_empty() {
+                    out.notes.entry(node).or_default().extend(notes);
+                }
             }
         }
         out

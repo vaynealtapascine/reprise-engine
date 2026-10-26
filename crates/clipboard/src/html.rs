@@ -14,7 +14,9 @@ use reprise_doc::{
 use reprise_geom::Length;
 
 use crate::inline::{ASSET_ATTR, FIELD_ATTR, JSON_ATTR};
+use crate::sections_html::{self, Bound, GEOMETRY_ATTR, SECTION_ATTR, STORY_ATTR, Stored};
 use crate::{ClipboardError, NativeFragment, codes};
+use reprise_doc::sections::{BreakKind, SectionId, SectionProperties};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ImportLimits {
@@ -50,7 +52,9 @@ fn fragment(
     mut notes: Vec<Note>,
     links: Vec<(NodeId, Range<usize>, AnnotationData)>,
 ) -> Result<Import, ClipboardError> {
-    let mut fragment = doc.copy_all_fragment("clipboard-import", &SchemaRegistry::builtin())?;
+    // Every story the markup carries is authored content, bound or not.
+    let mut fragment =
+        doc.copy_imported_fragment("clipboard-import", &SchemaRegistry::builtin())?;
     // Links are ranges of their own. They are added to the fragment rather
     // than the import document, whose annotation index would be rebuilt for
     // every link.
@@ -460,6 +464,30 @@ struct Reader {
     /// Links ready for the fragment.
     links: Vec<(NodeId, Range<usize>, AnnotationData)>,
     link_overflow: bool,
+    /// The sections of the HTML (sections §15): a `section` element read and
+    /// waiting for the first block after it.
+    pending_section: Option<Stored>,
+    /// Sections read, with the block each starts at.
+    sections: Vec<(NodeId, Stored)>,
+    /// `first`'s stored form, if the HTML has it.
+    first_section: Option<Stored>,
+    /// A `break-before` read and waiting for its block, and those read.
+    pending_break: Option<BreakKind>,
+    breaks: Vec<(NodeId, BreakKind)>,
+    /// The story being read, and the stories read by label.
+    story: Option<OpenStory>,
+    labels: BTreeMap<String, NodeId>,
+    /// Blocks that belong to a story.
+    story_blocks: std::collections::BTreeSet<NodeId>,
+    /// The geometry-mode record of the root element.
+    geometry: Option<SectionProperties>,
+}
+
+/// A story element being read.
+struct OpenStory {
+    node: NodeId,
+    /// The open-element depth it was opened at.
+    depth: usize,
 }
 
 /// Where an accepted anchor goes.
@@ -522,6 +550,21 @@ fn span_attribute(
             1
         }
     }
+}
+
+/// A page or column break asked for by `break-before` in an element's style.
+fn break_before(attrs: &BTreeMap<String, String>) -> Option<BreakKind> {
+    attrs.get("style")?.split(';').find_map(|d| {
+        let (key, value) = d.split_once(':')?;
+        if !key.trim().eq_ignore_ascii_case("break-before") {
+            return None;
+        }
+        match value.trim().to_ascii_lowercase().as_str() {
+            "page" | "always" | "left" | "right" => Some(BreakKind::Page),
+            "column" => Some(BreakKind::Column),
+            _ => None,
+        }
+    })
 }
 
 const LIST_LEVELS: usize = reprise_doc::lists::LEVELS;
@@ -646,6 +689,162 @@ impl Reader {
         }
         Ok(())
     }
+    /// A top-level block of the body was made: it starts the section that was
+    /// waiting for one, else the page or column break that was.
+    fn starts_here(&mut self, node: NodeId) {
+        if let Some(stored) = self.pending_section.take() {
+            self.sections.push((node, stored));
+            self.pending_break = None;
+        } else if let Some(kind) = self.pending_break.take() {
+            self.breaks.push((node, kind));
+        }
+    }
+
+    /// A `section` element with a stored form.
+    fn open_section(&mut self, stored: Stored) {
+        if stored.first {
+            if self.first_section.is_some() {
+                once(
+                    &mut self.notes,
+                    codes::HTML_APPROXIMATED,
+                    "a second first section was read as an ordinary section",
+                    false,
+                );
+            } else {
+                self.first_section = Some(stored);
+                return;
+            }
+        }
+        if self.pending_section.replace(stored).is_some() {
+            once(
+                &mut self.notes,
+                codes::HTML_DROPPED,
+                "a section with no content has no block to start at and was omitted",
+                true,
+            );
+        }
+    }
+
+    /// A `header`, `footer` or `template` that names a story.
+    fn open_story(&mut self, label: &str, depth: usize) -> Result<(), ClipboardError> {
+        self.flush(false)?;
+        if self.story.is_some() {
+            once(
+                &mut self.notes,
+                codes::HTML_APPROXIMATED,
+                "a story inside a story was read as part of the outer one",
+                false,
+            );
+            return Ok(());
+        }
+        self.count()?;
+        let node = self.doc.create_story(&[]).map_err(store)?;
+        if self.labels.insert(label.to_owned(), node).is_some() {
+            once(
+                &mut self.notes,
+                codes::HTML_APPROXIMATED,
+                "a story label used twice names the second story",
+                false,
+            );
+        }
+        self.story = Some(OpenStory { node, depth });
+        Ok(())
+    }
+
+    /// The sections, breaks and geometry mode read are written to the import
+    /// document, so copying it carries them in the fragment's envelope.
+    fn finish_sections(&mut self) {
+        if self.pending_section.take().is_some() {
+            once(
+                &mut self.notes,
+                codes::HTML_DROPPED,
+                "a section with no content has no block to start at and was omitted",
+                true,
+            );
+        }
+        let sections = std::mem::take(&mut self.sections);
+        for (node, stored) in sections {
+            let props = self.properties(&stored);
+            let started = self.doc.mint_lifetime(node).and_then(|life| {
+                self.doc
+                    .activate_start(node, &life, BreakKind::Section, &props)
+            });
+            if started.is_err() {
+                once(
+                    &mut self.notes,
+                    codes::HTML_DROPPED,
+                    "section settings that are not valid were omitted",
+                    true,
+                );
+            }
+        }
+        for (node, kind) in std::mem::take(&mut self.breaks) {
+            let started = self.doc.mint_lifetime(node).and_then(|life| {
+                self.doc
+                    .activate_start(node, &life, kind, &SectionProperties::new())
+            });
+            if started.is_err() {
+                once(
+                    &mut self.notes,
+                    codes::HTML_DROPPED,
+                    "a page or column break could not be kept",
+                    true,
+                );
+            }
+        }
+        if let Some(stored) = self.first_section.take() {
+            let props = self.properties(&stored);
+            if self
+                .doc
+                .write_section_properties(SectionId::First, "0", &props, &[])
+                .is_err()
+            {
+                once(
+                    &mut self.notes,
+                    codes::HTML_DROPPED,
+                    "settings of the first section that are not valid were omitted",
+                    true,
+                );
+            }
+        }
+        if let Some(record) = self.geometry.take()
+            && self.doc.write_geometry_record(&record).is_err()
+        {
+            once(
+                &mut self.notes,
+                codes::HTML_DROPPED,
+                "the geometry mode could not be kept",
+                true,
+            );
+        }
+    }
+
+    /// A section's stored properties, its bindings' labels turned into the
+    /// stories they name.
+    fn properties(&mut self, stored: &Stored) -> SectionProperties {
+        let mut props = stored.props.clone();
+        for (key, bound) in &stored.bindings {
+            let value = match bound {
+                Bound::None => String::new(),
+                Bound::Raw(raw) => raw.clone(),
+                Bound::Label(label) => match self.labels.get(label) {
+                    Some(story) => story.to_string(),
+                    None => {
+                        once(
+                            &mut self.notes,
+                            codes::HTML_APPROXIMATED,
+                            "a binding names a story the HTML does not contain; it shows nothing",
+                            false,
+                        );
+                        label.clone()
+                    }
+                },
+            };
+            props.insert(key.clone(), serde_json::Value::String(value));
+        }
+        props
+    }
+
     fn count(&mut self) -> Result<(), ClipboardError> {
         self.count = self.count.saturating_add(1);
         if self.count > self.limits.blocks.min(4096) {
@@ -684,13 +883,21 @@ impl Reader {
         } else {
             ""
         };
-        let node = if let Some(cell) = self.cell {
+        let node = if let Some(story) = self.story.as_ref().map(|s| s.node) {
+            self.doc
+                .append_story_block(story, BlockKind::Paragraph, "", staged)
+        } else if let Some(cell) = self.cell {
             self.doc
                 .append_cell_block(cell, BlockKind::Paragraph, "", staged)
         } else {
             self.doc.append_block(BlockKind::Paragraph, "", staged)
         }
         .map_err(store)?;
+        if self.story.is_some() {
+            self.story_blocks.insert(node);
+        } else if self.cell.is_none() {
+            self.starts_here(node);
+        }
         if !objects.is_empty() {
             self.doc
                 .insert_with_inline(node, 0, &self.text, &objects)
@@ -934,6 +1141,9 @@ impl Reader {
                         .is_some())
                 || (block && k == "id")
                 || (name == "a" && matches!(k.as_str(), "href" | "rel" | "target" | "id" | "name"))
+                || (name == "section" && k == SECTION_ATTR)
+                || (matches!(name, "header" | "footer" | "template") && k == STORY_ATTR)
+                || (name == "body" && k == GEOMETRY_ATTR)
         };
         if !attrs.keys().all(known) {
             once(
@@ -1005,6 +1215,9 @@ impl Reader {
                 {
                     self.role = role;
                 }
+                if self.story.is_none() && self.cell.is_none() {
+                    self.pending_break = break_before(attrs);
+                }
                 self.style = css(attrs, &mut self.notes)?;
                 self.preserve_space = name == "pre"
                     || attrs.get("style").is_some_and(|s| {
@@ -1050,17 +1263,34 @@ impl Reader {
                         "nested tables are unsupported".into(),
                     ));
                 }
+                if self.story.is_some() {
+                    // A story's blocks are paragraphs: the cells are read as
+                    // such, in order.
+                    once(
+                        &mut self.notes,
+                        codes::HTML_APPROXIMATED,
+                        "tables in a header, footer or other story were flattened to paragraphs",
+                        false,
+                    );
+                    return Ok(());
+                }
                 self.count()?;
                 self.max_columns = 0;
                 self.rows_started = 0;
                 self.occupied.clear();
-                self.table = Some(
-                    self.doc
-                        .append_table(TableColumns {
-                            columns: Vec::new(),
-                        })
-                        .map_err(store)?,
-                );
+                let table = self
+                    .doc
+                    .append_table(TableColumns {
+                        columns: Vec::new(),
+                    })
+                    .map_err(store)?;
+                self.table = Some(table);
+                if let Some(kind) = break_before(attrs)
+                    && self.pending_section.is_none()
+                {
+                    self.pending_break = Some(kind);
+                }
+                self.starts_here(table);
             }
             ("tr", false) => {
                 self.flush(false)?;
@@ -1159,6 +1389,55 @@ impl Reader {
                 self.row = None;
                 self.table = None;
             }
+            ("section", false) => {
+                self.flush(false)?;
+                match attrs
+                    .get(SECTION_ATTR)
+                    .and_then(|raw| sections_html::read(raw))
+                {
+                    Some(stored) => self.open_section(stored),
+                    None => once(
+                        &mut self.notes,
+                        codes::HTML_APPROXIMATED,
+                        "unsupported HTML tags flattened to text",
+                        false,
+                    ),
+                }
+            }
+            ("section", true) => self.flush(false)?,
+            ("header" | "footer" | "template", false) if attrs.contains_key(STORY_ATTR) => {
+                let label = attrs.get(STORY_ATTR).cloned().unwrap_or_default();
+                self.open_story(&label, stack_len)?;
+            }
+            ("header" | "footer" | "template", true)
+                if self.story.as_ref().is_some_and(|s| stack_len < s.depth) =>
+            {
+                self.flush(false)?;
+                self.story = None;
+            }
+            ("body", false) => {
+                if let Some(raw) = attrs.get(GEOMETRY_ATTR) {
+                    match sections_html::read_geometry(raw) {
+                        Some((record, left_out)) => {
+                            if left_out > 0 {
+                                once(
+                                    &mut self.notes,
+                                    codes::HTML_DROPPED,
+                                    "geometry mode keys that are not plain values were omitted",
+                                    true,
+                                );
+                            }
+                            self.geometry = Some(record);
+                        }
+                        None => once(
+                            &mut self.notes,
+                            codes::HTML_DROPPED,
+                            "an unreadable geometry mode was omitted",
+                            true,
+                        ),
+                    }
+                }
+            }
             ("html" | "body" | "tbody" | "tfoot", _) => {}
             _ => once(
                 &mut self.notes,
@@ -1213,6 +1492,15 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
         internal: Vec::new(),
         links: Vec::new(),
         link_overflow: false,
+        pending_section: None,
+        sections: Vec::new(),
+        first_section: None,
+        pending_break: None,
+        breaks: Vec::new(),
+        story: None,
+        labels: BTreeMap::new(),
+        story_blocks: Default::default(),
+        geometry: None,
     };
     let mut rest = html;
     let mut stack = Vec::<String>::new();
@@ -1287,7 +1575,11 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
             }
             continue;
         }
+        let story_template = name == "template"
+            && attributes(raw.get(name_end..).unwrap_or_default())
+                .is_ok_and(|a| a.contains_key(STORY_ATTR));
         if !closing
+            && !story_template
             && matches!(
                 name.as_str(),
                 "script" | "style" | "head" | "template" | "iframe" | "object"
@@ -1385,7 +1677,23 @@ pub fn import_html(html: &str, limits: ImportLimits) -> Result<Import, Clipboard
     reader.flush(false)?;
     reader.finish_table()?;
     reader.finish_links();
-    fragment(reader.doc, reader.notes, reader.links)
+    reader.finish_sections();
+    // A link in a story is an annotation of the import document, so copying
+    // it carries the link with the story; the body's go into the fragment.
+    let (in_stories, links): (Vec<_>, Vec<_>) = std::mem::take(&mut reader.links)
+        .into_iter()
+        .partition(|(node, _, _)| reader.story_blocks.contains(node));
+    for (node, bytes, data) in in_stories {
+        if reader.doc.add_annotation(node, bytes, &data).is_err() {
+            once(
+                &mut reader.notes,
+                codes::HTML_APPROXIMATED,
+                "a link in a header, footer or other story was imported as text",
+                false,
+            );
+        }
+    }
+    fragment(reader.doc, reader.notes, links)
 }
 
 #[cfg(test)]

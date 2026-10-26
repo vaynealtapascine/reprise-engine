@@ -12,6 +12,15 @@ pub(crate) struct Floats {
     next: BTreeMap<usize, Length>,
 }
 
+struct Candidate {
+    page: usize,
+    index: usize,
+    ti: usize,
+    frame: crate::template::ResolvedFrame,
+    template: std::sync::Arc<ResolvedTemplate>,
+    owner: reprise_doc::sections::SectionId,
+}
+
 impl Floats {
     #[allow(clippy::too_many_arguments)]
     pub fn place(
@@ -25,7 +34,9 @@ impl Floats {
         relation: &Relation,
         anchor: LineRef,
         evaluation: Option<&crate::incremental::Evaluation>,
+        sections: &crate::sections::Table,
         fields: &crate::inline::FieldValues,
+        running: Option<&crate::running::attach::Ctx<'_>>,
     ) {
         let Some(owner) = relation.owner else { return };
         let Some(line) = scratch.line(anchor).cloned() else {
@@ -34,11 +45,18 @@ impl Floats {
         let Some(source) = scratch.frame(line.frame).cloned() else {
             return;
         };
+        let candidates = sections
+            .enabled
+            .then(|| Self::candidates(sections, scratch, line.frame));
         let thread = template.main_thread();
-        let Some(first) = thread
-            .iter()
-            .position(|&i| i == line.frame % template.frames.len().max(1))
-        else {
+        let first = if candidates.is_some() {
+            Some(0)
+        } else {
+            thread.iter().position(|&i| {
+                crate::pages::PageFactory::index(scratch, source.page, i) == Some(line.frame)
+            })
+        };
+        let Some(first) = first else {
             out.diagnostics.push(Diagnostic::new(
                 Severity::Error,
                 codes::RELATION_NO_FRAME,
@@ -65,14 +83,37 @@ impl Floats {
         let mut pos = first;
         // One template cycle is enough to know whether an unoccupied frame can
         // ever hold it. An occupied candidate gets one fresh page to try.
-        for attempt in 0..thread.len().saturating_mul(2).saturating_add(1) {
-            let Some(&ti) = thread.get(pos) else { return };
-            let Some(frame) = template.frames.get(ti) else {
-                return;
+        let attempts = candidates.as_ref().map_or_else(
+            || thread.len().saturating_mul(2).saturating_add(1),
+            Vec::len,
+        );
+        for attempt in 0..attempts {
+            let candidate = candidates.as_ref().and_then(|c| c.get(attempt));
+            let template = candidate.map_or(template, |c| c.template.as_ref());
+            let ti = if let Some(candidate) = candidate {
+                page = candidate.page;
+                candidate.ti
+            } else {
+                let Some(&ti) = thread.get(pos) else { return };
+                ti
             };
-            let index = page
-                .saturating_mul(template.frames.len())
-                .saturating_add(ti);
+            let frame = if let Some(candidate) = candidate {
+                &candidate.frame
+            } else {
+                let Some(frame) = template.frames.get(ti) else {
+                    return;
+                };
+                frame
+            };
+            let index = if let Some(candidate) = candidate {
+                candidate.index
+            } else {
+                let Some(index) = crate::pages::PageFactory::preview(template, scratch, page, ti)
+                else {
+                    return;
+                };
+                index
+            };
             let context =
                 crate::flow::resolution_context(engine, template, Some(frame), frame.width);
             let size = doc
@@ -122,12 +163,12 @@ impl Floats {
                     &Subject::Node(owner),
                     &mut candidate_diagnostics,
                     evaluation,
-                    &crate::inline::FieldEnv {
+                    &crate::inline::FieldEnv::at(
                         page,
-                        pages: page.saturating_add(1),
-                        instance: crate::FieldInstance::Single,
-                        values: Some(fields),
-                    },
+                        page.saturating_add(1),
+                        crate::FieldInstance::Single,
+                        Some(fields),
+                    ),
                 );
                 let height = composed.block_end;
                 let free = self.next.get(&index).copied().unwrap_or_default();
@@ -146,7 +187,19 @@ impl Floats {
                     && at >= free
                     && at >= Length::ZERO
                     && height <= frame.depth - at
-                    && ensure_page(engine, template, scratch, page)
+                    && if let Some(candidate) = candidate {
+                        crate::pages::PageFactory::ensure_section(
+                            engine,
+                            sections,
+                            candidate.owner,
+                            crate::PageKind::Content,
+                            scratch,
+                            page,
+                            running,
+                        )
+                    } else {
+                        ensure_page(engine, template, scratch, page)
+                    }
                 {
                     let x = if side == FloatSide::Right {
                         frame.width - width
@@ -168,9 +221,51 @@ impl Floats {
                     let top = (at - margin).max(Length::ZERO);
                     let right = (x + width + margin).min(frame.width);
                     let bottom = (at + height + margin).min(frame.depth);
-                    let exclusion = Rect::new(Point::new(left, top), right - left, bottom - top);
+                    let mut exclusion =
+                        Rect::new(Point::new(left, top), right - left, bottom - top);
                     out.diagnostics.extend(candidate_diagnostics);
-                    out.exclusions.entry(index).or_default().push(exclusion);
+                    let physical = scratch.frame(index).and_then(|main| {
+                        let name = crate::sections::float_space_name(main);
+                        let (source_index, source) =
+                            scratch.frames.iter().enumerate().rev().find(|(_, f)| {
+                                f.page == page
+                                    && f.role == reprise_doc::FrameRole::Flow(name.clone())
+                            })?;
+                        let origin = source
+                            .to_page
+                            .inverse()?
+                            .apply(main.to_page.apply(Point::origin()));
+                        Some((source_index, origin))
+                    });
+                    let catalog = crate::pages::Catalog::from_snapshot(scratch);
+                    if let Some((source_index, origin)) = physical {
+                        for line in &mut block.lines {
+                            line.frame = source_index;
+                            line.rect.origin.x += origin.x;
+                            line.rect.origin.y += origin.y;
+                            line.baseline += origin.y;
+                            line.available.start += origin.x;
+                            line.available.end += origin.x;
+                            for run in &mut line.runs {
+                                run.x += origin.x;
+                            }
+                            if let Some(marker) = &mut line.marker {
+                                marker.x += origin.x;
+                                marker.baseline += origin.y;
+                                for run in &mut marker.runs {
+                                    run.x += origin.x;
+                                }
+                            }
+                        }
+                        block.sync_image();
+                        exclusion.origin.x += origin.x;
+                        exclusion.origin.y += origin.y;
+                        if let Some(source) = catalog.reference(source_index) {
+                            out.exclude_physical(source, exclusion);
+                        }
+                    } else if let Some(frame) = catalog.reference(index) {
+                        out.exclude(frame, exclusion);
+                    }
                     self.next.insert(index, at + height + margin);
                     scratch.blocks.push(block.clone());
                     out.blocks.push(block);
@@ -198,5 +293,88 @@ impl Floats {
             Subject::Relation(id),
             "float fits no available frame within one fresh template cycle; owner omitted",
         ));
+    }
+    fn candidates(
+        sections: &crate::sections::Table,
+        snapshot: &LayoutSnapshot,
+        anchor: usize,
+    ) -> Vec<Candidate> {
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
+        let Some(source) = snapshot.frame(anchor) else {
+            return Vec::new();
+        };
+        let Some(reference) = catalog.reference(anchor) else {
+            return Vec::new();
+        };
+        if !matches!(reference.address, crate::pages::FrameAddr::Main { .. }) {
+            return Vec::new();
+        }
+        let mut pages = vec![source.page];
+        let mut next = source.page.saturating_add(1);
+        while snapshot
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.get(next))
+            .is_some_and(|p| p.kind == crate::PageKind::Filler)
+        {
+            next = next.saturating_add(1);
+        }
+        pages.push(next);
+        let mut result = Vec::new();
+        for page in pages {
+            if page < snapshot.pages.len() {
+                for (index, frame) in crate::pages::PageFactory::body_frames(snapshot, page) {
+                    if page == source.page && index < anchor {
+                        continue;
+                    }
+                    let Some(reference) = catalog.reference(index) else {
+                        continue;
+                    };
+                    let Some(section) = sections.get(reference.provenance.section) else {
+                        continue;
+                    };
+                    if frame.rect.height <= Length::ZERO
+                        || (section.columns.is_some() && frame.rect.width < Length::from_pt(1))
+                    {
+                        continue;
+                    }
+                    let ti = section
+                        .template
+                        .frames
+                        .iter()
+                        .position(|f| f.name == frame.name)
+                        .unwrap_or(0);
+                    result.push(Candidate {
+                        page,
+                        index,
+                        ti,
+                        frame: crate::template::ResolvedFrame::from_layout(frame),
+                        template: section.template.clone(),
+                        owner: section.id(),
+                    });
+                }
+            } else if let Some(section) = sections.get(reference.provenance.section) {
+                for ti in section.template.main_thread() {
+                    if let Some(frame) = section.template.frames.get(ti)
+                        && let Some(index) = crate::pages::PageFactory::preview(
+                            &section.template,
+                            snapshot,
+                            page,
+                            ti,
+                        )
+                    {
+                        result.push(Candidate {
+                            page,
+                            index,
+                            ti,
+                            frame: frame.clone(),
+                            template: section.template.clone(),
+                            owner: section.id(),
+                        });
+                    }
+                }
+            }
+        }
+        result
     }
 }

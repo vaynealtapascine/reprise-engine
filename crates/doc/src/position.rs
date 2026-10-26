@@ -81,11 +81,23 @@ impl Document {
     fn full_order(&self) -> Vec<NodeId> {
         let tree = self.tree("content");
         let mut order = Vec::new();
-        let mut stack: Vec<TreeID> = tree.children(TreeParentId::Root).unwrap_or_default();
+        let roots = tree.children(TreeParentId::Root).unwrap_or_default();
+        let mut stack: Vec<TreeID> = roots
+            .iter()
+            .copied()
+            .filter(|&id| !self.is_story_node(id))
+            .collect();
+        stack.extend(roots.into_iter().filter(|&id| self.is_story_node(id)));
         stack.reverse();
         // Each node is pushed once, from its one parent, so this ends.
         while let Some(id) = stack.pop() {
-            order.push(NodeId::tree(id));
+            if self.is_story_node(id) {
+                if tree.parent(id) != Some(TreeParentId::Root) {
+                    continue;
+                }
+            } else {
+                order.push(NodeId::tree(id));
+            }
             if let Some(flow) = self.flow(id) {
                 order.extend(flow.marks.iter().map(|&(m, _)| m));
             }

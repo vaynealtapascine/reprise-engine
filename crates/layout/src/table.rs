@@ -126,11 +126,13 @@ impl Flow<'_> {
         };
         self.report_grid(&grid);
         let frame = self.snapshot.frame(self.frame_index()).cloned()?;
-        let starting_frame = self
-            .template
-            .frames
-            .get(self.frame_index() % self.template.frames.len().max(1));
-        let ctx = resolution_context(self.engine, self.template, starting_frame, frame.rect.width);
+        let starting_frame = self.template.frames.get(self.current_template_index());
+        let ctx = resolution_context(
+            self.engine,
+            &self.template,
+            starting_frame,
+            frame.rect.width,
+        );
         Some(TableBuild {
             node,
             columns: columns.clone(),
@@ -168,7 +170,7 @@ impl Flow<'_> {
                     continue;
                 };
                 let mut cell_blocks = Vec::new();
-                for block in doc.children(Some(cell.node)) {
+                for block in doc.children_of(cell.node) {
                     build.blocks = build.blocks.saturating_add(1);
                     if build.blocks > MAX_TABLE_BLOCKS {
                         break;
@@ -178,7 +180,7 @@ impl Flow<'_> {
                         continue;
                     }
                     if doc.kind_of(block) == Some(reprise_doc::BlockKind::Annotation) {
-                        if !self.region_owners.contains(&block)
+                        if !self.ownership.owns(block)
                             && let Some(annotation) = self.annotation(doc, block)
                         {
                             self.pending.push(annotation);

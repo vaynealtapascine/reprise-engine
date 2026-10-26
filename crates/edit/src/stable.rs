@@ -63,6 +63,8 @@ impl Resolution {
 /// Why a caret could not be anchored.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum StableError {
+    #[error("selection endpoints are in different traversal domains")]
+    CrossDomain { first: NodeId, second: NodeId },
     #[error("no live caret block {0}")]
     NoBlock(NodeId),
     #[error("offset {0} is not a character boundary in its block")]
@@ -234,6 +236,12 @@ impl StableCaret {
 
 impl StableSelection {
     pub fn anchor(doc: &Document, selection: &Selection) -> Result<StableSelection, StableError> {
+        if doc.domain_of(selection.anchor.node) != doc.domain_of(selection.focus.node) {
+            return Err(StableError::CrossDomain {
+                first: selection.anchor.node,
+                second: selection.focus.node,
+            });
+        }
         Ok(StableSelection {
             anchor: StableCaret::anchor(doc, selection.anchor)?,
             focus: StableCaret::anchor(doc, selection.focus)?,

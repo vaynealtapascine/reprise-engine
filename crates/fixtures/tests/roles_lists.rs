@@ -148,7 +148,11 @@ fn line_json(s: &LayoutSnapshot, l: &LineLayout) -> Value {
 /// each line's frame, bytes, origin, room and marker (text, inline position,
 /// baseline, width and page box); then the diagnostic codes.
 fn summary(doc: &Document, s: &LayoutSnapshot) -> Value {
-    let index = |node: NodeId| doc.blocks().iter().position(|b| *b == node);
+    let index = |node: NodeId| {
+        doc.top(reprise_doc::Domain::Body)
+            .iter()
+            .position(|b| *b == node)
+    };
     let numbering = doc.list_numbering();
     let items: Vec<Value> = numbering
         .sequence
@@ -636,7 +640,11 @@ fn incremental_layout_matches_full_after_inserting_removing_and_restarting() {
     same_as_full("first layout", &engine, &mut session, &doc);
 
     // Insert an item before the third: the items after it renumber.
-    let index = doc.blocks().iter().position(|b| *b == items[2]).unwrap();
+    let index = doc
+        .top(reprise_doc::Domain::Body)
+        .iter()
+        .position(|b| *b == items[2])
+        .unwrap();
     let inserted = item(&doc, list, 0, "Inserted");
     doc.move_block(inserted, None, index).unwrap();
     doc.commit();

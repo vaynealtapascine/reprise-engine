@@ -438,7 +438,7 @@ fn incremental_layout_matches_full_after_a_style_edit() {
     }
     // Editing the paragraph after a keep-with-next one invalidates the
     // heading's placement too.
-    let last = *doc.blocks().last().unwrap();
+    let last = *doc.top(reprise_doc::Domain::Body).last().unwrap();
     doc.set_overrides(
         last,
         &with(Style::default(), &[(Property::SpaceBefore, "90pt")]),

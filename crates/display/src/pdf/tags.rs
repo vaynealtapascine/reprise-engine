@@ -39,6 +39,38 @@ pub const RUN_SPLIT: Code = Code::new("pdf.run-split");
 /// The PDF is tagged but does not meet PDF/UA-1, so it does not claim to.
 pub const UA_NOT_MET: Code = Code::new("pdf.ua-not-met");
 
+/// What a running region's artifact is: the `Subtype` of its `/Artifact`
+/// marked content (ISO 32000-1, 14.8.2.2.2, "Pagination" artifacts).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactKind {
+    Header,
+    Footer,
+    Watermark,
+}
+
+/// How a page label numbers its page (the `/S` of a `/PageLabels` entry).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelStyle {
+    /// `/D`: 1, 2, 3.
+    Decimal,
+    /// `/r`: i, ii, iii.
+    LowerRoman,
+    /// `/R`: I, II, III.
+    UpperRoman,
+    /// `/a`: a, b, ..., z, aa, bb.
+    LowerAlpha,
+    /// `/A`: A, B, ..., Z, AA, BB.
+    UpperAlpha,
+}
+
+/// One page's label: a numbering style and the number the page has in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageLabel {
+    pub style: LabelStyle,
+    /// At least 1: the number of the page in `style`.
+    pub number: u32,
+}
+
 /// A table header cell's scope (ISO 32000-1, table 349).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
@@ -214,4 +246,10 @@ pub struct Structure {
     /// Glyph and image items that are decoration, not content, such as the derived
     /// copies of a repeated table header. They paint as artifacts and no node names them.
     pub artifacts: Vec<ReadingRun>,
+    /// Which of `artifacts` are a running region's header, footer or watermark.
+    /// They are written with that `Subtype`; the rest are plain artifacts.
+    pub artifact_kinds: std::collections::BTreeMap<ReadingRun, ArtifactKind>,
+    /// One label per page, or none at all. Written as the catalog's
+    /// `/PageLabels` when there is exactly one per page.
+    pub page_labels: Vec<PageLabel>,
 }

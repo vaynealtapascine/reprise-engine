@@ -14,7 +14,7 @@ fn pasted(html: &str) -> (Editor, Vec<reprise_diag::Note>) {
 }
 
 fn grid(doc: &Document) -> TableGrid {
-    let table = doc.blocks()[0];
+    let table = doc.top(reprise_doc::Domain::Body)[0];
     doc.table_structure(table).unwrap().unwrap()
 }
 

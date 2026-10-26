@@ -1,4 +1,5 @@
 mod collab;
+mod sections;
 use crate::convert as cv;
 use crate::*;
 use reprise_doc::{Document, PersistenceMode};
@@ -433,12 +434,23 @@ impl DocumentSession {
         Ok(())
     }
     pub fn state(&self) -> Result<Payload<State>> {
-        let mut todo: Vec<_> = self
+        let story_ids = self.doc().stories();
+        let roots: Vec<_> = self
             .doc()
-            .blocks()
+            .top(reprise_doc::Domain::Body)
             .into_iter()
-            .rev()
-            .map(|n| (n, 0u32))
+            .chain(
+                story_ids
+                    .iter()
+                    .flat_map(|&story| self.doc().top(reprise_doc::Domain::Story(story))),
+            )
+            .collect();
+        let mut todo: Vec<_> = roots.into_iter().rev().map(|n| (n, 0u32)).collect();
+        let starts: BTreeMap<_, _> = self
+            .doc()
+            .effective_starts()
+            .into_iter()
+            .map(|r| (r.id, r))
             .collect();
         let mut blocks = Vec::new();
         let numbering = self.doc().list_numbering();
@@ -467,7 +479,7 @@ impl DocumentSession {
             };
             todo.extend(
                 self.doc()
-                    .children(Some(node))
+                    .children_of(node)
                     .into_iter()
                     .rev()
                     .map(|n| (n, depth.saturating_add(1))),
@@ -477,6 +489,13 @@ impl DocumentSession {
                 continue;
             };
             blocks.push(Block {
+                starts: starts
+                    .get(&reprise_doc::sections::SectionId::Block(node))
+                    .map(|r| SectionStart {
+                        kind: r.kind.map(|k| k.token().to_owned()).unwrap_or_default(),
+                        life: r.life.clone().unwrap_or_default(),
+                        own: section_own(&r.own),
+                    }),
                 id: node.to_string(),
                 parent: self.doc().parent_of(node).flatten().map(|n| n.to_string()),
                 kind: match block.kind {
@@ -653,7 +672,76 @@ impl DocumentSession {
                 }
             })
             .collect();
+        let resolved_sections = self.engine.section_state(self.doc());
+        let sections: Vec<_> = self
+            .doc()
+            .section_table()
+            .into_iter()
+            .map(|s| SectionState {
+                id: s.id.to_string(),
+                life: s.life,
+                first_block: s.first_block.map(|n| n.to_string()),
+                end: s.end.map(|n| n.to_string()),
+                own: section_own(&s.own),
+                resolved: resolved_sections.get(&s.id).cloned(),
+                unknown_keys: s.unknown_keys,
+                bindings: s
+                    .bindings
+                    .into_iter()
+                    .map(|b| SectionBinding {
+                        slot: b.slot,
+                        variant: b.variant,
+                        authored: b.authored,
+                        story: b.story.map(|n| n.to_string()),
+                        resolved: b.resolved.map(|n| n.to_string()),
+                        from_section: b.from_section.to_string(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        let mut story_blocks: BTreeMap<String, Vec<Block>> = BTreeMap::new();
+        blocks.retain(|block| {
+            let domain =
+                reprise_doc::NodeId::parse(&block.id).and_then(|n| self.doc().domain_of(n));
+            if let Some(reprise_doc::Domain::Story(story)) = domain {
+                story_blocks
+                    .entry(story.to_string())
+                    .or_default()
+                    .push(block.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let mut bound_by: BTreeMap<String, Vec<StoryBinding>> = BTreeMap::new();
+        for section in &sections {
+            for binding in &section.bindings {
+                if let Some(story) = &binding.resolved {
+                    bound_by
+                        .entry(story.clone())
+                        .or_default()
+                        .push(StoryBinding {
+                            section: section.id.clone(),
+                            slot: binding.slot.clone(),
+                            variant: binding.variant.clone(),
+                        });
+                }
+            }
+        }
+        let stories = story_ids
+            .into_iter()
+            .map(|story| {
+                let id = story.to_string();
+                StoryState {
+                    bound_by: bound_by.remove(&id).unwrap_or_default(),
+                    blocks: story_blocks.remove(&id).unwrap_or_default(),
+                    id,
+                }
+            })
+            .collect();
         Ok(Payload::new(State {
+            sections,
+            stories,
             lists,
             annotations,
             styles,
@@ -2129,4 +2217,31 @@ fn outline_path(commands: &[reprise_font::PathCmd]) -> String {
         };
     }
     out
+}
+
+fn section_own(properties: &reprise_doc::sections::SectionProperties) -> serde_json::Value {
+    let raw: serde_json::Map<_, _> = properties
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                v.as_i64()
+                    .map(|i| serde_json::Value::String(i.to_string()))
+                    .unwrap_or_else(|| v.clone()),
+            )
+        })
+        .collect();
+    let parsed: serde_json::Map<_, _> = properties
+        .iter()
+        .filter(|(k, _)| reprise_doc::sections::known_property(k))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                v.as_i64()
+                    .map(|i| serde_json::Value::String(i.to_string()))
+                    .unwrap_or_else(|| v.clone()),
+            )
+        })
+        .collect();
+    serde_json::json!({"raw":raw,"parsed":parsed})
 }

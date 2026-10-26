@@ -146,7 +146,7 @@ impl Document {
         {
             return Err(DocError::NoNode(p));
         }
-        let len = self.children(parent).len();
+        let len = self.children_in(crate::Domain::Body, parent).len();
         if index > len {
             return Err(DocError::BadIndex { index, len });
         }
@@ -261,7 +261,7 @@ impl Document {
         }
         let parent = self.parent_of(id).flatten();
         let index = self
-            .children(parent)
+            .children_in(crate::Domain::Body, parent)
             .iter()
             .position(|&c| c == id)
             .ok_or(DocError::NoNode(id))?;
@@ -291,7 +291,7 @@ impl Document {
                 "different kinds can't be joined",
             ));
         }
-        if !self.children(Some(second)).is_empty() {
+        if !self.children_of(second).is_empty() {
             return Err(DocError::Malformed(
                 second,
                 "a block with children can't be joined",

@@ -143,8 +143,18 @@ pub(crate) trait FieldFunction: Sync {
     fn name(&self) -> &'static str;
     /// The text to assume before any pass has resolved it.
     fn guess(&self, object: &InlineObject, env: &FieldEnv<'_>) -> String;
+    /// The text a composition on its final page can know without any earlier
+    /// pass, or `None` to read the plan and guess as usual (sections §10, N6).
+    fn direct(&self, _: &InlineObject, _: &FieldEnv<'_>) -> Option<String> {
+        None
+    }
     /// The text a finished pass resolves, or why it can't.
     fn resolve(&self, object: &InlineObject, at: &FieldContext<'_>) -> Result<String, String>;
+    /// The text of a field that couldn't resolve, given the text it was
+    /// composed with. Most keep it.
+    fn failed(&self, composed: String) -> String {
+        composed
+    }
 }
 
 pub(crate) static KINDS: &[&dyn InlineKind] = &[&ImageKind, &FieldKind];
@@ -443,8 +453,8 @@ fn strong_rtl(c: char) -> Option<bool> {
 /// resolved values are keyed by [`FieldKey`], the object and its placement,
 /// never by the object alone.
 ///
-/// Non-exhaustive: further placements (running content of a section, with its
-/// slot and repetition) are added as variants, so match with a wildcard.
+/// Non-exhaustive: further placements (a frame chain's frame, with its
+/// repetition) are added as variants, so match with a wildcard.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -456,6 +466,16 @@ pub enum FieldInstance {
     Single,
     /// One page's copy of shared content, by 0-based page index.
     Page(u32),
+    /// A running region's content on one page (sections §10): the page, the
+    /// slot (so one story in two slots on one page resolves separately; the
+    /// variant follows from page and slot) and, for content repeated inside
+    /// the instance, an ordinal. In v1 an instance has one frame, so `repeat`
+    /// is 0.
+    Running {
+        page: u32,
+        slot: crate::running::SlotId,
+        repeat: u32,
+    },
 }
 
 impl FieldInstance {
@@ -480,6 +500,40 @@ pub(crate) struct FieldKey {
 /// The resolved field texts a pass composes with.
 pub(crate) type FieldValues = BTreeMap<FieldKey, String>;
 
+/// What a composition read of the field state: the values it found (keyed by
+/// object, for one instance) and the page context it guessed with. A running
+/// region's memo is valid for another request exactly when these still hold.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Reads {
+    pub fields: BTreeMap<FieldKey, Option<String>>,
+    /// `(page, pages)` when some field was guessed from the page context.
+    pub guessed: Option<(usize, usize)>,
+    /// The page label a field was composed with, when one was read directly.
+    pub label: Option<String>,
+}
+
+/// Where reads are recorded while a composition runs.
+pub(crate) type Trace = std::rc::Rc<std::cell::RefCell<Reads>>;
+
+/// The labels of the pages a composition can know.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PageLabels<'a> {
+    /// The pages made so far, in order.
+    Pages(&'a [crate::PageDescriptor]),
+    /// The one page a running region is composed for, before it exists.
+    One(usize, &'a str),
+}
+
+impl PageLabels<'_> {
+    /// The label of 0-based `page`, if it is a page this knows.
+    pub fn label(&self, page: usize) -> Option<&str> {
+        match self {
+            PageLabels::Pages(pages) => pages.get(page).map(|p| p.label.as_str()),
+            PageLabels::One(only, label) => (*only == page).then_some(*label),
+        }
+    }
+}
+
 /// What a field may assume while a pass composes: the page being composed,
 /// the pages made so far, the placement being composed, and texts a previous
 /// pass resolved.
@@ -492,6 +546,34 @@ pub(crate) struct FieldEnv<'a> {
     /// [`FieldInstance::Page`].
     pub instance: FieldInstance,
     pub values: Option<&'a FieldValues>,
+    /// Page labels, and whether `page` is the page the line is finally placed
+    /// on (sections §10, N6). A placed composition renders `page-number` from
+    /// its page's label directly; an unplaced one (an annotation, composed
+    /// before its page is known) reads the previous pass's value.
+    pub labels: Option<PageLabels<'a>>,
+    pub placed: bool,
+    pub trace: Option<&'a std::cell::RefCell<Reads>>,
+}
+
+impl<'a> FieldEnv<'a> {
+    /// A composition on `page`, placement `instance`, with a previous pass's
+    /// `values`.
+    pub(crate) fn at(
+        page: usize,
+        pages: usize,
+        instance: FieldInstance,
+        values: Option<&'a FieldValues>,
+    ) -> Self {
+        FieldEnv {
+            page,
+            pages,
+            instance,
+            values,
+            labels: None,
+            placed: false,
+            trace: None,
+        }
+    }
 }
 
 impl FieldEnv<'_> {
@@ -501,11 +583,25 @@ impl FieldEnv<'_> {
         pages: 1,
         instance: FieldInstance::Single,
         values: None,
+        labels: None,
+        placed: false,
+        trace: None,
     };
 
     /// The same environment for the placement `instance`.
     pub(crate) fn placed_as(self, instance: FieldInstance) -> Self {
         FieldEnv { instance, ..self }
+    }
+
+    /// What a field on its final page can say without feedback: only where
+    /// the page is known to be the one the line lands on (`placed`) and its
+    /// label is at hand. An annotation composed before its page is known is
+    /// neither, so it keeps reading the previous pass.
+    fn direct(&self, object: &InlineObject) -> Option<String> {
+        if !self.placed || self.labels.is_none() {
+            return None;
+        }
+        field_function(object)?.direct(object, self)
     }
 
     /// The text a field composes with.
@@ -514,7 +610,21 @@ impl FieldEnv<'_> {
             id,
             instance: self.instance,
         };
-        if let Some(text) = self.values.and_then(|v| v.get(&key)) {
+        if let Some(text) = self.direct(object) {
+            if let Some(trace) = self.trace {
+                trace.borrow_mut().label = Some(text.clone());
+            }
+            return text;
+        }
+        let found = self.values.and_then(|v| v.get(&key));
+        if let Some(trace) = self.trace {
+            let mut reads = trace.borrow_mut();
+            reads.fields.insert(key, found.cloned());
+            if found.is_none() {
+                reads.guessed = Some((self.page, self.pages));
+            }
+        }
+        if let Some(text) = found {
             return text.clone();
         }
         field_function(object).map_or_else(String::new, |f| f.guess(object, self))
@@ -529,6 +639,16 @@ pub(crate) struct FieldContext<'a> {
 }
 
 impl FieldContext<'_> {
+    /// The label of 0-based `page`: its descriptor's when the layout has
+    /// sections, else the decimal physical number.
+    fn label(&self, page: usize) -> String {
+        self.snapshot
+            .sections
+            .as_ref()
+            .and_then(|s| s.pages.get(page))
+            .map_or_else(|| (page + 1).to_string(), |p| p.label.clone())
+    }
+
     /// The 1-based page of a byte of a placed block.
     fn page_of(&self, node: NodeId, at: usize) -> Option<usize> {
         let line = self.snapshot.line_containing(node, at)?;
@@ -545,8 +665,11 @@ impl FieldFunction for PageNumber {
     fn guess(&self, _: &InlineObject, env: &FieldEnv<'_>) -> String {
         (env.page + 1).to_string()
     }
+    fn direct(&self, _: &InlineObject, env: &FieldEnv<'_>) -> Option<String> {
+        env.labels?.label(env.page).map(str::to_owned)
+    }
     fn resolve(&self, _: &InlineObject, at: &FieldContext<'_>) -> Result<String, String> {
-        Ok((at.page + 1).to_string())
+        Ok(at.label(at.page))
     }
 }
 
@@ -579,8 +702,13 @@ impl FieldFunction for PageOf {
             .resolve_field_target(target)
             .ok_or("page-of target is unreadable or gone")?;
         at.page_of(node, offset)
-            .map(|p| p.to_string())
+            .map(|p| at.label(p - 1))
             .ok_or_else(|| "page-of target is not placed".into())
+    }
+    /// A target that was resolved and then became unplaced must not keep
+    /// showing its old page.
+    fn failed(&self, _: String) -> String {
+        "?".into()
     }
 }
 
@@ -599,12 +727,20 @@ impl FieldFunction for TextField {
 }
 
 /// The blocks of a finished pass that fields can be in: the flowed and
-/// placed blocks, then the copies of repeated table header rows.
+/// placed blocks, the copies of repeated table header rows, then the blocks of
+/// running regions, each page's own.
 fn field_blocks(snapshot: &LayoutSnapshot) -> impl Iterator<Item = &crate::BlockLayout> {
     snapshot
         .blocks
         .iter()
         .chain(snapshot.repeated_headers.iter().flat_map(|h| &h.blocks))
+        .chain(
+            snapshot
+                .sections
+                .iter()
+                .flat_map(|s| &s.running)
+                .flat_map(|r| &r.blocks),
+        )
 }
 
 /// Every field's text as a finished pass places it, with the fields that
@@ -653,7 +789,7 @@ pub(crate) fn resolve_fields(
                         out.insert(key, text);
                     }
                     Err(why) => {
-                        out.insert(key, atom.text());
+                        out.insert(key, function.failed(atom.text()));
                         failed.push((block.node, atom.at, why));
                     }
                 }

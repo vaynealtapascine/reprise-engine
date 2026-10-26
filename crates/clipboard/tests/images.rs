@@ -74,7 +74,7 @@ fn package_embeds_used_images_only_and_open_restores_identical_layout() {
             before
         );
         for node in restored
-            .blocks()
+            .top(reprise_doc::Domain::Body)
             .into_iter()
             .filter(|&n| restored.kind_of(n) == Some(BlockKind::Image))
         {
@@ -122,15 +122,15 @@ fn clipboard_transports_assets_and_raw_records_through_twenty_undo_redo_steps() 
                 .all(|i| !i.placeholder && i.alt == "A red café image")
         );
     }
-    let complete = editor.document().document_order();
+    let complete = editor.document().order(reprise_doc::Domain::Body);
     for _ in 0..20 {
         editor.undo().unwrap();
     }
-    assert!(editor.document().blocks().is_empty());
+    assert!(editor.document().top(reprise_doc::Domain::Body).is_empty());
     for _ in 0..20 {
         editor.redo().unwrap();
     }
-    assert_eq!(editor.document().document_order(), complete);
+    assert_eq!(editor.document().order(reprise_doc::Domain::Body), complete);
     assert_eq!(
         target_engine
             .layout(editor.document())
@@ -266,7 +266,7 @@ fn missing_and_unreadable_images_still_survive_packages_and_clipboard() {
             fixture.engine.layout(opened.editable_document().unwrap()),
             layout
         );
-        let source_image = doc.blocks()[0];
+        let source_image = doc.top(reprise_doc::Domain::Body)[0];
         let fragment = copy_all(
             &doc,
             "source",

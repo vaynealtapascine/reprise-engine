@@ -47,8 +47,19 @@ pub(crate) fn placed(
     let entries = doc
         .inline_objects(node)
         .map_err(|e| ClipboardError::Invalid(e.to_string()))?;
+    // A block of the body is laid out in the body. A block of a story is laid
+    // out in each instance of the story: its fields carry the text they have on
+    // the first page the story is placed on.
     let resolved: BTreeMap<InlineId, String> = layout
-        .and_then(|l| l.blocks.iter().find(|b| b.node == node))
+        .and_then(|l| {
+            l.blocks.iter().find(|b| b.node == node).or_else(|| {
+                l.sections
+                    .iter()
+                    .flat_map(|s| &s.running)
+                    .flat_map(|r| &r.blocks)
+                    .find(|b| b.node == node)
+            })
+        })
         .map(|b| {
             b.lines
                 .iter()

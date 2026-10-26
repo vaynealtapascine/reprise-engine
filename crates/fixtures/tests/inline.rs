@@ -166,7 +166,7 @@ fn a_forward_page_of_and_a_page_count_settle_in_two_passes() {
 fn a_page_of_whose_target_is_gone_keeps_its_text_and_says_so() {
     let s = inline::page_of_forward().unwrap();
     // Delete the target paragraph: the persistent position is gone.
-    let order = s.doc.document_order();
+    let order = s.doc.order(reprise_doc::Domain::Body);
     let target = *order.last().unwrap();
     s.doc.delete_block(target).unwrap();
     s.doc.commit();

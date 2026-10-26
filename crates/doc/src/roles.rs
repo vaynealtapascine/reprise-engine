@@ -223,7 +223,7 @@ impl Document {
     /// Every live heading in document order, with its level and text, for a
     /// table of contents and navigation (16). Unknown roles are not headings.
     pub fn outline(&self) -> Vec<OutlineEntry> {
-        self.document_order()
+        self.order(crate::Domain::Body)
             .into_iter()
             .filter_map(|node| {
                 let level = self.role(node).ok()?.outline_level()?;

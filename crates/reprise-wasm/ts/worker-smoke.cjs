@@ -163,6 +163,37 @@ function send(data) {
   const atom = await send({ kind: "atom-rect", request: p({ node: linkedNode, at: 19 }) });
   assert.equal(atom.kind, "atom-rect"); assert.equal(atom.rect.data.page, 0); assert.ok(atom.rect.data.rect.width > 0);
   assert.equal((await send({ kind: "atom-rect", request: p({ node: linkedNode, at: 3 }) })).kind, "error");
+  // Sections: the commands are ordinary edits; the page queries and placed navigation have requests of their own.
+  await send({ kind: "create", request: p({ document_id: "50112233445566778899aabbccddeeff", peer_id: "56" }) });
+  const sectioned = await send({ kind: "edit", request: p({ commands: [0, 1].map(i => ({ kind: "insert-block", parent: null, index: i, block_kind: "paragraph", text: "worker section " + i, style: plain })) }) });
+  const sectionBlocks = sectioned.applied.data.blocks;
+  const storyMade = await send({ kind: "edit", request: p({ commands: [{ kind: "create-story", blocks: [{ block_kind: "paragraph", text: "Worker head", style: null }] }] }) });
+  const workerStory = storyMade.applied.data.stories[0];
+  const bound = await send({ kind: "edit", request: p({ commands: [
+    { kind: "set-region", section: "first", slot: "header", variant: "default", binding: { state: "story", story: workerStory } },
+    { kind: "insert-break", at: { position: "before", node: sectionBlocks[1] }, break_kind: "page" }] }) });
+  assert.equal(bound.kind, "edited");
+  const sectionJob = await send({ kind: "start", request: p({ width: 420 * 1024, height: 300 * 1024, max_pages: 100, viewport_start: 0, viewport_end: 2 }) });
+  for (let i = 0; i < 1000; i++) {
+    const step = await send({ kind: "step", job: sectionJob.job, budget: 1000 });
+    if (step.progress.data.complete) break;
+  }
+  const label = await send({ kind: "page-label", page: 1 });
+  assert.equal(label.kind, "page-label"); assert.equal(label.label.data.label, "2");
+  assert.equal((await send({ kind: "page-sections", page: 0 })).sections.data.owner, "first");
+  assert.deepEqual((await send({ kind: "section-pages", request: p("first") })).pages.data.owned, [0, 1]);
+  const regions = await send({ kind: "page-regions", page: 0 });
+  assert.equal(regions.regions.data.length, 1);
+  const where = regions.regions.data[0].rect;
+  assert.equal((await send({ kind: "region-instances", request: p(workerStory) })).instances.data.length, 2);
+  assert.deepEqual((await send({ kind: "page-fields", page: 0 })).fields.data, []);
+  const placed = await send({ kind: "hit-placed", request: p({ page: 0, x: where.x + (where.width >> 1), y: where.y + (where.height >> 1) }) });
+  assert.equal(placed.kind, "placed-hit"); assert.equal(placed.hit.data.kind, "running");
+  const caretRect = await send({ kind: "caret-in", request: p({ instance: placed.hit.data.instance, position: placed.hit.data.position }) });
+  assert.equal(caretRect.kind, "caret-rect"); assert.equal(caretRect.rect.data.page, 0);
+  const wrect = await send({ kind: "selection-rects-in", request: p({ instance: placed.hit.data.instance, selection: { anchor: { ...placed.hit.data.position, offset: 0 }, focus: placed.hit.data.position } }) });
+  assert.equal(wrect.kind, "selection-rects");
+  assert.equal((await send({ kind: "page-label", page: 99 })).kind, "error");
   assert.equal((await send({ kind: "close" })).kind, "ack");
   console.log("Worker smoke: edit effects, created IDs, split selection, emphasis/decoration/colour, authored marks, host font configuration/job invalidation and image results passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

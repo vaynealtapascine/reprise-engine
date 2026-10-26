@@ -26,10 +26,13 @@ use reprise_shape::{
     reorder_line, visual_order,
 };
 
+pub(crate) mod ahead;
+pub(crate) mod bands;
 mod keeps;
 pub(crate) mod paragraph;
 pub(crate) mod stage;
 
+use crate::ownership::{Class, Ownership};
 use crate::region::Bounded;
 use crate::regions::Plan;
 use crate::template::{ResolvedFrame, ResolvedTemplate};
@@ -48,22 +51,62 @@ pub(crate) struct Pending {
 
 /// Lays out every block, places the paragraphs and returns the blocks that
 /// wait for a relation to place them.
-pub(crate) fn run(
+pub(crate) fn run_with_sections(
     engine: &Engine,
     doc: &Document,
     template: &ResolvedTemplate,
     snapshot: &mut LayoutSnapshot,
     plan: &Plan,
+    sections: std::sync::Arc<crate::sections::Table>,
+    running: std::rc::Rc<crate::running::compose::Shared>,
 ) -> Vec<Pending> {
-    let mut cursor = Cursor::new(engine, doc, template, snapshot, plan);
-    for node in doc.blocks() {
+    let continuous = sections.has_continuous;
+    let mut cursor =
+        Cursor::new_with_sections(engine, doc, template, snapshot, plan, sections, running);
+    if continuous {
+        let nodes = doc.top(reprise_doc::Domain::Body);
+        // A unit either consumes input, advances a frame, or advances one of
+        // the bounded preparation/search phases. Include table descendants.
+        let input = doc
+            .order(reprise_doc::Domain::Body)
+            .iter()
+            .fold(0usize, |n, node| {
+                n.saturating_add(
+                    doc.block(*node)
+                        .map_or(1, |b| b.text.len().saturating_add(64)),
+                )
+            });
+        let bound = input
+            .saturating_add((engine.flow.max_pages.max(1) as usize).saturating_mul(64))
+            .saturating_mul(25 * 32)
+            .max(1);
+        let mut next = 0usize;
+        for _ in 0..bound {
+            let start = (!cursor.busy()).then(|| nodes.get(next).copied()).flatten();
+            if !cursor.busy() && start.is_none() {
+                return cursor.finish(engine, doc, template, snapshot, plan);
+            }
+            if start.is_some() {
+                next = next.saturating_add(1);
+            }
+            (cursor, _) = cursor.unit(engine, doc, template, snapshot, plan, None, start, &[], 1);
+        }
+        snapshot.diagnostics.push(Diagnostic::new(
+            Severity::Error,
+            codes::TEXT_UNPLACED,
+            Subject::Document,
+            "bounded section flow exhausted its work units",
+        ));
+        return cursor.finish(engine, doc, template, snapshot, plan);
+    }
+    for node in doc.top(reprise_doc::Domain::Body) {
         cursor = cursor.step(engine, doc, template, snapshot, plan, node, None);
     }
-    cursor.finish(engine, template, snapshot, plan)
+    cursor.finish(engine, doc, template, snapshot, plan)
 }
 
 /// Owned continuation state; no borrowed snapshot survives a yield.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct Cursor {
     thread: Vec<usize>,
     max_depth: Length,
@@ -73,11 +116,80 @@ pub(crate) struct Cursor {
     pos: usize,
     limit_hit: bool,
     pending: Vec<Pending>,
-    region_owners: std::collections::BTreeSet<NodeId>,
+    /// What the relations make of a block (`ownership.rs`): the only way the
+    /// flow learns it.
+    ownership: Ownership,
     previous: Option<NodeId>,
     /// The block in progress, between units of an incremental job.
     active: Option<Active>,
     keeps: Keeps,
+    catalog: crate::pages::Catalog,
+    source: crate::pages::FrameSource,
+    domain: Option<reprise_doc::Domain>,
+    pub(crate) section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    section: usize,
+    template: std::sync::Arc<ResolvedTemplate>,
+    boundary_node: Option<NodeId>,
+    band: usize,
+    band_start: Option<std::rc::Rc<bands::BandStart>>,
+    band_nodes: Vec<NodeId>,
+    balance: Option<Box<bands::Balance>>,
+    queued_node: Option<NodeId>,
+    open_band: bool,
+    /// The running regions' memo, for a body cursor of a document with any.
+    running: Option<std::rc::Rc<crate::running::compose::Shared>>,
+    /// Set for the cursor that composes a running region's story.
+    fields: Option<FieldContext>,
+    /// The cursor of a stepped job: the regions of a page are made by the
+    /// look-ahead, a unit at a time, before the unit that makes the page.
+    stepped: bool,
+    /// A stepped job has not made the first page yet: its regions come first.
+    first_pending: bool,
+    /// The look-ahead in progress (`flow/ahead.rs`).
+    ahead: Option<Box<ahead::Ahead>>,
+    /// The section start whose pre-transition work is done and which is only
+    /// waiting for its pages' regions.
+    pre_done: Option<NodeId>,
+    /// What the unit just run could not go on without; the caller makes it.
+    wanted: Option<crate::running::compose::Need>,
+    /// The last thing the look-ahead made. Asked for again at once, it was
+    /// made and cannot be found: the flow stops waiting and goes without.
+    stall: Option<crate::running::compose::Need>,
+    no_wait: bool,
+}
+
+/// The field environment of a cursor that composes something other than the
+/// body: which placement it is, the page it stands for and where its reads go.
+#[derive(Clone)]
+pub(crate) struct FieldContext {
+    pub instance: crate::inline::FieldInstance,
+    pub page: usize,
+    pub pages: usize,
+    /// The label of `page`, which does not exist yet while its regions are
+    /// composed.
+    pub label: String,
+    pub trace: Option<crate::inline::Trace>,
+}
+
+/// The running regions' composition context, when the document has any.
+fn running_ctx<'x>(
+    running: &'x Option<std::rc::Rc<crate::running::compose::Shared>>,
+    table: &crate::sections::Table,
+    engine: &'x Engine,
+    doc: &'x Document,
+    plan: &'x Plan,
+    stepped: bool,
+) -> Option<crate::running::attach::Ctx<'x>> {
+    let shared = running.as_deref()?;
+    (table.enabled && table.running.any()).then_some(crate::running::attach::Ctx {
+        engine,
+        doc,
+        plan,
+        shared,
+        filler_regions: false,
+        stepped,
+        collect: None,
+    })
 }
 
 /// What keep lookahead reuses between paragraphs of one layout: the block
@@ -87,6 +199,9 @@ pub(crate) struct Cursor {
 pub(crate) struct Keeps {
     order: Option<std::sync::Arc<BlockOrder>>,
     trials: Vec<(NodeId, ResolutionContext, std::sync::Arc<Prepared>)>,
+    /// The blocks a running story's digest took: the lookahead reads these, in
+    /// this order, and nothing the digest left out.
+    scope: Option<std::rc::Rc<crate::running::compose::Digest>>,
 }
 
 /// The document's top-level blocks in order, with each one's position.
@@ -125,6 +240,23 @@ pub(crate) enum Chain {
     TooLong,
 }
 
+/// What a keep-with-next chain makes of a block after the paragraph. It is the
+/// one thing the chain reads of a block that the block's own inputs do not
+/// hold (the relations that name it owner, its table role), so a key that
+/// holds a `Link` for every block the chain can reach holds all of it: the
+/// body's paragraph memo (`FlowKey`) and a running story's digest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Link {
+    /// A paragraph: composed in the frame, to see whether it fits.
+    Check,
+    /// An annotation, or an image a region relation places: not in the flow of
+    /// text, so the chain looks past it.
+    Pass,
+    /// A table, an image laid out in the flow or anything else: the chain
+    /// ends there, as fitting.
+    End,
+}
+
 /// A block that takes more than one unit.
 #[derive(Clone)]
 pub(crate) enum Active {
@@ -153,6 +285,7 @@ pub(crate) enum TableStep {
         next_header: usize,
         widths: Vec<Length>,
         repeat: Option<crate::table_flow::Repeat>,
+        current: Option<(usize, crate::table_flow::GroupStep)>,
     },
 }
 
@@ -168,23 +301,126 @@ impl TableStep {
 /// Rows a table prepares in one unit, at most.
 pub const TABLE_ROW_GROUP: usize = 16;
 
+/// The most pages a memoised transition may have made for a stepped job to
+/// wait for the look-ahead to make their regions. Past it the transition is
+/// redone, so the compositions it needs (three slots a page at most, of which
+/// the memo keeps sixteen a story) are always there together.
+const MAX_WAITED_PAGES: usize = 5;
+
 impl Cursor {
-    pub(crate) fn new(
+    pub(crate) fn new_with_sections(
         engine: &Engine,
         doc: &Document,
         template: &ResolvedTemplate,
         snapshot: &mut LayoutSnapshot,
         plan: &Plan,
+        sections: std::sync::Arc<crate::sections::Table>,
+        running: std::rc::Rc<crate::running::compose::Shared>,
     ) -> Self {
-        let thread = template.main_thread();
+        Self::new_source(
+            engine,
+            doc,
+            template,
+            snapshot,
+            plan,
+            reprise_doc::Domain::Body,
+            crate::pages::FrameSource::Paged,
+            Some(sections),
+            Some(running),
+            false,
+        )
+    }
+    /// As [`Self::new_with_sections`], for a stepped job: when the document
+    /// has running regions, making the first page waits for its regions, which
+    /// the look-ahead makes under the job's budget like any other unit.
+    pub(crate) fn new_stepped(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        sections: std::sync::Arc<crate::sections::Table>,
+        running: std::rc::Rc<crate::running::compose::Shared>,
+    ) -> Self {
+        Self::new_source(
+            engine,
+            doc,
+            template,
+            snapshot,
+            plan,
+            reprise_doc::Domain::Body,
+            crate::pages::FrameSource::Paged,
+            Some(sections),
+            Some(running),
+            true,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Plain running adapters connect in S6a; exercised by S3 tests.
+    pub(crate) fn new_in(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        domain: reprise_doc::Domain,
+        source: crate::pages::FrameSource,
+    ) -> Self {
+        let sections = (domain == reprise_doc::Domain::Body)
+            .then(|| crate::sections::Table::resolve(engine, doc, template));
+        Self::new_source(
+            engine, doc, template, snapshot, plan, domain, source, sections, None, false,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn new_source(
+        engine: &Engine,
+        doc: &Document,
+        template: &ResolvedTemplate,
+        snapshot: &mut LayoutSnapshot,
+        plan: &Plan,
+        domain: reprise_doc::Domain,
+        source: crate::pages::FrameSource,
+        section_table: Option<std::sync::Arc<crate::sections::Table>>,
+        running: Option<std::rc::Rc<crate::running::compose::Shared>>,
+        stepped: bool,
+    ) -> Self {
+        let section = section_table.as_ref().map_or(0, |s| s.initial);
+        let template = section_table
+            .as_ref()
+            .and_then(|s| s.sections.get(section))
+            .map_or_else(
+                || std::sync::Arc::new(template.clone()),
+                |s| s.template.clone(),
+            );
+        if section_table.as_ref().is_some_and(|s| s.enabled) {
+            snapshot
+                .sections
+                .get_or_insert_with(crate::SectionsLayout::default);
+        }
+        let thread = if source.can_page() {
+            template.main_thread()
+        } else {
+            (0..template.frames.len().min(1)).collect()
+        };
         let max_depth = thread
             .iter()
             .map(|&t| template.frames[t].depth)
             .max()
             .unwrap_or_default();
-        let thread_is_empty = thread.is_empty();
+        let thread_is_empty = thread.is_empty()
+            || source.is_exhausted()
+            || source
+                .single_index()
+                .is_some_and(|i| snapshot.frame(i).is_none());
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
         let mut flow = Flow {
             engine,
+            doc,
+            running,
+            fields: None,
+            log: Default::default(),
+            field_log: Default::default(),
             evaluation: None,
             previous: None,
             template,
@@ -199,12 +435,56 @@ impl Cursor {
             // No frame to flow through: unreachable, but nothing may panic.
             limit_hit: thread_is_empty,
             pending: Vec::new(),
-            region_owners: crate::regions::owners(engine, doc),
+            ownership: Ownership::of(engine, doc, domain),
             upcoming: &[],
             keeps: Keeps::default(),
+            catalog,
+            source,
+            domain: Some(domain),
+            section_table,
+            section,
+            boundary_node: None,
+            band: 0,
+            open_band: false,
+            stepped,
+            first_pending: false,
+            wanted: Default::default(),
+            split: false,
+            ahead: None,
+            pre_done: None,
+            stall: None,
+            no_wait: false,
         };
-        // Even an empty document gets a page.
-        flow.new_page();
+        // Even an empty document gets a page. A stepped job with running
+        // regions makes it when its regions are ready.
+        if flow.source.can_page() {
+            if stepped
+                && flow
+                    .section_table
+                    .as_ref()
+                    .is_some_and(|t| t.enabled && t.running.any())
+            {
+                flow.first_pending = true;
+            } else {
+                flow.new_page();
+            }
+        } else {
+            flow.page = flow
+                .source
+                .single_index()
+                .and_then(|i| flow.snapshot.frame(i))
+                .map_or(0, |f| f.page);
+            flow.page_base.push(flow.source.single_index().unwrap_or(0));
+            flow.fills.resize(
+                flow.snapshot.frames.len(),
+                Fill {
+                    used: Length::ZERO,
+                    empty: true,
+                    after: Length::ZERO,
+                    anchored: true,
+                },
+            );
+        }
 
         flow.cursor()
     }
@@ -219,14 +499,37 @@ impl Cursor {
         node: NodeId,
         evaluation: Option<&crate::incremental::Evaluation>,
     ) -> Self {
-        let mut flow = self.restore(engine, template, snapshot, plan, evaluation);
+        let mut flow = self.restore(engine, doc, template, snapshot, plan, evaluation);
         flow.node(doc, node);
         flow.previous = Some(node);
         flow.cursor()
     }
+    /// The same cursor, composing for the field environment `fields`.
+    pub(crate) fn with_fields(mut self, fields: FieldContext) -> Self {
+        self.fields = Some(fields);
+        self
+    }
+    /// The same cursor, with keep lookahead confined to the blocks of `scope`,
+    /// the digest of the story it composes (see `keeps.rs`), and knowing of
+    /// the relations what that digest holds of them and no more.
+    pub(crate) fn with_scope(
+        mut self,
+        scope: std::rc::Rc<crate::running::compose::Digest>,
+    ) -> Self {
+        self.ownership = Ownership::keyed(scope.clone());
+        self.keeps.scope = Some(scope);
+        self
+    }
+    /// A one-frame source has run out of frame: nothing more can be placed.
+    pub(crate) fn exhausted(&self) -> bool {
+        self.limit_hit
+    }
     /// A block is in progress.
     pub(crate) fn busy(&self) -> bool {
         self.active.is_some()
+            || self.balance.is_some()
+            || self.queued_node.is_some()
+            || self.ahead.is_some()
     }
     /// The lines a paragraph in progress has placed so far.
     pub(crate) fn in_progress(&self) -> Option<BlockLayout> {
@@ -240,7 +543,7 @@ impl Cursor {
     /// the blocks after it, for speculative preparation. Returns the units
     /// charged (at least 1, at most `allowance.max(1)`).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn unit(
+    pub(crate) fn ordinary_unit(
         mut self,
         engine: &Engine,
         doc: &Document,
@@ -253,7 +556,7 @@ impl Cursor {
         allowance: usize,
     ) -> (Self, usize) {
         let mut active = self.active.take();
-        let mut flow = self.restore(engine, template, snapshot, plan, evaluation);
+        let mut flow = self.restore(engine, doc, template, snapshot, plan, evaluation);
         flow.upcoming = upcoming;
         let mut used = 1;
         if active.is_none()
@@ -280,32 +583,60 @@ impl Cursor {
     pub(crate) fn finish(
         self,
         engine: &Engine,
+        doc: &Document,
         template: &ResolvedTemplate,
         snapshot: &mut LayoutSnapshot,
         plan: &Plan,
     ) -> Vec<Pending> {
-        let mut flow = self.restore(engine, template, snapshot, plan, None);
+        let mut flow = self.restore(engine, doc, template, snapshot, plan, None);
         while flow.snapshot.pages.len() < plan.pages {
-            if !flow.new_page() {
+            let page = flow.snapshot.pages.len();
+            let request = plan.page_requests.get(&page).copied();
+            let allocated = if let Some((owner, kind)) = request
+                && let Some(table) = flow.section_table.clone().filter(|s| s.enabled)
+                && let Some(section) = table.get(owner)
+            {
+                let index = table.by_id.get(&section.id()).copied();
+                index.is_some_and(|index| flow.open_page(&table, index, kind, false).is_some())
+            } else {
+                flow.new_page()
+            };
+            if !allocated {
                 break;
             }
         }
+        flow.merge_running_notes();
         flow.pending
     }
     pub(crate) fn page(&self) -> usize {
+        if let Some(Active::Table(t)) = &self.active
+            && let TableStep::Place {
+                current: Some((_, group)),
+                ..
+            } = t.as_ref()
+            && let Some(page) = group.first_page
+        {
+            return self.page.min(page);
+        }
         self.page
     }
     fn restore<'a>(
         self,
         engine: &'a Engine,
-        template: &'a ResolvedTemplate,
+        doc: &'a Document,
+        _template: &'a ResolvedTemplate,
         snapshot: &'a mut LayoutSnapshot,
         plan: &'a Plan,
         evaluation: Option<&'a crate::incremental::Evaluation>,
     ) -> Flow<'a> {
         Flow {
             engine,
-            template,
+            doc,
+            running: self.running,
+            fields: self.fields,
+            log: Default::default(),
+            field_log: Default::default(),
+            template: self.template,
             snapshot,
             plan,
             evaluation,
@@ -317,10 +648,26 @@ impl Cursor {
             pos: self.pos,
             limit_hit: self.limit_hit,
             pending: self.pending,
-            region_owners: self.region_owners,
+            ownership: self.ownership,
             previous: self.previous,
             upcoming: &[],
             keeps: self.keeps,
+            catalog: self.catalog,
+            source: self.source,
+            domain: self.domain,
+            section_table: self.section_table,
+            section: self.section,
+            boundary_node: self.boundary_node,
+            band: self.band,
+            open_band: self.open_band,
+            stepped: self.stepped,
+            first_pending: self.first_pending,
+            wanted: Default::default(),
+            split: false,
+            ahead: self.ahead,
+            pre_done: self.pre_done,
+            stall: self.stall,
+            no_wait: self.no_wait,
         }
     }
 }
@@ -342,14 +689,22 @@ pub(crate) struct Fill {
 }
 
 pub(crate) struct Flow<'a> {
+    pub(crate) doc: &'a Document,
+    running: Option<std::rc::Rc<crate::running::compose::Shared>>,
+    fields: Option<FieldContext>,
+    /// What the paragraph in progress has read from the plan, for the memo.
+    log: std::cell::RefCell<Option<Vec<crate::reads::PlanRead>>>,
+    /// The field values it composed with (folded into `log` when taken).
+    field_log: std::cell::RefCell<crate::inline::Reads>,
     pub(crate) pending: Vec<Pending>,
-    pub(crate) region_owners: std::collections::BTreeSet<NodeId>,
+    /// As [`Cursor::ownership`].
+    pub(crate) ownership: Ownership,
     pub(crate) previous: Option<NodeId>,
     /// Blocks after the current one, for speculative preparation.
     pub(crate) upcoming: &'a [NodeId],
     pub(crate) engine: &'a Engine,
     pub(crate) evaluation: Option<&'a crate::incremental::Evaluation>,
-    pub(crate) template: &'a ResolvedTemplate,
+    pub(crate) template: std::sync::Arc<ResolvedTemplate>,
     pub(crate) snapshot: &'a mut LayoutSnapshot,
     plan: &'a Plan,
     /// Template indices of the main flow's frames, in threading order.
@@ -365,10 +720,31 @@ pub(crate) struct Flow<'a> {
     pos: usize,
     limit_hit: bool,
     pub(crate) keeps: Keeps,
+    catalog: crate::pages::Catalog,
+    source: crate::pages::FrameSource,
+    domain: Option<reprise_doc::Domain>,
+    pub(crate) section_table: Option<std::sync::Arc<crate::sections::Table>>,
+    section: usize,
+    boundary_node: Option<NodeId>,
+    band: usize,
+    open_band: bool,
+    /// As [`Cursor::stepped`].
+    stepped: bool,
+    first_pending: bool,
+    /// What a stepped unit found missing and stopped for.
+    wanted: std::cell::RefCell<Option<crate::running::compose::Need>>,
+    /// A section start made its parity filler and stops there; the content
+    /// page is the next unit's, so the look-ahead can make its regions.
+    split: bool,
+    ahead: Option<Box<ahead::Ahead>>,
+    pre_done: Option<NodeId>,
+    stall: Option<crate::running::compose::Need>,
+    no_wait: bool,
 }
 
 impl Flow<'_> {
     fn node(&mut self, doc: &Document, node: NodeId) {
+        self.transition(doc, node);
         // `table` runs the same phases as `table_unit`, back to back.
         if let Ok(Some(reprise_doc::TableRole::Table(columns))) = doc.table_role(node) {
             self.table(doc, node, &columns);
@@ -379,9 +755,173 @@ impl Flow<'_> {
         }
     }
 
+    fn transition(&mut self, doc: &Document, node: NodeId) {
+        if self.boundary_node == Some(node) {
+            return;
+        }
+        self.boundary_node = Some(node);
+        let Some(table) = self.section_table.clone().filter(|s| s.enabled) else {
+            return;
+        };
+        let Some(kind) = table.starts.get(&node).copied() else {
+            return;
+        };
+        if self.previous.is_none() {
+            return;
+        }
+        if let Some(previous) = self.previous
+            && doc
+                .specified_style(previous)
+                .is_ok_and(|s| s.compute(&self.engine.functions).keep_with_next)
+        {
+            let note = Diagnostic::new(
+                Severity::Warning,
+                codes::KEEP_UNSATISFIED,
+                Subject::Node(previous),
+                "manual boundary overrides keep-with-next",
+            );
+            if !self.snapshot.diagnostics.contains(&note) {
+                self.snapshot.diagnostics.push(note);
+            }
+        }
+        use reprise_doc::sections::{BreakKind, SectionId};
+        match kind {
+            BreakKind::Column => {
+                self.advance();
+            }
+            BreakKind::Page => {
+                self.page_break();
+            }
+            BreakKind::Section => {
+                let Some(&next) = table.by_id.get(&SectionId::Block(node)) else {
+                    return;
+                };
+                let Some(section) = table.sections.get(next) else {
+                    return;
+                };
+                if self.open_band && section.start == crate::sections::Start::Continuous {
+                    self.open_band = false;
+                    let descriptor = self
+                        .snapshot
+                        .sections
+                        .as_ref()
+                        .and_then(|s| s.pages.get(self.page));
+                    let owner = descriptor.and_then(|p| table.get(p.section));
+                    let offset = descriptor
+                        .and_then(|p| p.bands.last())
+                        .map_or(Length::ZERO, |b| b.offset + b.depth);
+                    let taken = descriptor.map_or(Length::ZERO, |p| p.reserve.0 + p.reserve.1);
+                    if let Some(owner) = owner
+                        && let Some(template) = crate::pages::PageFactory::append_band(
+                            self.snapshot,
+                            section,
+                            owner,
+                            self.page,
+                            offset,
+                            if owner.geometry.writing_mode == reprise_doc::WritingMode::HorizontalTb
+                            {
+                                owner.geometry.block_extent() - taken - offset
+                            } else {
+                                owner.geometry.block_extent() - offset
+                            },
+                        )
+                    {
+                        self.section = next;
+                        self.template = std::sync::Arc::new(template);
+                        self.thread = self.template.main_thread();
+                        self.max_depth = self
+                            .thread
+                            .iter()
+                            .filter_map(|i| self.template.frames.get(*i))
+                            .map(|f| f.depth)
+                            .max()
+                            .unwrap_or_default();
+                        self.band = self
+                            .snapshot
+                            .sections
+                            .as_ref()
+                            .and_then(|s| s.pages.get(self.page))
+                            .map_or(0, |p| p.bands.len().saturating_sub(1));
+                        self.pos = 0;
+                        self.catalog.extend(self.snapshot);
+                        self.resize_fills();
+                        return;
+                    }
+                }
+                let parity = match section.start {
+                    crate::sections::Start::OddPage => Some(1),
+                    crate::sections::Start::EvenPage => Some(0),
+                    _ => None,
+                };
+                if parity.is_some_and(|parity| {
+                    (self.snapshot.pages.len().saturating_add(1) % 2) != parity
+                }) && table.sections.get(self.section).is_some()
+                {
+                    // The filler policy is the requesting (incoming) section's.
+                    if self
+                        .open_page(
+                            &table,
+                            self.section,
+                            crate::PageKind::Filler,
+                            section.filler_running,
+                        )
+                        .is_none()
+                    {
+                        self.page_limit();
+                        return;
+                    }
+                    if self.stepped && table.running.any() {
+                        // One page a unit: the content page that follows has
+                        // its own regions, and its number is the filler's plus
+                        // one, so the look-ahead makes them once the filler is
+                        // there. The start is processed again from the top;
+                        // the parity now agrees, so no second filler is made.
+                        self.boundary_node = None;
+                        self.split = true;
+                        return;
+                    }
+                }
+                self.section = next;
+                self.template = section.template.clone();
+                self.thread = self.template.main_thread();
+                self.max_depth = self
+                    .thread
+                    .iter()
+                    .filter_map(|i| self.template.frames.get(*i))
+                    .map(|f| f.depth)
+                    .max()
+                    .unwrap_or_default();
+                self.page_break();
+            }
+        }
+    }
+    fn page_break(&mut self) {
+        if self.new_page() {
+            self.page = self.snapshot.pages.len().saturating_sub(1);
+            self.pos = 0;
+        } else {
+            self.page_limit();
+        }
+    }
+    fn page_limit(&mut self) {
+        if !self.limit_hit {
+            self.limit_hit = true;
+            self.snapshot.diagnostics.push(Diagnostic::new(
+                Severity::Error,
+                codes::PAGE_LIMIT,
+                Subject::Document,
+                format!(
+                    "the text needs more than {} pages; the rest was left out",
+                    self.snapshot.pages.len()
+                ),
+            ));
+        }
+    }
+
     /// Starts a block. Blocks that take one step are laid out here and give
     /// `None`; paragraphs, flowed images and tables give their machine.
     fn begin_block(&mut self, doc: &Document, node: NodeId) -> Option<Active> {
+        self.transition(doc, node);
         let flow = self;
         match doc.table_role(node) {
             Ok(Some(reprise_doc::TableRole::Table(columns))) => {
@@ -413,24 +953,18 @@ impl Flow<'_> {
         let paragraph = || Some(Active::Paragraph(Box::new(paragraph::Paragraph::new(node))));
         match kind {
             BlockKind::Paragraph => return paragraph(),
-            BlockKind::Image => {
-                if !flow.region_owners.contains(&node) {
-                    let follows = doc.relations().iter().any(|(_, r)| {
-                        r.as_ref().is_ok_and(|r| {
-                            r.owner == Some(node)
-                                && r.schema == reprise_doc::relation::builtin::FOLLOW
-                        })
-                    });
-                    if !follows {
-                        return paragraph();
-                    }
+            BlockKind::Image => match flow.ownership.class(node) {
+                // A float or note places it: nothing here.
+                Class::Owner => {}
+                Class::Free => return paragraph(),
+                Class::Follower => {
                     if let Some(image) = flow.annotation(doc, node) {
                         flow.pending.push(image);
                     }
                 }
-            }
+            },
             BlockKind::Annotation => {
-                if !flow.region_owners.contains(&node)
+                if !flow.ownership.owns(node)
                     && let Some(annotation) = flow.annotation(doc, node)
                 {
                     flow.pending.push(annotation);
@@ -477,6 +1011,7 @@ impl Flow<'_> {
                         next_header: 0,
                         widths: Vec::new(),
                         repeat: None,
+                        current: None,
                     };
                     let TableStep::Rows(build) = std::mem::replace(step, placeholder) else {
                         return true;
@@ -491,6 +1026,7 @@ impl Flow<'_> {
                         next_header: 0,
                         widths,
                         repeat: None,
+                        current: None,
                     };
                 }
             }
@@ -501,37 +1037,27 @@ impl Flow<'_> {
                 next_header,
                 widths,
                 repeat,
+                current,
             } => {
                 // As `place_groups`: the repeat state starts when placing does.
                 let repeat = repeat.get_or_insert_with(|| {
                     crate::table_flow::Repeat::new(headers.len(), self.used() > Length::ZERO)
                 });
-                let instance = self.fields().instance;
-                if let Some(group) = headers.get(*next_header).cloned() {
-                    self.place_group(
-                        doc,
-                        *node,
-                        group,
-                        *next_header,
-                        headers,
-                        widths,
-                        repeat,
-                        instance,
-                    );
-                    *next_header += 1;
-                } else if let Some(group) = bodies.pop_front() {
-                    self.place_group(
-                        doc,
-                        *node,
-                        group,
-                        usize::MAX,
-                        headers,
-                        widths,
-                        repeat,
-                        instance,
-                    );
+                if current.is_none() {
+                    if let Some(group) = headers.get(*next_header).cloned() {
+                        *current = Some((*next_header, crate::table_flow::GroupStep::new(group)));
+                        *next_header = next_header.saturating_add(1);
+                    } else if let Some(group) = bodies.pop_front() {
+                        *current = Some((usize::MAX, crate::table_flow::GroupStep::new(group)));
+                    }
                 }
-                return *next_header >= headers.len() && bodies.is_empty();
+                let instance = self.fields().instance;
+                if let Some((index, group)) = current
+                    && group.unit(self, doc, *node, *index, headers, widths, repeat, instance)
+                {
+                    *current = None;
+                }
+                return *next_header >= headers.len() && bodies.is_empty() && current.is_none();
             }
         }
         false
@@ -539,6 +1065,7 @@ impl Flow<'_> {
 
     fn cursor(self) -> Cursor {
         Cursor {
+            template: self.template,
             thread: self.thread,
             max_depth: self.max_depth,
             page_base: self.page_base,
@@ -547,45 +1074,234 @@ impl Flow<'_> {
             pos: self.pos,
             limit_hit: self.limit_hit,
             pending: self.pending,
-            region_owners: self.region_owners,
+            ownership: self.ownership,
             previous: self.previous,
             active: None,
             keeps: self.keeps,
+            catalog: self.catalog,
+            source: self.source,
+            domain: self.domain,
+            section_table: self.section_table,
+            section: self.section,
+            boundary_node: self.boundary_node,
+            band: self.band,
+            band_start: None,
+            band_nodes: Vec::new(),
+            balance: None,
+            queued_node: None,
+            open_band: self.open_band,
+            running: self.running,
+            fields: self.fields,
+            stepped: self.stepped,
+            first_pending: self.first_pending,
+            ahead: self.ahead,
+            pre_done: self.pre_done,
+            wanted: self.wanted.into_inner(),
+            stall: self.stall,
+            no_wait: self.no_wait,
+        }
+    }
+
+    /// Adds what running regions reported to the diagnostics, once each.
+    fn merge_running_notes(&mut self) {
+        let Some(sections) = self.snapshot.sections.as_mut() else {
+            return;
+        };
+        let notes = std::mem::take(&mut sections.notes);
+        for note in notes {
+            if !self
+                .snapshot
+                .diagnostics
+                .iter()
+                .any(|d| crate::running::compose::same(d, &note))
+            {
+                self.snapshot.diagnostics.push(note);
+            }
+        }
+    }
+
+    /// Makes the next page of section `index`: its regions are composed, what
+    /// they came to is noted for the memo, and the factory makes the page. The
+    /// template its body frames came from is returned.
+    fn open_page(
+        &mut self,
+        table: &std::sync::Arc<crate::sections::Table>,
+        index: usize,
+        kind: crate::PageKind,
+        filler_regions: bool,
+    ) -> Option<std::sync::Arc<ResolvedTemplate>> {
+        let section = table.sections.get(index)?;
+        let page = self.snapshot.pages.len();
+        let first_owned = crate::running::attach::first_owned(self.snapshot, section.id(), kind);
+        let crate::pages::Numbering { label, .. } =
+            crate::pages::PageFactory::next_label(table, section, kind, self.snapshot);
+        let ctx = running_ctx(
+            &self.running,
+            table,
+            self.engine,
+            self.doc,
+            self.plan,
+            self.stepped,
+        )
+        .map(|c| crate::running::attach::Ctx {
+            filler_regions,
+            ..c
+        });
+        let regions = ctx.as_ref().and_then(|ctx| {
+            // A stepped job has had the look-ahead make this page's regions:
+            // they come from the memo. A page it did not foresee is made the
+            // slow way, and counted (`running_inline`).
+            if ctx.stepped
+                && let Ok(ready) = crate::running::attach::prepare_ready(
+                    ctx,
+                    table,
+                    index,
+                    section,
+                    page,
+                    kind,
+                    first_owned,
+                    &label,
+                    true,
+                )
+            {
+                return ready;
+            }
+            crate::running::attach::prepare(
+                ctx,
+                table,
+                index,
+                section,
+                page,
+                kind,
+                first_owned,
+                &label,
+            )
+        });
+        if ctx.is_some() {
+            self.read(|| crate::reads::PlanRead::Regions {
+                spec: crate::running::attach::PageSpec {
+                    section: section.id(),
+                    life: section.life().into(),
+                    kind,
+                    first_owned,
+                    page,
+                    label: label.clone(),
+                    filler_regions,
+                },
+                outcome: regions.as_ref().map(|r| r.outcome()),
+            });
+        }
+        let made = crate::pages::PageFactory::push_prepared(
+            self.engine,
+            table,
+            section,
+            kind,
+            self.snapshot,
+            first_owned,
+            regions,
+        );
+        if made.is_some() {
+            self.made_page();
+        }
+        made
+    }
+
+    /// Counts a page made, for the step's work.
+    fn made_page(&self) {
+        if let Some(evaluation) = self.evaluation {
+            evaluation.work(|w| w.pages_made = w.pages_made.saturating_add(1));
         }
     }
 
     /// Makes the next page from the template, unless the limit is reached.
     fn new_page(&mut self) -> bool {
-        let limit = self.engine.flow.max_pages.max(1) as usize;
-        if self.snapshot.pages.len() >= limit {
+        if !self.source.can_page() {
             return false;
         }
-        let page = self.snapshot.pages.len();
-        self.page_base.push(self.snapshot.frames.len());
-        self.snapshot.pages.push(PageLayout {
-            width: self.template.width,
-            height: self.template.height,
-        });
-        for frame in &self.template.frames {
-            self.snapshot.frames.push(frame.layout(page));
-            self.fills.push(Fill {
+        let base = self.snapshot.frames.len();
+        let mut page_template = None;
+        let pushed = if let Some(table) = self.section_table.clone().filter(|s| s.enabled) {
+            page_template = self.open_page(&table, self.section, crate::PageKind::Content, false);
+            page_template.is_some()
+        } else {
+            let pushed =
+                crate::pages::PageFactory::push(self.engine, &self.template, self.snapshot);
+            if pushed {
+                self.made_page();
+            }
+            pushed
+        };
+        if !pushed {
+            return false;
+        }
+        if let Some(template) = page_template {
+            self.template = template;
+            self.thread = self.template.main_thread();
+            self.max_depth = self
+                .thread
+                .iter()
+                .filter_map(|i| self.template.frames.get(*i))
+                .map(|f| f.depth)
+                .max()
+                .unwrap_or_default();
+            self.band = 0;
+        }
+        while self.page_base.len() < self.snapshot.pages.len().saturating_sub(1) {
+            self.page_base.push(base);
+        }
+        self.page_base.push(base);
+        self.catalog.extend(self.snapshot);
+        self.resize_fills();
+        true
+    }
+    fn resize_fills(&mut self) {
+        self.fills.resize(
+            self.snapshot.frames.len(),
+            Fill {
                 used: Length::ZERO,
                 empty: true,
                 after: Length::ZERO,
                 anchored: true,
-            });
-        }
-        true
+            },
+        );
     }
 
     /// The snapshot index of the frame the flow is in.
+    pub(crate) fn current_template_index(&self) -> usize {
+        self.thread.get(self.pos).copied().unwrap_or(0)
+    }
     pub(crate) fn frame_index(&self) -> usize {
-        self.page_base[self.page] + self.thread[self.pos]
+        self.source
+            .single_index()
+            .or_else(|| self.thread.get(self.pos).and_then(|&t| self.main_index(t)))
+            .unwrap_or(self.snapshot.frames.len())
+    }
+    fn main_index(&self, t: usize) -> Option<usize> {
+        if self.section_table.as_ref().is_some_and(|s| s.enabled) {
+            let column = self
+                .template
+                .frames
+                .iter()
+                .take(t)
+                .filter(|f| f.is_main_flow())
+                .count();
+            self.catalog.index(&crate::pages::FrameAddr::Main {
+                page: self.page,
+                band: self.band,
+                column,
+            })
+        } else {
+            self.catalog.ordinal(self.page, t)
+        }
     }
 
     /// Moves on to the next frame of the thread, or the first of a new page.
     /// False when the page limit stops it, which is reported once.
     pub(crate) fn advance(&mut self) -> bool {
+        if !self.source.next() {
+            self.limit_hit = true;
+            return false;
+        }
         if self.pos + 1 < self.thread.len() {
             self.pos += 1;
             return true;
@@ -610,14 +1326,60 @@ impl Flow<'_> {
         false
     }
 
+    fn frame_reference(&self, index: usize) -> Option<crate::pages::FrameRef> {
+        self.catalog.reference(index).cloned().or_else(|| {
+            let mut frame =
+                crate::pages::PageFactory::future_reference(&self.template, self.snapshot, index)?;
+            if let Some(section) = self
+                .section_table
+                .as_ref()
+                .and_then(|s| s.sections.get(self.section))
+            {
+                frame.provenance.section = section.id();
+                frame.provenance.life = section.life().into();
+            }
+            Some(frame)
+        })
+    }
+    pub(crate) fn exclusions(&self, index: usize) -> Option<Vec<Rect<FrameSpace>>> {
+        let frame = self.frame_reference(index);
+        let own = frame
+            .as_ref()
+            .and_then(|frame| self.plan.exclusions_for(frame))
+            .cloned();
+        if let Some(frame) = &frame {
+            self.read(|| crate::reads::PlanRead::Exclusions {
+                addr: frame.address.clone(),
+                provenance: frame.provenance.clone(),
+                value: own.clone(),
+            });
+        }
+        let mut boxes = own.unwrap_or_default();
+        boxes.extend(
+            self.plan
+                .physical_exclusions_for(&self.catalog, self.snapshot, index),
+        );
+        (!boxes.is_empty()).then_some(boxes)
+    }
     pub(crate) fn depth(&self, index: usize, full: Length) -> Length {
+        let frame = self.frame_reference(index);
+        let reserved = frame
+            .as_ref()
+            .and_then(|frame| self.plan.reservation_for(frame));
+        if let Some(frame) = &frame {
+            self.read(|| crate::reads::PlanRead::Reservation {
+                addr: frame.address.clone(),
+                provenance: frame.provenance.clone(),
+                value: reserved,
+            });
+        }
         (full
-            - self
-                .plan
-                .reservations
-                .get(&index)
-                .copied()
-                .unwrap_or_default())
+            - reserved
+                .unwrap_or_default()
+                .max(
+                    self.plan
+                        .physical_reservation_for(&self.catalog, self.snapshot, index),
+                ))
         .max(Length::ZERO)
     }
 
@@ -640,9 +1402,7 @@ impl Flow<'_> {
     /// Tables retain rectangular columns: pass below all float exclusions in
     /// this frame instead of overlapping them or changing column widths.
     pub(crate) fn table_top(&self) -> Length {
-        self.plan
-            .exclusions
-            .get(&self.frame_index())
+        self.exclusions(self.frame_index())
             .into_iter()
             .flatten()
             .map(|r| r.origin.y + r.height)
@@ -658,7 +1418,7 @@ impl Flow<'_> {
             .and_then(|&i| self.template.frames.get(i));
         resolution_context(
             self.engine,
-            self.template,
+            &self.template,
             frame,
             frame.map_or(Length::ZERO, |f| f.width),
         )
@@ -672,7 +1432,7 @@ impl Flow<'_> {
         let Some(evaluation) = self.evaluation else {
             return self.annotation_inner(doc, node);
         };
-        let key = crate::incremental::AnnotationKey::new(doc, node, self.template);
+        let key = crate::incremental::AnnotationKey::new(doc, node, &self.template);
         if let Some((pending, notes)) = evaluation.annotation_hit(node, &key, self.engine) {
             self.snapshot.diagnostics.extend(notes);
             return pending;
@@ -705,7 +1465,7 @@ impl Flow<'_> {
             .template
             .margin_width()
             .unwrap_or_else(|| frame.map_or(Length::ZERO, |f| f.width));
-        let ctx = resolution_context(engine, self.template, frame, width);
+        let ctx = resolution_context(engine, &self.template, frame, width);
         let prepared = prepare_cached(
             engine,
             doc,
@@ -823,18 +1583,34 @@ pub(crate) fn prepare_cached(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PositionKey {
+    band: usize,
+    source: crate::pages::FrameSource,
     page: usize,
     pos: usize,
     limit_hit: bool,
     pages: usize,
     frames: usize,
     fills: Vec<Fill>,
+    /// What the current section comes to (identity, lifetime, numbering,
+    /// geometry, start and the rest): the pages a transition makes, their
+    /// labels and the numbers it composes all come from it.
+    section: Option<std::sync::Arc<crate::sections::SectionKey>>,
+    /// The first section's restart, which numbers the document's first page.
+    first_restart: Option<i64>,
+    owner: Option<(reprise_doc::sections::SectionId, i64)>,
 }
 #[derive(Clone)]
 pub(crate) struct Delta {
+    band: usize,
+    source: crate::pages::FrameSource,
+    template: std::sync::Arc<ResolvedTemplate>,
+    thread: Vec<usize>,
+    max_depth: Length,
+    sections: Option<crate::SectionsLayout>,
     pages: Vec<PageLayout>,
     frames: Vec<FrameLayout>,
     pub(crate) blocks: Vec<BlockLayout>,
+    pub(crate) block_pages: std::collections::BTreeSet<usize>,
     diagnostics: Vec<Diagnostic>,
     fills: Vec<Fill>,
     page_base: Vec<usize>,
@@ -855,22 +1631,146 @@ impl Flow<'_> {
     pub(crate) fn position_key(&self) -> PositionKey {
         let tail = self.page_base.last().copied().unwrap_or(0);
         PositionKey {
+            band: self.band,
+            source: self.source.clone(),
             page: self.page,
             pos: self.pos,
             limit_hit: self.limit_hit,
             pages: self.snapshot.pages.len(),
             frames: self.snapshot.frames.len(),
             fills: self.fills.get(tail..).unwrap_or_default().to_vec(),
+            section: self
+                .section_table
+                .as_ref()
+                .filter(|s| s.enabled)
+                .and_then(|s| s.sections.get(self.section))
+                .map(|s| s.key()),
+            first_restart: self
+                .section_table
+                .as_ref()
+                .filter(|s| s.enabled)
+                .and_then(|s| s.sections.first())
+                .and_then(|s| s.restart),
+            owner: self
+                .snapshot
+                .sections
+                .as_ref()
+                .and_then(|s| s.pages.get(self.page))
+                .map(|p| (p.section, p.counter)),
         }
     }
     /// What fields compose with on the page being filled.
     pub(crate) fn fields(&self) -> crate::inline::FieldEnv<'_> {
-        crate::inline::FieldEnv {
-            page: self.page,
-            pages: self.page.saturating_add(1),
-            instance: crate::inline::FieldInstance::Single,
-            values: Some(&self.plan.fields),
+        match &self.fields {
+            Some(ctx) => {
+                let mut env = crate::inline::FieldEnv::at(
+                    ctx.page,
+                    ctx.pages,
+                    ctx.instance,
+                    Some(&self.plan.fields),
+                );
+                env.placed = true;
+                env.labels = Some(crate::inline::PageLabels::One(ctx.page, &ctx.label));
+                env.trace = ctx.trace.as_deref();
+                env
+            }
+            None => {
+                let mut env = crate::inline::FieldEnv::at(
+                    self.page,
+                    self.page.saturating_add(1),
+                    crate::inline::FieldInstance::Single,
+                    Some(&self.plan.fields),
+                );
+                // The body's lines land on the page being filled, whose label
+                // is fixed when the page is made. A layout without sections
+                // has no labels, and reads the plan as it always did.
+                env.placed = true;
+                env.labels = self
+                    .snapshot
+                    .sections
+                    .as_ref()
+                    .map(|s| crate::inline::PageLabels::Pages(&s.pages));
+                env.trace = self.recording().then_some(&self.field_log);
+                env
+            }
         }
+    }
+
+    /// Whether a paragraph's reads are being recorded.
+    fn recording(&self) -> bool {
+        self.log.borrow().is_some()
+    }
+
+    /// Notes one read, built only when recording.
+    pub(crate) fn read(&self, read: impl FnOnce() -> crate::reads::PlanRead) {
+        if let Some(log) = self.log.borrow_mut().as_mut() {
+            crate::reads::note(log, read());
+        }
+    }
+
+    /// Starts recording, continuing from `earlier` reads.
+    pub(crate) fn record_from(&self, earlier: Vec<crate::reads::PlanRead>) {
+        *self.log.borrow_mut() = Some(earlier);
+    }
+
+    /// Stops recording and returns everything read: plan entries, then field
+    /// values.
+    pub(crate) fn take_reads(&self) -> Vec<crate::reads::PlanRead> {
+        let mut reads = self.log.borrow_mut().take().unwrap_or_default();
+        let fields = std::mem::take(&mut *self.field_log.borrow_mut());
+        for (key, value) in fields.fields {
+            crate::reads::note(&mut reads, crate::reads::PlanRead::Field { key, value });
+        }
+        reads
+    }
+
+    /// Whether every read of a memoised transition still holds: the plan
+    /// entries answer as they did, and the regions of the pages it made come to
+    /// the same.
+    pub(crate) fn reads_hold(&self, reads: &[crate::reads::PlanRead]) -> bool {
+        reads.iter().all(|read| match read.holds(self.plan) {
+            Some(holds) => holds,
+            None => {
+                let crate::reads::PlanRead::Regions { spec, outcome } = read else {
+                    return false;
+                };
+                let Some(table) = self.section_table.as_ref() else {
+                    return false;
+                };
+                match running_ctx(
+                    &self.running,
+                    table,
+                    self.engine,
+                    self.doc,
+                    self.plan,
+                    self.stepped,
+                ) {
+                    Some(ctx) if ctx.stepped => {
+                        match crate::running::attach::outcome_ready(&ctx, table, spec) {
+                            Ok(now) => now.as_ref() == Some(outcome),
+                            Err(need) => {
+                                // The regions of this page are not made yet.
+                                // A transition that spans many pages is not
+                                // worth waiting for: it is simply redone.
+                                let pages = reads
+                                    .iter()
+                                    .filter(|r| matches!(r, crate::reads::PlanRead::Regions { .. }))
+                                    .count();
+                                if !self.no_wait && pages <= MAX_WAITED_PAGES {
+                                    self.wanted.borrow_mut().get_or_insert(need);
+                                }
+                                false
+                            }
+                        }
+                    }
+                    Some(ctx) => {
+                        crate::running::attach::outcome_of(&ctx, table, spec).as_ref()
+                            == Some(outcome)
+                    }
+                    None => outcome.is_none(),
+                }
+            }
+        })
     }
 
     pub(crate) fn plan(&self) -> &Plan {
@@ -887,6 +1787,38 @@ impl Flow<'_> {
     }
     fn delta(&self, before: Mark) -> Delta {
         Delta {
+            band: self.band,
+            source: self.source.clone(),
+            template: self.template.clone(),
+            thread: self.thread.clone(),
+            max_depth: self.max_depth,
+            sections: self
+                .snapshot
+                .sections
+                .as_ref()
+                .map(|s| crate::SectionsLayout {
+                    pages: s.pages.get(before.pages..).unwrap_or_default().to_vec(),
+                    // Instances and what they reported are made again from the
+                    // running memo when the transition is replayed.
+                    running: Vec::new(),
+                    notes: Vec::new(),
+                    rules: s
+                        .rules
+                        .iter()
+                        .filter(|r| r.page >= before.pages)
+                        .cloned()
+                        .collect(),
+                }),
+            block_pages: self
+                .snapshot
+                .blocks
+                .get(before.blocks..)
+                .unwrap_or_default()
+                .iter()
+                .flat_map(|b| &b.lines)
+                .filter_map(|l| self.snapshot.frame(l.frame))
+                .map(|f| f.page)
+                .collect(),
             pages: self
                 .snapshot
                 .pages
@@ -923,9 +1855,36 @@ impl Flow<'_> {
             tail: before.tail,
         }
     }
-    fn apply_delta(&mut self, delta: Delta) {
-        self.snapshot.pages.extend(delta.pages);
-        self.snapshot.frames.extend(delta.frames);
+    /// Makes the running instances of replayed pages again, from the running
+    /// memo: a transition that made a page is replayed when what the page's
+    /// regions came to is unchanged, and their text may not be.
+    fn reinstall_regions(&mut self, from: usize) {
+        let Some(table) = self.section_table.clone() else {
+            return;
+        };
+        let Some(ctx) = running_ctx(
+            &self.running,
+            &table,
+            self.engine,
+            self.doc,
+            self.plan,
+            self.stepped,
+        ) else {
+            return;
+        };
+        for page in from..self.snapshot.pages.len() {
+            crate::running::attach::reinstall(&ctx, &table, self.snapshot, page);
+        }
+    }
+    fn apply_delta(&mut self, delta: Delta) -> bool {
+        let first_replayed = self.snapshot.pages.len();
+        if !crate::pages::PageFactory::replay(self.engine, self.snapshot, delta.pages, delta.frames)
+        {
+            return false;
+        }
+        crate::pages::PageFactory::replay_sections(self.snapshot, delta.sections);
+        self.reinstall_regions(first_replayed);
+        self.catalog.extend(self.snapshot);
         self.snapshot.blocks.extend(delta.blocks);
         self.snapshot.diagnostics.extend(delta.diagnostics);
         self.fills.truncate(delta.tail);
@@ -934,6 +1893,12 @@ impl Flow<'_> {
         self.page = delta.page;
         self.pos = delta.pos;
         self.limit_hit = delta.limit_hit;
+        self.band = delta.band;
+        self.source = delta.source;
+        self.template = delta.template;
+        self.thread = delta.thread;
+        self.max_depth = delta.max_depth;
+        true
     }
 }
 
@@ -968,6 +1933,7 @@ pub(crate) struct PaintRun {
 }
 
 /// What composing a block into one region produced.
+#[derive(Clone)]
 pub(crate) struct Composed {
     pub(crate) lines: Vec<LineLayout>,
     /// Where the text continues, if the region ended before it did.
@@ -1953,6 +2919,7 @@ mod tests {
             height: Length::ZERO,
             frames: vec![frame.clone()],
             page_setup: None,
+            thread: None,
         };
         let ctx = resolution_context(&engine, &template, Some(&frame), frame.width);
         assert_eq!(

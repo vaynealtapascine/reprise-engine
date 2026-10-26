@@ -46,7 +46,7 @@ impl Exporter for NativeWithAssets<'_> {
         )?;
         fragment.attach_images(self.assets)?;
         let preserved = doc
-            .document_order()
+            .authored_order()
             .into_iter()
             .filter(|&node| doc.kind_of(node) == Some(BlockKind::Image))
             .all(|node| {
@@ -83,7 +83,7 @@ impl Exporter for PdfWithAssets<'_> {
             &crate::PdfMetadata::default(),
         )?;
         let preserved = doc
-            .document_order()
+            .authored_order()
             .into_iter()
             .filter(|&node| doc.kind_of(node) == Some(BlockKind::Image))
             .all(|node| {

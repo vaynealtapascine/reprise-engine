@@ -28,6 +28,8 @@ use crate::{BlockLayout, Diagnostic, LineLayout, Subject, codes};
 use reprise_diag::Severity;
 use reprise_doc::{Document, NodeId};
 use reprise_geom::Length;
+mod step;
+pub(crate) use step::GroupStep;
 
 #[derive(Clone)]
 pub(crate) struct Cell {
@@ -386,8 +388,18 @@ impl Flow<'_> {
     /// The depth of the next frame of the main thread, ignoring reservations
     /// that do not exist yet. Only an estimate for keeping groups together.
     fn fresh_depth(&self) -> Length {
+        if self
+            .section_table
+            .as_ref()
+            .is_some_and(|s| s.has_continuous)
+        {
+            return self
+                .next_frame()
+                .and_then(|(index, t)| self.next_template(index).frames.get(t).map(|f| f.depth))
+                .unwrap_or_default();
+        }
         let thread = self.template.main_thread();
-        let here = self.frame_index() % self.template.frames.len().max(1);
+        let here = self.current_template_index();
         let next = thread
             .iter()
             .position(|&i| i == here)

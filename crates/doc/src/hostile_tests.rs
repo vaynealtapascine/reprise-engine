@@ -37,7 +37,7 @@ fn victim() -> Document {
 /// Everything a reader derives from the document, as text.
 fn read_all(doc: &Document) -> String {
     let mut out = String::new();
-    for id in doc.document_order() {
+    for id in doc.authored_order() {
         out.push_str(&format!(
             "{id} {:?} {:?}\n",
             doc.parent_of(id),
@@ -88,7 +88,7 @@ fn hostile_peer_ops_import_without_panic_and_read_identically() {
         let mut rng = Rng::new(seed);
         scribble(&attacker, &mut rng, 60);
         // The honest peer edits concurrently through the document API.
-        let first = honest.blocks()[0];
+        let first = honest.top(crate::Domain::Body)[0];
         honest.block(first).unwrap().text.insert(0, "x").unwrap();
         honest.commit();
 
@@ -199,7 +199,7 @@ fn mutated_json_operations_never_panic() {
         let since = base.version_vector();
         if seed % 2 == 1 {
             // Concurrent local edits send checks through the shadow replica.
-            let first = base.blocks()[0];
+            let first = base.top(crate::Domain::Body)[0];
             base.block(first)
                 .unwrap()
                 .text

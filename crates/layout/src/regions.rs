@@ -2,30 +2,33 @@
 use crate::flow;
 use crate::relations::resolve::Resolver;
 use crate::template::ResolvedTemplate;
-use crate::{
-    BlockLayout, Diagnostic, Engine, LayoutSnapshot, LineRef, PageLayout, Resolution, Subject,
-    codes,
-};
+use crate::{BlockLayout, Diagnostic, Engine, LayoutSnapshot, LineRef, Resolution, Subject, codes};
 use reprise_diag::Severity;
 use reprise_doc::relation::builtin;
-use reprise_doc::{BlockKind, Document, NodeId, Relation, RelationId, ResolutionContext};
+use reprise_doc::{BlockKind, Document, Domain, NodeId, Relation, RelationId, ResolutionContext};
 use reprise_geom::{FrameSpace, Length, Rect};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAX_REGION_ITERATIONS: usize = 16;
 pub const MAX_NOTE_DEPTH: usize = 32;
 pub const MAX_REGION_RELATIONS: usize = 4096;
+mod physical;
 
 #[cfg(test)]
 mod tests;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Plan {
-    pub exclusions: BTreeMap<usize, Vec<Rect<FrameSpace>>>,
-    pub reservations: BTreeMap<usize, Length>,
+    pub exclusions: BTreeMap<crate::pages::FrameAddr, crate::pages::Entry<Vec<Rect<FrameSpace>>>>,
+    pub reservations: BTreeMap<crate::pages::FrameAddr, crate::pages::Entry<Length>>,
+    pub physical_exclusions: physical::Boxes,
+    pub note_areas: physical::Areas,
+    pub placement_owners: BTreeMap<RelationId, NodeId>,
+    pub frame_sources: BTreeMap<crate::pages::FrameAddr, (crate::pages::Provenance, usize)>,
     pub blocks: Vec<BlockLayout>,
     pub applied: BTreeSet<RelationId>,
     pub pages: usize,
+    pub page_requests: BTreeMap<usize, (reprise_doc::sections::SectionId, crate::PageKind)>,
     pub diagnostics: Vec<Diagnostic>,
     /// Field texts a finished pass resolved, for the next pass to compose
     /// with (see `docs/inline.md`). Derived; never stored in the document.
@@ -40,25 +43,113 @@ impl Plan {
     fn regions_equivalent(&self, other: &Self) -> bool {
         self.exclusions == other.exclusions
             && self.reservations == other.reservations
-            && self.blocks == other.blocks
+            && self.physical_exclusions == other.physical_exclusions
+            && self.note_areas == other.note_areas
+            && self.canonical_blocks() == other.canonical_blocks()
+            && self
+                .frame_sources
+                .iter()
+                .map(|(a, (p, _))| (a, p))
+                .eq(other.frame_sources.iter().map(|(a, (p, _))| (a, p)))
             && self.applied == other.applied
             && self.pages == other.pages
+            && self.page_requests == other.page_requests
+    }
+    pub fn exclusions_for(&self, frame: &crate::pages::FrameRef) -> Option<&Vec<Rect<FrameSpace>>> {
+        self.exclusions.get(&frame.address)?.for_frame(frame)
+    }
+    pub fn reservation_for(&self, frame: &crate::pages::FrameRef) -> Option<Length> {
+        self.reservations
+            .get(&frame.address)?
+            .for_frame(frame)
+            .copied()
+    }
+    pub fn exclude(&mut self, frame: &crate::pages::FrameRef, rect: Rect<FrameSpace>) {
+        let entry = self
+            .exclusions
+            .entry(frame.address.clone())
+            .or_insert_with(|| crate::pages::Entry::new(frame, Vec::new()));
+        if entry.provenance != frame.provenance {
+            *entry = crate::pages::Entry::new(frame, Vec::new());
+        }
+        entry.value.push(rect);
+    }
+    pub fn reserve(&mut self, frame: &crate::pages::FrameRef, depth: Length) {
+        self.reservations.insert(
+            frame.address.clone(),
+            crate::pages::Entry::new(frame, depth),
+        );
+    }
+    fn capture_frames(&mut self, snapshot: &LayoutSnapshot) {
+        let catalog = crate::pages::Catalog::from_snapshot(snapshot);
+        for block in &self.blocks {
+            for line in &block.lines {
+                if let Some(frame) = catalog.reference(line.frame) {
+                    self.frame_sources.insert(
+                        frame.address.clone(),
+                        (frame.provenance.clone(), line.frame),
+                    );
+                }
+            }
+        }
+    }
+    fn canonical_blocks(&self) -> Vec<BlockLayout> {
+        let indices: BTreeMap<_, _> = self
+            .frame_sources
+            .iter()
+            .enumerate()
+            .map(|(canonical, (_, (_, index)))| (*index, canonical))
+            .collect();
+        let mut blocks = self.blocks.clone();
+        for block in &mut blocks {
+            for line in &mut block.lines {
+                if let Some(&index) = indices.get(&line.frame) {
+                    line.frame = index;
+                }
+            }
+            block.sync_image();
+        }
+        blocks
+    }
+    fn blocks_for(&self, snapshot: &LayoutSnapshot) -> Vec<BlockLayout> {
+        let current = crate::pages::Catalog::from_snapshot(snapshot);
+        let indices: BTreeMap<_, _> = self
+            .frame_sources
+            .iter()
+            .filter_map(|(address, (provenance, old))| {
+                let index = current.index(address)?;
+                (current.reference(index)?.provenance == *provenance).then_some((*old, index))
+            })
+            .collect();
+        self.blocks
+            .iter()
+            .filter_map(|block| {
+                let mut block = block.clone();
+                for line in &mut block.lines {
+                    line.frame = *indices.get(&line.frame)?;
+                }
+                block.sync_image();
+                Some(block)
+            })
+            .collect()
+    }
+    pub(crate) fn applied_for(&self, snapshot: &LayoutSnapshot) -> BTreeSet<RelationId> {
+        let valid: BTreeSet<_> = self.blocks_for(snapshot).iter().map(|b| b.node).collect();
+        // A relation owner is unique in one region allocation. Invalid frame
+        // provenance must not suppress the ordinary unplaced-owner diagnostic.
+        self.applied
+            .iter()
+            .filter(|id| {
+                self.placement_owners
+                    .get(id)
+                    .is_some_and(|n| valid.contains(n))
+            })
+            .copied()
+            .collect()
     }
 }
 
-pub(crate) fn owners(engine: &Engine, doc: &Document) -> BTreeSet<NodeId> {
-    doc.relations()
-        .into_iter()
-        .filter_map(|(_, r)| {
-            let r = r.ok()?;
-            (is_region(&r) && engine.schemas.get(&r.schema).is_some())
-                .then_some(r.owner)
-                .flatten()
-        })
-        .collect()
-}
-
-fn is_region(r: &Relation) -> bool {
+pub(crate) fn is_region(r: &Relation) -> bool {
     r.schema == builtin::FLOAT || r.schema == builtin::NOTE
 }
 
@@ -67,29 +158,44 @@ pub(crate) fn run(
     engine: &Engine,
     doc: &Document,
     template: &ResolvedTemplate,
-    base: LayoutSnapshot,
+    mut base: LayoutSnapshot,
 ) -> LayoutSnapshot {
+    let sections = crate::sections::Table::resolve(engine, doc, template);
+    base.diagnostics.extend(sections.diagnostics.clone());
+    let running = std::rc::Rc::new(crate::running::compose::Shared::default());
     let active = active(engine, doc);
     let mut plan = Plan::default();
     let mut history: Vec<Plan> = Vec::new();
     for iteration in 0..MAX_REGION_ITERATIONS {
         let mut snapshot = base.clone();
-        let pending = flow::run(engine, doc, template, &mut snapshot, &plan);
+        let pending = flow::run_with_sections(
+            engine,
+            doc,
+            template,
+            &mut snapshot,
+            &plan,
+            sections.clone(),
+            running.clone(),
+        );
         if !active {
             crate::relations::run(engine, doc, &mut snapshot, pending, &plan.applied);
+            sections.sort_diagnostics(&mut snapshot);
             return snapshot;
         }
-        let next = allocate(engine, doc, template, &snapshot, None, &plan.fields);
+        let next = allocate_with_sections(
+            engine, doc, template, &snapshot, None, &sections, &plan, &running, None,
+        );
         let outcome = feedback(&plan, &next, &history, iteration);
         if outcome != Feedback::Continue {
             let applied = if outcome == Feedback::Converged {
-                next.applied.clone()
+                next.applied_for(&snapshot)
             } else {
-                plan.applied.clone()
+                plan.applied_for(&snapshot)
             };
             finish_feedback(&mut snapshot, &plan, next, outcome);
             crate::inline::field_notes(doc, &mut snapshot);
             crate::relations::run(engine, doc, &mut snapshot, pending, &applied);
+            sections.sort_diagnostics(&mut snapshot);
             return snapshot;
         }
         history.push(plan);
@@ -132,11 +238,11 @@ pub(crate) fn finish_feedback(
     outcome: Feedback,
 ) {
     if outcome == Feedback::Converged {
-        snapshot.blocks.extend(next.blocks);
+        snapshot.blocks.extend(next.blocks_for(snapshot));
         snapshot.diagnostics.extend(next.diagnostics);
     } else {
         let fields = plan.fields != next.fields;
-        snapshot.blocks.extend(plan.blocks.clone());
+        snapshot.blocks.extend(plan.blocks_for(snapshot));
         snapshot.diagnostics.extend(plan.diagnostics.clone());
         if !plan.regions_equivalent(&next) || !fields {
             snapshot.diagnostics.push(Diagnostic::new(Severity::Warning,
@@ -154,6 +260,7 @@ pub(crate) fn finish_feedback(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn allocate(
     engine: &Engine,
     doc: &Document,
@@ -162,6 +269,46 @@ pub(crate) fn allocate(
     evaluation: Option<&crate::incremental::Evaluation>,
     fields: &crate::inline::FieldValues,
 ) -> Plan {
+    let sections = crate::sections::Table::resolve(engine, doc, template);
+    let previous = Plan {
+        fields: fields.clone(),
+        ..Plan::default()
+    };
+    allocate_with_sections(
+        engine,
+        doc,
+        template,
+        flowed,
+        evaluation,
+        &sections,
+        &previous,
+        &crate::running::compose::Shared::default(),
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn allocate_with_sections(
+    engine: &Engine,
+    doc: &Document,
+    template: &ResolvedTemplate,
+    flowed: &LayoutSnapshot,
+    evaluation: Option<&crate::incremental::Evaluation>,
+    sections: &crate::sections::Table,
+    previous: &Plan,
+    running: &crate::running::compose::Shared,
+    collect: Option<&std::cell::RefCell<Vec<crate::running::compose::Need>>>,
+) -> Plan {
+    let fields = &previous.fields;
+    let ctx = (sections.enabled && sections.running.any()).then_some(crate::running::attach::Ctx {
+        engine,
+        doc,
+        plan: previous,
+        shared: running,
+        filler_regions: false,
+        stepped: evaluation.is_some(),
+        collect,
+    });
     let mut scratch = flowed.clone();
     let mut out = Plan::default();
     let mut relations: Vec<_> = doc
@@ -173,6 +320,23 @@ pub(crate) fn allocate(
                 .map(|r| (id, r))
         })
         .collect();
+    // This allocation places the body's regions. A live owner outside the body
+    // domain (any story, bound or not) is not the body's to place, and must
+    // neither crowd out the body's relations nor register as one of its owners.
+    relations.retain(|(id, r)| {
+        let outside = r
+            .owner
+            .is_some_and(|o| doc.block(o).is_ok() && doc.domain_of(o) != Some(Domain::Body));
+        if outside {
+            out.diagnostics.push(Diagnostic::new(
+                Severity::Error,
+                codes::RELATION_OWNER,
+                Subject::Relation(*id),
+                "region owner must be a body annotation or image; this one belongs to a story",
+            ));
+        }
+        !outside
+    });
     if relations.len() > MAX_REGION_RELATIONS {
         out.diagnostics.push(Diagnostic::new(
             Severity::Error,
@@ -257,7 +421,9 @@ pub(crate) fn allocate(
                     &r,
                     anchor,
                     evaluation,
+                    sections,
                     fields,
+                    ctx.as_ref(),
                 );
             } else {
                 notes.place(
@@ -270,7 +436,9 @@ pub(crate) fn allocate(
                     &r,
                     anchor,
                     evaluation,
+                    sections,
                     fields,
+                    ctx.as_ref(),
                 );
             }
             progressed = true;
@@ -285,7 +453,7 @@ pub(crate) fn allocate(
             out.diagnostics.push(Diagnostic::new(Severity::Error, codes::NOTE_DEPTH, Subject::Relation(id), "unresolved region dependency, cycle, missing anchor or nesting beyond 32 rounds; owner omitted"));
         }
     }
-    notes.finish(template, &mut out);
+    notes.finish(&scratch, &mut out);
     // What the next pass composes fields with: the body's and the placed
     // notes' and floats' own, which `scratch` now holds too.
     out.fields = crate::inline::next_fields(doc, &scratch, fields);
@@ -297,6 +465,24 @@ pub(crate) fn allocate(
         .map(|f| f.page.saturating_add(1))
         .max()
         .unwrap_or(0);
+    if let Some(metadata) = &scratch.sections {
+        out.page_requests.extend(
+            metadata
+                .pages
+                .iter()
+                .enumerate()
+                .map(|(page, p)| (page, (p.section, p.kind))),
+        );
+    }
+    out.capture_frames(&scratch);
+    for (id, relation) in doc.relations() {
+        if let Ok(relation) = relation
+            && let Some(owner) = relation.owner
+            && out.applied.contains(&id)
+        {
+            out.placement_owners.insert(id, owner);
+        }
+    }
     out
 }
 
@@ -315,20 +501,7 @@ pub(crate) fn ensure_page(
     snapshot: &mut LayoutSnapshot,
     page: usize,
 ) -> bool {
-    if page >= engine.flow.max_pages.max(1) as usize {
-        return false;
-    }
-    while snapshot.pages.len() <= page {
-        let page = snapshot.pages.len();
-        snapshot.pages.push(PageLayout {
-            width: template.width,
-            height: template.height,
-        });
-        for frame in &template.frames {
-            snapshot.frames.push(frame.layout(page));
-        }
-    }
-    true
+    crate::pages::PageFactory::ensure(engine, template, snapshot, page)
 }
 
 #[allow(clippy::too_many_arguments)]
