@@ -1027,12 +1027,12 @@ the body test). No existing snapshot or test changed.
 | field values a trial composition reads | `FieldEnv::text` records each read in the composition's `Reads` (label, values, guess), checked by `still_valid` | recorded in `field_log` and noted as `PlanRead::Field` |
 | `paragraph_spacing`, functions, fonts, shaper | engine configuration, immutable for a session (the documented precondition of `LayoutCache` and `LayoutContinuation`) | same |
 
-Two further reads of `region_owners` are not the chain's. `prepare_ahead` uses it to choose
-which upcoming blocks to prepare early; the results are cached by exact inputs, so it cannot
-change output. `table.rs` uses it for annotation blocks in table cells, a composition input
-and not a look-ahead one: I probed a running table with a cell annotation, adding and removing
-a NOTE it owns, and the cached layout equalled the full one both ways, so I changed nothing
-there (a scratch probe; I did not keep it).
+Correction in round 4: this audit missed a composition dependency. `prepare_ahead` used
+`region_owners` to choose speculative preparations (now removed), while `table.rs` used it
+to skip preparing annotations in table cells. The unretained plain-annotation scratch probe
+did not clear that table path: preparation can emit diagnostics, and an undefined style
+exposes cached/full disagreement on NOTE/FLOAT add and remove. The retained review probe
+and the round-4 matrix below replace that unsupported conclusion.
 
 *Tests.* In `review_b3_fixes.rs` (each compares every layout in a session with a full
 layout, diagnostics included, and covers adding and removing the relation): a paragraph
@@ -1098,3 +1098,137 @@ blocks and their `Link`, and only those.
 ### Gate
 
 Full gate (`G:/tmp/gate-sections-fix.sh`, log `G:/tmp/gate-sections-fix3.log`, run on `741669d` under `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 timeout 7000`, with `LIB` set as in round 2, finished 2026-10-25 23:53): 12 x `=== rc=0` (types, wasmbuild, bindgen-web, bindgen-node, tsc, tsc-worker, smoke, worker-smoke, fmt, clippy, wasmcheck, test), 1,714 passed (round 2: 1,679; the 35 added are this round's: 8 in `review_b3_fixes.rs`, and the 27 of `review_round2_extra.rs`, 20 of which are that file's re-run of `review_b3_fixes.rs`), 0 failed, 12 ignored (as before), no `d.ts` or `API.txt` drift (`git status` clean after the gate); `gate exit 0`. Before the gate, clippy and `cargo test -p reprise-layout -p reprise-doc` were run on the same code and caught one `clippy::useless_vec` in a new test, fixed in `741669d`.
+
+## B3 fixes, round 4
+
+Reviewed the round-4 brief and the round-3 request-changes review against
+`a614597fd468a43bf5ff9deef89fadb758c86abe` on `ws/sections2`. That commit contains the
+ownership repair; this completion adds coverage and corrects the audit and documentation.
+The coverage completion is committed as `37373d5156a834a3c97ed41c03d2cda55af35feb`.
+
+### Ownership is keyed as a class
+
+The chosen approach preserves composition's existing treatment of owners and keys the
+classification it reads. It does not special-case the failing annotation. `ownership.rs`
+alone scans relations for composition, producing `Free`, `Follower`, or `Owner` with
+NOTE/FLOAT ownership taking precedence over FOLLOW. `Cursor` and `Flow` hold `Ownership`,
+not a set of region owners. The body reads its classes once when a fresh flow begins;
+its prepared-content cache remains keyed by exact content/context, and calling or skipping
+preparation decides which diagnostics are replayed for this layout.
+
+Every running-story cursor is constructed in `running/compose.rs` with `with_scope(digest)`.
+Its ownership accessor answers only from that digest. The digest records classifications
+for top-level annotations/images and annotations in table cells; `same_as` compares those
+answers as well as nodes, items, and truncation. A table's nested classifications are
+published with its parts only when the whole table is admitted. No live relation scan can
+change composition behind an unchanged key. Paragraphs, tables, and cell images are
+composed independently of their ownership, so their relation classification is not needed
+in the digest. Rejected nested table descendants are never composed by ordinary table
+flow; a valid body-owned note/float can still be prepared separately by the region pass.
+
+The composition reads are now `Flow::begin_block` (images and annotations),
+`Flow::link` (body image keep classification; running keeps use the digest's `Link`),
+and `Flow::table_rows` (cell annotations), all through `Ownership`. The speculative
+`prepare_ahead` ownership filter and `regions::owners` are gone. This closes the dependency
+class at its source, including diagnostic-producing preparation.
+
+The enforcement is a **test**, not a Rust privacy guarantee against calling public
+`Document` methods: `relation_reads.rs` scans production layout sources for relation reads,
+rejects unlisted reader files and the old owner-set names, and confines `Classes::read`
+and `Ownership::of` to their construction sites. A direct `.relations()` read newly added
+to flow, table, running, or inline composition fails this source guard. New legitimate
+reader files require an explicit explanation in its allowlist.
+
+### Regression coverage and completion audit
+
+- The two review probes in `review_round3_matrix.rs` retain their assertions. The saved
+  source's SHA-256 is `541ADB2A998A1F3DEA18C0444583B3865DFF6B69BA50E5952860EA1841B7AE9C`,
+  matching `sections-b3-fixes3-manifest.json`; formatting a copy with Rust 2024 rustfmt
+  produces a byte-identical checked-in file. The review records four failures among
+  eight diagnostic transitions before the fix, while its top-level matrix passed.
+- The previous implementation's retained `G:/tmp/sec4-matrix-before.log` records all
+  three original ownership-matrix tests failing, including 15 snapshot disagreements;
+  `G:/tmp/sec4-matrix.log` records all three passing after the fix. These are inherited
+  baseline evidence, not a fresh rerun of the old source during this completion.
+- The extended matrix covers paragraph/annotation/image x body/header x top level,
+  first table cell, later row/second cell, and descendants of rejected nested tables
+  x NOTE/FLOAT/FOLLOW x both initial relation states: 144 scenarios, each warmed and
+  toggled three times. Every comparison includes complete snapshots and diagnostics.
+  Annotation style-diagnostic changes must actually occur in both first and later cells.
+  Nested containers must report `layout.table-invalid`. Their descendants stay out of
+  ordinary composition; valid body-owned region preparation remains allowed. Changing
+  ownership of rejected story descendants must reuse the header composition.
+- Overlapping FOLLOW/NOTE, FOLLOW/FLOAT, and NOTE/FLOAT ownership is tested for images
+  and annotations in all eight placements, including removing one while another remains
+  (48 scenarios). The precision regression checks that an unrelated body's relation
+  reuses the header while a cell annotation's changed ownership recomposes it.
+- A further 12 scenarios put a paragraph after 70 breaks inside a shared table-cell
+  flow host, in body and header, through both starting states and all three schemas.
+  Add/remove comparisons include diagnostics, and assert the late paragraph is prepared.
+- The full gate also retains valid body-owned note/float placement, stepped suspension,
+  keep-chain, and continuation-ownership regressions. No production behavior beyond
+  `a614597` needed changing; the follow-up corrects coverage and describes precisely
+  which nested kinds read ownership.
+
+### Relation-read inventory
+
+`rg` over the production layout crate found no remaining `region_owners` references.
+Every relation lookup and relation-derived ownership use was checked:
+
+- `ownership.rs`: `Classes::read` is the only composition classification scan; both
+  construction paths above and the complete-snapshot matrices cover it.
+- `incremental.rs`: `PassKey::new` stores authored/resolved relations, owner liveness
+  and owner inputs for region/final-pass memo validity. `partial` reads relation emptiness
+  only for the settled flag. `record_graph` reads relation dependencies, region schemas,
+  owner lines and reading-order dependencies after evaluation. None classify running
+  composition; the key and dependency graph are covered by workspace memo/job tests.
+- `regions.rs`: `active` detects a needed pass; `allocate` selects, validates, sorts and
+  places region relations, rejects story owners, and records applied placement owners.
+  `is_region` is the NOTE/FLOAT schema predicate used by this pass and `Classes::read`.
+  Region results/diagnostics are memoised under `PassKey`, independently of running
+  composition. Existing body region tests and the ownership matrix cover these paths.
+- `relations/mod.rs`: final relation dispatch, owner-deletion checks and schema ownership;
+  `relations/resolve.rs`: target resolution, including its FOLLOW compatibility check;
+  `relations/alignment.rs`: alignment application and ordered relation construction.
+  These operate in the final pass covered by `PassKey`, not running-story composition.
+- `sections/mod.rs`: the continuous-section FLOAT-presence check selects `FloatSpaces`.
+  Its result reaches composition through resolved frames, included in position/context
+  keys. Section/band/float workspace tests cover it.
+- `floats.rs`, `notes.rs`, and `relations/follow.rs` consume relations supplied by their
+  respective passes rather than independently querying composition ownership.
+  `display.rs` consumes resolved snapshot relation owners for rendering. Neither
+  provides a hidden live-document classification to a running composition.
+- `running/compose.rs` reads classes only to build its key. `flow.rs`, `flow/keeps.rs`,
+  and `table.rs` consume the accessor as described above; none query relations directly.
+
+`docs/CODEMAP.md` now maps the new ownership module and its regression files.
+No dependencies, existing snapshots, public interfaces or architecture decisions changed.
+
+### Gate
+
+Full gate: `G:/tmp/gate-sections-fix.sh`, log `G:/tmp/gate-sections-fix4.log`, run with
+`CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 timeout 7000 bash ...` and
+`TMP=TEMP=G:/tmp`. Builds used `F:/reprise-target/eng-sections2-b2` and its WASM sibling,
+the G: Cargo home, `INSTA_UPDATE=no`, four build jobs, and the MSVC/Windows SDK `LIB`
+configuration retained from the earlier review environment. It finished on
+2026-10-26 at 16:12:51 (Asia/Manila) against the implementation tree now committed as
+`37373d5`; no source or test changes followed the run.
+
+All **12 x `=== rc=0`**: types, wasmbuild, bindgen-web, bindgen-node, tsc, tsc-worker,
+smoke, worker-smoke, fmt, clippy, wasmcheck, test. **1,742 passed, 0 failed, 12 ignored**;
+`=== GATE DONE`, `gate exit 0`. The increase from round 3's 1,714 is the 22 tests in
+`review_round3_matrix` (including 20 fixture tests), two relation-read source guards,
+and four ownership-matrix tests. No `.d.ts` or `API.txt` drift, dependency changes, or
+existing snapshot changes: checked with `git diff --name-only a614597^` restricted to
+those files, which returned no paths. The pre-existing round-4 log was preserved as
+`G:/tmp/gate-sections-fix4-inherited.log` before this fresh run replaced the requested log.
+
+Before the full gate, all **28 focused tests** passed in `relation_ownership_matrix`,
+`relation_reads`, and `review_round3_matrix` (`G:/tmp/sec4-sol-matrix.log`). The expanded
+nested test initially asserted that no body descendant could be prepared; inspection
+showed that valid body NOTE/FLOAT placement intentionally prepares it in the region
+pass. The corrected new assertion distinguishes ordinary table composition from that
+separate pass. Neither retained review probe nor any existing assertion was weakened.
+
+The remaining working-tree changes after the gate are documentation/report updates.
+No processes were killed, and no merge or push was performed.
